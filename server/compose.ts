@@ -33,7 +33,7 @@ const INTENTS: Record<Intent, string | null> = {
 };
 
 const COMPONENT_QUESTIONS: Record<OptionalKind, string> = {
-  summary: 'The search snippets do not directly answer the query on their own; a short synthesized written overview would help the searcher.',
+  summary: 'The searcher would benefit from a short synthesized written overview of the topic.',
   knowledge: 'The query is about one specific entity (person, place, organisation, thing) that deserves a profile card with a picture and overview.',
   stats: 'The searcher would benefit from seeing key numbers, figures, prices or statistics as big visual tiles.',
   timeline: 'The topic involves a history or sequence of dated events that is worth showing on a timeline.',
@@ -78,6 +78,21 @@ const AI_KINDS: Partial<Record<ComponentKind, AiTask>> = {
   pros_cons: 'pros_cons',
 };
 
+const WANTS: Record<Intent, ComponentKind[]> = {
+  definition: ['summary', 'knowledge', 'gallery', 'key_points'],
+  how_to: ['steps', 'summary', 'key_points'],
+  comparison: ['comparison', 'pros_cons', 'summary', 'key_points', 'stats', 'gallery'],
+  news: ['summary', 'timeline', 'discussion', 'key_points'],
+  person: ['knowledge', 'summary', 'timeline', 'gallery', 'key_points'],
+  place: ['knowledge', 'gallery', 'stats', 'summary', 'key_points'],
+  product: ['summary', 'pros_cons', 'gallery', 'key_points', 'stats'],
+  statistics: ['stats', 'summary', 'key_points'],
+  history: ['timeline', 'summary', 'knowledge', 'key_points'],
+  opinion: ['pros_cons', 'discussion', 'summary', 'key_points'],
+  technical: ['summary', 'steps', 'discussion', 'key_points'],
+  general: ['summary', 'knowledge', 'gallery', 'key_points'],
+};
+
 interface Candidate extends KeyPoint {
   id: string;
 }
@@ -93,7 +108,7 @@ function candidates(search: SearchResponse): Candidate[] {
     for (const raw of src.text.split(/(?<=[.!?])\s+(?=[A-Z0-9"])/)) {
       const text = raw.replace(/^\W*(\w{3} \d{1,2}, \d{4}\s*[-—·]\s*)?/, '').trim();
       const key = text.toLowerCase().slice(0, 60);
-      if (text.length < 35 || text.length > 260 || seen.has(key) || /\.\.\.$|…$/.test(text) && text.length < 60) continue;
+      if (text.length < 35 || text.length > 260 || seen.has(key) || (/\.\.\.$|…$/.test(text) && text.length < 60)) continue;
       seen.add(key);
       out.push({ id: `s${out.length}`, text, url: src.url, domain: src.domain });
       if (out.length >= 40) return out;
@@ -161,26 +176,7 @@ function heuristicIntent(q: string): Intent {
   return 'general';
 }
 
-function availability(search: SearchResponse, stats: Stat[], timeline: TimelineItem[], ai: boolean): Record<OptionalKind, boolean> {
-  return {
-    summary: ai,
-    comparison: ai,
-    steps: ai,
-    pros_cons: ai,
-    knowledge: !!search.knowledge,
-    stats: stats.length >= 2,
-    timeline: timeline.length >= 3,
-    gallery: search.images.length >= 3,
-    discussion: search.discussions.length >= 2,
-  };
-}
-
-function assemble(parts: {
-  lead?: OptionalKind;
-  chosen: Set<ComponentKind>;
-  hasAnswer: boolean;
-  keyPoints: KeyPoint[];
-}): ComponentKind[] {
+function assemble(parts: { lead?: OptionalKind; chosen: Set<ComponentKind>; hasAnswer: boolean; keyPoints: KeyPoint[] }): ComponentKind[] {
   const { lead, chosen, hasAnswer, keyPoints } = parts;
   if (hasAnswer) chosen.add('answer');
   if (keyPoints.length >= 2) chosen.add('key_points');
@@ -200,123 +196,116 @@ function aiTasksFor(blocks: ComponentKind[], ai: boolean): AiTask[] {
   return [...tasks, 'followups'];
 }
 
-function heuristicLayout(search: SearchResponse, env: Env, started: number): Layout {
-  const ai = hasDeepSeek(env);
-  const cands = candidates(search);
-  const stats = extractStats(cands);
-  const timeline = extractTimeline(cands);
-  const intent = heuristicIntent(search.query);
-  const avail = availability(search, stats, timeline, ai);
-  const wants: Record<Intent, OptionalKind[]> = {
-    definition: ['summary', 'knowledge', 'gallery'],
-    how_to: ['steps', 'summary'],
-    comparison: ['comparison', 'pros_cons', 'summary'],
-    news: ['summary', 'timeline', 'discussion'],
-    person: ['knowledge', 'summary', 'timeline', 'gallery'],
-    place: ['knowledge', 'gallery', 'stats', 'summary'],
-    product: ['summary', 'pros_cons', 'gallery'],
-    statistics: ['stats', 'summary'],
-    history: ['timeline', 'summary', 'knowledge'],
-    opinion: ['pros_cons', 'discussion', 'summary'],
-    technical: ['summary', 'steps', 'discussion'],
-    general: ['summary', 'knowledge', 'gallery'],
-  };
-  const chosen = new Set<ComponentKind>(wants[intent].filter((k) => avail[k]));
-  const keyPoints = cands.slice(0, 5);
-  const blocks = assemble({ lead: wants[intent].find((k) => avail[k]), chosen, hasAnswer: false, keyPoints });
-  return {
-    intent,
-    intentConfidence: 0.5,
-    blocks,
-    keyPoints,
-    stats,
-    timeline,
-    aiTasks: aiTasksFor(blocks, ai),
-    summaryLength: 'medium',
-    actions: buildActions(search.query, [['deeper', 0.6], ['latest', 0.5], ['simpler', 0.45], ['alternatives', 0.4]]),
-    engine: 'heuristic',
-    ms: Date.now() - started,
-  };
+function heuristicChosen(intent: Intent, ai: boolean): Set<ComponentKind> {
+  const aiKinds = new Set<ComponentKind>(['summary', 'comparison', 'steps', 'pros_cons']);
+  return new Set<ComponentKind>(WANTS[intent].filter((k) => (aiKinds.has(k) ? ai : true)));
 }
 
-export async function compose(search: SearchResponse, env: Env): Promise<Layout> {
+/** Phase 1 — Jev decides the layout from the query alone, before any results. */
+export async function layoutFromQuery(query: string, env: Env): Promise<Layout> {
   const started = Date.now();
-  if (!jevKey(env) || !search.results.length) return heuristicLayout(search, env, started);
-
   const ai = hasDeepSeek(env);
-  const cands = candidates(search);
-  const stats = extractStats(cands);
-  const timeline = extractTimeline(cands);
-  const avail = availability(search, stats, timeline, ai);
-  const optional = (Object.keys(COMPONENT_QUESTIONS) as OptionalKind[]).filter((k) => avail[k]);
+  const hint = heuristicIntent(query);
 
+  if (!jevKey(env)) {
+    const chosen = heuristicChosen(hint, ai);
+    const blocks = assemble({ lead: WANTS[hint][0] as OptionalKind, chosen, hasAnswer: false, keyPoints: [] });
+    return {
+      intent: hint, intentConfidence: 0.5, blocks, keyPoints: [], stats: [], timeline: [],
+      aiTasks: aiTasksFor(blocks, ai), summaryLength: 'medium',
+      actions: buildActions(query, [['deeper', 0.6], ['latest', 0.5], ['simpler', 0.45], ['alternatives', 0.4]]),
+      engine: 'heuristic', ms: Date.now() - started,
+    };
+  }
+
+  const optionalKinds = Object.keys(COMPONENT_QUESTIONS) as OptionalKind[];
   const questions: Record<string, JevQuestion> = {
     intent: { type: 'choice', instructions: 'What is the searcher mainly looking for?', criteria: INTENTS },
-    depth: {
-      type: 'score',
-      instructions: 'How much written explanation does the searcher need?',
-      criteria: ['A one-line fact is enough', 'A short paragraph', 'A detailed multi-paragraph explanation'],
-    },
+    depth: { type: 'score', instructions: 'How much written explanation does the searcher need?', criteria: ['A one-line fact is enough', 'A short paragraph', 'A detailed multi-paragraph explanation'] },
+    lead: { type: 'choice', instructions: 'Which visual component should appear first to help the searcher digest the answer fastest?', criteria: Object.fromEntries(optionalKinds.map((k) => [k, LEAD_OPTIONS[k]])) },
   };
-  for (const k of optional) questions[`show_${k}`] = { type: 'noul', instructions: COMPONENT_QUESTIONS[k] };
-  if (optional.length >= 2) {
-    questions.lead = {
-      type: 'choice',
-      instructions: 'Which visual component should appear first to help the searcher digest the answer fastest?',
-      criteria: Object.fromEntries(optional.map((k) => [k, LEAD_OPTIONS[k]])),
-    };
-  }
-  if (cands.length >= 2) {
-    questions.best_sentence = {
-      type: 'choice',
-      instructions: 'Which sentence most directly and factually answers the search query?',
-      criteria: Object.fromEntries(cands.map((c) => [c.id, c.text])),
-    };
-  }
+  for (const k of optionalKinds) questions[`show_${k}`] = { type: 'noul', instructions: COMPONENT_QUESTIONS[k] };
   for (const id of Object.keys(ACTIONS) as ActionId[]) questions[`action_${id}`] = { type: 'noul', instructions: ACTIONS[id].when };
 
   let answers;
   try {
-    answers = await askJev(env, describeResults(search), questions);
+    answers = await askJev(env, `A user just typed this into a search engine: "${query}". Decide how to lay out the results page before any results have loaded.`, questions);
   } catch (err) {
-    console.error('Jev compose failed, using heuristics', err);
-    return heuristicLayout(search, env, started);
+    console.error('Jev layout failed, using heuristics', err);
+    const chosen = heuristicChosen(hint, ai);
+    const blocks = assemble({ lead: WANTS[hint][0] as OptionalKind, chosen, hasAnswer: false, keyPoints: [] });
+    return {
+      intent: hint, intentConfidence: 0.5, blocks, keyPoints: [], stats: [], timeline: [],
+      aiTasks: aiTasksFor(blocks, ai), summaryLength: 'medium',
+      actions: buildActions(query, [['deeper', 0.6], ['latest', 0.5], ['simpler', 0.45], ['alternatives', 0.4]]),
+      engine: 'heuristic', ms: Date.now() - started,
+    };
   }
 
   const intentAnswer = choice(answers, 'intent');
-  const intent = (intentAnswer?.choice as Intent) ?? heuristicIntent(search.query);
-  const chosen = new Set<ComponentKind>(optional.filter((k) => noul(answers, `show_${k}`) >= 0.5));
-
-  const best = choice(answers, 'best_sentence');
-  const ranked = best
-    ? Object.entries(best.probabilities).sort((a, b) => b[1] - a[1]).map(([id, p]) => ({ c: cands.find((c) => c.id === id)!, p })).filter((x) => x.c)
-    : [];
-  const top = ranked[0];
-  const answer = top && top.p >= 0.3 ? { text: top.c.text, url: top.c.url, domain: top.c.domain, confidence: top.p } : undefined;
-  const keyPoints = ranked.slice(answer ? 1 : 0, answer ? 6 : 5).map(({ c }) => ({ text: c.text, url: c.url, domain: c.domain }));
-
-  if (!answer && ai) chosen.add('summary');
-
+  const intent = (intentAnswer?.choice as Intent) ?? hint;
+  const chosen = new Set<ComponentKind>(optionalKinds.filter((k) => noul(answers, `show_${k}`) >= 0.5));
+  if (ai) chosen.add('summary');
   const depth = score(answers, 'depth') ?? 1;
   const summaryLength: SummaryLength = depth < 0.7 ? 'short' : depth < 1.4 ? 'medium' : 'long';
   const lead = choice(answers, 'lead')?.choice as OptionalKind | undefined;
-  const blocks = assemble({ lead, chosen, hasAnswer: !!answer, keyPoints });
+  const blocks = assemble({ lead, chosen, hasAnswer: false, keyPoints: [] });
 
   return {
-    intent,
-    intentConfidence: intentAnswer?.confidence ?? 0,
-    blocks,
-    answer,
-    keyPoints,
-    stats,
-    timeline,
-    aiTasks: aiTasksFor(blocks, ai),
-    summaryLength,
-    actions: buildActions(
-      search.query,
-      (Object.keys(ACTIONS) as ActionId[]).map((id) => [id, noul(answers, `action_${id}`)]),
-    ),
-    engine: 'jev',
-    ms: Date.now() - started,
+    intent, intentConfidence: intentAnswer?.confidence ?? 0, blocks, keyPoints: [], stats: [], timeline: [],
+    aiTasks: aiTasksFor(blocks, ai), summaryLength,
+    actions: buildActions(query, (Object.keys(ACTIONS) as ActionId[]).map((id) => [id, noul(answers, `action_${id}`)])),
+    engine: 'jev', ms: Date.now() - started,
   };
+}
+
+export interface FillResult {
+  answer?: KeyPoint & { confidence: number };
+  keyPoints: KeyPoint[];
+  stats: Stat[];
+  timeline: TimelineItem[];
+  blocks: ComponentKind[];
+}
+
+/** Phase 2 — once results arrive, extract answer/key points/stats/timeline and prune empty blocks. */
+export async function fillFromResults(query: string, search: SearchResponse, plannedBlocks: ComponentKind[], env: Env): Promise<FillResult> {
+  const cands = candidates(search);
+  const stats = extractStats(cands);
+  const timeline = extractTimeline(cands);
+
+  let answer: KeyPoint & { confidence: number } | undefined;
+  let keyPoints: KeyPoint[] = [];
+
+  if (jevKey(env) && cands.length >= 2) {
+    try {
+      const answers = await askJev(env, describeResults(search), {
+        best_sentence: { type: 'choice', instructions: 'Which sentence most directly and factally answers the search query?', criteria: Object.fromEntries(cands.map((c) => [c.id, c.text])) },
+      });
+      const best = choice(answers, 'best_sentence');
+      const ranked = best ? Object.entries(best.probabilities).sort((a, b) => b[1] - a[1]).map(([id, p]) => ({ c: cands.find((c) => c.id === id)!, p })).filter((x) => x.c) : [];
+      const top = ranked[0];
+      if (top && top.p >= 0.3) answer = { text: top.c.text, url: top.c.url, domain: top.c.domain, confidence: top.p };
+      keyPoints = ranked.slice(answer ? 1 : 0, answer ? 6 : 5).map(({ c }) => ({ text: c.text, url: c.url, domain: c.domain }));
+    } catch (err) {
+      console.error('Jev fill failed', err);
+      keyPoints = cands.slice(0, 5);
+    }
+  } else {
+    keyPoints = cands.slice(0, 5);
+  }
+
+  // Prune planned blocks that have no data to fill them with.
+  const aiKinds = new Set<ComponentKind>(['summary', 'comparison', 'steps', 'pros_cons']);
+  const present = new Set<ComponentKind>(plannedBlocks);
+  if (!answer) present.delete('answer');
+  if (keyPoints.length < 2) present.delete('key_points');
+  if (stats.length < 2) present.delete('stats');
+  if (timeline.length < 3) present.delete('timeline');
+  if (!search.knowledge) present.delete('knowledge');
+  if (search.images.length < 3) present.delete('gallery');
+  if (search.discussions.length < 2) present.delete('discussion');
+  if (!hasDeepSeek(env)) aiKinds.forEach((k) => present.delete(k));
+  const blocks = DEFAULT_ORDER.filter((k) => present.has(k));
+
+  return { answer, keyPoints, stats, timeline, blocks };
 }

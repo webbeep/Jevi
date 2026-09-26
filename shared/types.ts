@@ -109,6 +109,14 @@ export interface TimelineItem {
   url?: string;
 }
 
+export interface FillResult {
+  answer?: KeyPoint & { confidence: number };
+  keyPoints: KeyPoint[];
+  stats: Stat[];
+  timeline: TimelineItem[];
+  blocks: ComponentKind[];
+}
+
 export interface Layout {
   intent: Intent;
   intentConfidence: number;
