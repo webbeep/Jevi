@@ -10,12 +10,13 @@ export function numberTokens(s: string): string[] {
 export class Grounding {
   private readonly known: Set<string>;
 
-  constructor(corpus: string) {
+  /** `lenient` turns checks off, for answers that come from reasoning rather than sources. */
+  constructor(corpus: string, private readonly lenient = false) {
     this.known = new Set(numberTokens(corpus));
   }
 
   ok(s: string | number | undefined): boolean {
-    if (s === undefined) return true;
+    if (s === undefined || this.lenient) return true;
     return numberTokens(String(s)).every((n) => this.known.has(n) || Number(n) <= FREE_NUMBER_MAX);
   }
 

@@ -75,16 +75,16 @@ export interface LayoutPlan {
   confidence: number;
   depth: 'brief' | 'standard' | 'detailed';
   readPages: boolean;
-  /** Whether recency matters, so time filters are worth offering. */
-  timeSensitive: boolean;
   /** Only set when planning a follow-up. */
   mode?: FollowupMode;
+  /** Whether the answer deserves step-by-step reasoning before it is designed. */
+  think?: boolean;
   /** For refine follow-ups: which on-screen card the person means. */
   target?: number;
   ms: number;
 }
 
-export type FollowupMode = 'refine' | 'answer' | 'search';
+export type FollowupMode = 'refine' | 'answer' | 'chat' | 'search';
 
 export interface FollowupContext {
   mode: Exclude<FollowupMode, 'search'>;
@@ -95,7 +95,7 @@ export interface FollowupContext {
 export interface CardResponse {
   card: AnswerCard;
   followups: string[];
-  engine: 'deepseek' | 'extractive';
+  engine: 'deepseek' | 'reasoning' | 'extractive';
   pagesRead: number;
   removed: number;
   ms: number;

@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import type { AnswerCard, CardNode, CardResponse, FollowupContext, LayoutPlan } from '../shared/card';
-import type { Freshness, SearchResponse, SearchResult } from '../shared/types';
 import { cardDigest } from '../shared/digest';
+import type { SearchResponse, SearchResult } from '../shared/types';
 import { api } from './api';
 import { withBrowserFallback } from './fallback';
 import { type StreamBody, type StreamEvent, stream } from './sse';
@@ -17,14 +17,6 @@ export interface LiveCard {
   followups: string[];
 }
 
-const emptyLive = (): LiveCard => ({ regions: [], nodes: [], followups: [] });
-
-/** The body to show right now: designed nodes where ready, placeholders for regions still being designed. */
-export function liveBody(live: LiveCard, stillDesigning: boolean): CardNode[] {
-  const length = Math.max(live.nodes.length, stillDesigning ? live.regions.length : 0);
-  return Array.from({ length }, (_, i) => live.nodes[i] ?? (stillDesigning ? live.regions[i] : undefined)).filter((n): n is CardNode => !!n);
-}
-
 export interface Turn {
   id: number;
   kind: TurnKind;
@@ -32,14 +24,20 @@ export interface Turn {
   question: string;
   /** The search turn whose results this turn is built from (itself for search turns). */
   searchId: number;
+  /** How a follow-up was answered, so redesigns keep the same approach. */
+  mode?: Exclude<FollowupContext['mode'], 'refine'>;
   plan?: LayoutPlan;
   pattern?: string;
   search?: SearchResponse;
   /** The card as it streams in; replaced by `result` when complete. */
   live?: LiveCard;
   result?: CardResponse;
+  /** Finished designs by layout + simple, so switching views back and forth is instant. */
+  variants: Record<string, CardResponse>;
   version: number;
   filling: boolean;
+  /** The model is reasoning before it designs. */
+  thinking?: boolean;
   /** Set while an existing card is being redesigned. */
   status?: string;
   refinements: string[];
@@ -48,7 +46,15 @@ export interface Turn {
   error?: string;
 }
 
+const emptyLive = (): LiveCard => ({ regions: [], nodes: [], followups: [] });
+const variantKey = (pattern: string | undefined, simple: boolean) => `${pattern ?? ''}|${simple ? 1 : 0}`;
 const errMsg = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+/** The body to show right now: designed nodes where ready, placeholders for regions still being designed. */
+export function liveBody(live: LiveCard, stillDesigning: boolean): CardNode[] {
+  const length = Math.max(live.nodes.length, stillDesigning ? live.regions.length : 0);
+  return Array.from({ length }, (_, i) => live.nodes[i] ?? (stillDesigning ? live.regions[i] : undefined)).filter((n): n is CardNode => !!n);
+}
 
 export function scrollToTurn(id: number) {
   requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById(`turn-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })));
@@ -56,7 +62,7 @@ export function scrollToTurn(id: number) {
 
 let nextId = 0;
 
-export function useSession(freshness: Freshness) {
+export function useSession() {
   const [turns, setTurns] = useState<Turn[]>([]);
   const ref = useRef<Turn[]>([]);
   const epoch = useRef(0);
@@ -70,37 +76,53 @@ export function useSession(freshness: Freshness) {
   const update = useCallback((id: number, patch: Partial<Turn> | ((t: Turn) => Partial<Turn>)) => {
     commit((all) => all.map((t) => (t.id === id ? { ...t, ...(typeof patch === 'function' ? patch(t) : patch) } : t)));
   }, [commit]);
-  const add = useCallback((turn: Omit<Turn, 'id' | 'version' | 'refinements' | 'simple' | 'pins' | 'searchId'> & { searchId?: number }) => {
+  const add = useCallback((turn: Omit<Turn, 'id' | 'version' | 'refinements' | 'simple' | 'pins' | 'searchId' | 'variants'> & { searchId?: number }) => {
     const id = ++nextId;
-    commit((all) => [...all, { version: 0, refinements: [], simple: false, pins: [], ...turn, searchId: turn.searchId ?? id, id }]);
+    commit((all) => [...all, { version: 0, refinements: [], simple: false, pins: [], variants: {}, ...turn, searchId: turn.searchId ?? id, id }]);
     return id;
   }, [commit]);
   const searchOf = (t: Turn | undefined) => (t ? get(t.searchId) : undefined);
+
   /** Compact summary of the finished turns before `beforeId`, oldest first. */
   const contextBefore = (beforeId?: number) =>
     ref.current
       .filter((t) => t.result && (beforeId === undefined || t.id < beforeId))
-      .slice(-4)
-      .map((t) => `- Q: ${t.question} → ${cardDigest(t.result!.card)}`)
+      .slice(-6)
+      .map((t) => `- Q: ${t.question}\n  A: ${cardDigest(t.result!.card)}`)
       .join('\n');
 
-  /** Streams `body` into turn `id`, updating it event by event. */
+  /**
+   * Streams `body` into turn `id`, event by event. A follow-up stream can be
+   * re-routed mid-flight: to an existing card (redesign) or into a new search.
+   */
   const run = useCallback(async (id: number, body: StreamBody) => {
     controllers.current.get(id)?.abort();
     const controller = new AbortController();
     controllers.current.set(id, controller);
     const mine = epoch.current;
     const alive = () => mine === epoch.current && !controller.signal.aborted;
+    let route = id;
 
     const onEvent = (e: StreamEvent) => {
       if (!alive()) return;
       switch (e.event) {
         case 'plan':
-          return update(id, { plan: e.data, pattern: e.data.pattern });
+          return update(route, (t) => (t.result ? {} : { plan: e.data, pattern: e.data.pattern, mode: e.data.mode === 'answer' || e.data.mode === 'chat' ? e.data.mode : t.mode }));
+        case 'target': {
+          const placeholder = route;
+          route = e.data.id;
+          commit((all) => all.filter((t) => t.id !== placeholder));
+          const question = body.kind === 'followup' ? body.question : '';
+          update(route, (t) => ({ filling: true, live: undefined, status: `Redesigning: ${question}`, refinements: [...t.refinements, question] }));
+          scrollToTurn(route);
+          return;
+        }
+        case 'rewrite':
+          return update(route, { kind: 'search', question: e.data.query, searchId: route, mode: undefined });
         case 'search':
-          return update(id, { search: e.data });
+          return update(route, { search: e.data });
         case 'pages': {
-          const target = searchOf(get(id));
+          const target = searchOf(get(route));
           if (!target?.search) return;
           const results = target.search.results.map((r, i) => {
             const page = e.data.find((p) => p.n === i + 1);
@@ -109,34 +131,40 @@ export function useSession(freshness: Freshness) {
           return update(target.id, { search: { ...target.search, results } });
         }
         case 'images': {
-          const target = searchOf(get(id));
+          const target = searchOf(get(route));
           if (!target?.search) return;
           return update(target.id, { search: { ...target.search, images: e.data } });
         }
         case 'designing':
           return;
+        case 'thinking':
+          return update(route, { thinking: true });
         case 'layout':
-          return update(id, (t) => ({ live: { ...(t.live ?? emptyLive()), regions: e.data } }));
+          return update(route, (t) => ({ live: { ...(t.live ?? emptyLive()), regions: e.data } }));
         case 'head':
-          return update(id, (t) => ({ live: { ...(t.live ?? emptyLive()), head: e.data } }));
+          return update(route, (t) => ({ live: { ...(t.live ?? emptyLive()), head: e.data } }));
         case 'node':
-          return update(id, (t) => {
+          return update(route, (t) => {
             const live = t.live ?? emptyLive();
             const nodes = [...live.nodes];
             nodes[e.data.index] = e.data.node;
-            return { live: { ...live, nodes }, version: live.nodes.some(Boolean) ? t.version : t.version + 1 };
+            return { live: { ...live, nodes }, thinking: false, version: live.nodes.some(Boolean) ? t.version : t.version + 1 };
           });
         case 'followups':
-          return update(id, (t) => ({ live: { ...(t.live ?? emptyLive()), followups: e.data } }));
+          return update(route, (t) => ({ live: { ...(t.live ?? emptyLive()), followups: e.data } }));
         case 'done':
-          return update(id, (t) => ({
-            result: t.live?.nodes.some(Boolean)
-              ? { card: { title: t.live.head?.title ?? t.question, ...t.live.head, body: liveBody(t.live, false) }, followups: t.live.followups, engine: e.data.engine, pagesRead: e.data.pagesRead, removed: e.data.removed, ms: e.data.ms }
-              : t.result,
-            live: undefined,
-            filling: false,
-            status: undefined,
-          }));
+          return update(route, (t) => {
+            if (!t.live?.nodes.some(Boolean)) return { live: undefined, filling: false, status: undefined, thinking: false };
+            const result: CardResponse = {
+              card: { title: t.live.head?.title ?? t.question, ...t.live.head, body: liveBody(t.live, false) },
+              followups: t.live.followups,
+              engine: e.data.engine,
+              pagesRead: e.data.pagesRead,
+              removed: e.data.removed,
+              ms: e.data.ms,
+            };
+            return { result, variants: { ...t.variants, [variantKey(t.pattern, t.simple)]: result }, live: undefined, filling: false, status: undefined, thinking: false };
+          });
         case 'error':
           throw new Error(e.data.message);
         default: {
@@ -149,12 +177,12 @@ export function useSession(freshness: Freshness) {
     try {
       await stream(body, onEvent, controller.signal);
     } catch (err) {
-      if (alive()) update(id, { filling: false, status: undefined, live: undefined, error: errMsg(err) });
+      if (alive()) update(route, { filling: false, status: undefined, live: undefined, thinking: false, error: errMsg(err) });
       throw err;
     } finally {
       if (controllers.current.get(id) === controller) controllers.current.delete(id);
     }
-  }, [update]);
+  }, [update, commit]);
 
   const design = useCallback(async (id: number, opts: { pattern?: string; simple?: boolean; followup?: FollowupContext; status?: string } = {}) => {
     const turn = get(id);
@@ -162,21 +190,21 @@ export function useSession(freshness: Freshness) {
     if (!turn?.plan || !ctx?.search) return;
     const pattern = opts.pattern ?? turn.pattern ?? turn.plan.pattern;
     const simple = opts.simple ?? turn.simple;
-    const followup = opts.followup ?? (turn.kind === 'answer' ? { mode: 'answer' as const, question: turn.question } : undefined);
+    const followup = opts.followup ?? (turn.kind === 'answer' ? { mode: turn.mode ?? 'answer', question: turn.question } : undefined);
     update(id, { filling: true, status: opts.status, pattern, simple, error: undefined, live: undefined });
     const context = turn.kind === 'search' ? undefined : contextBefore(id) || undefined;
     await run(id, { kind: 'design', query: ctx.search.query, pattern, depth: turn.plan.depth, readPages: turn.plan.readPages, search: ctx.search, simple, followup, context }).catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [update, run]);
 
-  const runSearchTurn = useCallback(async (id: number, query: string, fresh: Freshness) => {
+  const runSearchTurn = useCallback(async (id: number, query: string) => {
     update(id, { kind: 'search', question: query, searchId: id, filling: true, plan: undefined, search: undefined, result: undefined, live: undefined, error: undefined });
     try {
-      await run(id, { kind: 'search', query, freshness: fresh, context: contextBefore(id) || undefined });
+      await run(id, { kind: 'search', query, freshness: 'any', context: contextBefore(id) || undefined });
     } catch {
       const turn = get(id);
       if (!turn || turn.search?.results.length) return;
-      const rescued = await withBrowserFallback(turn.search ?? { query, freshness: fresh, results: [], images: [], discussions: [], engines: [] });
+      const rescued = await withBrowserFallback(turn.search ?? { query, freshness: 'any', results: [], images: [], discussions: [], engines: [] });
       if (!rescued.results.length) return;
       const plan = turn.plan ?? (await api.plan(query));
       update(id, { search: rescued, plan, pattern: plan.pattern, error: undefined });
@@ -192,7 +220,7 @@ export function useSession(freshness: Freshness) {
     commit(() => []);
   }, [commit]);
 
-  const search = useCallback((query: string, opts: { reset: boolean; freshness?: Freshness }) => {
+  const search = useCallback((query: string, opts: { reset: boolean }) => {
     const q = query.trim();
     if (!q) return;
     if (opts.reset) {
@@ -202,9 +230,10 @@ export function useSession(freshness: Freshness) {
     }
     const id = add({ kind: 'search', question: q, filling: true });
     if (!opts.reset) scrollToTurn(id);
-    void runSearchTurn(id, q, opts.freshness ?? freshness);
-  }, [add, clear, runSearchTurn, freshness]);
+    void runSearchTurn(id, q);
+  }, [add, clear, runSearchTurn]);
 
+  /** Redesigns an existing card in place, straight from a control or action on it. */
   const refine = useCallback((id: number, instruction: string) => {
     const turn = get(id);
     if (!turn?.result) return;
@@ -214,54 +243,18 @@ export function useSession(freshness: Freshness) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [update, design]);
 
+  /** Any message after the first search: Jev decides whether to chat, answer, redesign a card or search. */
   const followup = useCallback(async (question: string, fromId?: number) => {
     const q = question.trim();
-    const from = fromId ? get(fromId) : [...ref.current].reverse().find((t) => t.result);
-    const ctx = searchOf(from);
-    if (!q || !from || !ctx?.search) return;
-    const mine = epoch.current;
+    const from = fromId ? get(fromId) : [...ref.current].reverse().find((t) => t.result || t.search);
+    const ctx = searchOf(from) ?? [...ref.current].reverse().find((t) => t.search);
+    if (!q || !ctx?.search) return;
     const id = add({ kind: 'answer', question: q, searchId: ctx.id, filling: true });
     scrollToTurn(id);
-
-    let plan: LayoutPlan;
-    try {
-      const cards = ref.current.filter((t) => t.result && t.id !== id).map((t) => ({ id: t.id, title: t.result!.card.title }));
-      plan = await api.plan(q, ctx.question, cards, contextBefore(id));
-    } catch (err) {
-      update(id, { filling: false, error: errMsg(err) });
-      return;
-    }
-    if (mine !== epoch.current) return;
-
-    switch (plan.mode ?? 'answer') {
-      case 'refine': {
-        const chosen = plan.target !== undefined ? get(plan.target) : undefined;
-        const target = chosen?.result ? chosen : from.result ? from : [...ref.current].reverse().find((t) => t.result && t.searchId === ctx.id);
-        if (target) {
-          commit((all) => all.filter((t) => t.id !== id));
-          refine(target.id, q);
-          return;
-        }
-        update(id, { plan, pattern: plan.pattern });
-        await design(id, { pattern: plan.pattern });
-        return;
-      }
-      case 'search': {
-        const { query } = await api.rewrite(ctx.question, q, contextBefore(id)).catch(() => ({ query: q }));
-        if (mine === epoch.current) await runSearchTurn(id, query, freshness);
-        return;
-      }
-      case 'answer':
-        update(id, { plan, pattern: plan.pattern });
-        await design(id, { pattern: plan.pattern });
-        return;
-      default: {
-        const unreachable: never = plan.mode as never;
-        return unreachable;
-      }
-    }
+    const cards = ref.current.filter((t) => t.result && t.id !== id).slice(-6).map((t) => ({ id: t.id, title: t.result!.card.title, card: t.result!.card }));
+    await run(id, { kind: 'followup', question: q, original: ctx.question, search: ctx.search, cards, context: contextBefore(id) || undefined }).catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [add, commit, update, design, refine, runSearchTurn, freshness]);
+  }, [add, run]);
 
   /** Turns one source page into its own card. */
   const digest = useCallback(async (r: SearchResult, searchTurnId: number) => {
@@ -290,9 +283,23 @@ export function useSession(freshness: Freshness) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [add, update]);
 
+  /** Shows a cached design for this view if there is one; otherwise designs it. */
+  const switchView = useCallback((id: number, pattern: string, simple: boolean) => {
+    const cached = get(id)?.variants[variantKey(pattern, simple)];
+    if (cached) {
+      update(id, (t) => ({ pattern, simple, result: cached, version: t.version + 1, live: undefined, error: undefined }));
+      return;
+    }
+    void design(id, { pattern, simple });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [update, design]);
+
   const pin = useCallback((id: number, node: CardNode) => update(id, (t) => ({ pins: [...t.pins, node] })), [update]);
-  const setPattern = useCallback((id: number, pattern: string) => void design(id, { pattern }), [design]);
-  const setSimple = useCallback((id: number, simple: boolean) => void design(id, { simple }), [design]);
+  const setPattern = useCallback((id: number, pattern: string) => switchView(id, pattern, get(id)?.simple ?? false), [switchView]);
+  const setSimple = useCallback((id: number, simple: boolean) => {
+    const t = get(id);
+    switchView(id, t?.pattern ?? t?.plan?.pattern ?? 'answer', simple);
+  }, [switchView]);
   const redesign = useCallback((id: number) => void design(id), [design]);
 
   return { turns, searchOf, clear, search, followup, refine, digest, pin, setPattern, setSimple, redesign };

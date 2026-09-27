@@ -4,7 +4,7 @@ export function hasDeepSeek(env: Env): boolean {
   return !!env.DEEPSEEK_API_KEY;
 }
 
-function request(env: Env, system: string, user: string, maxTokens: number, extra: Record<string, unknown>): Promise<Response> {
+function request(env: Env, system: string, user: string, maxTokens: number, extra: Record<string, unknown>, think = false): Promise<Response> {
   if (!env.DEEPSEEK_API_KEY) throw new Error('DEEPSEEK_API_KEY not configured');
   return fetch(`${env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com'}/chat/completions`, {
     method: 'POST',
@@ -15,9 +15,9 @@ function request(env: Env, system: string, user: string, maxTokens: number, extr
         { role: 'system', content: system },
         { role: 'user', content: user },
       ],
-      thinking: { type: 'disabled' },
-      max_tokens: maxTokens,
-      temperature: 0.4,
+      thinking: { type: think ? 'enabled' : 'disabled' },
+      max_tokens: think ? maxTokens + 4000 : maxTokens,
+      ...(think ? {} : { temperature: 0.4 }),
       ...extra,
     }),
     signal: AbortSignal.timeout(45000),
@@ -32,9 +32,20 @@ export async function deepseekJson<T>(env: Env, system: string, user: string, ma
   return JSON.parse(content.replace(/^```(?:json)?\s*|\s*```$/g, '')) as T;
 }
 
-/** Streams the completion and calls `onLine` for every complete output line, as soon as it is written. */
-export async function deepseekLines(env: Env, system: string, user: string, maxTokens: number, onLine: (line: string) => void): Promise<void> {
-  const res = await request(env, system, user, maxTokens, { stream: true });
+/**
+ * Streams the completion and calls `onLine` for every complete output line, as soon as it is written.
+ * With `think`, the model reasons first; `onThinking` fires once when that reasoning starts.
+ */
+export async function deepseekLines(
+  env: Env,
+  system: string,
+  user: string,
+  maxTokens: number,
+  onLine: (line: string) => void,
+  opts: { think?: boolean; onThinking?: () => void } = {},
+): Promise<void> {
+  const res = await request(env, system, user, maxTokens, { stream: true }, opts.think);
+  let thinkingSignalled = false;
   if (!res.ok || !res.body) throw new Error(`DeepSeek HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
   let sse = '';
@@ -54,7 +65,12 @@ export async function deepseekLines(env: Env, system: string, user: string, maxT
       const data = event.replace(/^data:\s*/gm, '').trim();
       if (!data || data === '[DONE]') continue;
       try {
-        text += (JSON.parse(data) as { choices?: { delta?: { content?: string } }[] }).choices?.[0]?.delta?.content ?? '';
+        const delta = (JSON.parse(data) as { choices?: { delta?: { content?: string; reasoning_content?: string } }[] }).choices?.[0]?.delta;
+        if (delta?.reasoning_content && !thinkingSignalled) {
+          thinkingSignalled = true;
+          opts.onThinking?.();
+        }
+        text += delta?.content ?? '';
       } catch {
         // keep-alive or partial frame
       }

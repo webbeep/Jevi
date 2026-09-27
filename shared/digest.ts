@@ -1,7 +1,7 @@
 import type { AnswerCard, CardNode } from './card';
 
-/** A one-to-two line summary of a card: its title and headline values, for conversation context. */
-export function cardDigest(card: AnswerCard, max = 280): string {
+/** A compact summary of a card — title, headline values and key statements — for conversation context. */
+export function cardDigest(card: AnswerCard, max = 420): string {
   const facts: string[] = [];
   const walk = (n: CardNode) => {
     if (facts.join('; ').length > max) return;
@@ -25,7 +25,16 @@ export function cardDigest(card: AnswerCard, max = 280): string {
         facts.push(`compares ${n.columns.filter(Boolean).join(' vs ')}`);
         break;
       case 'callout':
-        if (n.title) facts.push(n.title);
+        facts.push(n.title ?? n.text.split(/(?<=[.!?])\s/)[0]);
+        break;
+      case 'text':
+        facts.push(n.text.split(/(?<=[.!?])\s/)[0]);
+        break;
+      case 'steps':
+        facts.push(`steps: ${n.items.slice(0, 4).map((i) => i.title).join(' → ')}`);
+        break;
+      case 'list':
+        facts.push(n.items.slice(0, 4).map((i) => i.text).join(', '));
         break;
       default:
         if ('children' in n) n.children.forEach(walk);

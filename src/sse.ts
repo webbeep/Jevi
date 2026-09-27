@@ -3,7 +3,8 @@ import type { Freshness, ImageResult, SearchResponse } from '../shared/types';
 
 export type StreamBody =
   | { kind: 'search'; query: string; freshness: Freshness; context?: string }
-  | { kind: 'design'; query: string; pattern: string; depth: LayoutPlan['depth']; readPages: boolean; search: SearchResponse; simple?: boolean; followup?: FollowupContext; context?: string };
+  | { kind: 'design'; query: string; pattern: string; depth: LayoutPlan['depth']; readPages: boolean; search: SearchResponse; simple?: boolean; followup?: FollowupContext; context?: string }
+  | { kind: 'followup'; question: string; original: string; search: SearchResponse; cards: { id: number; title: string; card?: AnswerCard }[]; context?: string };
 
 export type StreamEvent =
   | { event: 'plan'; data: LayoutPlan }
@@ -11,11 +12,14 @@ export type StreamEvent =
   | { event: 'pages'; data: { n: number; url: string; text: string }[] }
   | { event: 'images'; data: ImageResult[] }
   | { event: 'designing'; data: { pagesRead: number; ms: number } }
+  | { event: 'thinking'; data: Record<string, never> }
+  | { event: 'rewrite'; data: { query: string } }
+  | { event: 'target'; data: { id: number } }
   | { event: 'layout'; data: CardNode[] }
   | { event: 'head'; data: Omit<AnswerCard, 'body'> }
   | { event: 'node'; data: { index: number; node: CardNode } }
   | { event: 'followups'; data: string[] }
-  | { event: 'done'; data: { engine: 'deepseek' | 'extractive'; removed: number; pagesRead: number; ms: number } }
+  | { event: 'done'; data: { engine: 'deepseek' | 'reasoning' | 'extractive'; removed: number; pagesRead: number; ms: number } }
   | { event: 'error'; data: { message: string } };
 
 /** POSTs to the streaming endpoint and calls `onEvent` for every Server-Sent Event as it arrives. */
