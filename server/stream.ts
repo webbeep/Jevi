@@ -1,6 +1,6 @@
 import type { FollowupContext, LayoutPlan } from '../shared/card';
 import type { Freshness, SearchResponse } from '../shared/types';
-import { designStream } from './design';
+import { designParallel, designStream } from './design';
 import { collectPages } from './pages';
 import { planLayout, quickAnswer } from './plan';
 import { searchWithLate } from './search';
@@ -35,9 +35,12 @@ async function design(
   const fresh = pages.filter((p) => !req.search.results[p.n - 1]?.content);
   if (fresh.length) send('pages', fresh);
   send('designing', { pagesRead: pages.length, ms: Date.now() - started });
-  const summary = await designStream({ ...req, pages }, env, {
+  // Redesigns need the whole current card in one context; everything else is designed region by region in parallel.
+  const designer = req.followup?.mode === 'refine' ? designStream : designParallel;
+  const summary = await designer({ ...req, pages }, env, {
+    layout: (regions) => send('layout', regions),
     head: (head) => send('head', head),
-    node: (node) => send('node', node),
+    node: (node, index) => send('node', { index, node }),
     followups: (items) => send('followups', items),
   });
   send('done', { ...summary, pagesRead: pages.length, ms: Date.now() - started });
@@ -51,13 +54,25 @@ export async function runStream(req: StreamRequest, env: Env, send: Send): Promi
         send('plan', plan);
         return plan;
       });
-      const { response: results, late } = await searchWithLate({ q: req.query, freshness: req.freshness, count: 20 }, env);
+      // Jev picks the instant answer from the first engine to respond, while the rest of the search finishes.
+      let quick: Promise<unknown> = Promise.resolve();
+      let quickSent = false;
+      const tryQuick = (results: SearchResponse) =>
+        quickAnswer(req.query, results, env)
+          .then((q) => {
+            if (q && !quickSent) {
+              quickSent = true;
+              send('quick', q);
+            }
+          })
+          .catch((err) => console.error('quick answer failed', err));
+      const { response: results, late } = await searchWithLate({ q: req.query, freshness: req.freshness, count: 20 }, env, (first) => {
+        quick = tryQuick({ query: req.query, freshness: req.freshness, results: first, images: [], discussions: [], engines: [] });
+      });
       send('search', results);
       if (!results.results.length) throw new Error('No results from any engine. Try rephrasing.');
       const plan = await planned;
-      const quick = quickAnswer(req.query, results, env)
-        .then((q) => q && send('quick', q))
-        .catch((err) => console.error('quick answer failed', err));
+      quick = quick.then(() => (quickSent ? undefined : tryQuick(results)));
       await design(send, env, { query: req.query, pattern: plan.pattern, depth: plan.depth, readPages: plan.readPages, search: results }, started, late);
       await quick;
       return;

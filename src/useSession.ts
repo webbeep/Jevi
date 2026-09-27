@@ -9,8 +9,19 @@ export type TurnKind = 'search' | 'answer' | 'digest';
 
 export interface LiveCard {
   head?: Omit<AnswerCard, 'body'>;
-  nodes: CardNode[];
+  /** Placeholder regions being filled in parallel (empty for single-call designs). */
+  regions: CardNode[];
+  /** Designed nodes by position; parallel regions may arrive out of order. */
+  nodes: (CardNode | undefined)[];
   followups: string[];
+}
+
+const emptyLive = (): LiveCard => ({ regions: [], nodes: [], followups: [] });
+
+/** The body to show right now: designed nodes where ready, placeholders for regions still being designed. */
+export function liveBody(live: LiveCard, stillDesigning: boolean): CardNode[] {
+  const length = Math.max(live.nodes.length, stillDesigning ? live.regions.length : 0);
+  return Array.from({ length }, (_, i) => live.nodes[i] ?? (stillDesigning ? live.regions[i] : undefined)).filter((n): n is CardNode => !!n);
 }
 
 export interface Turn {
@@ -94,19 +105,23 @@ export function useSession(freshness: Freshness) {
           return update(id, { quick: e.data });
         case 'designing':
           return;
+        case 'layout':
+          return update(id, (t) => ({ live: { ...(t.live ?? emptyLive()), regions: e.data } }));
         case 'head':
-          return update(id, { live: { head: e.data, nodes: [], followups: [] } });
+          return update(id, (t) => ({ live: { ...(t.live ?? emptyLive()), head: e.data } }));
         case 'node':
-          return update(id, (t) => ({
-            live: { head: t.live?.head, nodes: [...(t.live?.nodes ?? []), e.data], followups: t.live?.followups ?? [] },
-            version: t.live?.nodes.length ? t.version : t.version + 1,
-          }));
+          return update(id, (t) => {
+            const live = t.live ?? emptyLive();
+            const nodes = [...live.nodes];
+            nodes[e.data.index] = e.data.node;
+            return { live: { ...live, nodes }, version: live.nodes.some(Boolean) ? t.version : t.version + 1 };
+          });
         case 'followups':
-          return update(id, (t) => ({ live: t.live && { ...t.live, followups: e.data } }));
+          return update(id, (t) => ({ live: { ...(t.live ?? emptyLive()), followups: e.data } }));
         case 'done':
           return update(id, (t) => ({
-            result: t.live
-              ? { card: { title: t.live.head?.title ?? t.question, ...t.live.head, body: t.live.nodes }, followups: t.live.followups, engine: e.data.engine, pagesRead: e.data.pagesRead, removed: e.data.removed, ms: e.data.ms }
+            result: t.live?.nodes.some(Boolean)
+              ? { card: { title: t.live.head?.title ?? t.question, ...t.live.head, body: liveBody(t.live, false) }, followups: t.live.followups, engine: e.data.engine, pagesRead: e.data.pagesRead, removed: e.data.removed, ms: e.data.ms }
               : t.result,
             live: undefined,
             filling: false,

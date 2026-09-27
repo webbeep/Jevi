@@ -11,8 +11,9 @@ export type StreamEvent =
   | { event: 'quick'; data: QuickAnswer }
   | { event: 'pages'; data: { n: number; url: string; text: string }[] }
   | { event: 'designing'; data: { pagesRead: number; ms: number } }
+  | { event: 'layout'; data: CardNode[] }
   | { event: 'head'; data: Omit<AnswerCard, 'body'> }
-  | { event: 'node'; data: CardNode }
+  | { event: 'node'; data: { index: number; node: CardNode } }
   | { event: 'followups'; data: string[] }
   | { event: 'done'; data: { engine: 'deepseek' | 'extractive'; removed: number; pagesRead: number; ms: number } }
   | { event: 'error'; data: { message: string } };

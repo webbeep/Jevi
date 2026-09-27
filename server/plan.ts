@@ -93,12 +93,13 @@ export async function quickAnswer(query: string, search: SearchResponse, env: En
   const answers = await askJev(env, `Search query: "${query}"`, {
     best: {
       type: 'choice',
-      instructions: 'Which sentence most directly and factually answers the search query?',
-      criteria: Object.fromEntries(cands.map((c) => [c.id, clip(c.text, 240)])),
+      instructions: 'Which sentence states the actual answer to the search query as a concrete fact? Page descriptions and invitations to visit a site do not count.',
+      criteria: { ...Object.fromEntries(cands.map((c) => [c.id, clip(c.text, 240)])), none: 'None of these sentences actually answers the query' },
     },
   });
   const best = choice(answers, 'best');
-  const pick = best && cands.find((c) => c.id === best.choice);
+  if (!best || best.choice === 'none') return undefined;
+  const pick = cands.find((c) => c.id === best.choice);
   if (!pick || (best.probabilities[best.choice] ?? 0) < 0.35) return undefined;
   return { text: pick.text, url: pick.url, domain: pick.domain, confidence: best.probabilities[best.choice] };
 }

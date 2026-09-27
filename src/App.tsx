@@ -8,7 +8,7 @@ import { CardContext } from './card/context';
 import { Icon } from './card/Icon';
 import { LogoMark, Wordmark } from './Logo';
 import { Sources } from './Sources';
-import { type Turn, useSession } from './useSession';
+import { type Turn, liveBody, useSession } from './useSession';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -263,13 +263,16 @@ function TurnView({ turn, first, session, freshness }: {
   freshness?: { value: Freshness; onChange: (v: Freshness) => void };
 }) {
   const ctx = session.searchOf(turn);
-  const streaming = !!turn.live?.nodes.length;
+  const streaming = !!turn.live?.nodes.some(Boolean);
   const card: AnswerCard = useMemo(() => {
     const skeleton = turn.plan?.skeleton ?? { title: turn.question, body: LOADING };
+    const live = turn.live;
     let base: AnswerCard;
-    if (streaming) base = { ...skeleton, ...turn.live!.head, body: [...turn.live!.nodes, ...(turn.filling ? [{ type: 'slot' as const, hint: 'more', shape: 'block' as const }] : [])] };
-    else if (turn.result) base = turn.result.card;
-    else base = { ...skeleton, ...turn.live?.head, body: skeleton.body };
+    if (live && streaming) {
+      const more = turn.filling && !live.regions.length ? [{ type: 'slot' as const, hint: 'more', shape: 'block' as const }] : [];
+      base = { ...skeleton, ...live.head, body: [...liveBody(live, turn.filling), ...more] };
+    } else if (turn.result) base = turn.result.card;
+    else base = { ...skeleton, ...live?.head, body: live?.regions.length ? live.regions : skeleton.body };
     if (!turn.result && !turn.live?.head && turn.kind !== 'search') base = { ...base, title: turn.question };
     return turn.pins.length ? { ...base, body: [...base.body, { type: 'section', title: 'Pinned by you', icon: 'pin', children: turn.pins }] } : base;
   }, [streaming, turn.live, turn.result, turn.plan, turn.question, turn.kind, turn.pins, turn.filling]);

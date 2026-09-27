@@ -17,6 +17,11 @@ const GAP: Record<Gap, string> = { sm: 'gap-1.5 sm:gap-2', md: 'gap-2 sm:gap-3',
 const COLS = { 2: 'grid-cols-2', 3: 'grid-cols-2 sm:grid-cols-3', 4: 'grid-cols-2 sm:grid-cols-4' } as const;
 const ALIGN = { start: 'sm:items-start', center: 'sm:items-center', end: 'sm:items-end', between: 'sm:items-center sm:justify-between' } as const;
 
+/** Whether a node is (or contains) a placeholder, so swapping it for real content remounts and animates it. */
+function hasSlot(n: CardNode): boolean {
+  return n.type === 'slot' || ('children' in n && n.children.some(hasSlot));
+}
+
 /** Small nodes that should stay side by side even on phones. */
 function isCompact(n: CardNode): boolean {
   return n.type === 'tile' || n.type === 'stat' || (n.type === 'slot' && n.shape === 'tile');
@@ -26,7 +31,7 @@ export function Nodes({ nodes, className, stagger = false }: { nodes: CardNode[]
   return (
     <div className={cn('flex flex-col gap-4', className)}>
       {nodes.map((n, i) => (
-        <div key={i} className={cn('min-w-0', n.type !== 'slot' && 'animate-in fade-in slide-in-from-bottom-2 fill-mode-backwards duration-500')} style={stagger ? { animationDelay: `${i * 70}ms` } : undefined}>
+        <div key={`${i}-${hasSlot(n) ? 'placeholder' : n.type}`} className={cn('min-w-0', !hasSlot(n) && 'animate-in fade-in slide-in-from-bottom-2 fill-mode-backwards duration-500')} style={stagger ? { animationDelay: `${i * 70}ms` } : undefined}>
           <NodeView node={n} />
         </div>
       ))}
