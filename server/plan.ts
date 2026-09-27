@@ -11,7 +11,7 @@ const MODES: Record<FollowupMode, string> = {
   search: 'A different topic, or something the current results cannot cover, so a fresh web search is needed',
 };
 
-export async function planLayout(query: string, env: Env, original?: string, cards: { id: number; title: string }[] = []): Promise<LayoutPlan> {
+export async function planLayout(query: string, env: Env, original?: string, cards: { id: number; title: string }[] = [], context = ''): Promise<LayoutPlan> {
   const started = Date.now();
   const fallback = (): LayoutPlan => {
     const pattern = heuristicPattern(query);
@@ -33,7 +33,7 @@ export async function planLayout(query: string, env: Env, original?: string, car
 
   try {
     const state = original
-      ? `Someone searched for "${original}" and is looking at the answer card. They now typed the follow-up: "${query}". Decide how the answer to this follow-up should be laid out.`
+      ? `Someone searched for "${original}".${context ? ` Conversation so far:\n${context}\n` : ''} They now typed the follow-up: "${query}". Decide how the answer to this follow-up should be laid out.`
       : `Someone typed this into a search engine: "${query}". Before any results load, decide how the answer card should be laid out so the answer is instantly readable at a glance.`;
     const answers = await askJev(env, state, {
       ...(original ? { mode: { type: 'choice' as const, instructions: 'What kind of follow-up is this?', criteria: MODES } } : {}),

@@ -1,14 +1,15 @@
 import type { AnswerCard, CardNode, FollowupContext, LayoutPlan } from '../shared/card';
-import type { Freshness, SearchResponse } from '../shared/types';
+import type { Freshness, ImageResult, SearchResponse } from '../shared/types';
 
 export type StreamBody =
-  | { kind: 'search'; query: string; freshness: Freshness }
-  | { kind: 'design'; query: string; pattern: string; depth: LayoutPlan['depth']; readPages: boolean; search: SearchResponse; simple?: boolean; followup?: FollowupContext };
+  | { kind: 'search'; query: string; freshness: Freshness; context?: string }
+  | { kind: 'design'; query: string; pattern: string; depth: LayoutPlan['depth']; readPages: boolean; search: SearchResponse; simple?: boolean; followup?: FollowupContext; context?: string };
 
 export type StreamEvent =
   | { event: 'plan'; data: LayoutPlan }
   | { event: 'search'; data: SearchResponse }
   | { event: 'pages'; data: { n: number; url: string; text: string }[] }
+  | { event: 'images'; data: ImageResult[] }
   | { event: 'designing'; data: { pagesRead: number; ms: number } }
   | { event: 'layout'; data: CardNode[] }
   | { event: 'head'; data: Omit<AnswerCard, 'body'> }

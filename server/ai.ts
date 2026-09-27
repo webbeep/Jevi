@@ -8,12 +8,12 @@ import { askJev, choice, jevKey } from './jev';
 import { pageText } from './pages';
 import { Env, clip } from './util';
 
-export async function rewriteQuery(original: string, question: string, env: Env): Promise<string> {
+export async function rewriteQuery(original: string, question: string, env: Env, context = ''): Promise<string> {
   if (!hasDeepSeek(env)) return `${original} ${question}`;
   const { query } = await deepseekJson<{ query: string }>(
     env,
-    'Rewrite the follow-up into a standalone web search query of at most 10 words. Reply as JSON: {"query": string}.',
-    `Original search: ${original}\nFollow-up: ${question}`,
+    'Rewrite the follow-up into a standalone web search query of at most 10 words, resolving references like "it" or "the cheaper one" from the conversation. Reply as JSON: {"query": string}.',
+    `Original search: ${original}\n${context ? `Conversation so far:\n${context}\n` : ''}Follow-up: ${question}`,
     80,
   );
   return query?.trim() || question;

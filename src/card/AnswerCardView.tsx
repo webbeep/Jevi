@@ -1,12 +1,20 @@
-import { Loader2, RefreshCw } from 'lucide-react';
+import { Loader2, MoreHorizontal, RefreshCw } from 'lucide-react';
 import type { AnswerCard, CardPattern } from '../../shared/card';
 import { cn } from '@/lib/utils';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Skeleton } from '@/components/ui/skeleton';
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { LogoMark } from '../Logo';
 import { Icon } from './Icon';
 import { Nodes } from './render';
@@ -31,49 +39,54 @@ export function AnswerCardView({ card, version, filling, streaming, status, patt
   return (
     <Card className="relative gap-0 overflow-hidden py-0 shadow-sm">
       <div className={cn('absolute inset-x-0 top-0 h-0.5', filling && 'designing-bar')} />
-      <div className="flex items-center gap-3 border-b px-4 py-3 sm:px-6 sm:py-4">
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-xl border bg-muted/40 sm:size-10">
-          {filling && !card.icon ? <LogoMark className="size-5" animated /> : <Icon name={card.icon} fallback="layout-grid" className="size-[18px] sm:size-5" />}
+      <div className="flex items-center gap-3 px-4 pb-1 pt-3.5 sm:px-6 sm:pt-5">
+        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/60">
+          {filling && !card.icon ? <LogoMark className="size-4" animated /> : <Icon name={card.icon} fallback="layout-grid" className="size-4" />}
         </div>
         <div className="min-w-0 flex-1">
-          <h2 className="truncate text-[15px] font-semibold tracking-tight sm:text-base">{card.title}</h2>
-          {filling && !card.subtitle ? <Skeleton className="mt-1.5 h-3 w-40" /> : <p className="truncate text-[13px] text-muted-foreground sm:text-sm">{card.subtitle}</p>}
+          <h2 className="truncate text-[15px] font-semibold leading-tight tracking-tight">{card.title}</h2>
+          {filling && !card.subtitle ? <Skeleton className="mt-1 h-3 w-32" /> : card.subtitle && <p className="truncate text-xs text-muted-foreground">{card.subtitle}</p>}
         </div>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" className="size-8 shrink-0" onClick={onRegenerate} disabled={filling} aria-label="Redesign card">
-              <RefreshCw className={cn('size-4', filling && 'animate-spin')} />
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className="size-8 shrink-0 text-muted-foreground" aria-label="Card options">
+              {filling ? <Loader2 className="size-4 animate-spin" /> : <MoreHorizontal className="size-4" />}
             </Button>
-          </TooltipTrigger>
-          <TooltipContent>Redesign</TooltipContent>
-        </Tooltip>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            {alternatives.length > 0 && (
+              <>
+                <DropdownMenuLabel className="text-xs text-muted-foreground">Layout</DropdownMenuLabel>
+                <DropdownMenuRadioGroup value={pattern} onValueChange={(v) => v !== pattern && onPattern(v)}>
+                  {alternatives.map((a) => (
+                    <DropdownMenuRadioItem key={a.id} value={a.id} disabled={filling}>{a.label}</DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+                <DropdownMenuSeparator />
+                <DropdownMenuCheckboxItem checked={simple} disabled={filling} onCheckedChange={(v) => onSimple(!!v)}>Explain simpler</DropdownMenuCheckboxItem>
+              </>
+            )}
+            <DropdownMenuItem disabled={filling} onSelect={onRegenerate}><RefreshCw className="size-4" />Redesign</DropdownMenuItem>
+            {engine && (
+              <>
+                <DropdownMenuSeparator />
+                <p className="px-2 py-1.5 text-[11px] leading-snug text-muted-foreground">{engine}</p>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {status && (
-        <div className="flex items-center gap-2 border-b bg-brand/5 px-4 py-2 text-xs text-brand animate-in fade-in slide-in-from-top-1 sm:px-6">
+        <div className="mx-4 mt-2 flex items-center gap-2 rounded-lg bg-brand/8 px-3 py-1.5 text-xs text-brand animate-in fade-in slide-in-from-top-1 sm:mx-6">
           <Loader2 className="size-3.5 animate-spin" />
           <span className="truncate">{status}</span>
         </div>
       )}
 
-      <div className={cn('px-4 py-4 transition-[opacity,filter] duration-300 sm:px-6 sm:py-5', status && !streaming && 'pointer-events-none opacity-50 blur-[1px]')}>
+      <div className={cn('px-4 pb-4 pt-3 transition-[opacity,filter] duration-300 sm:px-6 sm:pb-6 sm:pt-4', status && !streaming && 'pointer-events-none opacity-50 blur-[1px]')}>
         <Nodes key={version} nodes={card.body} className="gap-4 sm:gap-5" stagger={!streaming} />
       </div>
-
-      {alternatives.length > 0 && (
-        <div className="no-scrollbar flex items-center gap-2 overflow-x-auto border-t bg-muted/30 px-4 py-2 sm:px-6">
-          <span className="shrink-0 text-xs text-muted-foreground">Layout</span>
-          <ToggleGroup type="single" size="sm" value={pattern} disabled={filling} onValueChange={(v) => v && v !== pattern && onPattern(v)} className="shrink-0">
-            {alternatives.map((a) => (
-              <ToggleGroupItem key={a.id} value={a.id} className="h-7 shrink-0 px-2.5 text-xs" title={a.description}>{a.label}</ToggleGroupItem>
-            ))}
-          </ToggleGroup>
-          <ToggleGroup type="multiple" size="sm" disabled={filling} value={simple ? ['simple'] : []} onValueChange={(v) => onSimple(v.includes('simple'))} className="shrink-0">
-            <ToggleGroupItem value="simple" className="h-7 px-2.5 text-xs">Simpler</ToggleGroupItem>
-          </ToggleGroup>
-          {engine && <Badge variant="outline" className="ml-auto shrink-0 font-normal text-muted-foreground">{engine}</Badge>}
-        </div>
-      )}
     </Card>
   );
 }

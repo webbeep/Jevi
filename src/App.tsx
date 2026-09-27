@@ -42,7 +42,7 @@ function useTheme() {
 function engineLabel(t: Turn): string | undefined {
   const r = t.result;
   if (r) {
-    return [r.engine === 'deepseek' ? 'Designed' : 'Extracted', r.pagesRead ? `${r.pagesRead} pages read` : '', r.removed ? `${r.removed} unverified removed` : '', r.ms ? `${(r.ms / 1000).toFixed(1)}s` : '']
+    return [r.engine === 'deepseek' ? 'Designed by Jev + DeepSeek' : 'Extracted from sources', r.pagesRead ? `${r.pagesRead} pages read` : '', r.removed ? `${r.removed} unverified removed` : '', r.ms ? `${(r.ms / 1000).toFixed(1)}s` : '']
       .filter(Boolean)
       .join(' · ');
   }
@@ -213,10 +213,10 @@ export default function App() {
             ))}
 
             {last?.result && last.result.followups.length > 0 && !busy && (
-              <div className="-mt-4 flex flex-col gap-0.5 animate-in fade-in">
+              <div className="-mt-4 flex flex-wrap gap-1.5 animate-in fade-in">
                 {last.result.followups.map((f) => (
-                  <button key={f} onClick={() => session.followup(f, last.id)} className="flex items-center gap-2.5 rounded-lg px-2 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
-                    <Lightbulb className="size-3.5 shrink-0" />{f}
+                  <button key={f} onClick={() => session.followup(f, last.id)} className="rounded-full border bg-card px-3 py-1.5 text-left text-[13px] leading-snug text-muted-foreground transition-colors hover:border-foreground/20 hover:text-foreground">
+                    {f}
                   </button>
                 ))}
               </div>

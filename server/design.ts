@@ -21,9 +21,9 @@ DISPLAY
 - heading {text, eyebrow, level:1|2|3}
 - text {text, tone, size:"sm"|"md"|"lg"}  (supports **bold** and [n] source citations)
 - stat {label, value, unit, icon, delta, trend:"up"|"down"|"flat"}
-- tile {label, value, sub, icon, active:boolean}  (compact cell for scrollers and grids)
+- tile {label, value, sub, icon, imageRef:image index, active:boolean}  (compact cell for scrollers and grids; with imageRef it becomes a picture tile, great for products, places, dishes, people)
 - keyvalue {items:[{label, value, icon}]}
-- list {style:"bullet"|"check"|"number"|"icon", items:[{text, icon, meta}]}
+- list {style:"bullet"|"check"|"number"|"icon"|"media", items:[{text, icon, meta, imageRef}]}  ("media" shows each item as a row with a thumbnail; meta is a short badge like a price or score)
 - chart {kind:"bar"|"line"|"area", title, unit, data:[{label, value:number}]}  (only with 3+ real numbers)
 - progress {label, value:0-100, caption}
 - rating {value, max, label}
@@ -49,9 +49,9 @@ icon: any lucide icon name in kebab-case, e.g. "thermometer", "map-pin", "clock"
 tone: "default"|"muted"|"primary"|"positive"|"negative"|"warning".`;
 
 const DEPTH_HINT = {
-  brief: 'Keep it to a glance: 3-5 top-level nodes.',
-  standard: 'Aim for 4-7 top-level nodes.',
-  detailed: 'Be thorough: 6-10 top-level nodes, using tabs or sections to stay tidy.',
+  brief: 'Keep it to a glance: 3-4 top-level nodes, almost no prose.',
+  standard: 'Aim for 4-6 top-level nodes.',
+  detailed: 'Be thorough but tidy: up to 8 top-level nodes, grouping extra detail into tabs or accordions.',
 } as const;
 
 function sourcesBlock(search: SearchResponse, pages: PageText[], pageChars = 2800): string {
@@ -70,6 +70,8 @@ export interface DesignRequest {
   pages: PageText[];
   simple?: boolean;
   followup?: FollowupContext;
+  /** Compact summary of earlier turns, for resolving references in follow-ups. */
+  context?: string;
 }
 
 export interface DesignEvents {
@@ -104,6 +106,14 @@ const DESIGNER = `You are the UI designer of a visual search engine. Every query
 
 ${GRAMMAR}
 
+STYLE — visual first, minimal text
+- Show, don't tell: numbers, icons, pictures, charts, tables and timelines carry the answer; words only label them. The card should be understood in a 3-second glance.
+- Never restate the card title as a heading; the header already shows it.
+- If the sources only support a few facts, make the card shorter: drop any skeleton slot you cannot fill with new information instead of rephrasing something already shown.
+- Text budget: labels 1-4 words; tile and stat values as short as possible; subtitles under 10 words; a text node is 1-2 short sentences. Never repeat the same fact in two places. No filler ("Here is", "In summary", "It is important to note").
+- When the person wants to understand something (why/how/what is, or an explainer layout), explanation is the content: use clear, plain sentences in short paragraphs or an accordion, keep every step of the reasoning (don't skip what a newcomer needs), and add a one-line analogy. Still concise.
+- Pictures: when IMAGES contains pictures that clearly show the subject (check each image's description), use them — a profile image, a gallery, picture tiles for options, or a media list for ranked items. Never use an image whose description is about something else.
+
 RULES
 - Every number, value and fact must come from SOURCES or PAGE TEXT. Never estimate, never use typical or example values, never fill a slot from general knowledge. Any number not found in the sources is automatically deleted, so leave such nodes out.
 - Never compute new numbers yourself (multiplying, converting, summing). When quantities should change with an amount (servings, loaves, people, budget), use a scaler node whose base and amounts are exactly the source values; the person rescales it live.
@@ -125,7 +135,7 @@ Last line: {"followups":[4 short follow-up questions]}
 No code fences, no prose, no blank lines, no line breaks inside a JSON object.`;
 
 const SYSTEM_REGION = `${DESIGNER}
-- You are one of several designers building the same card in parallel. The TASK tells you which part is yours and what the others cover; stay in your lane and never repeat their content.
+- You are one of several designers building the same card in parallel. The TASK tells you which part is yours and what the others cover; stay in your lane and never repeat their content. If your region is a list of items (picks, options, places), it holds the whole list.
 - Output only what the TASK asks for, as JSON Lines: one complete compact JSON object per line. Every node carries a \"type\" field, e.g. {\"type\":\"hero\",...}. No code fences, no prose, no blank lines, no line breaks inside a JSON object.`;
 
 function taskBlock(req: DesignRequest): string {
@@ -135,6 +145,7 @@ function taskBlock(req: DesignRequest): string {
     `- ${DEPTH_HINT[req.depth]}`,
     req.simple ? '- Write for a 10-year-old: plain words and a friendly analogy.' : '',
     followupRules(req.followup, req.search.query).trim().replace(/^/, '- '),
+    req.context ? `- Conversation so far (use it to resolve references like "it" or "the cheaper one"; don't repeat it):\n${req.context}` : '',
   ]
     .filter((l) => l && l !== '- ')
     .join('\n');

@@ -23,9 +23,9 @@ export type CardNode =
   | { type: 'heading'; text: string; eyebrow?: string; level?: 1 | 2 | 3 }
   | { type: 'text'; text: string; tone?: Tone; size?: 'sm' | 'md' | 'lg' }
   | { type: 'stat'; label: string; value: string; unit?: string; icon?: string; delta?: string; trend?: 'up' | 'down' | 'flat' }
-  | { type: 'tile'; label: string; value?: string; sub?: string; icon?: string; active?: boolean }
+  | { type: 'tile'; label: string; value?: string; sub?: string; icon?: string; imageRef?: number; active?: boolean }
   | { type: 'keyvalue'; items: { label: string; value: string; icon?: string }[] }
-  | { type: 'list'; style?: 'bullet' | 'check' | 'number' | 'icon'; items: { text: string; icon?: string; meta?: string }[] }
+  | { type: 'list'; style?: 'bullet' | 'check' | 'number' | 'icon' | 'media'; items: { text: string; icon?: string; meta?: string; imageRef?: number }[] }
   | { type: 'chart'; kind: 'bar' | 'line' | 'area'; title?: string; unit?: string; data: { label: string; value: number }[] }
   | { type: 'progress'; label: string; value: number; caption?: string }
   | { type: 'rating'; value: number; max?: number; label?: string }

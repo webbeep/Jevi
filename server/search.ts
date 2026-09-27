@@ -86,6 +86,7 @@ const tavily: Engine = {
           query: q.q,
           max_results: 10,
           include_images: true,
+          include_image_descriptions: true,
           include_raw_content: 'markdown',
           time_range: q.freshness === 'any' ? undefined : q.freshness,
         }),
@@ -364,8 +365,8 @@ async function images(q: string): Promise<ImageResult[]> {
       query?: { pages?: Record<string, { title: string; imageinfo?: { thumburl?: string; url: string; descriptionurl: string }[] }> };
     }>(u.toString(), { headers: { 'User-Agent': UA } }, 4500);
     const out = Object.values(data.query?.pages ?? {})
-      .map((p) => p.imageinfo?.[0] && { url: p.imageinfo[0].descriptionurl, thumb: p.imageinfo[0].thumburl ?? p.imageinfo[0].url, title: p.title.replace(/^File:|\.\w+$/g, ''), source: 'commons.wikimedia.org' })
-      .filter((x): x is ImageResult => !!x && /\.(jpe?g|png|webp)/i.test(x.thumb));
+      .map((p) => p.imageinfo?.[0] && { url: p.imageinfo[0].url, thumb: p.imageinfo[0].thumburl ?? p.imageinfo[0].url, title: p.title.replace(/^File:|\.\w+$/g, ''), source: 'commons.wikimedia.org' })
+      .filter((x): x is ImageResult => !!x && /\.(jpe?g|png|webp)$/i.test(x.url));
     if (!out.length) throw new Error('no images');
     return out;
   };
@@ -394,10 +395,17 @@ function settle<T>(p: Promise<T>, fallback: T): Promise<T> {
 /** Supplementary lookups may finish at most this long after the web results. */
 const EXTRAS_GRACE_MS = 300;
 
+export interface LateExtras {
+  /** Page content from engines that finished after the response, keyed by normalized URL. */
+  content: Map<string, string>;
+  /** Images from engines that finished after the response. */
+  images: ImageResult[];
+}
+
 export interface SearchWithLate {
   response: SearchResponse;
   /** Page content from engines that finished after the response was ready, keyed by normalized URL. */
-  late: Promise<Map<string, string>>;
+  late: Promise<LateExtras>;
 }
 
 export async function search(q: Query, env: Env): Promise<SearchResponse> {
@@ -463,16 +471,18 @@ export async function searchWithLate(q: Query, env: Env): Promise<SearchWithLate
 
   const results = fuse(web, q.count);
   const knowledge = instant ?? wiki;
+  const early = new Set(web.map((w) => w.engine));
   const late = allEngines.then(() => {
     const content = new Map<string, string>();
     done.forEach((d) => d.hits.forEach((h) => h.content && content.set(normalizeUrl(h.url), h.content)));
-    return content;
+    return { content, images: done.filter((d) => !early.has(d.engine)).flatMap((d) => d.images ?? []) };
   });
 
   const seen = new Set<string>();
   const allImages = [
     ...(knowledge?.image ? [{ url: knowledge.url, thumb: knowledge.image, title: knowledge.title, source: domainOf(knowledge.url) }] : []),
     ...web.flatMap((w) => w.images ?? []),
+    ...results.filter((r) => r.image).map((r) => ({ url: r.url, thumb: r.image!, title: r.title, source: r.domain })),
     ...imgs,
   ].filter((img) => img.thumb && !seen.has(img.thumb) && seen.add(img.thumb));
 

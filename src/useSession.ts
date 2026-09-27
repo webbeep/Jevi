@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import type { AnswerCard, CardNode, CardResponse, FollowupContext, LayoutPlan } from '../shared/card';
 import type { Freshness, SearchResponse, SearchResult } from '../shared/types';
+import { cardDigest } from '../shared/digest';
 import { api } from './api';
 import { withBrowserFallback } from './fallback';
 import { type StreamBody, type StreamEvent, stream } from './sse';
@@ -75,6 +76,13 @@ export function useSession(freshness: Freshness) {
     return id;
   }, [commit]);
   const searchOf = (t: Turn | undefined) => (t ? get(t.searchId) : undefined);
+  /** Compact summary of the finished turns before `beforeId`, oldest first. */
+  const contextBefore = (beforeId?: number) =>
+    ref.current
+      .filter((t) => t.result && (beforeId === undefined || t.id < beforeId))
+      .slice(-4)
+      .map((t) => `- Q: ${t.question} → ${cardDigest(t.result!.card)}`)
+      .join('\n');
 
   /** Streams `body` into turn `id`, updating it event by event. */
   const run = useCallback(async (id: number, body: StreamBody) => {
@@ -99,6 +107,11 @@ export function useSession(freshness: Freshness) {
             return page && !r.content ? { ...r, content: page.text } : r;
           });
           return update(target.id, { search: { ...target.search, results } });
+        }
+        case 'images': {
+          const target = searchOf(get(id));
+          if (!target?.search) return;
+          return update(target.id, { search: { ...target.search, images: e.data } });
         }
         case 'designing':
           return;
@@ -151,14 +164,15 @@ export function useSession(freshness: Freshness) {
     const simple = opts.simple ?? turn.simple;
     const followup = opts.followup ?? (turn.kind === 'answer' ? { mode: 'answer' as const, question: turn.question } : undefined);
     update(id, { filling: true, status: opts.status, pattern, simple, error: undefined, live: undefined });
-    await run(id, { kind: 'design', query: ctx.search.query, pattern, depth: turn.plan.depth, readPages: turn.plan.readPages, search: ctx.search, simple, followup }).catch(() => undefined);
+    const context = turn.kind === 'search' ? undefined : contextBefore(id) || undefined;
+    await run(id, { kind: 'design', query: ctx.search.query, pattern, depth: turn.plan.depth, readPages: turn.plan.readPages, search: ctx.search, simple, followup, context }).catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [update, run]);
 
   const runSearchTurn = useCallback(async (id: number, query: string, fresh: Freshness) => {
     update(id, { kind: 'search', question: query, searchId: id, filling: true, plan: undefined, search: undefined, result: undefined, live: undefined, error: undefined });
     try {
-      await run(id, { kind: 'search', query, freshness: fresh });
+      await run(id, { kind: 'search', query, freshness: fresh, context: contextBefore(id) || undefined });
     } catch {
       const turn = get(id);
       if (!turn || turn.search?.results.length) return;
@@ -212,7 +226,7 @@ export function useSession(freshness: Freshness) {
     let plan: LayoutPlan;
     try {
       const cards = ref.current.filter((t) => t.result && t.id !== id).map((t) => ({ id: t.id, title: t.result!.card.title }));
-      plan = await api.plan(q, ctx.question, cards);
+      plan = await api.plan(q, ctx.question, cards, contextBefore(id));
     } catch (err) {
       update(id, { filling: false, error: errMsg(err) });
       return;
@@ -233,7 +247,7 @@ export function useSession(freshness: Freshness) {
         return;
       }
       case 'search': {
-        const { query } = await api.rewrite(ctx.question, q).catch(() => ({ query: q }));
+        const { query } = await api.rewrite(ctx.question, q, contextBefore(id)).catch(() => ({ query: q }));
         if (mine === epoch.current) await runSearchTurn(id, query, freshness);
         return;
       }

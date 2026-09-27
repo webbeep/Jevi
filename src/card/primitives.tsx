@@ -15,6 +15,9 @@ import { RichText } from './RichText';
 
 type Of<T extends CardNode['type']> = Extract<CardNode, { type: T }>;
 
+/** Short labels render as plain text, so inline source markers are dropped from them. */
+export const plain = (s: string) => s.replace(/\s*\[\d+\]/g, '').trim();
+
 export const TONE_TEXT: Record<Tone, string> = {
   default: 'text-foreground',
   muted: 'text-muted-foreground',
@@ -58,10 +61,10 @@ export function Hero({ node }: { node: Of<'hero'> }) {
   const value = useCountUp(node.value);
   return (
     <div className="flex min-w-0 flex-col">
-      {node.label && <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{node.label}</span>}
+      {node.label && <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{plain(node.label)}</span>}
       <div className="flex items-start gap-3">
         <span className={cn('text-5xl font-semibold leading-none tracking-tighter sm:text-6xl', node.value.length > 14 && 'text-3xl sm:text-4xl leading-tight tracking-tight', TONE_TEXT[node.tone ?? 'default'])}>
-          <span className="tabular-nums">{value}</span>
+          <span className="tabular-nums">{plain(value)}</span>
           {node.unit && <span className="ml-1 align-top text-2xl font-normal text-muted-foreground">{node.unit}</span>}
         </span>
         {node.icon && <Icon name={node.icon} className="mt-1 size-10 text-muted-foreground/60 sm:size-12" />}
@@ -75,7 +78,7 @@ export function Heading({ node }: { node: Of<'heading'> }) {
   return (
     <div>
       {node.eyebrow && <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{node.eyebrow}</div>}
-      <div className={cn('font-semibold tracking-tight', node.level === 1 ? 'text-2xl' : node.level === 3 ? 'text-base' : 'text-lg')}>{node.text}</div>
+      <div className={cn('font-semibold tracking-tight', node.level === 1 ? 'text-2xl' : node.level === 3 ? 'text-base' : 'text-lg')}>{plain(node.text)}</div>
     </div>
   );
 }
@@ -94,7 +97,7 @@ export function StatView({ node }: { node: Of<'stat'> }) {
     <div className="rounded-xl border bg-card p-3 sm:p-4">
       <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><Icon name={node.icon} className="size-3.5" />{node.label}</div>
       <div className="mt-1 flex items-baseline gap-1 sm:mt-1.5">
-        <span className="text-xl font-semibold tracking-tight sm:text-2xl">{node.value}</span>
+        <span className="text-xl font-semibold tracking-tight sm:text-2xl">{plain(node.value)}</span>
         {node.unit && <span className="text-sm text-muted-foreground">{node.unit}</span>}
       </div>
       {node.delta && (
@@ -107,7 +110,8 @@ export function StatView({ node }: { node: Of<'stat'> }) {
 }
 
 export function Tile({ node }: { node: Of<'tile'> }) {
-  const { onAsk } = useCard();
+  const { onAsk, images } = useCard();
+  const img = node.imageRef !== undefined ? images[node.imageRef] : undefined;
   return (
     <button
       onClick={() => onAsk(`Tell me more about ${node.label}${node.value ? ` (${node.value})` : ''}`)}
@@ -116,9 +120,12 @@ export function Tile({ node }: { node: Of<'tile'> }) {
         node.active ? 'border-foreground/25 bg-muted ring-1 ring-foreground/10' : 'bg-card',
       )}
     >
-      <span className="text-[11px] font-medium text-muted-foreground">{node.label}</span>
-      <Icon name={node.icon} className="size-[18px] text-foreground/70 sm:size-5" />
-      {node.value && <span className="text-[15px] font-semibold tracking-tight sm:text-base">{node.value}</span>}
+      {img ? (
+        <img src={img.thumb} alt={node.label} loading="lazy" className="mb-1 aspect-square w-full max-w-24 rounded-lg bg-muted object-cover" onError={(e) => ((e.target as HTMLElement).style.display = 'none')} />
+      ) : null}
+      <span className="text-[11px] font-medium text-muted-foreground">{plain(node.label)}</span>
+      {!img && <Icon name={node.icon} className="size-[18px] text-foreground/70 sm:size-5" />}
+      {node.value && <span className="text-[15px] font-semibold tracking-tight sm:text-base">{plain(node.value)}</span>}
       {node.sub && <span className="text-[11px] leading-tight text-muted-foreground"><RichText text={node.sub} inline /></span>}
     </button>
   );
@@ -137,8 +144,33 @@ export function KeyValue({ node }: { node: Of<'keyvalue'> }) {
   );
 }
 
+function MediaList({ node }: { node: Of<'list'> }) {
+  const { images } = useCard();
+  return (
+    <ul className="divide-y rounded-xl border bg-card">
+      {node.items.map((item, i) => {
+        const img = item.imageRef !== undefined ? images[item.imageRef] : undefined;
+        return (
+          <li key={i} className="flex items-center gap-3 p-2.5 sm:p-3">
+            {img ? (
+              <img src={img.thumb} alt="" loading="lazy" className="size-12 shrink-0 rounded-lg bg-muted object-cover sm:size-14" onError={(e) => ((e.target as HTMLElement).style.visibility = 'hidden')} />
+            ) : (
+              <span className="flex size-12 shrink-0 items-center justify-center rounded-lg bg-muted text-sm font-semibold text-muted-foreground sm:size-14">
+                {item.icon ? <Icon name={item.icon} className="size-5" /> : i + 1}
+              </span>
+            )}
+            <span className="min-w-0 flex-1 text-sm leading-snug"><RichText text={item.text} inline /></span>
+            {item.meta && <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs font-medium tabular-nums">{item.meta}</span>}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 export function List({ node }: { node: Of<'list'> }) {
   const style = node.style ?? 'bullet';
+  if (style === 'media') return <MediaList node={node} />;
   return (
     <ul className="space-y-2 sm:space-y-2.5">
       {node.items.map((item, i) => (
@@ -168,7 +200,17 @@ export function ProgressView({ node }: { node: Of<'progress'> }) {
 }
 
 export function Rating({ node }: { node: Of<'rating'> }) {
-  const max = Math.min(Math.max(node.max ?? 5, 1), 10);
+  const scale = Math.max(node.max ?? 5, 1);
+  if (scale > 10) {
+    return (
+      <div className="flex items-center gap-2.5">
+        <span className="text-sm font-semibold tabular-nums">{node.value}<span className="font-normal text-muted-foreground">/{scale}</span></span>
+        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-warning" style={{ width: `${Math.min(100, (node.value / scale) * 100)}%` }} /></div>
+        {node.label && <span className="text-xs text-muted-foreground">{plain(node.label)}</span>}
+      </div>
+    );
+  }
+  const max = scale;
   return (
     <div className="flex items-center gap-2">
       <div className="flex">
@@ -262,7 +304,7 @@ export function ProsCons({ node }: { node: Of<'proscons'> }) {
 }
 
 export function Badges({ node }: { node: Of<'badges'> }) {
-  return <div className="flex flex-wrap gap-1.5">{node.items.map((b) => <Badge key={b} variant="secondary" className="font-normal">{b}</Badge>)}</div>;
+  return <div className="flex flex-wrap gap-1.5">{node.items.map((b) => <Badge key={b} variant="secondary" className="font-normal">{plain(b)}</Badge>)}</div>;
 }
 
 export function Quote({ node }: { node: Of<'quote'> }) {
