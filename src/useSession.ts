@@ -1,10 +1,17 @@
 import { useCallback, useRef, useState } from 'react';
-import type { AnswerCard, CardNode, CardResponse, FollowupContext, LayoutPlan } from '../shared/card';
+import type { AnswerCard, CardNode, CardResponse, FollowupContext, LayoutPlan, QuickAnswer } from '../shared/card';
 import type { Freshness, SearchResponse, SearchResult } from '../shared/types';
 import { api } from './api';
 import { withBrowserFallback } from './fallback';
+import { type StreamBody, type StreamEvent, stream } from './sse';
 
 export type TurnKind = 'search' | 'answer' | 'digest';
+
+export interface LiveCard {
+  head?: Omit<AnswerCard, 'body'>;
+  nodes: CardNode[];
+  followups: string[];
+}
 
 export interface Turn {
   id: number;
@@ -16,6 +23,9 @@ export interface Turn {
   plan?: LayoutPlan;
   pattern?: string;
   search?: SearchResponse;
+  quick?: QuickAnswer;
+  /** The card as it streams in; replaced by `result` when complete. */
+  live?: LiveCard;
   result?: CardResponse;
   version: number;
   filling: boolean;
@@ -39,6 +49,7 @@ export function useSession(freshness: Freshness) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const ref = useRef<Turn[]>([]);
   const epoch = useRef(0);
+  const controllers = useRef(new Map<number, AbortController>());
 
   const commit = useCallback((fn: (prev: Turn[]) => Turn[]) => {
     ref.current = fn(ref.current);
@@ -55,56 +66,117 @@ export function useSession(freshness: Freshness) {
   }, [commit]);
   const searchOf = (t: Turn | undefined) => (t ? get(t.searchId) : undefined);
 
+  /** Streams `body` into turn `id`, updating it event by event. */
+  const run = useCallback(async (id: number, body: StreamBody) => {
+    controllers.current.get(id)?.abort();
+    const controller = new AbortController();
+    controllers.current.set(id, controller);
+    const mine = epoch.current;
+    const alive = () => mine === epoch.current && !controller.signal.aborted;
+
+    const onEvent = (e: StreamEvent) => {
+      if (!alive()) return;
+      switch (e.event) {
+        case 'plan':
+          return update(id, { plan: e.data, pattern: e.data.pattern });
+        case 'search':
+          return update(id, { search: e.data });
+        case 'pages': {
+          const target = searchOf(get(id));
+          if (!target?.search) return;
+          const results = target.search.results.map((r, i) => {
+            const page = e.data.find((p) => p.n === i + 1);
+            return page && !r.content ? { ...r, content: page.text } : r;
+          });
+          return update(target.id, { search: { ...target.search, results } });
+        }
+        case 'quick':
+          return update(id, { quick: e.data });
+        case 'designing':
+          return;
+        case 'head':
+          return update(id, { live: { head: e.data, nodes: [], followups: [] } });
+        case 'node':
+          return update(id, (t) => ({
+            live: { head: t.live?.head, nodes: [...(t.live?.nodes ?? []), e.data], followups: t.live?.followups ?? [] },
+            version: t.live?.nodes.length ? t.version : t.version + 1,
+          }));
+        case 'followups':
+          return update(id, (t) => ({ live: t.live && { ...t.live, followups: e.data } }));
+        case 'done':
+          return update(id, (t) => ({
+            result: t.live
+              ? { card: { title: t.live.head?.title ?? t.question, ...t.live.head, body: t.live.nodes }, followups: t.live.followups, engine: e.data.engine, pagesRead: e.data.pagesRead, removed: e.data.removed, ms: e.data.ms }
+              : t.result,
+            live: undefined,
+            filling: false,
+            status: undefined,
+          }));
+        case 'error':
+          throw new Error(e.data.message);
+        default: {
+          const unreachable: never = e;
+          return unreachable;
+        }
+      }
+    };
+
+    try {
+      await stream(body, onEvent, controller.signal);
+    } catch (err) {
+      if (alive()) update(id, { filling: false, status: undefined, live: undefined, error: errMsg(err) });
+      throw err;
+    } finally {
+      if (controllers.current.get(id) === controller) controllers.current.delete(id);
+    }
+  }, [update]);
+
   const design = useCallback(async (id: number, opts: { pattern?: string; simple?: boolean; followup?: FollowupContext; status?: string } = {}) => {
     const turn = get(id);
     const ctx = searchOf(turn);
     if (!turn?.plan || !ctx?.search) return;
-    const mine = epoch.current;
     const pattern = opts.pattern ?? turn.pattern ?? turn.plan.pattern;
     const simple = opts.simple ?? turn.simple;
     const followup = opts.followup ?? (turn.kind === 'answer' ? { mode: 'answer' as const, question: turn.question } : undefined);
-    update(id, { filling: true, status: opts.status, pattern, simple, error: undefined });
-    try {
-      const result = await api.card({ query: ctx.search.query, pattern, depth: turn.plan.depth, readPages: turn.plan.readPages, search: ctx.search, simple, followup });
-      if (mine === epoch.current) update(id, (t) => ({ result, version: t.version + 1, filling: false, status: undefined }));
-    } catch (err) {
-      if (mine === epoch.current) update(id, { filling: false, status: undefined, error: errMsg(err) });
-    }
+    update(id, { filling: true, status: opts.status, pattern, simple, error: undefined, live: undefined });
+    await run(id, { kind: 'design', query: ctx.search.query, pattern, depth: turn.plan.depth, readPages: turn.plan.readPages, search: ctx.search, simple, followup }).catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [update]);
+  }, [update, run]);
 
   const runSearchTurn = useCallback(async (id: number, query: string, fresh: Freshness) => {
-    const mine = epoch.current;
-    update(id, { kind: 'search', question: query, searchId: id, filling: true, plan: undefined, search: undefined, result: undefined, error: undefined });
-    const planned = api.plan(query).then((plan) => {
-      if (mine === epoch.current) update(id, { plan, pattern: plan.pattern });
-      return plan;
-    });
+    update(id, { kind: 'search', question: query, searchId: id, filling: true, plan: undefined, search: undefined, result: undefined, live: undefined, quick: undefined, error: undefined });
     try {
-      const search = await withBrowserFallback(await api.search(query, fresh));
-      if (mine !== epoch.current) return;
-      update(id, { search });
-      if (!search.results.length) throw new Error('No results from any engine. Try rephrasing.');
-      const plan = await planned;
-      if (mine !== epoch.current) return;
+      await run(id, { kind: 'search', query, freshness: fresh });
+    } catch {
+      const turn = get(id);
+      if (!turn || turn.search?.results.length) return;
+      const rescued = await withBrowserFallback(turn.search ?? { query, freshness: fresh, results: [], images: [], discussions: [], engines: [] });
+      if (!rescued.results.length) return;
+      const plan = turn.plan ?? (await api.plan(query));
+      update(id, { search: rescued, plan, pattern: plan.pattern, error: undefined });
       await design(id, { pattern: plan.pattern });
-    } catch (err) {
-      if (mine === epoch.current) update(id, { filling: false, error: errMsg(err) });
     }
-  }, [update, design]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [update, run, design]);
+
+  const clear = useCallback(() => {
+    epoch.current++;
+    controllers.current.forEach((c) => c.abort());
+    controllers.current.clear();
+    commit(() => []);
+  }, [commit]);
 
   const search = useCallback((query: string, opts: { reset: boolean; freshness?: Freshness }) => {
     const q = query.trim();
     if (!q) return;
     if (opts.reset) {
-      epoch.current++;
-      commit(() => []);
+      clear();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
     const id = add({ kind: 'search', question: q, filling: true });
     if (!opts.reset) scrollToTurn(id);
     void runSearchTurn(id, q, opts.freshness ?? freshness);
-  }, [add, commit, runSearchTurn, freshness]);
+  }, [add, clear, runSearchTurn, freshness]);
 
   const refine = useCallback((id: number, instruction: string) => {
     const turn = get(id);
@@ -148,7 +220,6 @@ export function useSession(freshness: Freshness) {
         return;
       }
       case 'search': {
-        update(id, { plan, pattern: plan.pattern });
         const { query } = await api.rewrite(ctx.question, q).catch(() => ({ query: q }));
         if (mine === epoch.current) await runSearchTurn(id, query, freshness);
         return;
@@ -165,15 +236,16 @@ export function useSession(freshness: Freshness) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [add, commit, update, design, refine, runSearchTurn, freshness]);
 
+  /** Turns one source page into its own card. */
   const digest = useCallback(async (r: SearchResult, searchTurnId: number) => {
     const ctx = get(searchTurnId);
     if (!ctx?.search) return;
     const mine = epoch.current;
-    const id = add({ kind: 'digest', question: `Digest: ${r.title}`, searchId: searchTurnId, filling: true });
+    const id = add({ kind: 'digest', question: `Summarize: ${r.title}`, searchId: searchTurnId, filling: true });
     scrollToTurn(id);
     try {
-      const page = await api.read(r.url, ctx.question);
-      const ref = ctx.search.results.findIndex((x) => x.url === r.url) + 1;
+      const page = await api.read(r.url, ctx.question, r.content);
+      const n = ctx.search.results.findIndex((x) => x.url === r.url) + 1;
       const card: AnswerCard = {
         title: page.title || r.title,
         subtitle: r.domain,
@@ -181,7 +253,7 @@ export function useSession(freshness: Freshness) {
         body: [
           { type: 'text', text: page.tldr, size: 'lg' },
           ...(page.bullets.length ? [{ type: 'list' as const, style: 'check' as const, items: page.bullets.map((text) => ({ text })) }] : []),
-          ...(ref > 0 ? [{ type: 'citations' as const, refs: [ref] }] : []),
+          ...(n > 0 ? [{ type: 'citations' as const, refs: [n] }] : []),
         ],
       };
       if (mine === epoch.current) update(id, (t) => ({ result: { card, followups: [], engine: 'extractive', pagesRead: 1, removed: 0, ms: 0 }, version: t.version + 1, filling: false }));
@@ -190,11 +262,6 @@ export function useSession(freshness: Freshness) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [add, update]);
-
-  const clear = useCallback(() => {
-    epoch.current++;
-    commit(() => []);
-  }, [commit]);
 
   const pin = useCallback((id: number, node: CardNode) => update(id, (t) => ({ pins: [...t.pins, node] })), [update]);
   const setPattern = useCallback((id: number, pattern: string) => void design(id, { pattern }), [design]);

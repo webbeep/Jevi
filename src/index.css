@@ -23,11 +23,12 @@
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
-  --brand: oklch(0.6 0.2 262);
+  --brand: oklch(0.56 0.24 285);
+  --brand-2: oklch(0.7 0.2 350);
   --positive: oklch(0.62 0.16 155);
   --negative: oklch(0.6 0.22 22);
   --warning: oklch(0.75 0.16 70);
-  --chart-1: oklch(0.6 0.2 262);
+  --chart-1: oklch(0.56 0.24 285);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
   --chart-4: oklch(0.828 0.189 84.429);
@@ -53,11 +54,12 @@
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
-  --brand: oklch(0.7 0.17 262);
+  --brand: oklch(0.68 0.2 285);
+  --brand-2: oklch(0.76 0.17 350);
   --positive: oklch(0.72 0.15 155);
   --negative: oklch(0.7 0.19 22);
   --warning: oklch(0.8 0.15 75);
-  --chart-1: oklch(0.7 0.17 262);
+  --chart-1: oklch(0.68 0.2 285);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
@@ -88,6 +90,7 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-brand: var(--brand);
+  --color-brand-2: var(--brand-2);
   --color-positive: var(--positive);
   --color-negative: var(--negative);
   --color-warning: var(--warning);
@@ -107,3 +110,21 @@
 
 .no-scrollbar { scrollbar-width: none; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
+
+/* A thin moving gradient line: the card is being designed. */
+.designing-bar {
+  background: linear-gradient(90deg, transparent, var(--brand), var(--brand-2), transparent);
+  background-size: 50% 100%;
+  background-repeat: no-repeat;
+  animation: designing 1.4s ease-in-out infinite;
+}
+@keyframes designing {
+  from { background-position: -50% 0; }
+  to { background-position: 150% 0; }
+}
+.text-brand-gradient {
+  background: linear-gradient(90deg, var(--brand), var(--brand-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}

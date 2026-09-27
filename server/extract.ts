@@ -12,6 +12,7 @@ export function candidates(search: SearchResponse, limit = 40): Candidate[] {
   const sources = [
     ...(search.knowledge ? [{ text: search.knowledge.extract, url: search.knowledge.url, domain: 'wikipedia' }] : []),
     ...search.results.slice(0, 14).map((r) => ({ text: r.snippet, url: r.url, domain: r.domain })),
+    ...search.results.slice(0, 6).filter((r) => r.content).map((r) => ({ text: r.content!.slice(0, 900).replace(/\n/g, ' '), url: r.url, domain: r.domain })),
   ];
   for (const src of sources) {
     for (const raw of src.text.split(/(?<=[.!?])\s+(?=[A-Z0-9"])/)) {

@@ -91,10 +91,10 @@ export function Text({ node }: { node: Of<'text'> }) {
 export function StatView({ node }: { node: Of<'stat'> }) {
   const Trend = node.trend === 'up' ? TrendingUp : node.trend === 'down' ? TrendingDown : Minus;
   return (
-    <div className="rounded-xl border bg-card p-4">
+    <div className="rounded-xl border bg-card p-3 sm:p-4">
       <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><Icon name={node.icon} className="size-3.5" />{node.label}</div>
-      <div className="mt-1.5 flex items-baseline gap-1">
-        <span className="text-2xl font-semibold tracking-tight">{node.value}</span>
+      <div className="mt-1 flex items-baseline gap-1 sm:mt-1.5">
+        <span className="text-xl font-semibold tracking-tight sm:text-2xl">{node.value}</span>
         {node.unit && <span className="text-sm text-muted-foreground">{node.unit}</span>}
       </div>
       {node.delta && (
@@ -112,13 +112,13 @@ export function Tile({ node }: { node: Of<'tile'> }) {
     <button
       onClick={() => onAsk(`Tell me more about ${node.label}${node.value ? ` (${node.value})` : ''}`)}
       className={cn(
-        'flex min-w-[84px] flex-col items-center gap-1 rounded-xl border px-3 py-3 text-center transition-colors hover:border-foreground/20',
+        'flex min-w-[72px] flex-col items-center gap-0.5 rounded-xl border px-2 py-2.5 text-center transition-colors hover:border-foreground/20 sm:min-w-[84px] sm:gap-1 sm:px-3 sm:py-3',
         node.active ? 'border-foreground/25 bg-muted ring-1 ring-foreground/10' : 'bg-card',
       )}
     >
       <span className="text-[11px] font-medium text-muted-foreground">{node.label}</span>
-      <Icon name={node.icon} className="size-5 text-foreground/70" />
-      {node.value && <span className="text-base font-semibold tracking-tight">{node.value}</span>}
+      <Icon name={node.icon} className="size-[18px] text-foreground/70 sm:size-5" />
+      {node.value && <span className="text-[15px] font-semibold tracking-tight sm:text-base">{node.value}</span>}
       {node.sub && <span className="text-[11px] leading-tight text-muted-foreground"><RichText text={node.sub} inline /></span>}
     </button>
   );
@@ -128,7 +128,7 @@ export function KeyValue({ node }: { node: Of<'keyvalue'> }) {
   return (
     <dl className="divide-y rounded-xl border bg-card">
       {node.items.map((i) => (
-        <div key={i.label} className="flex items-center justify-between gap-4 px-4 py-2.5 text-sm">
+        <div key={i.label} className="flex items-center justify-between gap-3 px-3 py-2 text-sm sm:px-4 sm:py-2.5">
           <dt className="flex items-center gap-2 text-muted-foreground"><Icon name={i.icon} className="size-3.5" />{i.label}</dt>
           <dd className="text-right font-medium"><RichText text={i.value} inline /></dd>
         </div>
@@ -140,9 +140,9 @@ export function KeyValue({ node }: { node: Of<'keyvalue'> }) {
 export function List({ node }: { node: Of<'list'> }) {
   const style = node.style ?? 'bullet';
   return (
-    <ul className="space-y-2.5">
+    <ul className="space-y-2 sm:space-y-2.5">
       {node.items.map((item, i) => (
-        <li key={i} className="flex items-start gap-3 text-sm leading-relaxed">
+        <li key={i} className="flex items-start gap-2 text-sm leading-relaxed sm:gap-3">
           <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center">
             {style === 'number' ? <span className="text-xs font-semibold text-muted-foreground">{i + 1}</span>
               : style === 'check' ? <Check className="size-4 text-positive" />
@@ -183,18 +183,20 @@ export function Rating({ node }: { node: Of<'rating'> }) {
 }
 
 export function TableView({ node }: { node: Of<'table'> }) {
+  const width = Math.max(node.columns.length, ...node.rows.map((r) => r.length));
+  const columns = [...Array(width - node.columns.length).fill(''), ...node.columns];
   return (
     <div className="overflow-hidden rounded-xl border bg-card">
       <Table>
         <TableHeader>
           <TableRow className="hover:bg-transparent">
-            {node.columns.map((c, i) => <TableHead key={i} className={cn('h-10 text-xs', node.highlight === i && 'bg-muted/60 text-foreground')}>{c}</TableHead>)}
+            {columns.map((c, i) => <TableHead key={i} className={cn('h-9 text-xs font-semibold text-foreground', node.highlight === i && 'bg-muted/60')}>{c}</TableHead>)}
           </TableRow>
         </TableHeader>
         <TableBody>
           {node.rows.map((r, ri) => (
             <TableRow key={ri}>
-              {r.map((cell, ci) => <TableCell key={ci} className={cn('whitespace-normal py-2.5 text-sm align-top', ci === 0 && 'font-medium text-muted-foreground', node.highlight === ci && 'bg-muted/60')}>
+              {r.map((cell, ci) => <TableCell key={ci} className={cn('whitespace-normal px-2 py-2 text-[13px] align-top sm:px-3 sm:py-2.5 sm:text-sm', ci === 0 && 'font-medium text-muted-foreground', node.highlight === ci && 'bg-muted/60')}>
                 <RichText text={cell} inline />
               </TableCell>)}
             </TableRow>
@@ -232,7 +234,7 @@ export function Steps({ node }: { node: Of<'steps'> }) {
     <ol className="space-y-1">
       {node.items.map((s, i) => (
         <li key={i}>
-          <button onClick={() => toggle(i)} className="flex w-full items-start gap-3 rounded-lg p-2 text-left transition-colors hover:bg-muted/60">
+          <button onClick={() => toggle(i)} className="flex w-full items-start gap-2.5 rounded-lg px-1 py-1.5 text-left transition-colors hover:bg-muted/60 sm:gap-3 sm:p-2">
             <span className={cn('flex size-6 shrink-0 items-center justify-center rounded-full border text-xs font-semibold tabular-nums transition-colors', done.has(i) ? 'border-positive bg-positive text-white' : 'bg-card')}>
               {done.has(i) ? <Check className="size-3.5" /> : i + 1}
             </span>
@@ -249,14 +251,14 @@ export function Steps({ node }: { node: Of<'steps'> }) {
 
 export function ProsCons({ node }: { node: Of<'proscons'> }) {
   const column = (items: string[], positive: boolean) => (
-    <div className={cn('rounded-xl border p-4', positive ? TONE_SURFACE.positive : TONE_SURFACE.negative)}>
+    <div className={cn('rounded-xl border p-3 sm:p-4', positive ? TONE_SURFACE.positive : TONE_SURFACE.negative)}>
       <div className={cn('mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider', positive ? 'text-positive' : 'text-negative')}>
         {positive ? <ThumbsUp className="size-3.5" /> : <ThumbsDown className="size-3.5" />}{positive ? 'Pros' : 'Cons'}
       </div>
       <ul className="space-y-1.5 text-sm">{items.map((p, i) => <li key={i} className="leading-snug"><RichText text={p} inline /></li>)}</ul>
     </div>
   );
-  return <div className="grid gap-3 sm:grid-cols-2">{node.pros.length > 0 && column(node.pros, true)}{node.cons.length > 0 && column(node.cons, false)}</div>;
+  return <div className="grid gap-2 sm:grid-cols-2 sm:gap-3">{node.pros.length > 0 && column(node.pros, true)}{node.cons.length > 0 && column(node.cons, false)}</div>;
 }
 
 export function Badges({ node }: { node: Of<'badges'> }) {
@@ -275,7 +277,7 @@ export function Quote({ node }: { node: Of<'quote'> }) {
 export function Callout({ node }: { node: Of<'callout'> }) {
   const tone = node.tone ?? 'default';
   return (
-    <div className={cn('flex gap-3 rounded-xl border p-4', TONE_SURFACE[tone])}>
+    <div className={cn('flex gap-2.5 rounded-xl border p-3 sm:gap-3 sm:p-4', TONE_SURFACE[tone])}>
       {node.icon && <Icon name={node.icon} className={cn('mt-0.5', TONE_TEXT[tone])} />}
       <div className="min-w-0 text-sm">
         {node.title && <div className="font-medium">{node.title}</div>}
@@ -331,8 +333,8 @@ export function Profile({ node }: { node: Of<'profile'> }) {
   const { images } = useCard();
   const img = node.imageRef !== undefined ? images[node.imageRef] : undefined;
   return (
-    <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-      <Avatar className="size-20 rounded-2xl border">
+    <div className="flex items-center gap-3 sm:gap-4">
+      <Avatar className="size-16 rounded-2xl border sm:size-20">
         {img && <AvatarImage src={img.thumb} alt={node.name} className="object-cover" />}
         <AvatarFallback className="rounded-2xl text-xl">{node.name.slice(0, 2).toUpperCase()}</AvatarFallback>
       </Avatar>

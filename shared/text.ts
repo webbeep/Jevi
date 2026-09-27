@@ -56,3 +56,18 @@ export function parseDuckDuckGo(html: string): ParsedHit[] {
   }
   return hits;
 }
+
+/** Turns scraped markdown into plain readable text: drops images, link targets, nav-ish short lines. */
+export function cleanMarkdown(md: string, max = 6000): string {
+  const text = md
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/<[^>]+>/g, ' ')
+    .split('\n')
+    .map((l) => l.replace(/^[#>*\-+\s|]+/, '').trim())
+    .filter((l) => !(/^\d+(\.\d+)*\s/.test(l) && l.length < 90))
+    .filter((l) => l.length >= 60 || (l.length > 20 && /[.!?:)]$/.test(l)) || (/\d/.test(l) && /[%$€£°]|\d\s?(g|kg|mm|cm|km|mph|mAh|GB|TB|nits)\b/i.test(l)))
+    .join('\n')
+    .replace(/\n{2,}/g, '\n');
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}

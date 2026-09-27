@@ -124,7 +124,7 @@ function groundNode(node: CardNode, g: Grounding): CardNode | undefined {
   }
 }
 
-function groundNodes(nodes: CardNode[], g: Grounding): CardNode[] {
+export function groundNodes(nodes: CardNode[], g: Grounding): CardNode[] {
   return nodes.map((n) => groundNode(n, g)).filter((n): n is CardNode => !!n);
 }
 

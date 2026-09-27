@@ -5,7 +5,8 @@ import type {
 } from '../shared/types';
 import { deepseekJson, hasDeepSeek } from './deepseek';
 import { askJev, choice, jevKey } from './jev';
-import { Env, UA, clip, fetchText, hedge, stripHtml } from './util';
+import { pageText } from './pages';
+import { Env, clip } from './util';
 
 export async function rewriteQuery(original: string, question: string, env: Env): Promise<string> {
   if (!hasDeepSeek(env)) return `${original} ${question}`;
@@ -53,41 +54,19 @@ export async function slot(query: string, text: string, env: Env): Promise<SlotR
   };
 }
 
-async function fetchPage(url: string, env: Env): Promise<{ title: string; text: string }> {
-  const viaJina = async () => {
-    const headers: Record<string, string> = { 'X-Return-Format': 'text', 'User-Agent': UA };
-    if (env.JINA_API_KEY) headers.Authorization = `Bearer ${env.JINA_API_KEY}`;
-    const text = await fetchText(`https://r.jina.ai/${url}`, { headers }, 12000);
-    return { title: text.match(/^Title:\s*(.+)$/m)?.[1] ?? url, text };
-  };
-  const viaHtml = (fetchUrl: string) => async () => {
-    const html = await fetchText(fetchUrl, { headers: { 'User-Agent': UA } }, 10000);
-    const body = html.replace(/<(script|style|nav|footer|header|noscript)[\s\S]*?<\/\1>/gi, ' ');
-    return { title: stripHtml(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? url), text: stripHtml(body) };
-  };
-  const readable = (task: () => Promise<{ title: string; text: string }>) => async () => {
-    const page = await task();
-    if (page.text.length < 200) throw new Error('Page had no readable text');
-    return page;
-  };
-  try {
-    return await hedge([viaHtml(url), viaJina, viaHtml(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`)].map(readable), 1500);
-  } catch {
-    throw new Error('Could not read this page (it may block bots)');
-  }
-}
-
-export async function read(url: string, query: string, env: Env): Promise<ReadResponse> {
-  const page = await fetchPage(url, env);
+export async function read(url: string, query: string, env: Env, known?: string, textOnly = false): Promise<ReadResponse> {
+  const text = known && known.length > 300 ? known : await pageText(url, env, 9000, 12000);
+  const title = text.split('\n')[0].slice(0, 120);
+  if (textOnly) return { url, title, text, tldr: '', bullets: [] };
   if (!hasDeepSeek(env)) {
-    const sentences = page.text.split(/(?<=[.!?])\s+/).filter((s) => s.length > 50);
-    return { url, title: page.title, tldr: clip(sentences.slice(0, 2).join(' '), 400), bullets: sentences.slice(2, 6).map((s) => clip(s, 200)) };
+    const sentences = text.split(/(?<=[.!?])\s+/).filter((s) => s.length > 50);
+    return { url, title, text, tldr: clip(sentences.slice(0, 2).join(' '), 400), bullets: sentences.slice(2, 6).map((s) => clip(s, 200)) };
   }
-  const out = await deepseekJson<{ tldr: string; bullets: string[] }>(
+  const out = await deepseekJson<{ title?: string; tldr: string; bullets: string[] }>(
     env,
-    'Digest the web page for a visual reader. Reply as JSON: {"tldr": string (2 sentences), "bullets": string[] (4-6 concrete takeaways, most relevant to the query first)}.',
-    `Query: ${query}\nPage title: ${page.title}\n\n${clip(page.text, 12000)}`,
+    'Digest the web page for a visual reader. Reply as JSON: {"title": string (the page title), "tldr": string (2 sentences), "bullets": string[] (4-6 concrete takeaways, most relevant to the query first)}.',
+    `Query: ${query}\n\n${clip(text, 12000)}`,
     700,
   );
-  return { url, title: page.title, tldr: out.tldr, bullets: out.bullets ?? [] };
+  return { url, title: out.title || title, text, tldr: out.tldr, bullets: out.bullets ?? [] };
 }

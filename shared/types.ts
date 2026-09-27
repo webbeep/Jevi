@@ -8,6 +8,8 @@ export interface SearchResult {
   engines: string[];
   image?: string;
   date?: string;
+  /** Readable page text, when the page could be fetched. */
+  content?: string;
 }
 
 export interface ImageResult {
@@ -81,6 +83,7 @@ export interface SlotResponse {
 export interface ReadResponse {
   url: string;
   title: string;
+  text: string;
   tldr: string;
   bullets: string[];
 }

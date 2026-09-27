@@ -48,7 +48,7 @@ export function SliderNode({ node }: { node: Of<'slider'> }) {
   const [value, setValue] = useState(node.value);
   const changed = value !== node.value;
   return (
-    <div className="rounded-xl border bg-card p-4">
+    <div className="rounded-xl border bg-card p-3 sm:p-4">
       <div className="mb-3 flex items-center justify-between text-sm">
         <span className="text-muted-foreground">{node.label}</span>
         <span className="font-semibold tabular-nums">{fmt(value, node.unit)}</span>
@@ -82,7 +82,7 @@ export function Scaler({ node }: { node: Of<'scaler'> }) {
   const [value, setValue] = useState(node.value ?? node.base);
   const factor = value / node.base;
   return (
-    <div className="rounded-xl border bg-card p-4">
+    <div className="rounded-xl border bg-card p-3 sm:p-4">
       <div className="mb-3 flex items-center justify-between text-sm">
         <span className="text-muted-foreground">{node.label}</span>
         <span className="font-semibold tabular-nums">{fmt(value, node.unit)}</span>
@@ -104,7 +104,7 @@ export function Scaler({ node }: { node: Of<'scaler'> }) {
 
 export function AccordionNode({ node }: { node: Of<'accordion'> }) {
   return (
-    <Accordion type="multiple" className="rounded-xl border bg-card px-4">
+    <Accordion type="multiple" className="rounded-xl border bg-card px-3 sm:px-4">
       {node.items.map((i, idx) => (
         <AccordionItem key={idx} value={String(idx)}>
           <AccordionTrigger className="text-sm">{i.title}</AccordionTrigger>
@@ -126,7 +126,7 @@ export function Reveal({ node }: { node: Of<'reveal'> }) {
   return (
     <div className="grid gap-2 sm:grid-cols-2">
       {node.items.map((item, i) => (
-        <button key={i} onClick={() => toggle(i)} className="group h-32 [perspective:800px]" aria-pressed={flipped.has(i)}>
+        <button key={i} onClick={() => toggle(i)} className="group h-28 [perspective:800px] sm:h-32" aria-pressed={flipped.has(i)}>
           <span className={cn('relative block size-full transition-transform duration-500 [transform-style:preserve-3d]', flipped.has(i) && '[transform:rotateY(180deg)]')}>
             <span className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-xl border bg-card p-4 text-center text-sm font-medium [backface-visibility:hidden]">
               {item.front}

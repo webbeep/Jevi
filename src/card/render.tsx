@@ -13,7 +13,7 @@ import {
 
 const ChartView = lazy(() => import('./ChartView'));
 
-const GAP: Record<Gap, string> = { sm: 'gap-2', md: 'gap-3', lg: 'gap-5' };
+const GAP: Record<Gap, string> = { sm: 'gap-1.5 sm:gap-2', md: 'gap-2 sm:gap-3', lg: 'gap-3 sm:gap-5' };
 const COLS = { 2: 'grid-cols-2', 3: 'grid-cols-2 sm:grid-cols-3', 4: 'grid-cols-2 sm:grid-cols-4' } as const;
 const ALIGN = { start: 'sm:items-start', center: 'sm:items-center', end: 'sm:items-end', between: 'sm:items-center sm:justify-between' } as const;
 
@@ -26,7 +26,7 @@ export function Nodes({ nodes, className, stagger = false }: { nodes: CardNode[]
   return (
     <div className={cn('flex flex-col gap-4', className)}>
       {nodes.map((n, i) => (
-        <div key={i} className={cn('min-w-0', stagger && n.type !== 'slot' && 'animate-in fade-in slide-in-from-bottom-2 fill-mode-backwards duration-500')} style={stagger ? { animationDelay: `${i * 70}ms` } : undefined}>
+        <div key={i} className={cn('min-w-0', n.type !== 'slot' && 'animate-in fade-in slide-in-from-bottom-2 fill-mode-backwards duration-500')} style={stagger ? { animationDelay: `${i * 70}ms` } : undefined}>
           <NodeView node={n} />
         </div>
       ))}
@@ -49,13 +49,13 @@ export function NodeView({ node }: { node: CardNode }): ReactNode {
       return <div className={cn('grid', COLS[node.cols], GAP[node.gap ?? 'md'], '[&>*]:h-full')}>{node.children.map((c, i) => <NodeView key={i} node={c} />)}</div>;
     case 'section':
       return (
-        <section className="space-y-3">
+        <section className="space-y-2 sm:space-y-3">
           {node.title && (
             <h3 className={cn('flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground', node.tone && TONE_TEXT[node.tone])}>
               <Icon name={node.icon} className="size-3.5" />{node.title}
             </h3>
           )}
-          <Nodes nodes={node.children} className="gap-3" />
+          <Nodes nodes={node.children} className="gap-2.5 sm:gap-3" />
         </section>
       );
     case 'tabs':
@@ -72,7 +72,7 @@ export function NodeView({ node }: { node: CardNode }): ReactNode {
       );
     case 'scroller':
       return (
-        <div className="-mx-5 overflow-x-auto px-5 no-scrollbar sm:-mx-6 sm:px-6">
+        <div className="no-scrollbar -mx-4 overflow-x-auto px-4 sm:-mx-6 sm:px-6">
           <div className="flex w-max min-w-full gap-2 [&>*]:flex-1">{node.children.map((c, i) => <NodeView key={i} node={c} />)}</div>
         </div>
       );

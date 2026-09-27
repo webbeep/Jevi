@@ -75,6 +75,8 @@ export interface LayoutPlan {
   confidence: number;
   depth: 'brief' | 'standard' | 'detailed';
   readPages: boolean;
+  /** Whether recency matters, so time filters are worth offering. */
+  timeSensitive: boolean;
   /** Only set when planning a follow-up. */
   mode?: FollowupMode;
   /** For refine follow-ups: which on-screen card the person means. */
@@ -88,6 +90,13 @@ export interface FollowupContext {
   mode: Exclude<FollowupMode, 'search'>;
   question: string;
   baseCard?: AnswerCard;
+}
+
+export interface QuickAnswer {
+  text: string;
+  url?: string;
+  domain?: string;
+  confidence: number;
 }
 
 export interface CardResponse {

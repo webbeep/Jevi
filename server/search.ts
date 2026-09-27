@@ -7,7 +7,7 @@ import type {
   SearchResponse,
   SearchResult,
 } from '../shared/types';
-import { parseDuckDuckGo } from '../shared/text';
+import { cleanMarkdown, parseDuckDuckGo } from '../shared/text';
 import { Env, UA, clip, domainOf, fetchJson, fetchText, hedge, stripHtml } from './util';
 
 interface Query {
@@ -22,6 +22,7 @@ interface Hit {
   snippet: string;
   image?: string;
   date?: string;
+  content?: string;
 }
 
 interface EngineOutput {
@@ -36,8 +37,10 @@ interface Engine {
 }
 
 const ENGINE_TIMEOUT_MS = 6500;
-const EARLY_RETURN_MS = 2200;
-const EARLY_RETURN_HITS = 12;
+const EARLY_RETURN_MS = 1100;
+const EARLY_RETURN_HITS = 10;
+/** Engines that return page content are worth a short extra wait. */
+const CONTENT_ENGINE_WAIT_MS = 1600;
 
 function freshnessCode(f: Freshness, codes: Record<Exclude<Freshness, 'any'>, string>): string | undefined {
   return f === 'any' ? undefined : codes[f];
@@ -72,7 +75,7 @@ const tavily: Engine = {
   enabled: (env) => !!env.TAVILY_API_KEY,
   async run(q, env) {
     const data = await fetchJson<{
-      results?: { title: string; url: string; content: string; published_date?: string }[];
+      results?: { title: string; url: string; content: string; raw_content?: string | null; published_date?: string }[];
       images?: (string | { url: string; description?: string })[];
     }>(
       'https://api.tavily.com/search',
@@ -81,15 +84,22 @@ const tavily: Engine = {
         headers: { Authorization: `Bearer ${env.TAVILY_API_KEY}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           query: q.q,
-          max_results: Math.min(q.count, 20),
+          max_results: 10,
           include_images: true,
+          include_raw_content: 'markdown',
           time_range: q.freshness === 'any' ? undefined : q.freshness,
         }),
       },
       ENGINE_TIMEOUT_MS,
     );
     return {
-      hits: (data.results ?? []).map((r) => ({ title: r.title, url: r.url, snippet: clip(r.content ?? '', 320), date: r.published_date })),
+      hits: (data.results ?? []).map((r) => ({
+        title: r.title,
+        url: r.url,
+        snippet: clip(r.content ?? '', 320),
+        date: r.published_date,
+        content: r.raw_content ? cleanMarkdown(r.raw_content) || undefined : undefined,
+      })),
       images: (data.images ?? []).map((img) => {
         const url = typeof img === 'string' ? img : img.url;
         return { url, thumb: url, title: typeof img === 'string' ? '' : img.description ?? '', source: domainOf(url) };
@@ -246,7 +256,7 @@ export function keyedEngines(env: Env): string[] {
   return [brave, tavily, serper, jina].filter((e) => e.enabled(env)).map((e) => e.name);
 }
 
-function normalizeUrl(url: string): string {
+export function normalizeUrl(url: string): string {
   try {
     const u = new URL(url);
     [...u.searchParams.keys()].filter((k) => k.startsWith('utm_')).forEach((k) => u.searchParams.delete(k));
@@ -273,6 +283,7 @@ function fuse(outputs: { engine: string; hits: Hit[] }[], count: number): Search
         if (hit.snippet.length > existing.snippet.length) existing.snippet = hit.snippet;
         existing.image ??= hit.image;
         existing.date ??= hit.date;
+        existing.content ??= hit.content;
       } else {
         merged.set(key, { ...hit, domain: domainOf(hit.url), engines: [engine], score });
       }
@@ -380,7 +391,30 @@ function settle<T>(p: Promise<T>, fallback: T): Promise<T> {
   return p.catch(() => fallback);
 }
 
+/** Supplementary lookups may finish at most this long after the web results. */
+const EXTRAS_GRACE_MS = 300;
+
+export interface SearchWithLate {
+  response: SearchResponse;
+  /** Page content from engines that finished after the response was ready, keyed by normalized URL. */
+  late: Promise<Map<string, string>>;
+}
+
 export async function search(q: Query, env: Env): Promise<SearchResponse> {
+  return (await searchWithLate(q, env)).response;
+}
+
+async function wikiKnowledge(q: string): Promise<Knowledge | undefined> {
+  const data = await fetchJson<{ query?: { search?: { title: string }[] } }>(
+    `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(q)}&format=json&srlimit=1&origin=*`,
+    { headers: { 'User-Agent': UA } },
+    3000,
+  );
+  const title = data.query?.search?.[0]?.title;
+  return title ? wikiSummary(title) : undefined;
+}
+
+export async function searchWithLate(q: Query, env: Env): Promise<SearchWithLate> {
   const engines = WEB_ENGINES.filter((e) => e.enabled(env));
   const statuses: EngineStatus[] = [];
 
@@ -402,11 +436,13 @@ export async function search(q: Query, env: Env): Promise<SearchResponse> {
     const startedAt = Date.now();
     const tick = setInterval(() => {
       const webHits = done.filter((d) => d.engine !== 'wikipedia').reduce((n, d) => n + d.hits.length, 0);
-      if (Date.now() - startedAt >= EARLY_RETURN_MS && webHits >= EARLY_RETURN_HITS) {
+      const elapsed = Date.now() - startedAt;
+      const contentPending = engines.some((e) => e === tavily) && !done.some((d) => d.engine === 'tavily') && !statuses.some((st) => st.name === 'tavily');
+      if (elapsed >= EARLY_RETURN_MS && webHits >= EARLY_RETURN_HITS && (!contentPending || elapsed >= CONTENT_ENGINE_WAIT_MS)) {
         clearInterval(tick);
         resolve();
       }
-    }, 150);
+    }, 100);
     void allEngines.finally(() => clearInterval(tick));
   });
   const webPromise = Promise.race([allEngines, enoughEarly]).then(() => {
@@ -415,16 +451,23 @@ export async function search(q: Query, env: Env): Promise<SearchResponse> {
     return [...done];
   });
 
-  const [web, instant, imgs, hn] = await Promise.all([
+  const graceOver = webPromise.then(() => new Promise<void>((r) => setTimeout(r, EXTRAS_GRACE_MS)));
+  const bounded = <T,>(p: Promise<T>, fallback: T) => Promise.race([settle(p, fallback), graceOver.then(() => fallback)]);
+  const [web, instant, wiki, imgs, hn] = await Promise.all([
     webPromise,
-    settle(instantAnswer(q.q), undefined),
-    settle(images(q.q), [] as ImageResult[]),
-    settle(discussions(q.q), [] as Discussion[]),
+    bounded(instantAnswer(q.q), undefined),
+    bounded(wikiKnowledge(q.q), undefined),
+    bounded(images(q.q), [] as ImageResult[]),
+    bounded(discussions(q.q), [] as Discussion[]),
   ]);
 
   const results = fuse(web, q.count);
-  const wikiTop = web.find((w) => w.engine === 'wikipedia')?.hits[0];
-  const knowledge = instant ?? (wikiTop ? await settle(wikiSummary(wikiTop.title), undefined) : undefined);
+  const knowledge = instant ?? wiki;
+  const late = allEngines.then(() => {
+    const content = new Map<string, string>();
+    done.forEach((d) => d.hits.forEach((h) => h.content && content.set(normalizeUrl(h.url), h.content)));
+    return content;
+  });
 
   const seen = new Set<string>();
   const allImages = [
@@ -434,12 +477,15 @@ export async function search(q: Query, env: Env): Promise<SearchResponse> {
   ].filter((img) => img.thumb && !seen.has(img.thumb) && seen.add(img.thumb));
 
   return {
-    query: q.q,
-    freshness: q.freshness,
-    results,
-    images: allImages.slice(0, 16),
-    knowledge,
-    discussions: hn,
-    engines: statuses.sort((a, b) => a.name.localeCompare(b.name)),
+    response: {
+      query: q.q,
+      freshness: q.freshness,
+      results,
+      images: allImages.slice(0, 16),
+      knowledge,
+      discussions: hn,
+      engines: [...statuses].sort((a, b) => a.name.localeCompare(b.name)),
+    },
+    late,
   };
 }

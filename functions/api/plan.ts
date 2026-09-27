@@ -1,4 +1,4 @@
-import { planLayout } from '../../server/card';
+import { planLayout } from '../../server/plan';
 import { Env, errorJson, json, readJson } from '../../server/util';
 
 export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
