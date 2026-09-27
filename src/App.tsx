@@ -8,20 +8,12 @@ import { Icon } from './card/Icon';
 import { LogoMark } from './Logo';
 import { Sources } from './Sources';
 import { type Turn, liveBody, useSession } from './useSession';
+import { useSuggestions } from './useSuggestions';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { TooltipProvider } from '@/components/ui/tooltip';
-
-const EXAMPLES = [
-  { icon: 'cloud-sun', query: 'weather in Tokyo' },
-  { icon: 'scale', query: 'iPhone 17 vs Pixel 10' },
-  { icon: 'chef-hat', query: 'how to make sourdough bread' },
-  { icon: 'atom', query: 'what is quantum computing' },
-  { icon: 'landmark', query: 'history of the Roman Empire' },
-  { icon: 'trophy', query: 'best budget running shoes' },
-];
 
 const LOADING: CardNode[] = [{ type: 'slot', hint: 'answer', shape: 'hero' }, { type: 'slot', hint: 'details', shape: 'block' }];
 
@@ -37,6 +29,11 @@ type QuoteMode = (typeof QUOTE_MODES)[number]['id'];
 interface Quote {
   text: string;
   turnId: number;
+}
+
+function greeting(): string {
+  const h = new Date().getHours();
+  return h < 5 ? 'Up late?' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
 }
 
 function useTheme() {
@@ -63,6 +60,7 @@ export default function App() {
   const initial = useMemo(() => new URLSearchParams(location.search), []);
   const [dark, setDark] = useTheme();
   const session = useSession();
+  const suggestions = useSuggestions();
   const { turns } = session;
   const [input, setInput] = useState(initial.get('q') ?? '');
   const [message, setMessage] = useState('');
@@ -201,21 +199,19 @@ export default function App() {
         {home ? (
           <main className="mx-auto flex min-h-[82dvh] max-w-xl flex-col items-center justify-center px-4 pb-16">
             <LogoMark className="mb-5 size-11" />
-            <h1 className="text-center text-3xl font-semibold tracking-tight sm:text-4xl">
-              Search that <span className="text-brand-gradient">designs</span> the answer.
-            </h1>
+            <p className="text-sm text-muted-foreground">{greeting()}</p>
+            <h1 className="mt-1 text-center text-3xl font-semibold tracking-tight sm:text-4xl">What can I help with?</h1>
             <form onSubmit={onSearchSubmit} className="relative mt-7 w-full">
-              <Search className="pointer-events-none absolute left-4 top-1/2 size-5 -translate-y-1/2 text-muted-foreground" />
-              <Input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Ask anything" enterKeyHint="search" autoFocus className="h-14 rounded-full bg-card pl-12 pr-14 text-base shadow-xs md:text-base" />
-              <Button type="submit" size="icon" className="absolute right-2 top-1/2 size-10 -translate-y-1/2 rounded-full" aria-label="Search">
+              <Input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Ask anything" enterKeyHint="send" autoFocus className="h-14 rounded-full bg-card pl-6 pr-14 text-base shadow-xs md:text-base" />
+              <Button type="submit" size="icon" className="absolute right-2 top-1/2 size-10 -translate-y-1/2 rounded-full" aria-label="Send">
                 <ArrowUp className="size-4" />
               </Button>
             </form>
             <div className="mt-5 flex flex-wrap justify-center gap-2">
-              {EXAMPLES.map((ex) => (
-                <Button key={ex.query} variant="outline" size="sm" className="rounded-full font-normal text-muted-foreground" onClick={() => startSearch(ex.query)}>
-                  <Icon name={ex.icon} className="size-3.5" />
-                  {ex.query}
+              {suggestions.slice(0, 6).map((s) => (
+                <Button key={s.text} variant="outline" size="sm" className="h-auto min-h-8 whitespace-normal rounded-full py-1.5 text-left font-normal text-muted-foreground animate-in fade-in" onClick={() => startSearch(s.text)}>
+                  <Icon name={s.icon} fallback="sparkles" className="size-3.5" />
+                  {s.text}
                 </Button>
               ))}
             </div>

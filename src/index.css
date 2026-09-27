@@ -122,9 +122,3 @@
   from { background-position: -50% 0; }
   to { background-position: 150% 0; }
 }
-.text-brand-gradient {
-  background: linear-gradient(90deg, var(--brand), var(--brand-2));
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}

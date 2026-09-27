@@ -1,6 +1,6 @@
-# Jevi — visual search
+# Jevi
 
-A mobile-first search engine that turns results into a visual, interactive page.
+A mobile-first assistant that searches, thinks and answers with interactive cards you can see, tweak and use.
 
 - **Search** fans out to every engine in parallel and fuses the rankings: DuckDuckGo (html → lite → AllOrigins), Bing RSS, Marginalia, SearXNG, Wikipedia, plus Brave / Tavily / Serper / Jina when free keys are set. Images come from Openverse → Wikimedia Commons, discussions from Hacker News. If the server gets too few results, the browser retries DuckDuckGo through AllOrigins / Codetabs.
 - **One streaming request per search** (`/api/stream`, Server-Sent Events): Jev's layout (~0.2s) → merged results with page text (~1.2–1.6s) → Jev's instant answer (~0.2s later) → the card, node by node, as DeepSeek writes it (first node ~3s).
