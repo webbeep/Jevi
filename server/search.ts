@@ -109,6 +109,67 @@ const tavily: Engine = {
   },
 };
 
+const DAYS: Record<Exclude<Freshness, 'any'>, number> = { day: 1, week: 7, month: 30, year: 365 };
+
+/** Exa: neural web search that returns page text with each result (free tier: $10 credit/month). */
+const exa: Engine = {
+  name: 'exa',
+  enabled: (env) => !!env.EXA_API_KEY,
+  async run(q, env) {
+    const since = q.freshness === 'any' ? undefined : new Date(Date.now() - DAYS[q.freshness] * 86_400_000).toISOString();
+    const data = await fetchJson<{
+      results?: { title?: string; url: string; publishedDate?: string; image?: string; text?: string; highlights?: string[] }[];
+    }>(
+      'https://api.exa.ai/search',
+      {
+        method: 'POST',
+        headers: { 'x-api-key': env.EXA_API_KEY!, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: q.q, numResults: 10, type: 'fast', contents: { text: { maxCharacters: 6000 } }, ...(since ? { startPublishedDate: since } : {}) }),
+      },
+      ENGINE_TIMEOUT_MS,
+    );
+    return {
+      hits: (data.results ?? []).map((r) => {
+        const text = r.text ? cleanMarkdown(r.text) : '';
+        return {
+          title: r.title || domainOf(r.url),
+          url: r.url,
+          snippet: clip(r.highlights?.[0] ?? text.replace(/\n/g, ' '), 320),
+          date: r.publishedDate,
+          image: r.image,
+          content: text.length > 300 ? text : undefined,
+        };
+      }),
+    };
+  },
+};
+
+/** Perplexity Search API: ranked results with extracted page passages (paid, $5 per 1k requests). */
+const perplexity: Engine = {
+  name: 'perplexity',
+  enabled: (env) => !!env.PERPLEXITY_API_KEY,
+  async run(q, env) {
+    const data = await fetchJson<{ results?: { title: string; url: string; snippet: string; date?: string | null }[] }>(
+      'https://api.perplexity.ai/search',
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${env.PERPLEXITY_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: q.q, max_results: 10, search_type: 'fast', max_tokens_per_page: 1200, ...(q.freshness === 'any' ? {} : { search_recency_filter: q.freshness }) }),
+      },
+      ENGINE_TIMEOUT_MS,
+    );
+    return {
+      hits: (data.results ?? []).map((r) => ({
+        title: r.title,
+        url: r.url,
+        snippet: clip(r.snippet.replace(/\s+/g, ' '), 320),
+        date: r.date ?? undefined,
+        content: r.snippet.length > 600 ? cleanMarkdown(r.snippet) || undefined : undefined,
+      })),
+    };
+  },
+};
+
 const serper: Engine = {
   name: 'serper',
   enabled: (env) => !!env.SERPER_API_KEY,
@@ -251,10 +312,12 @@ const marginalia: Engine = {
   },
 };
 
-const WEB_ENGINES: Engine[] = [brave, tavily, serper, jina, duckduckgo, bing, marginalia, searxng, wikipedia];
+const WEB_ENGINES: Engine[] = [brave, tavily, exa, perplexity, serper, jina, duckduckgo, bing, marginalia, searxng, wikipedia];
+/** Engines that return page text; the search waits briefly for the first of them. */
+const CONTENT_ENGINES = new Set(['tavily', 'exa', 'perplexity']);
 
 export function keyedEngines(env: Env): string[] {
-  return [brave, tavily, serper, jina].filter((e) => e.enabled(env)).map((e) => e.name);
+  return [brave, tavily, exa, perplexity, serper, jina].filter((e) => e.enabled(env)).map((e) => e.name);
 }
 
 export function normalizeUrl(url: string): string {
@@ -267,7 +330,7 @@ export function normalizeUrl(url: string): string {
   }
 }
 
-const ENGINE_WEIGHT: Record<string, number> = { brave: 1.2, serper: 1.2, tavily: 1.1, jina: 1.1, marginalia: 0.5, wikipedia: 0.8 };
+const ENGINE_WEIGHT: Record<string, number> = { brave: 1.2, serper: 1.2, exa: 1.2, perplexity: 1.2, tavily: 1.1, jina: 1.1, marginalia: 0.5, wikipedia: 0.8 };
 
 /** Reciprocal rank fusion across engines, so results found by several engines rise. */
 function fuse(outputs: { engine: string; hits: Hit[] }[], count: number): SearchResult[] {
@@ -445,7 +508,8 @@ export async function searchWithLate(q: Query, env: Env): Promise<SearchWithLate
     const tick = setInterval(() => {
       const webHits = done.filter((d) => d.engine !== 'wikipedia').reduce((n, d) => n + d.hits.length, 0);
       const elapsed = Date.now() - startedAt;
-      const contentPending = engines.some((e) => e === tavily) && !done.some((d) => d.engine === 'tavily') && !statuses.some((st) => st.name === 'tavily');
+      const contentEngines = engines.filter((e) => CONTENT_ENGINES.has(e.name));
+      const contentPending = contentEngines.length > 0 && !done.some((d) => CONTENT_ENGINES.has(d.engine)) && contentEngines.some((e) => !statuses.some((st) => st.name === e.name));
       if (elapsed >= EARLY_RETURN_MS && webHits >= EARLY_RETURN_HITS && (!contentPending || elapsed >= CONTENT_ENGINE_WAIT_MS)) {
         clearInterval(tick);
         resolve();
