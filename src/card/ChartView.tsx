@@ -1,33 +1,75 @@
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, XAxis } from 'recharts';
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, XAxis, YAxis } from 'recharts';
 import type { CardNode } from '../../shared/card';
-import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart';
+import { ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart';
+
+const PALETTE = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)'];
 
 export default function ChartView({ node }: { node: Extract<CardNode, { type: 'chart' }> }) {
   const config = { value: { label: node.unit ?? node.title ?? 'Value', color: 'var(--chart-1)' } } satisfies ChartConfig;
   const axis = <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} fontSize={11} tickFormatter={(v: string) => (v.length > 6 ? v.slice(0, 6) : v)} />;
   const tooltip = <ChartTooltip cursor={false} content={<ChartTooltipContent hideLabel={false} />} />;
-  return (
-    <div className="rounded-xl border bg-card p-3 sm:p-4">
-      {node.title && <div className="mb-3 text-sm font-medium">{node.title}{node.unit && <span className="ml-1 text-muted-foreground">({node.unit})</span>}</div>}
-      <ChartContainer config={config} className="aspect-auto h-40 w-full sm:h-44">
-        {node.kind === 'line' ? (
+
+  const chart = (() => {
+    switch (node.kind) {
+      case 'line':
+        return (
           <LineChart data={node.data} margin={{ left: 8, right: 8, top: 8 }}>
             <CartesianGrid vertical={false} />{axis}{tooltip}
             <Line dataKey="value" type="monotone" stroke="var(--color-value)" strokeWidth={2} dot={{ r: 3 }} />
           </LineChart>
-        ) : node.kind === 'area' ? (
+        );
+      case 'area':
+        return (
           <AreaChart data={node.data} margin={{ left: 8, right: 8, top: 8 }}>
             <CartesianGrid vertical={false} />{axis}{tooltip}
             <Area dataKey="value" type="monotone" stroke="var(--color-value)" fill="var(--color-value)" fillOpacity={0.15} strokeWidth={2} />
           </AreaChart>
-        ) : (
+        );
+      case 'hbar':
+        return (
+          <BarChart data={node.data} layout="vertical" margin={{ left: 4, right: 16 }}>
+            <XAxis type="number" hide />
+            <YAxis dataKey="label" type="category" tickLine={false} axisLine={false} width={96} fontSize={11} tickFormatter={(v: string) => (v.length > 14 ? `${v.slice(0, 13)}…` : v)} />
+            {tooltip}
+            <Bar dataKey="value" fill="var(--color-value)" radius={5} />
+          </BarChart>
+        );
+      case 'pie': {
+        const pieConfig = Object.fromEntries(node.data.map((d, i) => [d.label, { label: d.label, color: PALETTE[i % PALETTE.length] }])) satisfies ChartConfig;
+        return (
+          <ChartContainer config={pieConfig} className="mx-auto aspect-square h-56">
+            <PieChart>
+              <ChartTooltip content={<ChartTooltipContent nameKey="label" hideLabel />} />
+              <Pie data={node.data} dataKey="value" nameKey="label" innerRadius={48} strokeWidth={2}>
+                {node.data.map((d, i) => <Cell key={d.label} fill={PALETTE[i % PALETTE.length]} />)}
+              </Pie>
+              <ChartLegend content={<ChartLegendContent nameKey="label" />} className="flex-wrap gap-2" />
+            </PieChart>
+          </ChartContainer>
+        );
+      }
+      case 'bar':
+        return (
           <BarChart data={node.data} margin={{ top: 8 }}>
             <CartesianGrid vertical={false} />{axis}{tooltip}
             <Bar dataKey="value" fill="var(--color-value)" radius={6} />
           </BarChart>
-        )}
-      </ChartContainer>
+        );
+      default: {
+        const unreachable: never = node.kind;
+        return unreachable;
+      }
+    }
+  })();
+
+  return (
+    <div className="rounded-xl border bg-card p-3 sm:p-4">
+      {node.title && <div className="mb-3 text-sm font-medium">{node.title}{node.unit && <span className="ml-1 text-muted-foreground">({node.unit})</span>}</div>}
+      {node.kind === 'pie' ? chart : (
+        <ChartContainer config={config} className={node.kind === 'hbar' ? 'aspect-auto w-full' : 'aspect-auto h-40 w-full sm:h-44'} style={node.kind === 'hbar' ? { height: Math.max(120, node.data.length * 34) } : undefined}>
+          {chart}
+        </ChartContainer>
+      )}
     </div>
   );
 }
-

@@ -91,10 +91,12 @@ export class Polisher {
       case 'profile':
         return { ...node, imageRef: this.image(node.imageRef) };
       case 'image': {
+        if (node.query) return node;
         const ref = this.image(node.ref);
         return ref === undefined ? undefined : node;
       }
       case 'gallery': {
+        if (node.query) return node;
         const refs = node.refs.map((r) => this.image(r)).filter((r): r is number => r !== undefined);
         return refs.length ? { ...node, refs } : undefined;
       }

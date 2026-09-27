@@ -109,9 +109,16 @@ export function StatView({ node }: { node: Of<'stat'> }) {
   );
 }
 
+/** A picture found for the item, or one referenced from the search images. */
+function usePicture(src: string | undefined, ref: number | undefined): string | undefined {
+  const { images } = useCard();
+  return src ?? (ref !== undefined ? images[ref]?.thumb : undefined);
+}
+
 export function Tile({ node }: { node: Of<'tile'> }) {
-  const { onAsk, images } = useCard();
-  const img = node.imageRef !== undefined ? images[node.imageRef] : undefined;
+  const { onAsk, busy } = useCard();
+  const img = usePicture(node.imageSrc, node.imageRef);
+  const pending = !img && !!node.imageQuery && busy;
   return (
     <button
       onClick={() => onAsk(`Tell me more about ${node.label}${node.value ? ` (${node.value})` : ''}`)}
@@ -121,10 +128,12 @@ export function Tile({ node }: { node: Of<'tile'> }) {
       )}
     >
       {img ? (
-        <img src={img.thumb} alt={node.label} loading="lazy" className="mb-1 aspect-square w-full max-w-24 rounded-lg bg-muted object-cover" onError={(e) => ((e.target as HTMLElement).style.display = 'none')} />
+        <img src={img} alt={node.label} loading="lazy" className="mb-1 aspect-square w-full max-w-24 rounded-lg bg-muted object-cover animate-in fade-in" onError={(e) => ((e.target as HTMLElement).style.display = 'none')} />
+      ) : pending ? (
+        <Skeleton className="mb-1 aspect-square w-full max-w-24 rounded-lg" />
       ) : null}
       <span className="text-[11px] font-medium text-muted-foreground">{plain(node.label)}</span>
-      {!img && <Icon name={node.icon} className="size-[18px] text-foreground/70 sm:size-5" />}
+      {!img && !pending && <Icon name={node.icon} className="size-[18px] text-foreground/70 sm:size-5" />}
       {node.value && <span className="text-[15px] font-semibold tracking-tight sm:text-base">{plain(node.value)}</span>}
       {node.sub && <span className="text-[11px] leading-tight text-muted-foreground"><RichText text={node.sub} inline /></span>}
     </button>
@@ -144,26 +153,28 @@ export function KeyValue({ node }: { node: Of<'keyvalue'> }) {
   );
 }
 
+function MediaThumb({ item, index }: { item: Of<'list'>['items'][number]; index: number }) {
+  const { busy } = useCard();
+  const img = usePicture(item.imageSrc, item.imageRef);
+  if (img) return <img src={img} alt="" loading="lazy" className="size-12 shrink-0 rounded-lg bg-muted object-cover animate-in fade-in sm:size-14" onError={(e) => ((e.target as HTMLElement).style.visibility = 'hidden')} />;
+  if (item.imageQuery && busy) return <Skeleton className="size-12 shrink-0 rounded-lg sm:size-14" />;
+  return (
+    <span className="flex size-12 shrink-0 items-center justify-center rounded-lg bg-muted text-sm font-semibold text-muted-foreground sm:size-14">
+      {item.icon ? <Icon name={item.icon} className="size-5" /> : index + 1}
+    </span>
+  );
+}
+
 function MediaList({ node }: { node: Of<'list'> }) {
-  const { images } = useCard();
   return (
     <ul className="divide-y rounded-xl border bg-card">
-      {node.items.map((item, i) => {
-        const img = item.imageRef !== undefined ? images[item.imageRef] : undefined;
-        return (
-          <li key={i} className="flex items-center gap-3 p-2.5 sm:p-3">
-            {img ? (
-              <img src={img.thumb} alt="" loading="lazy" className="size-12 shrink-0 rounded-lg bg-muted object-cover sm:size-14" onError={(e) => ((e.target as HTMLElement).style.visibility = 'hidden')} />
-            ) : (
-              <span className="flex size-12 shrink-0 items-center justify-center rounded-lg bg-muted text-sm font-semibold text-muted-foreground sm:size-14">
-                {item.icon ? <Icon name={item.icon} className="size-5" /> : i + 1}
-              </span>
-            )}
-            <span className="min-w-0 flex-1 text-sm leading-snug"><RichText text={item.text} inline /></span>
-            {item.meta && <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs font-medium tabular-nums">{item.meta}</span>}
-          </li>
-        );
-      })}
+      {node.items.map((item, i) => (
+        <li key={i} className="flex items-center gap-3 p-2.5 sm:p-3">
+          <MediaThumb item={item} index={i} />
+          <span className="min-w-0 flex-1 text-sm leading-snug"><RichText text={item.text} inline /></span>
+          {item.meta && <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs font-medium tabular-nums">{item.meta}</span>}
+        </li>
+      ))}
     </ul>
   );
 }
@@ -330,23 +341,27 @@ export function Callout({ node }: { node: Of<'callout'> }) {
 }
 
 export function ImageView({ node }: { node: Of<'image'> }) {
-  const { images } = useCard();
-  const img = images[node.ref];
-  if (!img) return null;
+  const { images, busy } = useCard();
+  const ref = node.ref !== undefined ? images[node.ref] : undefined;
+  const src = node.src ?? ref?.thumb;
+  const aspect = node.aspect === 'square' ? 'aspect-square' : node.aspect === 'tall' ? 'aspect-[3/4]' : 'aspect-video';
+  if (!src) return node.query && busy ? <Skeleton className={cn('w-full rounded-xl', aspect)} /> : null;
   return (
-    <figure className="overflow-hidden rounded-xl border bg-muted">
-      <img src={img.thumb} alt={node.caption ?? img.title} loading="lazy" className={cn('w-full object-cover', node.aspect === 'square' ? 'aspect-square' : node.aspect === 'tall' ? 'aspect-[3/4]' : 'aspect-video')} />
+    <figure className="overflow-hidden rounded-xl border bg-muted animate-in fade-in">
+      <img src={src} alt={node.caption ?? ref?.title ?? ''} loading="lazy" className={cn('w-full object-cover', node.aspect === 'square' ? 'aspect-square' : node.aspect === 'tall' ? 'aspect-[3/4]' : 'aspect-video')} />
       {node.caption && <figcaption className="px-3 py-2 text-xs text-muted-foreground">{node.caption}</figcaption>}
     </figure>
   );
 }
 
 export function Gallery({ node }: { node: Of<'gallery'> }) {
-  const { images } = useCard();
-  const items = node.refs.map((r) => images[r]).filter(Boolean);
+  const { images, busy } = useCard();
+  const items = node.pics?.length
+    ? node.pics.map((p) => ({ thumb: p.src, url: p.link, title: p.title, source: p.link ? new URL(p.link).hostname.replace(/^www\./, '') : '' }))
+    : node.refs.map((r) => images[r]).filter(Boolean);
   const [open, setOpen] = useState<number | null>(null);
   const current = open === null ? undefined : items[open];
-  if (!items.length) return null;
+  if (!items.length) return node.query && busy ? <div className="grid grid-cols-3 gap-1.5">{[0, 1, 2].map((i) => <Skeleton key={i} className="aspect-square rounded-lg" />)}</div> : null;
   return (
     <>
       <div className={cn('grid gap-1.5', items.length >= 3 ? 'grid-cols-3' : 'grid-cols-2')}>
@@ -372,12 +387,11 @@ export function Gallery({ node }: { node: Of<'gallery'> }) {
 }
 
 export function Profile({ node }: { node: Of<'profile'> }) {
-  const { images } = useCard();
-  const img = node.imageRef !== undefined ? images[node.imageRef] : undefined;
+  const img = usePicture(node.imageSrc, node.imageRef);
   return (
     <div className="flex items-center gap-3 sm:gap-4">
       <Avatar className="size-16 rounded-2xl border sm:size-20">
-        {img && <AvatarImage src={img.thumb} alt={node.name} className="object-cover" />}
+        {img && <AvatarImage src={img} alt={node.name} className="object-cover" />}
         <AvatarFallback className="rounded-2xl text-xl">{node.name.slice(0, 2).toUpperCase()}</AvatarFallback>
       </Avatar>
       <div className="min-w-0 flex-1">

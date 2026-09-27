@@ -3,6 +3,7 @@ import type { SearchResponse } from '../shared/types';
 import { deepseekLines, hasDeepSeek } from './deepseek';
 import { candidates, extractStats, extractTimeline } from './extract';
 import { Grounding, groundNodes } from './ground';
+import { PictureResolver } from './pictures';
 import { Polisher } from './polish';
 import type { PageText } from './pages';
 import { patternById } from './patterns';
@@ -22,10 +23,10 @@ DISPLAY
 - heading {text, eyebrow, level:1|2|3}
 - text {text, tone, size:"sm"|"md"|"lg"}  (supports **bold** and [n] source citations)
 - stat {label, value, unit, icon, delta, trend:"up"|"down"|"flat"}
-- tile {label, value, sub, icon, imageRef:image index, active:boolean}  (compact cell for scrollers and grids; with imageRef it becomes a picture tile, great for products, places, dishes, people)
+- tile {label, value, sub, icon, imageQuery, imageRef, active:boolean}  (compact cell for scrollers and grids; with a picture it becomes a picture tile, great for products, places, dishes, people)
 - keyvalue {items:[{label, value, icon}]}
-- list {style:"bullet"|"check"|"number"|"icon"|"media", items:[{text, icon, meta, imageRef}]}  ("media" shows each item as a row with a thumbnail; meta is a short badge like a price or score)
-- chart {kind:"bar"|"line"|"area", title, unit, data:[{label, value:number}]}  (only with 3+ real numbers)
+- list {style:"bullet"|"check"|"number"|"icon"|"media", items:[{text, icon, meta, imageQuery, imageRef}]}  ("media" shows each item as a row with its own thumbnail; meta is a short badge like a price or score)
+- chart {kind:"bar"|"hbar"|"line"|"area"|"pie", title, unit, data:[{label, value:number}]}  (bar: compare categories; hbar: rankings with long names; line/area: change over time; pie: shares of a whole)
 - progress {label, value:0-100, caption}
 - rating {value, max, label}
 - table {columns:[string], rows:[[string]], highlight:column index}
@@ -35,9 +36,10 @@ DISPLAY
 - badges {items:[string]}
 - quote {text, source}
 - callout {tone, title, text, icon}
-- image {ref:image index, caption, aspect:"wide"|"square"|"tall"}
-- gallery {refs:[image indexes]}
-- profile {name, subtitle, imageRef:image index, facts:[{label, value}]}
+- image {query | ref, caption, aspect:"wide"|"square"|"tall"}
+- gallery {query | refs}  (several real photos of one subject)
+- profile {name, subtitle, imageQuery | imageRef, facts:[{label, value}]}
+PICTURES: imageQuery / query is the exact name of what the picture must show ("Nike Downshifter 13", "Eiffel Tower at night", "Taylor Swift"); a real photo of that exact item is found for it. imageRef / ref is an IMAGES index — use it only when that image's description clearly shows the same item.
 - actions {items:[{label, icon, query, kind:"search"|"ask"|"refine"}]}  (next-step buttons: "refine" redesigns THIS card with the query as an instruction, "ask" answers a follow-up in a new card, "search" runs a new search)
 - citations {refs:[source numbers]}
 INTERACTIVE (make the card something to play with, not just read)
@@ -121,7 +123,8 @@ STYLE — visual first, minimal text
 - Text budget: labels 1-4 words; tile and stat values as short as possible; subtitles under 10 words; a text node is 1-2 short sentences. Never repeat the same fact in two places. No filler ("Here is", "In summary", "It is important to note").
 - When the person wants to understand something (why/how/what is, or an explainer layout), explanation is the content: use clear, plain sentences in short paragraphs or an accordion, keep every step of the reasoning (don't skip what a newcomer needs), and add a one-line analogy. Still concise.
 - Predict what they will want next: offer the 1-3 most likely adjustments as controls (choices, slider, scaler) or "refine" actions — e.g. a different budget, size, date range, audience or level of detail — so they never have to type a clarification.
-- Pictures: when IMAGES contains pictures that clearly show the subject (check each image's description), use them — a profile image, a gallery, picture tiles for options, or a media list for ranked items. Never use an image whose description is about something else.
+- Pictures: every picture must show the specific item it sits next to — each product, place, dish or person gets its own imageQuery with its exact name. Use pictures where seeing the item helps (products, places, food, people, animals, landmarks, designs); skip them for abstract topics. Never reuse one picture for several items and never use a general stock-style photo.
+- Charts and tables only when they add understanding: a chart needs 3+ comparable numbers from the sources (a trend, a ranking, shares of a whole); a table needs 2+ items compared across 3+ attributes. Never chart two numbers or non-numeric facts; a stat or tile is better there.
 
 RULES
 - Every number, value and fact must come from SOURCES or PAGE TEXT. Never estimate, never use typical or example values, never fill a slot from general knowledge. Any number not found in the sources is automatically deleted, so leave such nodes out.
@@ -218,6 +221,7 @@ export async function designStream(req: DesignRequest, env: Env, on: DesignEvent
   const chat = req.followup?.mode === 'chat';
   const g = new Grounding(corpusOf(req), chat);
   const polish = new Polisher(textCap(req));
+  const pictures = new PictureResolver(env);
   const base = req.followup?.mode === 'refine' && req.followup.baseCard ? `CURRENT CARD\n${JSON.stringify(req.followup.baseCard).slice(0, 12000)}\n\n` : '';
   const user = `${sourcesBlock(req.search, req.pages)}\n\n${base}SKELETON\n${JSON.stringify(patternById(req.pattern).skeleton)}\n\nTASK\n${taskBlock(req)}\n\nQUERY: ${req.followup?.question ?? req.query}`;
 
@@ -243,7 +247,7 @@ export async function designStream(req: DesignRequest, env: Env, on: DesignEvent
             if (contentNodes >= MAX_CONTENT_NODES) return;
             contentNodes++;
           }
-          return on.node(node, index++);
+          return pictures.emit(node, index++, on.node);
         }
         case 'dropped':
           removed++;
@@ -257,6 +261,7 @@ export async function designStream(req: DesignRequest, env: Env, on: DesignEvent
   } catch (err) {
     console.error('DeepSeek stream failed', err);
   }
+  await pictures.flush();
   if (!contentNodes) return extractive(req, on);
   return { engine: chat ? 'reasoning' : 'deepseek', removed };
 }
@@ -289,6 +294,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
   const regions = patternById(req.pattern).skeleton;
   on.layout(regions);
   const g = new Grounding(corpusOf(req));
+  const pictures = new PictureResolver(env);
   const polish = new Polisher(textCap(req));
   const shared = `${sourcesBlock(req.search, req.pages, 2000)}\n\nTASK\n${taskBlock(req)}\n- Card regions, top to bottom:\n${regions.map((r, i) => `  R${i + 1}: ${regionPurpose(r)}`).join('\n')}\n  FINISH: header, interactive control, actions, citations, follow-ups`;
   const query = req.followup?.question ?? req.query;
@@ -308,7 +314,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
         const node = polish.apply(parsed.node);
         if (!node) return;
         contentNodes++;
-        on.node(node, i);
+        pictures.emit(node, i, on.node);
       } else if (parsed?.kind === 'dropped') removed++;
     });
   };
@@ -332,7 +338,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
             return on.head({ title: parsed.node.text, subtitle: parsed.node.eyebrow });
           }
           const order = FINISH_ORDER[parsed.node.type];
-          return on.node(parsed.node, order === undefined ? regions.length + FINISH_SLOTS + extra++ : regions.length + order);
+          return pictures.emit(parsed.node, order === undefined ? regions.length + FINISH_SLOTS + extra++ : regions.length + order, on.node);
         }
         case 'dropped':
           removed++;
@@ -348,6 +354,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
   const results = await Promise.allSettled([...regions.map(regionCall), finishCall()]);
   if (!headSentAny) on.head({ title: req.query.replace(/^./, (c) => c.toUpperCase()) });
   results.filter((r) => r.status === 'rejected').forEach((r) => console.error('region failed', (r as PromiseRejectedResult).reason));
+  await pictures.flush();
   if (!contentNodes) return extractive(req, on);
   return { engine: 'deepseek', removed };
 }

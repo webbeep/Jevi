@@ -23,10 +23,10 @@ export type CardNode =
   | { type: 'heading'; text: string; eyebrow?: string; level?: 1 | 2 | 3 }
   | { type: 'text'; text: string; tone?: Tone; size?: 'sm' | 'md' | 'lg' }
   | { type: 'stat'; label: string; value: string; unit?: string; icon?: string; delta?: string; trend?: 'up' | 'down' | 'flat' }
-  | { type: 'tile'; label: string; value?: string; sub?: string; icon?: string; imageRef?: number; active?: boolean }
+  | { type: 'tile'; label: string; value?: string; sub?: string; icon?: string; imageRef?: number; imageQuery?: string; imageSrc?: string; active?: boolean }
   | { type: 'keyvalue'; items: { label: string; value: string; icon?: string }[] }
-  | { type: 'list'; style?: 'bullet' | 'check' | 'number' | 'icon' | 'media'; items: { text: string; icon?: string; meta?: string; imageRef?: number }[] }
-  | { type: 'chart'; kind: 'bar' | 'line' | 'area'; title?: string; unit?: string; data: { label: string; value: number }[] }
+  | { type: 'list'; style?: 'bullet' | 'check' | 'number' | 'icon' | 'media'; items: { text: string; icon?: string; meta?: string; imageRef?: number; imageQuery?: string; imageSrc?: string }[] }
+  | { type: 'chart'; kind: 'bar' | 'hbar' | 'line' | 'area' | 'pie'; title?: string; unit?: string; data: { label: string; value: number }[] }
   | { type: 'progress'; label: string; value: number; caption?: string }
   | { type: 'rating'; value: number; max?: number; label?: string }
   | { type: 'table'; columns: string[]; rows: string[][]; highlight?: number }
@@ -36,9 +36,10 @@ export type CardNode =
   | { type: 'badges'; items: string[] }
   | { type: 'quote'; text: string; source?: string }
   | { type: 'callout'; tone?: Tone; title?: string; text: string; icon?: string }
-  | { type: 'image'; ref: number; caption?: string; aspect?: 'wide' | 'square' | 'tall' }
-  | { type: 'gallery'; refs: number[] }
-  | { type: 'profile'; name: string; subtitle?: string; imageRef?: number; facts?: { label: string; value: string }[] }
+  /** Pictures reference IMAGES by index, or name what they show (`query`) for the server to find. */
+  | { type: 'image'; ref?: number; query?: string; src?: string; link?: string; caption?: string; aspect?: 'wide' | 'square' | 'tall' }
+  | { type: 'gallery'; refs: number[]; query?: string; pics?: { src: string; link: string; title: string }[] }
+  | { type: 'profile'; name: string; subtitle?: string; imageRef?: number; imageQuery?: string; imageSrc?: string; facts?: { label: string; value: string }[] }
   | { type: 'actions'; items: { label: string; icon?: string; query: string; kind?: ActionKind }[] }
   // Interactive
   | { type: 'choices'; label?: string; options: { label: string; prompt: string; selected?: boolean }[] }

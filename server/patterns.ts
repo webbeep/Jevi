@@ -16,7 +16,7 @@ export const PATTERNS: PatternDef[] = [
     description: 'One big headline value (a current reading, price, score, count or status) with small supporting tiles, a short series over time, and a few details',
     skeleton: [
       row(slot('headline value', 'hero'), slot('context', 'block')),
-      { type: 'scroller', children: [slot('series', 'tile'), slot('series', 'tile'), slot('series', 'tile'), slot('series', 'tile'), slot('series', 'tile')] },
+      { type: 'scroller', children: [slot('series over time: tiles for a few upcoming values, or a line chart for a longer trend', 'tile'), slot('series', 'tile'), slot('series', 'tile'), slot('series', 'tile'), slot('series', 'tile')] },
       grid(2, slot('detail', 'tile'), slot('detail', 'tile'), slot('detail', 'tile'), slot('detail', 'tile')),
     ],
   },

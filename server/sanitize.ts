@@ -85,7 +85,7 @@ function sanitizeNode(raw: unknown, imageCount: number, depth: number): CardNode
     }
     case 'tile': {
       const label = str(n.label, 60);
-      return label ? { type, label, value: str(n.value, 40), sub: str(n.sub, 80), icon: icon(n.icon), imageRef: ref(n.imageRef), active: n.active === true } : undefined;
+      return label ? { type, label, value: str(n.value, 40), sub: str(n.sub, 80), icon: icon(n.icon), imageRef: ref(n.imageRef), imageQuery: str(n.imageQuery, 80), active: n.active === true } : undefined;
     }
     case 'keyvalue': {
       const items = arr(n.items).map((i) => ({ label: str((i as Raw)?.label, 60) ?? '', value: str((i as Raw)?.value, 160) ?? '', icon: icon((i as Raw)?.icon) })).filter((i) => i.label && i.value);
@@ -93,7 +93,7 @@ function sanitizeNode(raw: unknown, imageCount: number, depth: number): CardNode
     }
     case 'list': {
       const items = arr(n.items)
-        .map((i) => (typeof i === 'string' ? { text: i } : { text: str((i as Raw)?.text, 300) ?? '', icon: icon((i as Raw)?.icon), meta: str((i as Raw)?.meta, 60), imageRef: ref((i as Raw)?.imageRef) }))
+        .map((i) => (typeof i === 'string' ? { text: i } : { text: str((i as Raw)?.text, 300) ?? '', icon: icon((i as Raw)?.icon), meta: str((i as Raw)?.meta, 60), imageRef: ref((i as Raw)?.imageRef), imageQuery: str((i as Raw)?.imageQuery, 80) }))
         .filter((i) => i.text);
       return items.length ? { type, items, style: oneOf(n.style, ['bullet', 'check', 'number', 'icon', 'media'] as const) } : undefined;
     }
@@ -101,7 +101,7 @@ function sanitizeNode(raw: unknown, imageCount: number, depth: number): CardNode
       const data = arr(n.data)
         .map((d) => ({ label: str((d as Raw)?.label, 24) ?? '', value: num((d as Raw)?.value) }))
         .filter((d): d is { label: string; value: number } => !!d.label && d.value !== undefined);
-      return data.length >= 2 ? { type, data, kind: oneOf(n.kind, ['bar', 'line', 'area'] as const) ?? 'bar', title: str(n.title, 80), unit: str(n.unit, 20) } : undefined;
+      return data.length >= 2 ? { type, data, kind: oneOf(n.kind, ['bar', 'hbar', 'line', 'area', 'pie'] as const) ?? 'bar', title: str(n.title, 80), unit: str(n.unit, 20) } : undefined;
     }
     case 'progress': {
       const label = str(n.label, 80);
@@ -144,16 +144,18 @@ function sanitizeNode(raw: unknown, imageCount: number, depth: number): CardNode
     }
     case 'image': {
       const r = ref(n.ref);
-      return r !== undefined ? { type, ref: r, caption: str(n.caption, 120), aspect: oneOf(n.aspect, ['wide', 'square', 'tall'] as const) } : undefined;
+      const query = str(n.query, 80);
+      return r !== undefined || query ? { type, ref: r, query: r === undefined ? query : undefined, caption: str(n.caption, 120), aspect: oneOf(n.aspect, ['wide', 'square', 'tall'] as const) } : undefined;
     }
     case 'gallery': {
       const refs = arr(n.refs).map(ref).filter((r): r is number => r !== undefined);
-      return refs.length ? { type, refs } : undefined;
+      const query = str(n.query, 80);
+      return refs.length || query ? { type, refs, query: refs.length ? undefined : query } : undefined;
     }
     case 'profile': {
       const name = str(n.name, 100);
       const facts = arr(n.facts).map((f) => ({ label: str((f as Raw)?.label, 40) ?? '', value: str((f as Raw)?.value, 120) ?? '' })).filter((f) => f.label && f.value);
-      return name ? { type, name, subtitle: str(n.subtitle, 120), imageRef: ref(n.imageRef), facts } : undefined;
+      return name ? { type, name, subtitle: str(n.subtitle, 120), imageRef: ref(n.imageRef), imageQuery: str(n.imageQuery, 80), facts } : undefined;
     }
     case 'actions': {
       const items = arr(n.items)
