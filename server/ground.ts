@@ -102,6 +102,21 @@ function groundNode(node: CardNode, g: Grounding): CardNode | undefined {
     }
     case 'profile':
       return { ...node, facts: node.facts?.filter((f) => g.ok(f.value)) };
+    case 'choices':
+    case 'slider':
+      return node;
+    case 'scaler': {
+      const items = node.items.filter((i) => g.ok(i.amount));
+      return items.length && g.ok(node.base) ? { ...node, items } : undefined;
+    }
+    case 'accordion': {
+      const items = node.items.map((i) => ({ ...i, text: g.sentences(i.text) })).filter((i) => i.text && g.ok(i.title));
+      return items.length ? { ...node, items } : undefined;
+    }
+    case 'reveal': {
+      const items = node.items.filter((i) => g.ok(i.front) && g.ok(i.back));
+      return items.length ? { ...node, items } : undefined;
+    }
     default: {
       const unreachable: never = node;
       return unreachable;

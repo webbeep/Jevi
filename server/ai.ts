@@ -1,57 +1,21 @@
 import type {
-  AskRequest,
-  AskResponse,
   ReadResponse,
-  SearchResult,
   SlotKind,
   SlotResponse,
 } from '../shared/types';
 import { deepseekJson, hasDeepSeek } from './deepseek';
-import { askJev, choice, jevKey, noul } from './jev';
+import { askJev, choice, jevKey } from './jev';
 import { Env, UA, clip, fetchText, hedge, stripHtml } from './util';
 
-function sourcesBlock(results: SearchResult[]): string {
-  return results
-    .slice(0, 10)
-    .map((r, i) => `[${i + 1}] ${r.title} (${r.domain}): ${clip(r.snippet, 400)}`)
-    .join('\n');
-}
-
-export async function ask(req: AskRequest, env: Env): Promise<AskResponse> {
-  let needsSearch = 0.5;
-  if (jevKey(env)) {
-    try {
-      const answers = await askJev(env, `Original search: "${req.query}"\nFollow-up: "${req.question}"\n\nAvailable results:\n${sourcesBlock(req.results)}`, {
-        needs_search: {
-          type: 'noul',
-          instructions: 'Answering the follow-up well requires a new web search, because the available results do not cover it.',
-        },
-      });
-      needsSearch = noul(answers, 'needs_search');
-    } catch (err) {
-      console.error('Jev ask failed', err);
-    }
-  }
-
-  if (!hasDeepSeek(env)) return { kind: 'search', query: `${req.query} ${req.question}` };
-
-  if (needsSearch >= 0.6) {
-    const { query } = await deepseekJson<{ query: string }>(
-      env,
-      'Rewrite the follow-up into a standalone web search query of at most 10 words. Reply as JSON: {"query": string}.',
-      `Original search: ${req.query}\nFollow-up: ${req.question}`,
-      80,
-    );
-    return { kind: 'search', query: query || req.question };
-  }
-
-  const { answer } = await deepseekJson<{ answer: string }>(
+export async function rewriteQuery(original: string, question: string, env: Env): Promise<string> {
+  if (!hasDeepSeek(env)) return `${original} ${question}`;
+  const { query } = await deepseekJson<{ query: string }>(
     env,
-    'Answer the follow-up using the numbered sources, in 2-5 sentences, with **bold** key terms and inline citations like [2]. Reply as JSON: {"answer": string}.',
-    `Original search: ${req.query}\nFollow-up: ${req.question}\n\nSources:\n${sourcesBlock(req.results)}`,
-    600,
+    'Rewrite the follow-up into a standalone web search query of at most 10 words. Reply as JSON: {"query": string}.',
+    `Original search: ${original}\nFollow-up: ${question}`,
+    80,
   );
-  return { kind: 'answer', answer };
+  return query?.trim() || question;
 }
 
 const SLOTS: Record<SlotKind, string> = {

@@ -1,4 +1,4 @@
-import type { AnswerCard, CardNode, CardResponse, LayoutPlan } from '../shared/card';
+import type { AnswerCard, CardNode, CardResponse, FollowupContext, FollowupMode, LayoutPlan } from '../shared/card';
 import type { SearchResponse } from '../shared/types';
 import { deepseekJson, hasDeepSeek } from './deepseek';
 import { candidates, extractStats, extractTimeline } from './extract';
@@ -11,7 +11,13 @@ import { Env, clip } from './util';
 
 const DEPTHS = ['brief', 'standard', 'detailed'] as const;
 
-export async function planLayout(query: string, env: Env): Promise<LayoutPlan> {
+const MODES: Record<FollowupMode, string> = {
+  refine: 'Changes how the current answer card is shown: a different unit, time range, focus, audience, amount or level of detail, on the same topic',
+  answer: 'A new question about the same topic that the current search results can probably answer',
+  search: 'A different topic, or something the current results cannot cover, so a fresh web search is needed',
+};
+
+export async function planLayout(query: string, env: Env, original?: string, cards: { id: number; title: string }[] = []): Promise<LayoutPlan> {
   const started = Date.now();
   const fallback = (): LayoutPlan => {
     const pattern = heuristicPattern(query);
@@ -24,13 +30,21 @@ export async function planLayout(query: string, env: Env): Promise<LayoutPlan> {
       confidence: 0.5,
       depth: 'standard',
       readPages: heuristicPattern(query) === 'spotlight' || heuristicPattern(query) === 'dataset',
+      mode: original ? 'answer' : undefined,
       ms: Date.now() - started,
     };
   };
   if (!jevKey(env)) return fallback();
 
   try {
-    const answers = await askJev(env, `Someone typed this into a search engine: "${query}". Before any results load, decide how the answer card should be laid out so the answer is instantly readable at a glance.`, {
+    const state = original
+      ? `Someone searched for "${original}" and is looking at the answer card. They now typed the follow-up: "${query}". Decide how the answer to this follow-up should be laid out.`
+      : `Someone typed this into a search engine: "${query}". Before any results load, decide how the answer card should be laid out so the answer is instantly readable at a glance.`;
+    const answers = await askJev(env, state, {
+      ...(original ? { mode: { type: 'choice' as const, instructions: 'What kind of follow-up is this?', criteria: MODES } } : {}),
+      ...(original && cards.length > 1
+        ? { target: { type: 'choice' as const, instructions: 'If this asks to change a card on screen, which card does it refer to?', criteria: Object.fromEntries(cards.slice(-8).map((c) => [`c${c.id}`, c.title])) } }
+        : {}),
       pattern: {
         type: 'choice',
         instructions: 'Which card layout fits the answer this person expects?',
@@ -59,6 +73,8 @@ export async function planLayout(query: string, env: Env): Promise<LayoutPlan> {
       confidence: pick.confidence,
       depth: DEPTHS[Math.max(0, Math.min(2, Math.round(depthScore)))],
       readPages: noul(answers, 'needs_pages') >= 0.5,
+      mode: original ? ((choice(answers, 'mode')?.choice as FollowupMode | undefined) ?? 'answer') : undefined,
+      target: Number(choice(answers, 'target')?.choice.slice(1)) || undefined,
       ms: Date.now() - started,
     };
   } catch (err) {
@@ -96,8 +112,14 @@ DISPLAY
 - image {ref:image index, caption, aspect:"wide"|"square"|"tall"}
 - gallery {refs:[image indexes]}
 - profile {name, subtitle, imageRef:image index, facts:[{label, value}]}
-- actions {items:[{label, icon, query, kind:"search"|"ask"}]}  (next-step buttons; "ask" answers from these results, "search" runs a new search)
+- actions {items:[{label, icon, query, kind:"search"|"ask"|"refine"}]}  (next-step buttons: "refine" redesigns THIS card with the query as an instruction, "ask" answers a follow-up in a new card, "search" runs a new search)
 - citations {refs:[source numbers]}
+INTERACTIVE (make the card something to play with, not just read)
+- choices {label, options:[{label, prompt, selected}]}  (segmented control; picking an option redesigns the card using its prompt, e.g. time range, focus, audience)
+- slider {label, min, max, step, value, unit, prompt}  (prompt must contain {value}; releasing the slider redesigns the card, e.g. "plan for {value} people")
+- scaler {label, base, value, min, max, step, unit, items:[{name, amount:number, unit}]}  (live, instant rescaling of quantities such as ingredients or costs; base is the amount the sources describe, value is where the control starts, e.g. the amount the person asked for)
+- accordion {items:[{title, text}]}  (tap to expand details)
+- reveal {items:[{front, back}]}  (tap-to-flip cards for quizzes, myths vs facts, terms)
 icon: any lucide icon name in kebab-case, e.g. "thermometer", "map-pin", "clock", "trending-up".
 tone: "default"|"muted"|"primary"|"positive"|"negative"|"warning".`;
 
@@ -115,7 +137,31 @@ function sourcesBlock(search: SearchResponse, pages: PageText[]): string {
   return `SOURCES\n${results.join('\n')}${knowledge}${pageBlock}\n\nIMAGES (use by index)\n${images.join('\n') || 'none'}`;
 }
 
-export async function designCard(req: { query: string; pattern: string; depth: LayoutPlan['depth']; readPages?: boolean; search: SearchResponse; simple?: boolean }, env: Env): Promise<CardResponse> {
+export interface DesignRequest {
+  query: string;
+  pattern: string;
+  depth: LayoutPlan['depth'];
+  readPages?: boolean;
+  search: SearchResponse;
+  simple?: boolean;
+  followup?: FollowupContext;
+}
+
+function followupRules(f: FollowupContext | undefined, originalQuery: string): string {
+  if (!f) return '';
+  switch (f.mode) {
+    case 'refine':
+      return `\n\nTHIS IS A REDESIGN. The person is looking at CURRENT CARD (below) for "${originalQuery}" and asked: "${f.question}". Return the full updated card: apply the change, keep what still applies, and restructure freely if the change calls for a different layout. Mark the matching choices option as selected and move any slider to the requested value.`;
+    case 'answer':
+      return `\n\nTHIS IS A FOLLOW-UP. The original search was "${originalQuery}". Design a focused card that answers only the follow-up question "${f.question}". Do not repeat the original answer; pick the components that fit this question best.`;
+    default: {
+      const unreachable: never = f.mode;
+      return unreachable;
+    }
+  }
+}
+
+export async function designCard(req: DesignRequest, env: Env): Promise<CardResponse> {
   const started = Date.now();
   const extractive = () => ({ ...extractiveCard(req.query, req.pattern, req.search), pagesRead: 0, removed: 0, ms: Date.now() - started });
   if (!hasDeepSeek(env)) return extractive();
@@ -129,18 +175,21 @@ ${GRAMMAR}
 RULES
 - Start from the SKELETON layout that was pre-selected ("${pattern.label}": ${pattern.description}). Replace every slot with real components; you may add, drop or rearrange nodes if it serves the answer better.
 - Every number, value and fact must come from SOURCES or PAGE TEXT. Never estimate, never use typical or example values, never fill a slot from general knowledge. Any number not found in the sources is automatically deleted, so leave such nodes out.
+- Never compute new numbers yourself (multiplying, converting, summing). When quantities should change with an amount (servings, loaves, people, budget), use a scaler node whose base and amounts are exactly the source values; the person rescales it live.
 - If the sources don't contain what the person asked for (for example a live reading or a price), say so honestly in a short callout and make the actions node point to the best sources to check.
 - Put citations like [2] inside text nodes where useful. Lead with the answer. Prefer visual components (hero, tiles, stats, charts, tables, timelines) over paragraphs; keep text short.
 - Nesting depth at most 4. ${DEPTH_HINT[req.depth]}
-- Finish with an actions node (2-4 useful next steps) and a citations node.${req.simple ? '\n- Write for a 10-year-old: plain words and a friendly analogy.' : ''}
+- Include at least one interactive node (choices, slider, scaler, accordion or reveal) whenever the answer has something worth adjusting, exploring or testing.
+- Finish with an actions node (2-4 useful next steps; prefer "refine" for changes to this card) and a citations node.${req.simple ? '\n- Write for a 10-year-old: plain words and a friendly analogy.' : ''}${followupRules(req.followup, req.search.query)}
 
 Reply with JSON only: {"card":{"title":string,"subtitle":string,"icon":string,"accent":tone,"body":[nodes]},"followups":[4 short follow-up questions]}`;
 
-  const user = `QUERY: ${req.query}\n\nSKELETON\n${JSON.stringify(pattern.skeleton)}\n\n${sourcesBlock(req.search, pages)}`;
+  const base = req.followup?.mode === 'refine' && req.followup.baseCard ? `CURRENT CARD\n${JSON.stringify(req.followup.baseCard).slice(0, 12000)}\n\n` : '';
+  const user = `QUERY: ${req.followup?.question ?? req.query}\n\n${base}SKELETON\n${JSON.stringify(pattern.skeleton)}\n\n${sourcesBlock(req.search, pages)}`;
   try {
     const out = await deepseekJson<{ card?: unknown; followups?: unknown }>(env, system, user, 2600);
     const sanitized = sanitizeCard(out.card, Math.min(req.search.images.length, 12), req.query);
-    const corpus = [req.query, ...req.search.results.map((r) => `${r.title} ${r.snippet} ${r.date ?? ''}`), req.search.knowledge?.extract ?? '', ...pages.map((p) => p.text)].join(' ');
+    const corpus = [req.query, req.followup?.question ?? '', req.followup?.baseCard ? JSON.stringify(req.followup.baseCard) : '', ...req.search.results.map((r) => `${r.title} ${r.snippet} ${r.date ?? ''}`), req.search.knowledge?.extract ?? '', ...pages.map((p) => p.text)].join(' ');
     const { card, removed } = groundCard(sanitized, corpus);
     if (!card.body.some((n) => n.type !== 'actions' && n.type !== 'citations')) throw new Error('card had no grounded content');
     const followups = Array.isArray(out.followups) ? out.followups.filter((f): f is string => typeof f === 'string').slice(0, 4) : [];

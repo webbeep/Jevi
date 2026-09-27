@@ -1,5 +1,5 @@
-import type { CardResponse, LayoutPlan } from '../shared/card';
-import type { AskRequest, AskResponse, Freshness, HealthResponse, ReadResponse, SearchResponse, SlotResponse } from '../shared/types';
+import type { CardResponse, FollowupContext, LayoutPlan } from '../shared/card';
+import type { Freshness, HealthResponse, ReadResponse, SearchResponse, SlotResponse } from '../shared/types';
 
 async function call<T>(path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, body === undefined ? undefined : {
@@ -12,11 +12,21 @@ async function call<T>(path: string, body?: unknown): Promise<T> {
   return data;
 }
 
+export interface CardRequest {
+  query: string;
+  pattern: string;
+  depth: LayoutPlan['depth'];
+  readPages: boolean;
+  search: SearchResponse;
+  simple: boolean;
+  followup?: FollowupContext;
+}
+
 export const api = {
   search: (q: string, freshness: Freshness) => call<SearchResponse>(`/api/search?q=${encodeURIComponent(q)}&freshness=${freshness}`),
-  plan: (query: string) => call<LayoutPlan>('/api/plan', { query }),
-  card: (body: { query: string; pattern: string; depth: LayoutPlan['depth']; readPages: boolean; search: SearchResponse; simple: boolean }) => call<CardResponse>('/api/card', body),
-  ask: (req: AskRequest) => call<AskResponse>('/api/ask', req),
+  plan: (query: string, original?: string, cards?: { id: number; title: string }[]) => call<LayoutPlan>('/api/plan', { query, original, cards }),
+  card: (body: CardRequest) => call<CardResponse>('/api/card', body),
+  rewrite: (original: string, question: string) => call<{ query: string }>('/api/rewrite', { original, question }),
   slot: (query: string, text: string) => call<SlotResponse>('/api/slot', { query, text }),
   read: (url: string, query: string) => call<ReadResponse>('/api/read', { url, query }),
   health: () => call<HealthResponse>('/api/health'),

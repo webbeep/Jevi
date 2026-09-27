@@ -5,6 +5,7 @@ import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Icon } from './Icon';
+import { AccordionNode, Choices, Reveal, Scaler, SliderNode } from './interactive';
 import {
   Actions, Badges, Callout, Citations, Gallery, Heading, Hero, ImageView, KeyValue, List, Profile,
   ProgressView, ProsCons, Quote, Rating, SlotView, StatView, Steps, TableView, Text, Tile, Timeline, TONE_TEXT,
@@ -21,8 +22,16 @@ function isCompact(n: CardNode): boolean {
   return n.type === 'tile' || n.type === 'stat' || (n.type === 'slot' && n.shape === 'tile');
 }
 
-export function Nodes({ nodes, className }: { nodes: CardNode[]; className?: string }) {
-  return <div className={cn('flex flex-col gap-4', className)}>{nodes.map((n, i) => <NodeView key={i} node={n} />)}</div>;
+export function Nodes({ nodes, className, stagger = false }: { nodes: CardNode[]; className?: string; stagger?: boolean }) {
+  return (
+    <div className={cn('flex flex-col gap-4', className)}>
+      {nodes.map((n, i) => (
+        <div key={i} className={cn('min-w-0', stagger && n.type !== 'slot' && 'animate-in fade-in slide-in-from-bottom-2 fill-mode-backwards duration-500')} style={stagger ? { animationDelay: `${i * 70}ms` } : undefined}>
+          <NodeView node={n} />
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export function NodeView({ node }: { node: CardNode }): ReactNode {
@@ -92,6 +101,11 @@ export function NodeView({ node }: { node: CardNode }): ReactNode {
     case 'actions': return <Actions node={node} />;
     case 'citations': return <Citations node={node} />;
     case 'slot': return <SlotView node={node} />;
+    case 'choices': return <Choices node={node} />;
+    case 'slider': return <SliderNode node={node} />;
+    case 'scaler': return <Scaler node={node} />;
+    case 'accordion': return <AccordionNode node={node} />;
+    case 'reveal': return <Reveal node={node} />;
     default: {
       const unreachable: never = node;
       throw new Error(`Unknown node ${JSON.stringify(unreachable)}`);

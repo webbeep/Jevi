@@ -157,8 +157,43 @@ function sanitizeNode(raw: unknown, imageCount: number, depth: number): CardNode
     }
     case 'actions': {
       const items = arr(n.items)
-        .map((i) => ({ label: str((i as Raw)?.label, 40) ?? '', query: str((i as Raw)?.query, 200) ?? '', icon: icon((i as Raw)?.icon), kind: oneOf((i as Raw)?.kind, ['search', 'ask'] as const) }))
+        .map((i) => ({ label: str((i as Raw)?.label, 40) ?? '', query: str((i as Raw)?.query, 200) ?? '', icon: icon((i as Raw)?.icon), kind: oneOf((i as Raw)?.kind, ['search', 'ask', 'refine'] as const) }))
         .filter((i) => i.label && i.query);
+      return items.length ? { type, items } : undefined;
+    }
+    case 'choices': {
+      const options = arr(n.options)
+        .map((o) => ({ label: str((o as Raw)?.label, 40) ?? '', prompt: str((o as Raw)?.prompt, 200) ?? '', selected: (o as Raw)?.selected === true }))
+        .filter((o) => o.label && o.prompt);
+      return options.length >= 2 ? { type, options, label: str(n.label, 60) } : undefined;
+    }
+    case 'slider': {
+      const label = str(n.label, 60);
+      const prompt = str(n.prompt, 200);
+      const min = num(n.min);
+      const max = num(n.max);
+      if (!label || !prompt?.includes('{value}') || min === undefined || max === undefined || max <= min) return undefined;
+      const value = Math.min(max, Math.max(min, num(n.value) ?? min));
+      return { type, label, prompt, min, max, value, step: num(n.step), unit: str(n.unit, 16) };
+    }
+    case 'scaler': {
+      const label = str(n.label, 60);
+      const base = num(n.base);
+      const min = num(n.min);
+      const max = num(n.max);
+      const items = arr(n.items)
+        .map((i) => ({ name: str((i as Raw)?.name, 80) ?? '', amount: num((i as Raw)?.amount), unit: str((i as Raw)?.unit, 20) }))
+        .filter((i): i is { name: string; amount: number; unit: string | undefined } => !!i.name && i.amount !== undefined && i.amount > 0);
+      if (!label || !base || base <= 0 || min === undefined || max === undefined || max <= min || !items.length) return undefined;
+      const value = num(n.value);
+      return { type, label, base, value: value === undefined ? undefined : Math.min(max, Math.max(min, value)), min, max, step: num(n.step), unit: str(n.unit, 20), items };
+    }
+    case 'accordion': {
+      const items = arr(n.items).map((i) => ({ title: str((i as Raw)?.title, 120) ?? '', text: str((i as Raw)?.text, 800) ?? '' })).filter((i) => i.title && i.text);
+      return items.length ? { type, items } : undefined;
+    }
+    case 'reveal': {
+      const items = arr(n.items).map((i) => ({ front: str((i as Raw)?.front, 200) ?? '', back: str((i as Raw)?.back, 400) ?? '' })).filter((i) => i.front && i.back);
       return items.length ? { type, items } : undefined;
     }
     case 'citations': {

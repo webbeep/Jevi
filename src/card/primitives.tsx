@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Check, ChevronLeft, ChevronRight, Minus, Star, ThumbsDown, ThumbsUp, TrendingDown, TrendingUp } from 'lucide-react';
 import type { CardNode, Tone } from '../../shared/card';
 import { cn } from '@/lib/utils';
@@ -33,13 +33,35 @@ const TONE_SURFACE: Record<Tone, string> = {
   warning: 'bg-warning/10 border-warning/25',
 };
 
+/** Animates the leading number of a value (e.g. "41,798,407" or "23°") from zero on mount. */
+function useCountUp(value: string, ms = 700): string {
+  const match = value.match(/^(\D*)(\d[\d,]*(?:\.\d+)?)(.*)$/);
+  const target = match ? Number(match[2].replace(/,/g, '')) : NaN;
+  const [shown, setShown] = useState(Number.isFinite(target) ? 0 : target);
+  useEffect(() => {
+    if (!Number.isFinite(target)) return;
+    const start = performance.now();
+    let frame = requestAnimationFrame(function tick(now) {
+      const t = Math.min(1, (now - start) / ms);
+      setShown(target * (1 - (1 - t) ** 3));
+      if (t < 1) frame = requestAnimationFrame(tick);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [target, ms]);
+  if (!match || !Number.isFinite(target)) return value;
+  const decimals = match[2].split('.')[1]?.length ?? 0;
+  const body = shown.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals, useGrouping: match[2].includes(',') });
+  return `${match[1]}${body}${match[3]}`;
+}
+
 export function Hero({ node }: { node: Of<'hero'> }) {
+  const value = useCountUp(node.value);
   return (
     <div className="flex min-w-0 flex-col">
       {node.label && <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{node.label}</span>}
       <div className="flex items-start gap-3">
         <span className={cn('text-5xl font-semibold leading-none tracking-tighter sm:text-6xl', node.value.length > 14 && 'text-3xl sm:text-4xl leading-tight tracking-tight', TONE_TEXT[node.tone ?? 'default'])}>
-          {node.value}
+          <span className="tabular-nums">{value}</span>
           {node.unit && <span className="ml-1 align-top text-2xl font-normal text-muted-foreground">{node.unit}</span>}
         </span>
         {node.icon && <Icon name={node.icon} className="mt-1 size-10 text-muted-foreground/60 sm:size-12" />}
@@ -328,12 +350,23 @@ export function Profile({ node }: { node: Of<'profile'> }) {
 }
 
 export function Actions({ node }: { node: Of<'actions'> }) {
-  const { onSearch, onAsk } = useCard();
+  const { onSearch, onAsk, onRefine, busy } = useCard();
+  const run = (a: Of<'actions'>['items'][number]) => {
+    switch (a.kind ?? 'search') {
+      case 'refine': return onRefine(a.query);
+      case 'ask': return onAsk(a.query);
+      case 'search': return onSearch(a.query);
+      default: {
+        const unreachable: never = a.kind as never;
+        return unreachable;
+      }
+    }
+  };
   return (
     <div className="flex flex-wrap gap-2">
       {node.items.map((a) => (
-        <Button key={a.label} variant="outline" size="sm" className="rounded-full" onClick={() => (a.kind === 'ask' ? onAsk(a.query) : onSearch(a.query))}>
-          <Icon name={a.icon} className="size-3.5" />{a.label}
+        <Button key={a.label} variant={a.kind === 'refine' ? 'secondary' : 'outline'} size="sm" className="rounded-full" disabled={busy && a.kind === 'refine'} onClick={() => run(a)}>
+          <Icon name={a.icon} fallback={a.kind === 'refine' ? 'wand-sparkles' : a.kind === 'ask' ? 'message-circle' : 'search'} className="size-3.5" />{a.label}
         </Button>
       ))}
     </div>

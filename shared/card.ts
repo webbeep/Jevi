@@ -4,6 +4,9 @@
  * refines and fills it) may combine these freely — nothing is tied to a topic.
  */
 
+/** search = new web search, ask = answer as a new card from these results, refine = redesign this card. */
+export type ActionKind = 'search' | 'ask' | 'refine';
+
 export type Tone = 'default' | 'muted' | 'primary' | 'positive' | 'negative' | 'warning';
 export type Gap = 'sm' | 'md' | 'lg';
 
@@ -36,7 +39,13 @@ export type CardNode =
   | { type: 'image'; ref: number; caption?: string; aspect?: 'wide' | 'square' | 'tall' }
   | { type: 'gallery'; refs: number[] }
   | { type: 'profile'; name: string; subtitle?: string; imageRef?: number; facts?: { label: string; value: string }[] }
-  | { type: 'actions'; items: { label: string; icon?: string; query: string; kind?: 'search' | 'ask' }[] }
+  | { type: 'actions'; items: { label: string; icon?: string; query: string; kind?: ActionKind }[] }
+  // Interactive
+  | { type: 'choices'; label?: string; options: { label: string; prompt: string; selected?: boolean }[] }
+  | { type: 'slider'; label: string; min: number; max: number; step?: number; value: number; unit?: string; prompt: string }
+  | { type: 'scaler'; label: string; base: number; value?: number; min: number; max: number; step?: number; unit?: string; items: { name: string; amount: number; unit?: string }[] }
+  | { type: 'accordion'; items: { title: string; text: string }[] }
+  | { type: 'reveal'; items: { front: string; back: string }[] }
   | { type: 'citations'; refs: number[] }
   // Placeholder rendered while content is on its way
   | { type: 'slot'; hint: string; shape?: 'hero' | 'line' | 'block' | 'tile' | 'chart' | 'row' };
@@ -66,7 +75,19 @@ export interface LayoutPlan {
   confidence: number;
   depth: 'brief' | 'standard' | 'detailed';
   readPages: boolean;
+  /** Only set when planning a follow-up. */
+  mode?: FollowupMode;
+  /** For refine follow-ups: which on-screen card the person means. */
+  target?: number;
   ms: number;
+}
+
+export type FollowupMode = 'refine' | 'answer' | 'search';
+
+export interface FollowupContext {
+  mode: Exclude<FollowupMode, 'search'>;
+  question: string;
+  baseCard?: AnswerCard;
 }
 
 export interface CardResponse {

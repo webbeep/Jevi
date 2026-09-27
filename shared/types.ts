@@ -69,16 +69,6 @@ export interface TimelineItem {
   url?: string;
 }
 
-export interface AskRequest {
-  query: string;
-  question: string;
-  results: SearchResult[];
-}
-
-export type AskResponse =
-  | { kind: 'answer'; answer: string }
-  | { kind: 'search'; query: string };
-
 export type SlotKind = 'key_point' | 'stat' | 'timeline' | 'search' | 'explain';
 
 export interface SlotResponse {
