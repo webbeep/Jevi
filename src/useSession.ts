@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
-import type { AnswerCard, CardNode, CardResponse, FollowupContext, LayoutPlan, QuickAnswer } from '../shared/card';
+import type { AnswerCard, CardNode, CardResponse, FollowupContext, LayoutPlan } from '../shared/card';
 import type { Freshness, SearchResponse, SearchResult } from '../shared/types';
 import { api } from './api';
 import { withBrowserFallback } from './fallback';
@@ -34,7 +34,6 @@ export interface Turn {
   plan?: LayoutPlan;
   pattern?: string;
   search?: SearchResponse;
-  quick?: QuickAnswer;
   /** The card as it streams in; replaced by `result` when complete. */
   live?: LiveCard;
   result?: CardResponse;
@@ -101,8 +100,6 @@ export function useSession(freshness: Freshness) {
           });
           return update(target.id, { search: { ...target.search, results } });
         }
-        case 'quick':
-          return update(id, { quick: e.data });
         case 'designing':
           return;
         case 'layout':
@@ -159,7 +156,7 @@ export function useSession(freshness: Freshness) {
   }, [update, run]);
 
   const runSearchTurn = useCallback(async (id: number, query: string, fresh: Freshness) => {
-    update(id, { kind: 'search', question: query, searchId: id, filling: true, plan: undefined, search: undefined, result: undefined, live: undefined, quick: undefined, error: undefined });
+    update(id, { kind: 'search', question: query, searchId: id, filling: true, plan: undefined, search: undefined, result: undefined, live: undefined, error: undefined });
     try {
       await run(id, { kind: 'search', query, freshness: fresh });
     } catch {
@@ -186,7 +183,8 @@ export function useSession(freshness: Freshness) {
     if (!q) return;
     if (opts.reset) {
       clear();
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      window.scrollTo({ top: 0 });
+      requestAnimationFrame(() => window.scrollTo({ top: 0 }));
     }
     const id = add({ kind: 'search', question: q, filling: true });
     if (!opts.reset) scrollToTurn(id);

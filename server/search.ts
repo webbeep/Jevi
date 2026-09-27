@@ -414,15 +414,11 @@ async function wikiKnowledge(q: string): Promise<Knowledge | undefined> {
   return title ? wikiSummary(title) : undefined;
 }
 
-/** Called once with the first engine's results, before the full merged search is ready. */
-export type FirstHits = (results: SearchResult[]) => void;
-
-export async function searchWithLate(q: Query, env: Env, onFirstHits?: FirstHits): Promise<SearchWithLate> {
+export async function searchWithLate(q: Query, env: Env): Promise<SearchWithLate> {
   const engines = WEB_ENGINES.filter((e) => e.enabled(env));
   const statuses: EngineStatus[] = [];
 
   const done: { engine: string; hits: Hit[]; images?: ImageResult[] }[] = [];
-  let firstSent = false;
   const allEngines = Promise.all(
     engines.map(async (engine) => {
       const started = Date.now();
@@ -430,10 +426,6 @@ export async function searchWithLate(q: Query, env: Env, onFirstHits?: FirstHits
         const out = await engine.run(q, env);
         statuses.push({ name: engine.name, ok: true, count: out.hits.length, ms: Date.now() - started });
         done.push({ engine: engine.name, ...out });
-        if (onFirstHits && !firstSent && engine.name !== 'wikipedia' && out.hits.length >= 5) {
-          firstSent = true;
-          onFirstHits(fuse([{ engine: engine.name, hits: out.hits }], 10));
-        }
       } catch (err) {
         const error = err instanceof AggregateError ? 'all mirrors failed' : err instanceof Error ? err.message : String(err);
         statuses.push({ name: engine.name, ok: false, count: 0, ms: Date.now() - started, error });

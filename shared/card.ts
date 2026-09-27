@@ -92,13 +92,6 @@ export interface FollowupContext {
   baseCard?: AnswerCard;
 }
 
-export interface QuickAnswer {
-  text: string;
-  url?: string;
-  domain?: string;
-  confidence: number;
-}
-
 export interface CardResponse {
   card: AnswerCard;
   followups: string[];

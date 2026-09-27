@@ -1,9 +1,7 @@
-import type { FollowupMode, LayoutPlan, QuickAnswer } from '../shared/card';
-import type { SearchResponse } from '../shared/types';
-import { candidates } from './extract';
+import type { FollowupMode, LayoutPlan } from '../shared/card';
 import { askJev, choice, jevKey, noul, score } from './jev';
 import { PATTERNS, heuristicPattern, patternById, skeletonCard } from './patterns';
-import { Env, clip } from './util';
+import type { Env } from './util';
 
 const DEPTHS = ['brief', 'standard', 'detailed'] as const;
 
@@ -83,23 +81,4 @@ export async function planLayout(query: string, env: Env, original?: string, car
     console.error('Jev plan failed', err);
     return fallback();
   }
-}
-
-/** Jev picks the single sentence that best answers the query, to show while the full card is designed. */
-export async function quickAnswer(query: string, search: SearchResponse, env: Env): Promise<QuickAnswer | undefined> {
-  if (!jevKey(env)) return undefined;
-  const cands = candidates(search, 30);
-  if (cands.length < 2) return undefined;
-  const answers = await askJev(env, `Search query: "${query}"`, {
-    best: {
-      type: 'choice',
-      instructions: 'Which sentence states the actual answer to the search query as a concrete fact? Page descriptions and invitations to visit a site do not count.',
-      criteria: { ...Object.fromEntries(cands.map((c) => [c.id, clip(c.text, 240)])), none: 'None of these sentences actually answers the query' },
-    },
-  });
-  const best = choice(answers, 'best');
-  if (!best || best.choice === 'none') return undefined;
-  const pick = cands.find((c) => c.id === best.choice);
-  if (!pick || (best.probabilities[best.choice] ?? 0) < 0.35) return undefined;
-  return { text: pick.text, url: pick.url, domain: pick.domain, confidence: best.probabilities[best.choice] };
 }

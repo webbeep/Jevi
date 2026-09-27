@@ -1,5 +1,5 @@
-import { Loader2, RefreshCw, Zap } from 'lucide-react';
-import type { AnswerCard, CardPattern, QuickAnswer } from '../../shared/card';
+import { Loader2, RefreshCw } from 'lucide-react';
+import type { AnswerCard, CardPattern } from '../../shared/card';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -11,7 +11,7 @@ import { LogoMark } from '../Logo';
 import { Icon } from './Icon';
 import { Nodes } from './render';
 
-export function AnswerCardView({ card, version, filling, streaming, status, quick, pattern, alternatives, engine, onPattern, simple, onSimple, onRegenerate }: {
+export function AnswerCardView({ card, version, filling, streaming, status, pattern, alternatives, engine, onPattern, simple, onSimple, onRegenerate }: {
   card: AnswerCard;
   /** Changes whenever a fresh design starts, replaying the entrance animation. */
   version: string;
@@ -20,8 +20,6 @@ export function AnswerCardView({ card, version, filling, streaming, status, quic
   streaming: boolean;
   /** Shown while an existing card is being redesigned. */
   status?: string;
-  /** Jev's instant answer; the caller passes it only until the designed card starts arriving. */
-  quick?: QuickAnswer;
   pattern?: string;
   alternatives: CardPattern[];
   engine?: string;
@@ -59,20 +57,6 @@ export function AnswerCardView({ card, version, filling, streaming, status, quic
       )}
 
       <div className={cn('px-4 py-4 transition-[opacity,filter] duration-300 sm:px-6 sm:py-5', status && !streaming && 'pointer-events-none opacity-50 blur-[1px]')}>
-        {quick && (
-          <div className="mb-4 rounded-xl border border-brand/20 bg-gradient-to-br from-brand/8 to-brand-2/5 p-3.5 animate-in fade-in slide-in-from-top-1">
-            <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-brand">
-              <Zap className="size-3" /> Instant answer
-            </div>
-            <p className="text-[15px] leading-snug">{quick.text}</p>
-            {quick.domain && (
-              <div className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
-                <img src={`https://icons.duckduckgo.com/ip3/${quick.domain}.ico`} alt="" className="size-3.5 rounded-sm" />
-                {quick.domain}
-              </div>
-            )}
-          </div>
-        )}
         <Nodes key={version} nodes={card.body} className="gap-4 sm:gap-5" stagger={!streaming} />
       </div>
 

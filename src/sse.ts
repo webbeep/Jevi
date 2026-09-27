@@ -1,4 +1,4 @@
-import type { AnswerCard, CardNode, FollowupContext, LayoutPlan, QuickAnswer } from '../shared/card';
+import type { AnswerCard, CardNode, FollowupContext, LayoutPlan } from '../shared/card';
 import type { Freshness, SearchResponse } from '../shared/types';
 
 export type StreamBody =
@@ -8,7 +8,6 @@ export type StreamBody =
 export type StreamEvent =
   | { event: 'plan'; data: LayoutPlan }
   | { event: 'search'; data: SearchResponse }
-  | { event: 'quick'; data: QuickAnswer }
   | { event: 'pages'; data: { n: number; url: string; text: string }[] }
   | { event: 'designing'; data: { pagesRead: number; ms: number } }
   | { event: 'layout'; data: CardNode[] }

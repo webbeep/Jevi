@@ -20,12 +20,12 @@ const FRESHNESS: { id: Freshness; label: string }[] = [
 ];
 
 const EXAMPLES = [
-  { icon: 'cloud-sun', label: 'Live readings', query: 'weather in Tokyo' },
-  { icon: 'scale', label: 'Side by side', query: 'iPhone 17 vs Pixel 10' },
-  { icon: 'chef-hat', label: 'Make it', query: 'how to make sourdough bread' },
-  { icon: 'atom', label: 'Understand', query: 'what is quantum computing' },
-  { icon: 'landmark', label: 'Timelines', query: 'history of the Roman Empire' },
-  { icon: 'trophy', label: 'Decide', query: 'best budget running shoes' },
+  { icon: 'cloud-sun', query: 'weather in Tokyo' },
+  { icon: 'scale', query: 'iPhone 17 vs Pixel 10' },
+  { icon: 'chef-hat', query: 'how to make sourdough bread' },
+  { icon: 'atom', query: 'what is quantum computing' },
+  { icon: 'landmark', query: 'history of the Roman Empire' },
+  { icon: 'trophy', query: 'best budget running shoes' },
 ];
 
 const LOADING: CardNode[] = [{ type: 'slot', hint: 'answer', shape: 'hero' }, { type: 'slot', hint: 'details', shape: 'block' }];
@@ -155,7 +155,7 @@ export default function App() {
         ref={searchRef}
         value={input}
         onChange={(e) => setInput(e.target.value)}
-        placeholder={home ? 'Ask anything — get an answer you can see' : 'Search'}
+        placeholder={home ? 'Ask anything' : 'Search'}
         enterKeyHint="search"
         autoFocus={home}
         className={cn('rounded-full bg-card shadow-xs', home ? 'h-14 pl-12 pr-14 text-base md:text-base' : 'h-10 pl-9 pr-11')}
@@ -186,26 +186,19 @@ export default function App() {
 
         {home ? (
           <main className="mx-auto flex min-h-[82dvh] max-w-xl flex-col items-center justify-center px-4 pb-16">
-            <LogoMark className="mb-6 size-12" />
+            <LogoMark className="mb-5 size-11" />
             <h1 className="text-center text-3xl font-semibold tracking-tight sm:text-4xl">
               Search that <span className="text-brand-gradient">designs</span> the answer.
             </h1>
-            <p className="mt-3 max-w-md text-center text-sm leading-relaxed text-muted-foreground sm:text-base">
-              Ask anything. Jevi reads the web and builds an interactive card for your question — live numbers, tables, steps, sliders — instead of a list of links.
-            </p>
-            <div className="mt-8 w-full">{searchBox}</div>
-            <div className="mt-6 grid w-full grid-cols-2 gap-2 sm:grid-cols-3">
+            <div className="mt-7 w-full">{searchBox}</div>
+            <div className="mt-5 flex flex-wrap justify-center gap-2">
               {EXAMPLES.map((ex) => (
-                <button key={ex.query} onClick={() => startSearch(ex.query)} className="group flex flex-col gap-2 rounded-xl border bg-card p-3 text-left transition-all hover:-translate-y-0.5 hover:border-foreground/20 hover:shadow-sm">
-                  <span className="flex size-8 items-center justify-center rounded-lg bg-muted transition-colors group-hover:bg-brand/10 group-hover:text-brand">
-                    <Icon name={ex.icon} className="size-4" />
-                  </span>
-                  <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{ex.label}</span>
-                  <span className="text-sm font-medium leading-snug">{ex.query}</span>
-                </button>
+                <Button key={ex.query} variant="outline" size="sm" className="rounded-full font-normal text-muted-foreground" onClick={() => startSearch(ex.query)}>
+                  <Icon name={ex.icon} className="size-3.5" />
+                  {ex.query}
+                </Button>
               ))}
             </div>
-            <p className="mt-6 hidden text-xs text-muted-foreground sm:block">Press <kbd className="rounded border bg-muted px-1.5 py-0.5 font-mono text-[10px]">/</kbd> to search from anywhere</p>
           </main>
         ) : (
           <main ref={mainRef} className="mx-auto max-w-2xl space-y-8 px-3 pb-[60vh] pt-3 sm:px-4 sm:pt-4">
@@ -315,7 +308,6 @@ function TurnView({ turn, first, session, freshness }: {
             filling={turn.filling}
             streaming={streaming}
             status={turn.status}
-            quick={!streaming && !turn.result ? turn.quick : undefined}
             pattern={turn.pattern}
             alternatives={turn.kind === 'digest' ? [] : turn.plan?.alternatives ?? []}
             engine={engineLabel(turn)}

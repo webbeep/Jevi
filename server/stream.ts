@@ -2,7 +2,7 @@ import type { FollowupContext, LayoutPlan } from '../shared/card';
 import type { Freshness, SearchResponse } from '../shared/types';
 import { designParallel, designStream } from './design';
 import { collectPages } from './pages';
-import { planLayout, quickAnswer } from './plan';
+import { planLayout } from './plan';
 import { searchWithLate } from './search';
 import type { Send } from './sse';
 import type { Env } from './util';
@@ -54,27 +54,11 @@ export async function runStream(req: StreamRequest, env: Env, send: Send): Promi
         send('plan', plan);
         return plan;
       });
-      // Jev picks the instant answer from the first engine to respond, while the rest of the search finishes.
-      let quick: Promise<unknown> = Promise.resolve();
-      let quickSent = false;
-      const tryQuick = (results: SearchResponse) =>
-        quickAnswer(req.query, results, env)
-          .then((q) => {
-            if (q && !quickSent) {
-              quickSent = true;
-              send('quick', q);
-            }
-          })
-          .catch((err) => console.error('quick answer failed', err));
-      const { response: results, late } = await searchWithLate({ q: req.query, freshness: req.freshness, count: 20 }, env, (first) => {
-        quick = tryQuick({ query: req.query, freshness: req.freshness, results: first, images: [], discussions: [], engines: [] });
-      });
+      const { response: results, late } = await searchWithLate({ q: req.query, freshness: req.freshness, count: 20 }, env);
       send('search', results);
       if (!results.results.length) throw new Error('No results from any engine. Try rephrasing.');
       const plan = await planned;
-      quick = quick.then(() => (quickSent ? undefined : tryQuick(results)));
       await design(send, env, { query: req.query, pattern: plan.pattern, depth: plan.depth, readPages: plan.readPages, search: results }, started, late);
-      await quick;
       return;
     }
     case 'design':

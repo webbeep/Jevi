@@ -84,7 +84,7 @@ export function Sources({ results, engines, query, onDigest }: { results: Search
 
   return (
     <section className="space-y-2">
-      <div className="flex items-center gap-2 px-1">
+      <div className="flex items-center gap-2">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Sources</h3>
         <span className="text-xs text-muted-foreground">{results.length}{withText ? ` · ${withText} read in full` : ''}</span>
         <div className="ml-auto flex items-center gap-1">
@@ -100,9 +100,9 @@ export function Sources({ results, engines, query, onDigest }: { results: Search
         </div>
       </div>
 
-      <div className="no-scrollbar -mx-3 flex snap-x gap-2 overflow-x-auto px-3 pb-1 sm:-mx-4 sm:px-4">
+      <div className="no-scrollbar flex gap-2 overflow-x-auto pb-1">
         {results.slice(0, 10).map((r, i) => (
-          <button key={r.url} onClick={() => setReading(r)} className="group flex w-52 shrink-0 snap-start flex-col gap-1.5 rounded-xl border bg-card p-3 text-left transition-colors hover:border-foreground/20 sm:w-60">
+          <button key={r.url} onClick={() => setReading(r)} className="group flex w-52 shrink-0 flex-col gap-1.5 rounded-xl border bg-card p-3 text-left transition-colors hover:border-foreground/20 sm:w-60">
             <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
               <span className="tabular-nums">{i + 1}</span>
               <img src={favicon(r.domain)} alt="" className="size-3.5 rounded-sm" loading="lazy" />
