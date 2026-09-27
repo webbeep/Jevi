@@ -3,9 +3,11 @@
 A mobile-first search engine that turns results into a visual, interactive page.
 
 - **Search** fans out to every engine in parallel and fuses the rankings: DuckDuckGo (html → lite → AllOrigins), Bing RSS, Marginalia, SearXNG, Wikipedia, plus Brave / Tavily / Serper / Jina when free keys are set. Images come from Openverse → Wikimedia Commons, discussions from Hacker News. If the server gets too few results, the browser retries DuckDuckGo through AllOrigins / Codetabs.
-- **Jev** (TypeSafe AI) decides in one call: intent, which components to show and which goes first, the best answer sentence and key points picked from the snippets, summary length, and which action buttons to offer. Without a Jev key a rule-based layout is used.
-- **DeepSeek Flash** only runs for the tasks Jev hands off: overview summary, comparison table, steps, pros/cons, follow-up questions, explanations and page digests.
-- **Interact**: highlight any text and Jev places it (key point, stat, timeline, new search, or explanation); ask follow-ups (Jev decides whether to answer from the results or search again); tweak freshness, summary length, simple mode, source filters; digest any result page.
+- **Every answer is one card designed for the question.** Cards are composed from a small UI grammar (`shared/card.ts`): layout nodes (stack, grid, section, tabs, scroller) and display nodes (hero, tile, stat, chart, table, timeline, steps, profile, gallery, actions…) rendered with shadcn/ui.
+- **Jev** (TypeSafe AI, ~200ms) picks a layout pattern from the query alone (`server/patterns.ts` — topic-neutral arrangements like "big headline value + series + details"), how detailed to be, and whether full page text is needed. The skeleton renders immediately.
+- **DeepSeek Flash** then designs the final card from the grammar, starting from Jev's skeleton, using only the search results (and the text of the top pages when Jev asks for it).
+- **Grounding** (`server/ground.ts`): every number in the card is checked against the source text; anything unsupported is removed before it reaches the browser.
+- **Interact**: switch between Jev's top layouts, "Simpler", redesign, tap tiles to ask about them, action buttons, follow-ups, highlight text to pin/explain/search it, digest any source page.
 
 ## Setup
 

@@ -1,0 +1,100 @@
+import { type ReactNode, Suspense, lazy } from 'react';
+import type { CardNode, Gap } from '../../shared/card';
+import { cn } from '@/lib/utils';
+import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
+import { Separator } from '@/components/ui/separator';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Icon } from './Icon';
+import {
+  Actions, Badges, Callout, Citations, Gallery, Heading, Hero, ImageView, KeyValue, List, Profile,
+  ProgressView, ProsCons, Quote, Rating, SlotView, StatView, Steps, TableView, Text, Tile, Timeline, TONE_TEXT,
+} from './primitives';
+
+const ChartView = lazy(() => import('./ChartView'));
+
+const GAP: Record<Gap, string> = { sm: 'gap-2', md: 'gap-3', lg: 'gap-5' };
+const COLS = { 2: 'grid-cols-2', 3: 'grid-cols-2 sm:grid-cols-3', 4: 'grid-cols-2 sm:grid-cols-4' } as const;
+const ALIGN = { start: 'sm:items-start', center: 'sm:items-center', end: 'sm:items-end', between: 'sm:items-center sm:justify-between' } as const;
+
+/** Small nodes that should stay side by side even on phones. */
+function isCompact(n: CardNode): boolean {
+  return n.type === 'tile' || n.type === 'stat' || (n.type === 'slot' && n.shape === 'tile');
+}
+
+export function Nodes({ nodes, className }: { nodes: CardNode[]; className?: string }) {
+  return <div className={cn('flex flex-col gap-4', className)}>{nodes.map((n, i) => <NodeView key={i} node={n} />)}</div>;
+}
+
+export function NodeView({ node }: { node: CardNode }): ReactNode {
+  switch (node.type) {
+    case 'stack': {
+      const row = node.direction === 'row';
+      const compact = row && node.children.every(isCompact);
+      return (
+        <div className={cn('flex min-w-0', GAP[node.gap ?? 'md'], compact ? 'no-scrollbar flex-row overflow-x-auto' : row ? cn('flex-col sm:flex-row', ALIGN[node.align ?? 'start'], node.wrap && 'sm:flex-wrap') : 'flex-col')}>
+          {node.children.map((c, i) => <div key={i} className={cn('flex min-w-0 flex-col [&>*]:flex-1', compact ? 'flex-1' : row && 'sm:flex-1')}><NodeView node={c} /></div>)}
+        </div>
+      );
+    }
+    case 'grid':
+      return <div className={cn('grid', COLS[node.cols], GAP[node.gap ?? 'md'], '[&>*]:h-full')}>{node.children.map((c, i) => <NodeView key={i} node={c} />)}</div>;
+    case 'section':
+      return (
+        <section className="space-y-3">
+          {node.title && (
+            <h3 className={cn('flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground', node.tone && TONE_TEXT[node.tone])}>
+              <Icon name={node.icon} className="size-3.5" />{node.title}
+            </h3>
+          )}
+          <Nodes nodes={node.children} className="gap-3" />
+        </section>
+      );
+    case 'tabs':
+      return (
+        <Tabs defaultValue="0" className="gap-3">
+          <ScrollArea className="w-full">
+            <TabsList className="w-max">
+              {node.tabs.map((t, i) => <TabsTrigger key={i} value={String(i)}>{t.label}</TabsTrigger>)}
+            </TabsList>
+            <ScrollBar orientation="horizontal" className="h-1.5" />
+          </ScrollArea>
+          {node.tabs.map((t, i) => <TabsContent key={i} value={String(i)}><Nodes nodes={t.children} className="gap-3" /></TabsContent>)}
+        </Tabs>
+      );
+    case 'scroller':
+      return (
+        <div className="-mx-5 overflow-x-auto px-5 no-scrollbar sm:-mx-6 sm:px-6">
+          <div className="flex w-max min-w-full gap-2 [&>*]:flex-1">{node.children.map((c, i) => <NodeView key={i} node={c} />)}</div>
+        </div>
+      );
+    case 'divider':
+      return <Separator />;
+    case 'hero': return <Hero node={node} />;
+    case 'heading': return <Heading node={node} />;
+    case 'text': return <Text node={node} />;
+    case 'stat': return <StatView node={node} />;
+    case 'tile': return <Tile node={node} />;
+    case 'keyvalue': return <KeyValue node={node} />;
+    case 'list': return <List node={node} />;
+    case 'chart': return <Suspense fallback={<SlotView node={{ type: 'slot', hint: 'chart', shape: 'chart' }} />}><ChartView node={node} /></Suspense>;
+    case 'progress': return <ProgressView node={node} />;
+    case 'rating': return <Rating node={node} />;
+    case 'table': return <TableView node={node} />;
+    case 'timeline': return <Timeline node={node} />;
+    case 'steps': return <Steps node={node} />;
+    case 'proscons': return <ProsCons node={node} />;
+    case 'badges': return <Badges node={node} />;
+    case 'quote': return <Quote node={node} />;
+    case 'callout': return <Callout node={node} />;
+    case 'image': return <ImageView node={node} />;
+    case 'gallery': return <Gallery node={node} />;
+    case 'profile': return <Profile node={node} />;
+    case 'actions': return <Actions node={node} />;
+    case 'citations': return <Citations node={node} />;
+    case 'slot': return <SlotView node={node} />;
+    default: {
+      const unreachable: never = node;
+      throw new Error(`Unknown node ${JSON.stringify(unreachable)}`);
+    }
+  }
+}

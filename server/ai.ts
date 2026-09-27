@@ -1,9 +1,6 @@
 import type {
-  AiResult,
-  AiTask,
   AskRequest,
   AskResponse,
-  GenerateRequest,
   ReadResponse,
   SearchResult,
   SlotKind,
@@ -18,37 +15,6 @@ function sourcesBlock(results: SearchResult[]): string {
     .slice(0, 10)
     .map((r, i) => `[${i + 1}] ${r.title} (${r.domain}): ${clip(r.snippet, 400)}`)
     .join('\n');
-}
-
-const LENGTH_HINT = { short: '2-3 sentences', medium: 'one rich paragraph of 4-6 sentences', long: 'two to three short paragraphs' } as const;
-
-function taskSpec(task: AiTask, req: GenerateRequest): string {
-  switch (task) {
-    case 'summary':
-      return `"summary": string — ${LENGTH_HINT[req.length]}. Use **bold** for the key terms. Cite sources inline like [1] or [2][3].`;
-    case 'comparison':
-      return '"comparison": { "columns": string[] (the 2-4 things compared), "rows": [{ "label": string (attribute), "values": string[] (one short value per column) }] } — 4 to 7 rows.';
-    case 'steps':
-      return '"steps": [{ "title": string (imperative, max 8 words), "detail": string (one sentence) }] — 3 to 7 steps.';
-    case 'pros_cons':
-      return '"pros": string[] and "cons": string[] — 3 to 5 short items each.';
-    case 'followups':
-      return '"followups": string[] — 4 short, curious follow-up questions the searcher might ask next.';
-    default: {
-      const unreachable: never = task;
-      throw new Error(`Unknown task ${unreachable}`);
-    }
-  }
-}
-
-export async function generate(req: GenerateRequest, env: Env): Promise<AiResult> {
-  if (!hasDeepSeek(env) || !req.tasks.length) return {};
-  const style = req.simple
-    ? 'Write for a 10-year-old: plain words, short sentences, a friendly analogy.'
-    : 'Write clearly and concisely for a busy reader who prefers scannable content.';
-  const system = `You are the writing engine of a visual search engine. Only use facts supported by the numbered sources; if they are insufficient say so briefly. ${style} Reply with a single JSON object containing exactly these keys:\n${req.tasks.map((t) => `- ${taskSpec(t, req)}`).join('\n')}`;
-  const knowledge = req.knowledge ? `\nEncyclopedia: ${req.knowledge.title} — ${clip(req.knowledge.extract, 800)}` : '';
-  return deepseekJson<AiResult>(env, system, `Query: ${req.query}\n\nSources:\n${sourcesBlock(req.results)}${knowledge}`);
 }
 
 export async function ask(req: AskRequest, env: Env): Promise<AskResponse> {

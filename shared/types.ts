@@ -51,46 +51,6 @@ export interface SearchResponse {
   engines: EngineStatus[];
 }
 
-export type Intent =
-  | 'definition'
-  | 'how_to'
-  | 'comparison'
-  | 'news'
-  | 'person'
-  | 'place'
-  | 'product'
-  | 'statistics'
-  | 'history'
-  | 'opinion'
-  | 'technical'
-  | 'general';
-
-export type ComponentKind =
-  | 'answer'
-  | 'summary'
-  | 'knowledge'
-  | 'stats'
-  | 'timeline'
-  | 'gallery'
-  | 'key_points'
-  | 'comparison'
-  | 'steps'
-  | 'pros_cons'
-  | 'discussion'
-  | 'results';
-
-export type AiTask = 'summary' | 'comparison' | 'steps' | 'pros_cons' | 'followups';
-
-export type SummaryLength = 'short' | 'medium' | 'long';
-
-export type ActionId = 'simpler' | 'deeper' | 'latest' | 'alternatives' | 'howto' | 'images' | 'reviews' | 'history';
-
-export interface Action {
-  id: ActionId;
-  label: string;
-  query: string;
-}
-
 export interface KeyPoint {
   text: string;
   url?: string;
@@ -107,52 +67,6 @@ export interface TimelineItem {
   when: string;
   text: string;
   url?: string;
-}
-
-export interface FillResult {
-  answer?: KeyPoint & { confidence: number };
-  keyPoints: KeyPoint[];
-  stats: Stat[];
-  timeline: TimelineItem[];
-  blocks: ComponentKind[];
-}
-
-export interface Layout {
-  intent: Intent;
-  intentConfidence: number;
-  blocks: ComponentKind[];
-  answer?: KeyPoint & { confidence: number };
-  keyPoints: KeyPoint[];
-  stats: Stat[];
-  timeline: TimelineItem[];
-  aiTasks: AiTask[];
-  summaryLength: SummaryLength;
-  actions: Action[];
-  engine: 'jev' | 'heuristic';
-  ms: number;
-}
-
-export interface Comparison {
-  columns: string[];
-  rows: { label: string; values: string[] }[];
-}
-
-export interface AiResult {
-  summary?: string;
-  comparison?: Comparison;
-  steps?: { title: string; detail: string }[];
-  pros?: string[];
-  cons?: string[];
-  followups?: string[];
-}
-
-export interface GenerateRequest {
-  query: string;
-  tasks: AiTask[];
-  length: SummaryLength;
-  simple: boolean;
-  results: SearchResult[];
-  knowledge?: Knowledge;
 }
 
 export interface AskRequest {
