@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useState } from 'react';
-import { ArrowUpRight, Check, ChevronLeft, ChevronRight, Copy, MessageCircle, Minus, Play, Search, Star, ThumbsDown, ThumbsUp, TrendingDown, TrendingUp } from 'lucide-react';
+import { ArrowUpRight, Check, ChevronLeft, ChevronRight, Copy, MessageCircle, Minus, Play, Star, ThumbsDown, ThumbsUp, TrendingDown, TrendingUp } from 'lucide-react';
 import type { CardNode, Tone } from '../../shared/card';
 import type { SearchResult } from '../../shared/types';
 import { cn } from '@/lib/utils';
@@ -134,11 +134,11 @@ function useSource(n: number | undefined) {
 const subjectOf = (text: string) => plain(text).replace(/\*\*/g, '').split(/\s[—–-]\s|:\s/)[0].trim().slice(0, 80);
 
 /**
- * What to do with a source an item points at: ask about it or search it within the conversation, or leave for the site.
+ * What to do with a source an item points at: ask about it in the conversation, or leave for the site.
  * `children` is the trigger (a whole row or tile); without it, a small button is shown.
  */
 function SourceMenu({ result: r, subject, children, className }: { result: SearchResult; subject: string; children?: ReactNode; className?: string }) {
-  const { onAsk, onSearch, busy } = useCard();
+  const { onAsk, busy } = useCard();
   const topic = subject || r.title;
   return (
     <DropdownMenu>
@@ -156,9 +156,6 @@ function SourceMenu({ result: r, subject, children, className }: { result: Searc
         </DropdownMenuLabel>
         <DropdownMenuItem disabled={busy} onSelect={() => onAsk(`Tell me more about ${topic}, based on ${domainLabel(r.domain)}`)}>
           <MessageCircle /><span className="truncate">Ask about {subject || 'this'}</span>
-        </DropdownMenuItem>
-        <DropdownMenuItem disabled={busy} onSelect={() => onSearch(topic)}>
-          <Search /><span className="truncate">Search {subject || 'this'}</span>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
