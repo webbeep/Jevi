@@ -1,4 +1,5 @@
 import type { AnswerCard, CardNode, FollowupContext, ImageCredit, LayoutPlan } from '../shared/card';
+import { knowledgeMatches } from '../shared/relevance';
 import type { SearchResponse } from '../shared/types';
 import { hasLlm, llmLines } from './llm';
 import { candidates, extractStats, extractTimeline } from './extract';
@@ -411,10 +412,11 @@ function extractive(req: DesignRequest, on: DesignEvents): DesignSummary {
   const stats = extractStats(cands, 4);
   const timeline = extractTimeline(cands);
   const k = search.knowledge;
+  const onTopic = !!k && knowledgeMatches(query, k.title, k.description);
   const imageRef = k?.image ? search.images.findIndex((img) => img.thumb === k.image) : -1;
   const body: CardNode[] = [];
 
-  if (k && ['profile', 'visual', 'explainer', 'answer'].includes(patternId)) {
+  if (onTopic && k && ['profile', 'visual', 'explainer', 'answer'].includes(patternId)) {
     body.push({ type: 'profile', name: k.title, subtitle: k.description, imageRef: imageRef >= 0 ? imageRef : undefined });
   }
   if (cands[0]) body.push({ type: 'text', text: cands[0].text, size: 'lg' });
@@ -424,7 +426,7 @@ function extractive(req: DesignRequest, on: DesignEvents): DesignSummary {
   if (cands.length > 1) body.push({ type: 'section', title: 'Key points', icon: 'pin', children: [{ type: 'list', style: 'check', items: cands.slice(1, 6).map((c) => ({ text: c.text, meta: c.domain })) }] });
   body.push({ type: 'citations', refs: [1, 2, 3, 4].filter((i) => i <= search.results.length) });
 
-  on.head({ title: k?.title ?? query, subtitle: patternById(patternId).label });
+  on.head({ title: onTopic && k ? k.title : query, subtitle: patternById(patternId).label });
   body.forEach((node, i) => on.node(node, i));
   return { engine: 'extractive', removed: 0 };
 }

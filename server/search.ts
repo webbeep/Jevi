@@ -7,6 +7,7 @@ import type {
   SearchResponse,
   SearchResult,
 } from '../shared/types';
+import { knowledgeMatches } from '../shared/relevance';
 import { cleanMarkdown, parseDuckDuckGo } from '../shared/text';
 import { commons, openverse, permitted } from './images';
 import { Env, UA, clip, domainOf, fetchJson, fetchText, hedge, stripHtml } from './util';
@@ -538,7 +539,8 @@ export async function searchWithLate(q: Query, env: Env): Promise<SearchWithLate
   ]);
 
   const results = fuse(web, q.count, q.q);
-  const knowledge = instant ?? wiki;
+  const knowledge = (instant && knowledgeMatches(q.q, instant.title, instant.description) ? instant : undefined)
+    ?? (wiki && knowledgeMatches(q.q, wiki.title, wiki.description) ? wiki : undefined);
   const early = new Set(web.map((w) => w.engine));
   const late = allEngines.then(() => {
     const content = new Map<string, string>();
