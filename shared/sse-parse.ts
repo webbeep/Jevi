@@ -35,6 +35,17 @@ export function parseSseFrames(buffer: string): { events: SseFrame[]; rest: stri
   return { events, rest, cut: !finished };
 }
 
+export const EMPTY_DONE_MESSAGE = "Couldn't build an answer — try asking again.";
+
+/**
+ * A `done` frame that arrived with no card nodes. An existing result stays
+ * put; otherwise the person can retry the turn by hand.
+ */
+export function emptyDoneState(hadResult: boolean): { error: string | undefined; retryable: boolean | undefined } {
+  if (hadResult) return { error: undefined, retryable: undefined };
+  return { error: EMPTY_DONE_MESSAGE, retryable: true };
+}
+
 /** One silent retry, and only before any card content has been shown. */
 export function shouldAutoRetry(err: unknown, attempt: number, sawContent: boolean): boolean {
   return err instanceof StreamError

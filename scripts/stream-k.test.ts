@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { sseResponse } from '../server/sse.ts';
-import { StreamError, parseSseFrames, shouldAutoRetry } from '../shared/sse-parse.ts';
+import { EMPTY_DONE_MESSAGE, StreamError, emptyDoneState, parseSseFrames, shouldAutoRetry } from '../shared/sse-parse.ts';
 
 const body = async (res: Response) => new Response(res.body).text();
 
@@ -36,6 +36,16 @@ test('frame parser marks a body that ends without done as cut', () => {
   assert.equal(parseSseFrames(done).cut, false);
   const error = 'event: error\ndata: {"message":"no"}\n\n';
   assert.equal(parseSseFrames(error).cut, false);
+});
+
+test('emptyDoneState is retryable only when the turn has no result', () => {
+  const empty = emptyDoneState(false);
+  assert.equal(empty.error, EMPTY_DONE_MESSAGE);
+  assert.equal(empty.error, "Couldn't build an answer — try asking again.");
+  assert.equal(empty.retryable, true);
+  const kept = emptyDoneState(true);
+  assert.equal(kept.error, undefined);
+  assert.equal(kept.retryable, undefined);
 });
 
 test('shouldAutoRetry truth table', () => {

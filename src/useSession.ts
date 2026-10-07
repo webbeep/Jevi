@@ -4,6 +4,7 @@ import { cardDigest } from '../shared/digest';
 import type { SearchResponse, SearchResult } from '../shared/types';
 import { api } from './api';
 import { withBrowserFallback } from './fallback';
+import { emptyDoneState } from '../shared/sse-parse';
 import { StreamError, type StreamBody, type StreamEvent, shouldAutoRetry, stream } from './sse';
 
 export type TurnKind = 'search' | 'answer' | 'digest';
@@ -179,7 +180,7 @@ export function useSession() {
         case 'done':
           return update(route, (t) => {
             if (!t.live?.nodes.some(Boolean)) {
-              return { live: undefined, filling: false, status: undefined, thinking: false, retryable: undefined, error: t.result ? undefined : "Couldn't build an answer — try asking again." };
+              return { live: undefined, filling: false, status: undefined, thinking: false, ...emptyDoneState(Boolean(t.result)) };
             }
             const result: CardResponse = {
               card: { title: t.live.head?.title ?? t.question, ...t.live.head, body: liveBody(t.live, false), credits: t.live.credits },
