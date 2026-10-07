@@ -72,7 +72,7 @@ export function Hero({ node }: { node: Of<'hero'> }) {
     <div className="flex min-w-0 flex-col">
       {node.label && <span className="zo-label">{plain(node.label)}</span>}
       <div className="flex items-start gap-3">
-        <span className={cn('text-[52px] font-semibold leading-[0.95] tracking-[-0.045em] sm:text-[64px]', node.value.length > 14 && 'text-[32px] leading-tight tracking-[-0.03em] sm:text-[40px]', TONE_TEXT[node.tone === 'primary' || !node.tone ? 'default' : node.tone])}>
+        <span className={cn('text-[52px] font-semibold leading-[0.95] tracking-[-0.045em] sm:text-[64px]', node.value.length > 8 && node.value.length <= 14 && 'text-[36px] leading-[1.05] tracking-[-0.035em] sm:text-[64px] sm:leading-[0.95] sm:tracking-[-0.045em]', node.value.length > 14 && 'text-[32px] leading-tight tracking-[-0.03em] sm:text-[40px]', TONE_TEXT[node.tone === 'primary' || !node.tone ? 'default' : node.tone])}>
           <span className="tabular-nums">{plain(value)}</span>
           {node.unit && <span className="ml-1 align-top text-xl font-normal tracking-[-0.02em] text-muted-foreground sm:text-2xl">{node.unit}</span>}
         </span>
