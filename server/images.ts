@@ -26,10 +26,35 @@ export function matchScore(query: string, title: string): number {
   return words.filter((w) => t.includes(w)).length / words.length;
 }
 
-/** A picture counts as specific when its title names most of the item. */
-const matches = (query: string, title: string) => matchScore(query, title) >= (keywords(query).length <= 2 ? 1 : 0.6);
+/** The name part of an item ("Altra Torin 9" in "Altra Torin 9 running shoe"): capitalized words and model numbers. */
+function core(query: string): string[] {
+  return query.split(/\s+/).map((w) => w.replace(/[^\p{L}\p{N}]/gu, '')).filter((w) => w && !STOP.has(w.toLowerCase()) && (/^\p{Lu}/u.test(w) || /\d/.test(w))).map((w) => w.toLowerCase());
+}
+
+const hasWord = (text: string, w: string) => (w.length <= 3 ? new RegExp(`(^|[^a-z0-9])${w}([^a-z0-9]|$)`).test(text) : text.includes(w));
+
+/**
+ * A picture counts as specific when its title names the item: every word of its
+ * name (brand, model, number) when the query has one, otherwise most of its words.
+ */
+export function matches(query: string, title: string): boolean {
+  const name = core(query);
+  const t = title.toLowerCase();
+  if (name.length) return name.every((w) => hasWord(t, w));
+  return matchScore(query, title) >= (keywords(query).length <= 2 ? 1 : 0.6);
+}
 
 const licenseLabel = (short?: string) => (short ? stripHtml(short).replace(/^cc-/i, 'CC ').trim() : '');
+
+/** Licenses that are impractical or not allowed for commercial reuse (GFDL needs its full text alongside each use). */
+const restricted = (license: string) => /\b(GFDL|NC|ND)\b|non-?commercial|no ?deriv|fair use|non-free/i.test(license);
+
+/** A readable author name from Commons' free-form Artist field (drops emails, links and camera notes). */
+function author(raw?: string): string {
+  const text = stripHtml(raw ?? '').replace(/\S+\s*(@|\[at\]|\(at\))\s*\S+/gi, '').replace(/https?:\/\/\S+/g, '').replace(/\s+/g, ' ').trim();
+  const name = text.split(/\s(?:-|–|\||,|\(|Canon|Nikon|Sony|camera)\s?/i)[0].trim();
+  return name.length > 40 ? `${name.slice(0, 39).replace(/\s+\S*$/, '')}…` : name;
+}
 
 /** Wikipedia's lead image for the best-matching article. `pilicense=free` excludes non-free (fair-use) files. */
 async function wikipedia(query: string): Promise<ImageResult[]> {
@@ -40,29 +65,29 @@ async function wikipedia(query: string): Promise<ImageResult[]> {
   );
   const pages = Object.values(data.query?.pages ?? {}).sort((a, b) => a.index - b.index).filter((p) => p.thumbnail && p.pageimage && matches(query, p.title));
   if (!pages.length) return [];
-  const credits = await fileCredits(pages.map((p) => p.pageimage!)).catch(() => new Map<string, string>());
-  return pages.map((p) => ({
+  const credits = await fileCredits(pages.map((p) => p.pageimage!)).catch(() => new Map<string, { credit: string; license: string }>());
+  return pages.filter((p) => !restricted(credits.get(p.pageimage!.replace(/_/g, ' '))?.license ?? '')).map((p) => ({
     url: `https://en.wikipedia.org/wiki/File:${encodeURIComponent(p.pageimage!)}`,
     thumb: p.thumbnail!.source,
     title: p.title,
     source: 'wikipedia.org',
     license: 'open' as const,
-    credit: credits.get(p.pageimage!.replace(/_/g, ' ')) ?? 'Wikipedia',
+    credit: credits.get(p.pageimage!.replace(/_/g, ' '))?.credit ?? 'Wikipedia',
   }));
 }
 
 /** Author and license of Wikipedia/Commons files ("Jane Doe · CC BY-SA 4.0 · Wikimedia"), by file name. */
-async function fileCredits(files: string[]): Promise<Map<string, string>> {
+async function fileCredits(files: string[]): Promise<Map<string, { credit: string; license: string }>> {
   const data = await fetchJson<{ query?: { pages?: Record<string, { title: string; imageinfo?: { extmetadata?: Record<string, { value?: string }> }[] }> } }>(
     `https://en.wikipedia.org/w/api.php?action=query&prop=imageinfo&iiprop=extmetadata&iiextmetadatafilter=Artist|LicenseShortName&titles=${encodeURIComponent(files.map((f) => `File:${f}`).join('|'))}&format=json&origin=*`,
     { headers: { 'User-Agent': UA } },
     TIMEOUT_MS,
   );
-  const out = new Map<string, string>();
+  const out = new Map<string, { credit: string; license: string }>();
   Object.values(data.query?.pages ?? {}).forEach((p) => {
     const meta = p.imageinfo?.[0]?.extmetadata;
-    const artist = stripHtml(meta?.Artist?.value ?? '').slice(0, 60);
-    out.set(p.title.replace(/^File:/, ''), [artist, licenseLabel(meta?.LicenseShortName?.value), 'Wikimedia'].filter(Boolean).join(' · '));
+    const license = licenseLabel(meta?.LicenseShortName?.value);
+    out.set(p.title.replace(/^File:/, ''), { credit: [author(meta?.Artist?.value), license, 'Wikimedia'].filter(Boolean).join(' · '), license });
   });
   return out;
 }
@@ -90,9 +115,9 @@ export async function commons(query: string, n = 6): Promise<ImageResult[]> {
     .sort((a, b) => a.index - b.index)
     .flatMap((p) => {
       const info = p.imageinfo?.[0];
-      if (!info || !/\.(jpe?g|png|webp)$/i.test(info.url)) return [];
-      const artist = stripHtml(info.extmetadata?.Artist?.value ?? '').slice(0, 60);
-      const license = licenseLabel(info.extmetadata?.LicenseShortName?.value);
+      const license = licenseLabel(info?.extmetadata?.LicenseShortName?.value);
+      if (!info || !/\.(jpe?g|png|webp)$/i.test(info.url) || restricted(license)) return [];
+      const artist = author(info.extmetadata?.Artist?.value);
       return [{
         url: info.descriptionurl,
         thumb: info.thumburl ?? info.url,
@@ -151,7 +176,7 @@ async function unsplash(query: string, env: Env, n: number): Promise<ImageResult
 async function exa(query: string, env: Env): Promise<ImageResult[]> {
   const data = await fetchJson<{ results?: { title?: string; url: string; image?: string }[] }>(
     'https://api.exa.ai/search',
-    { method: 'POST', headers: { 'x-api-key': env.EXA_API_KEY!, 'Content-Type': 'application/json' }, body: JSON.stringify({ query, numResults: 5, type: 'fast' }) },
+    { method: 'POST', headers: { 'x-api-key': env.EXA_API_KEY!, 'Content-Type': 'application/json' }, body: JSON.stringify({ query, numResults: 5, type: 'fast', contents: { text: { maxCharacters: 1 } } }) },
     TIMEOUT_MS,
   );
   return (data.results ?? []).filter((r) => r.image).map((r) => ({ url: r.url, thumb: r.image!, title: r.title ?? '', source: domainOf(r.url), license: 'source' as const, credit: domainOf(r.url) }));

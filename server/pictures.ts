@@ -1,6 +1,6 @@
 import type { CardNode, ImageCredit } from '../shared/card';
 import type { ImageResult } from '../shared/types';
-import { findImages, matchScore } from './images';
+import { findImages, matches } from './images';
 import type { Env } from './util';
 
 type Emit = (node: CardNode, index: number) => void;
@@ -31,7 +31,7 @@ export class PictureResolver {
 
   /** A pooled picture whose title names every significant word of the item. */
   private fromPool(query: string): ImageResult | undefined {
-    return this.pool.find((img) => !this.used.has(img.thumb) && img.title && matchScore(query, img.title) === 1);
+    return this.pool.find((img) => !this.used.has(img.thumb) && img.title && matches(query, img.title));
   }
 
   private async one(query: string, allowGeneric = false): Promise<Pic | undefined> {

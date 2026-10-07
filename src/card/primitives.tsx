@@ -173,8 +173,11 @@ function MediaList({ node }: { node: Of<'list'> }) {
       {node.items.map((item, i) => (
         <li key={i} className="flex items-center gap-3 p-2.5 sm:p-3">
           <MediaThumb item={item} index={i} />
-          <span className="min-w-0 flex-1 text-sm leading-snug"><RichText text={item.text} inline /></span>
-          {item.meta && <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs font-medium tabular-nums">{item.meta}</span>}
+          <span className="flex min-w-0 flex-1 flex-col items-start gap-1 text-sm leading-snug">
+            <RichText text={item.text} inline />
+            {item.meta && <span className="max-w-full truncate rounded-full bg-muted px-2 py-0.5 text-xs font-medium tabular-nums sm:hidden">{item.meta}</span>}
+          </span>
+          {item.meta && <span className="hidden max-w-[40%] shrink-0 truncate rounded-full bg-muted px-2 py-0.5 text-xs font-medium tabular-nums sm:inline">{item.meta}</span>}
         </li>
       ))}
     </ul>

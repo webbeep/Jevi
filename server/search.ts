@@ -104,7 +104,7 @@ const tavily: Engine = {
       })),
       images: (data.images ?? []).map((img) => {
         const url = typeof img === 'string' ? img : img.url;
-        return { url, thumb: url, title: typeof img === 'string' ? '' : img.description ?? '', source: domainOf(url), license: 'source' as const, credit: domainOf(url) };
+        return { url, thumb: url, title: typeof img === 'string' ? '' : img.description ?? '', source: domainOf(url), license: 'source' as const, credit: domainOf(url).replace(/^(cdn|images?|img|static|media|assets)\d*\./, '') };
       }),
     };
   },
