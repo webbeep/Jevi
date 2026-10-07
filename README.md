@@ -1,6 +1,6 @@
-# Jevi
+# ZO
 
-A mobile-first assistant that searches, thinks and answers with interactive cards you can see, tweak and use.
+[zo.page](https://zo.page) — a mobile-first assistant that searches, thinks and answers with interactive cards you can see, tweak and use.
 
 - **Search** fans out to every engine in parallel and fuses the rankings: DuckDuckGo (html → lite → AllOrigins), Bing RSS, Marginalia, SearXNG, Wikipedia, plus Brave / Tavily / Serper / Jina when free keys are set. Images come from Openverse → Wikimedia Commons, discussions from Hacker News. If the server gets too few results, the browser retries DuckDuckGo through AllOrigins / Codetabs.
 - **One streaming request per search** (`/api/stream`, Server-Sent Events): Jev's layout (~0.2s) → merged results with page text (~1.2–1.6s) → Jev's instant answer (~0.2s later) → the card, node by node, as DeepSeek writes it (first node ~3s).
@@ -23,7 +23,7 @@ npm run dev            # http://localhost:5173 (Vite) → API on :8788 (wrangler
 
 ```bash
 npx wrangler login
-npm run deploy         # builds, uploads .env keys as Pages secrets, deploys to jevi.pages.dev
+npm run deploy         # builds, uploads .env keys as Pages secrets, deploys to the "zo-page" Pages project (custom domain: zo.page)
 ```
 
 `npm run secrets` re-uploads keys without redeploying (a redeploy is needed for running code to see new secret values).

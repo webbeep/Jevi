@@ -8,13 +8,13 @@ export interface Suggestion {
 
 const SEASONS = ['winter', 'winter', 'spring', 'spring', 'spring', 'summer', 'summer', 'summer', 'autumn', 'autumn', 'autumn', 'winter'];
 
-/** Starter prompts that show what Jevi is for: getting things done, not just finding links. */
+/** Starter prompts that show what ZO is for: getting things done, not just finding links. */
 export async function generateSuggestions(env: Env, now = new Date()): Promise<Suggestion[]> {
   if (!hasDeepSeek(env)) return [];
   const today = now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
   const out = await deepseekJson<{ suggestions?: { text?: unknown; icon?: unknown }[] }>(
     env,
-    `You write the starter prompts on the home screen of Jevi, an assistant that searches the web, thinks, and answers with interactive cards (live numbers, comparisons, step-by-step plans, sliders to tweak the answer). The prompts should make someone want to tap one and show the range of what it does.
+    `You write the starter prompts on the home screen of ZO, an assistant that searches the web, thinks, and answers with interactive cards (live numbers, comparisons, step-by-step plans, sliders to tweak the answer). The prompts should make someone want to tap one and show the range of what it does.
 
 Rules:
 - 8 prompts, each under 42 characters, written the way a person would actually type them.

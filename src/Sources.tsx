@@ -53,8 +53,8 @@ function Reader({ result, query, onClose, onDigest }: { result: SearchResult | n
               <SheetTitle className="text-base leading-snug">{result.title}</SheetTitle>
               <SheetDescription className="sr-only">Readable text of this source</SheetDescription>
               <div className="flex gap-2 pt-1">
-                <Button size="sm" className="h-8 rounded-full" onClick={() => { onDigest(result); onClose(); }}><LayoutGrid className="size-3.5" />Make it a card</Button>
-                <Button size="sm" variant="outline" className="h-8 rounded-full" asChild>
+                <Button size="sm" className="h-8 rounded-lg" onClick={() => { onDigest(result); onClose(); }}><LayoutGrid className="size-3.5" />Make it a card</Button>
+                <Button size="sm" variant="outline" className="h-8 rounded-lg" asChild>
                   <a href={result.url} target="_blank" rel="noreferrer"><ExternalLink className="size-3.5" />Open site</a>
                 </Button>
               </div>
@@ -77,16 +77,16 @@ function Reader({ result, query, onClose, onDigest }: { result: SearchResult | n
   );
 }
 
-export function Sources({ results, engines, query, onDigest }: { results: SearchResult[]; engines: EngineStatus[]; query: string; onDigest: (r: SearchResult) => void }) {
+export function Sources({ layout, results, engines, query, onDigest }: { layout: 'strip' | 'rail'; results: SearchResult[]; engines: EngineStatus[]; query: string; onDigest: (r: SearchResult) => void }) {
   const [reading, setReading] = useState<SearchResult | null>(null);
   const [all, setAll] = useState(false);
   const withText = results.filter((r) => r.content).length;
 
   return (
-    <section className="space-y-2">
+    <section className="space-y-2.5">
       <div className="flex items-center gap-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Sources</h3>
-        <span className="text-xs text-muted-foreground">{results.length}{withText ? ` · ${withText} read in full` : ''}</span>
+        <h3 className="zo-label text-foreground">Sources</h3>
+        <span className="text-xs tabular-nums text-muted-foreground">{results.length}{withText ? ` · ${withText} read` : ''}</span>
         <div className="ml-auto flex items-center gap-1">
           {engines.map((e) => (
             <Tooltip key={e.name}>
@@ -96,24 +96,31 @@ export function Sources({ results, engines, query, onDigest }: { results: Search
               <TooltipContent>{e.name}: {e.ok ? `${e.count} results · ${e.ms}ms` : e.error}</TooltipContent>
             </Tooltip>
           ))}
-          <Button variant="ghost" size="sm" className="ml-1 h-7 px-2 text-xs" onClick={() => setAll(true)}><List className="size-3.5" />All</Button>
+          <Button variant="ghost" size="sm" className="ml-1 h-7 rounded-lg px-2 text-xs text-muted-foreground" onClick={() => setAll(true)}><List className="size-3.5" />All</Button>
         </div>
       </div>
 
-      <div className="no-scrollbar flex gap-2 overflow-x-auto pb-1">
-        {results.slice(0, 10).map((r, i) => (
-          <button key={r.url} onClick={() => setReading(r)} className="group flex w-52 shrink-0 flex-col gap-1.5 rounded-xl border bg-card p-3 text-left transition-colors hover:border-foreground/20 sm:w-60">
-            <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-              <span className="tabular-nums">{i + 1}</span>
-              <img src={favicon(r.domain)} alt="" className="size-3.5 rounded-sm" loading="lazy" />
-              <span className="truncate">{r.domain.replace(/^en\./, '')}</span>
-              {r.content && <FileText className="ml-auto size-3 shrink-0 text-brand" aria-label="Full text available" />}
-            </span>
-            <span className="line-clamp-2 text-[13px] font-medium leading-snug">{r.title}</span>
-            <span className="line-clamp-2 text-xs leading-snug text-muted-foreground">{r.snippet}</span>
-          </button>
-        ))}
-      </div>
+      {layout === 'strip' ? (
+        <div className="no-scrollbar -mx-3 flex snap-x gap-2 overflow-x-auto px-3 pb-1 sm:mx-0 sm:px-0">
+          {results.slice(0, 10).map((r, i) => (
+            <button key={r.url} onClick={() => setReading(r)} className="flex w-56 shrink-0 snap-start flex-col gap-1.5 rounded-xl border bg-card p-3 text-left transition-colors hover:bg-accent/60 sm:w-60">
+              <SourceMeta result={r} index={i} />
+              <span className="line-clamp-2 text-[13px] font-medium leading-snug">{r.title}</span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <ol className="-mx-2">
+          {results.slice(0, 8).map((r, i) => (
+            <li key={r.url}>
+              <button onClick={() => setReading(r)} className="flex w-full flex-col gap-1 rounded-lg px-2 py-2.5 text-left transition-colors hover:bg-foreground/[0.04]">
+                <SourceMeta result={r} index={i} />
+                <span className="line-clamp-2 text-[13px] font-medium leading-snug">{r.title}</span>
+              </button>
+            </li>
+          ))}
+        </ol>
+      )}
 
       <Sheet open={all} onOpenChange={setAll}>
         <SheetContent side="right" className="w-full gap-0 p-0 sm:max-w-md">
@@ -141,5 +148,16 @@ export function Sources({ results, engines, query, onDigest }: { results: Search
 
       <Reader result={reading} query={query} onClose={() => setReading(null)} onDigest={onDigest} />
     </section>
+  );
+}
+
+function SourceMeta({ result, index }: { result: SearchResult; index: number }) {
+  return (
+    <span className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
+      <img src={favicon(result.domain)} alt="" className="size-3.5 rounded-[3px]" loading="lazy" />
+      <span className="truncate">{result.domain.replace(/^(www|en)\./, '')}</span>
+      {result.content && <FileText className="size-3 shrink-0 opacity-60" aria-label="Full text available" />}
+      <span className="ml-auto tabular-nums opacity-60">{index + 1}</span>
+    </span>
   );
 }

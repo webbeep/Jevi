@@ -56,7 +56,7 @@ export function NodeView({ node }: { node: CardNode }): ReactNode {
       return (
         <section className="space-y-2 sm:space-y-3">
           {node.title && (
-            <h3 className={cn('flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground', node.tone && TONE_TEXT[node.tone])}>
+            <h3 className={cn('flex items-center gap-2 zo-label', node.tone && TONE_TEXT[node.tone])}>
               <Icon name={node.icon} className="size-3.5" />{node.title}
             </h3>
           )}

@@ -5,7 +5,7 @@ import { api } from './api';
 import { AnswerCardView } from './card/AnswerCardView';
 import { CardContext } from './card/context';
 import { Icon } from './card/Icon';
-import { LogoMark } from './Logo';
+import { LogoMark, Wordmark } from './Logo';
 import { Sources } from './Sources';
 import { type Turn, liveBody, useSession } from './useSession';
 import { useSuggestions } from './useSuggestions';
@@ -31,11 +31,6 @@ interface Quote {
   turnId: number;
 }
 
-function greeting(): string {
-  const h = new Date().getHours();
-  return h < 5 ? 'Up late?' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
-}
-
 function useTheme() {
   const [dark, setDark] = useState(() => localStorage.getItem('theme') === 'dark' || (!localStorage.getItem('theme') && matchMedia('(prefers-color-scheme: dark)').matches));
   useEffect(() => {
@@ -48,12 +43,12 @@ function useTheme() {
 function engineLabel(t: Turn): string | undefined {
   const r = t.result;
   if (r) {
-    const source = r.engine === 'reasoning' ? 'Answered by reasoning — not from live sources' : r.engine === 'deepseek' ? 'Designed by Jev + DeepSeek from sources' : 'Extracted from sources';
+    const source = r.engine === 'reasoning' ? 'Reasoned answer — not from live sources' : r.engine === 'deepseek' ? 'Composed from sources' : 'Quoted from sources';
     return [source, r.pagesRead ? `${r.pagesRead} pages read` : '', r.removed ? `${r.removed} unverified removed` : '', r.ms ? `${(r.ms / 1000).toFixed(1)}s` : ''].filter(Boolean).join(' · ');
   }
-  if (t.live?.nodes.length) return 'Designing…';
+  if (t.live?.nodes.length) return 'Composing…';
   if (t.search) return `${t.search.results.length} sources · reading`;
-  return t.plan ? `${t.plan.engine === 'jev' ? 'Jev' : 'Auto'} layout · ${t.plan.ms}ms` : undefined;
+  return t.plan ? 'Planning the layout…' : undefined;
 }
 
 export default function App() {
@@ -73,6 +68,7 @@ export default function App() {
   const last = [...turns].reverse().find((t) => t.result);
   const busy = turns.some((t) => t.filling);
   const title = root?.result?.card.title ?? root?.question ?? '';
+  const railTurn = [...turns].reverse().find((t) => t.kind === 'search' && t.search?.results.length);
 
   const startSearch = (q: string) => {
     const query = q.trim();
@@ -175,66 +171,98 @@ export default function App() {
 
   return (
     <TooltipProvider delayDuration={300}>
-      <div className="min-h-dvh">
-        <header className={cn('z-30', home ? '' : 'sticky top-0 border-b bg-background/80 backdrop-blur-xl')}>
-          <div className={cn('mx-auto flex max-w-2xl items-center gap-2.5 px-3 sm:px-4', home ? 'justify-end py-3' : 'h-14')}>
-            {!home && (
-              <>
-                <button onClick={newChat} className="shrink-0" aria-label="Home">
-                  <LogoMark className="size-7" />
-                </button>
-                <h1 className="min-w-0 flex-1 truncate text-[15px] font-semibold tracking-tight">{title}</h1>
-                <Button variant="outline" size="sm" className="h-8 shrink-0 rounded-full" onClick={newChat}>
-                  <Plus className="size-3.5" />
-                  <span className="hidden sm:inline">New chat</span>
-                </Button>
-              </>
-            )}
-            <Button variant="ghost" size="icon" className="size-9 shrink-0 rounded-full" onClick={() => setDark(!dark)} aria-label="Toggle theme">
-              {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
-            </Button>
-          </div>
-        </header>
+      <div className="relative min-h-dvh">
+        <div className="zo-wash" data-on={busy} aria-hidden />
 
         {home ? (
-          <main className="mx-auto flex min-h-[82dvh] max-w-xl flex-col items-center justify-center px-4 pb-16">
-            <LogoMark className="mb-5 size-11" />
-            <p className="text-sm text-muted-foreground">{greeting()}</p>
-            <h1 className="mt-1 text-center text-3xl font-semibold tracking-tight sm:text-4xl">What can I help with?</h1>
-            <form onSubmit={onSearchSubmit} className="relative mt-7 w-full">
-              <Input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Ask anything" enterKeyHint="send" autoFocus className="h-14 rounded-full bg-card pl-6 pr-14 text-base shadow-xs md:text-base" />
-              <Button type="submit" size="icon" className="absolute right-2 top-1/2 size-10 -translate-y-1/2 rounded-full" aria-label="Send">
-                <ArrowUp className="size-4" />
-              </Button>
-            </form>
-            <div className="mt-5 flex flex-wrap justify-center gap-2">
-              {suggestions.slice(0, 6).map((s) => (
-                <Button key={s.text} variant="outline" size="sm" className="h-auto min-h-8 whitespace-normal rounded-full py-1.5 text-left font-normal text-muted-foreground animate-in fade-in" onClick={() => startSearch(s.text)}>
-                  <Icon name={s.icon} fallback="sparkles" className="size-3.5" />
-                  {s.text}
+          <>
+            <header className="flex h-14 items-center justify-end px-3 sm:px-5">
+              <ThemeToggle dark={dark} onToggle={() => setDark(!dark)} />
+            </header>
+            <main className="relative mx-auto flex w-full max-w-[640px] flex-col px-4 pb-16 pt-[12dvh] sm:pt-[18dvh]">
+              <h1 className="flex justify-center">
+                <Wordmark className="text-[40px] sm:text-[48px]" />
+                <span className="sr-only">ZO</span>
+              </h1>
+              <form onSubmit={onSearchSubmit} className="group relative mt-8 sm:mt-10">
+                <Search className="pointer-events-none absolute left-5 top-1/2 size-[18px] -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  placeholder="Ask anything"
+                  enterKeyHint="send"
+                  autoFocus
+                  className="h-14 rounded-2xl border-input bg-card pl-12 pr-14 text-base shadow-card transition-shadow focus-visible:shadow-float focus-visible:ring-0 md:text-base"
+                />
+                <Button type="submit" size="icon" className="absolute right-2 top-1/2 size-10 -translate-y-1/2 rounded-xl" disabled={!input.trim()} aria-label="Send">
+                  <ArrowUp className="size-4" />
                 </Button>
-              ))}
-            </div>
-          </main>
-        ) : (
-          <main ref={mainRef} className="mx-auto max-w-2xl space-y-8 px-3 pb-[60vh] pt-4 sm:px-4">
-            {turns.map((t, i) => <TurnView key={t.id} turn={t} first={i === 0} session={session} />)}
-
-            {last?.result && last.result.followups.length > 0 && !busy && (
-              <div className="-mt-4 flex flex-wrap gap-1.5 animate-in fade-in">
-                {last.result.followups.map((f) => (
-                  <button key={f} onClick={() => session.followup(f, last.id)} className="rounded-full border bg-card px-3 py-1.5 text-left text-[13px] leading-snug text-muted-foreground transition-colors hover:border-foreground/20 hover:text-foreground">
-                    {f}
-                  </button>
+              </form>
+              <ul className="mt-6 grid gap-0.5 sm:mt-8 sm:grid-cols-2 sm:gap-x-4">
+                {suggestions.slice(0, 6).map((s, i) => (
+                  <li key={s.text} className={cn('animate-in fade-in fill-mode-backwards duration-500', i >= 4 && 'hidden sm:block')} style={{ animationDelay: `${i * 40}ms` }}>
+                    <button onClick={() => startSearch(s.text)} className="flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left text-[14px] leading-snug text-foreground/75 transition-colors hover:bg-foreground/[0.04] hover:text-foreground">
+                      <Icon name={s.icon} fallback="sparkles" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                      <span className="line-clamp-2">{s.text}</span>
+                    </button>
+                  </li>
                 ))}
+              </ul>
+            </main>
+          </>
+        ) : (
+          <>
+            <header className="sticky top-0 z-30 border-b bg-background/75 backdrop-blur-xl backdrop-saturate-150">
+              <div className={cn(SHELL, 'flex h-14 items-center gap-3')}>
+                <button onClick={newChat} className="shrink-0 rounded-full" aria-label="Home">
+                  <LogoMark className="size-7" />
+                </button>
+                <h1 className="min-w-0 flex-1 truncate text-[15px] font-medium tracking-[-0.01em]">{title}</h1>
+                <Button variant="ghost" size="sm" className="h-8 shrink-0 gap-1.5 rounded-lg px-2.5 text-muted-foreground hover:text-foreground" onClick={newChat}>
+                  <Plus className="size-4" />
+                  <span className="hidden sm:inline">New chat</span>
+                </Button>
+                <ThemeToggle dark={dark} onToggle={() => setDark(!dark)} />
               </div>
-            )}
-          </main>
+            </header>
+
+            <div className={cn(SHELL, GRID, 'relative pb-[50vh] pt-5 sm:pt-8')}>
+              <main ref={mainRef} className="min-w-0 space-y-10">
+                {turns.map((t, i) => <TurnView key={t.id} turn={t} first={i === 0} session={session} />)}
+
+                {last?.result && last.result.followups.length > 0 && !busy && (
+                  <section className="-mt-4 animate-in fade-in">
+                    <h3 className="zo-label mb-1 px-1">Related</h3>
+                    <ul className="divide-y">
+                      {last.result.followups.map((f) => (
+                        <li key={f}>
+                          <button onClick={() => session.followup(f, last.id)} className="group flex w-full items-center gap-3 px-1 py-3 text-left text-[14px] leading-snug text-foreground/80 transition-colors hover:text-foreground">
+                            <CornerDownRight className="size-4 shrink-0 text-muted-foreground" />
+                            <span className="flex-1">{f}</span>
+                            <Plus className="size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                )}
+              </main>
+
+              <aside className="hidden lg:block">
+                {railTurn?.search && (
+                  <div className="sticky top-[5.5rem] max-h-[calc(100dvh-7rem)] overflow-y-auto no-scrollbar">
+                    <Sources key={railTurn.id} layout="rail" results={railTurn.search.results} engines={railTurn.search.engines} query={railTurn.question} onDigest={(r) => session.digest(r, railTurn.id)} />
+                  </div>
+                )}
+              </aside>
+            </div>
+          </>
         )}
 
         {!home && (
-          <div className="fixed inset-x-0 bottom-0 z-30 bg-gradient-to-t from-background via-background/90 to-transparent px-3 pb-[calc(env(safe-area-inset-bottom)+10px)] pt-8 sm:px-4">
-            <form onSubmit={send} className="mx-auto max-w-2xl overflow-hidden rounded-3xl border bg-popover shadow-lg">
+          <div className="fixed inset-x-0 bottom-0 z-30 bg-gradient-to-t from-background via-background/85 to-transparent pb-[calc(env(safe-area-inset-bottom)+12px)] pt-10">
+            <div className={cn(SHELL, GRID)}>
+            <form onSubmit={send} className="overflow-hidden rounded-2xl border border-input bg-popover shadow-float">
               {quote && (
                 <div className="space-y-2 border-b px-3 pb-2.5 pt-3 animate-in fade-in slide-in-from-bottom-1">
                   <div className="flex items-start gap-2">
@@ -246,7 +274,7 @@ export default function App() {
                   </div>
                   <ToggleGroup type="single" size="sm" value={quoteMode} onValueChange={(v) => v && setQuoteMode(v as QuoteMode)} className="no-scrollbar w-full justify-start overflow-x-auto">
                     {QUOTE_MODES.map((m) => (
-                      <ToggleGroupItem key={m.id} value={m.id} title={m.hint} className="h-7 shrink-0 rounded-full px-3 text-xs data-[state=on]:bg-foreground data-[state=on]:text-background">
+                      <ToggleGroupItem key={m.id} value={m.id} title={m.hint} className="h-7 shrink-0 rounded-lg px-2.5 text-xs data-[state=on]:bg-foreground/[0.08] data-[state=on]:text-foreground">
                         <Icon name={m.icon} className="size-3.5" />
                         {m.label}
                       </ToggleGroupItem>
@@ -254,24 +282,38 @@ export default function App() {
                   </ToggleGroup>
                 </div>
               )}
-              <div className="flex items-center gap-1.5 p-1.5 pl-4">
+              <div className="flex items-center gap-2 p-2 pl-4">
                 <input
                   ref={composerRef}
                   value={message}
                   onChange={(e) => setMessage(e.target.value)}
-                  placeholder={quote ? (quoteMode === 'save' ? 'Press send to pin it' : 'Add a note (optional)') : 'Ask anything, or tell a card what to change…'}
+                  placeholder={quote ? (quoteMode === 'save' ? 'Press send to pin it' : 'Add a note (optional)') : 'Ask a follow-up'}
                   enterKeyHint="send"
                   className="min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground sm:text-sm"
                 />
-                <Button type="submit" size="icon" className="size-8 shrink-0 rounded-full" disabled={!quote && !message.trim()} aria-label="Send">
+                <Button type="submit" size="icon" className="size-9 shrink-0 rounded-xl" disabled={!quote && !message.trim()} aria-label="Send">
                   <ArrowUp className="size-4" />
                 </Button>
               </div>
             </form>
+            </div>
           </div>
         )}
       </div>
     </TooltipProvider>
+  );
+}
+
+/** Shared page frame so header, feed, rail and composer line up on the same edges. */
+const SHELL = 'mx-auto w-full max-w-[1120px] px-3 sm:px-6';
+/** Single column; from lg a fixed-width sources rail sits beside a 720px reading column. */
+const GRID = 'mx-auto max-w-[720px] lg:grid lg:max-w-[1120px] lg:grid-cols-[minmax(0,720px)_300px] lg:justify-center lg:gap-12';
+
+function ThemeToggle({ dark, onToggle }: { dark: boolean; onToggle: () => void }) {
+  return (
+    <Button variant="ghost" size="icon" className="size-8 shrink-0 rounded-lg text-muted-foreground hover:text-foreground" onClick={onToggle} aria-label="Toggle theme">
+      {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
+    </Button>
   );
 }
 
@@ -292,11 +334,11 @@ function TurnView({ turn, first, session }: { turn: Turn; first: boolean; sessio
   }, [streaming, turn.live, turn.result, turn.plan, turn.question, turn.kind, turn.pins, turn.filling]);
 
   return (
-    <section id={`turn-${turn.id}`} data-turn={turn.id} className="scroll-mt-16 space-y-3 animate-in fade-in slide-in-from-bottom-3 duration-500">
+    <section id={`turn-${turn.id}`} data-turn={turn.id} className="scroll-mt-20 space-y-3 animate-in fade-in slide-in-from-bottom-3 duration-500">
       {!first && (
         <div className="flex justify-end">
-          <div className="flex max-w-[85%] items-center gap-2 rounded-2xl rounded-br-md bg-foreground px-3.5 py-2 text-sm text-background">
-            {turn.kind === 'search' && <Search className="size-3.5 shrink-0 opacity-70" />}
+          <div className="flex max-w-[85%] items-center gap-2 rounded-2xl rounded-br-md bg-foreground/[0.06] px-4 py-2.5 text-[15px] leading-snug dark:bg-foreground/[0.09]">
+            {turn.kind === 'search' && <Search className="size-3.5 shrink-0 text-muted-foreground" />}
             {turn.question}
           </div>
         </div>
@@ -341,7 +383,9 @@ function TurnView({ turn, first, session }: { turn: Turn; first: boolean; sessio
       )}
 
       {turn.kind === 'search' && turn.search && turn.search.results.length > 0 && (
-        <Sources results={turn.search.results} engines={turn.search.engines} query={turn.question} onDigest={(r) => session.digest(r, turn.id)} />
+        <div className="lg:hidden">
+          <Sources layout="strip" results={turn.search.results} engines={turn.search.engines} query={turn.question} onDigest={(r) => session.digest(r, turn.id)} />
+        </div>
       )}
     </section>
   );

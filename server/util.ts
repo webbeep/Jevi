@@ -1,6 +1,6 @@
 export type Env = Record<string, string | undefined>;
 
-export const UA = 'Mozilla/5.0 (compatible; JeviSearch/1.0; +https://jevi.pages.dev)';
+export const UA = 'Mozilla/5.0 (compatible; ZoBot/1.0; +https://zo.page)';
 
 export function json(data: unknown, status = 200, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(data), {

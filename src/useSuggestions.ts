@@ -5,7 +5,7 @@ export interface Suggestion {
   icon: string;
 }
 
-const STORAGE_KEY = 'jevi:suggestions';
+const STORAGE_KEY = 'zo:suggestions';
 
 const DEFAULTS: Suggestion[] = [
   { text: 'Plan a 3-day Tokyo trip on a budget', icon: 'map' },

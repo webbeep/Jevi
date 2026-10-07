@@ -37,20 +37,21 @@ export function AnswerCardView({ card, version, filling, streaming, status, patt
   onRegenerate: () => void;
 }) {
   return (
-    <Card className="relative gap-0 overflow-hidden py-0 shadow-sm">
-      <div className={cn('absolute inset-x-0 top-0 h-0.5', filling && 'designing-bar')} />
-      <div className="flex items-center gap-3 px-4 pb-1 pt-3.5 sm:px-6 sm:pt-5">
-        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/60">
-          {filling && !card.icon ? <LogoMark className="size-4" animated /> : <Icon name={card.icon} fallback="layout-grid" className="size-4" />}
+    <div className="relative isolate rounded-2xl">
+    <div className="zo-aura" data-on={filling} />
+    <Card className="relative gap-0 overflow-hidden rounded-2xl py-0 shadow-card">
+      <div className="flex items-center gap-3 px-4 pb-1 pt-4 sm:px-6 sm:pt-5">
+        <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-background">
+          {filling && !card.icon ? <LogoMark className="size-4 animate-pulse" /> : <Icon name={card.icon} fallback="layout-grid" className="size-[18px] text-foreground/80" />}
         </div>
         <div className="min-w-0 flex-1">
-          <h2 className="truncate text-[15px] font-semibold leading-tight tracking-tight">{card.title}</h2>
-          {filling && !card.subtitle ? <Skeleton className="mt-1 h-3 w-32" /> : card.subtitle && <p className="truncate text-xs text-muted-foreground">{card.subtitle}</p>}
+          <h2 className="truncate text-base font-semibold leading-snug tracking-[-0.015em]">{card.title}</h2>
+          {filling && !card.subtitle ? <Skeleton className="mt-1 h-3 w-32" /> : card.subtitle && <p className="truncate text-[13px] text-muted-foreground">{card.subtitle}</p>}
         </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" className="size-8 shrink-0 text-muted-foreground" aria-label="Card options">
-              {filling ? <Loader2 className="size-4 animate-spin" /> : <MoreHorizontal className="size-4" />}
+<MoreHorizontal className="size-4" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
@@ -78,15 +79,16 @@ export function AnswerCardView({ card, version, filling, streaming, status, patt
       </div>
 
       {status && (
-        <div className="mx-4 mt-2 flex items-center gap-2 rounded-lg bg-brand/8 px-3 py-1.5 text-xs text-brand animate-in fade-in slide-in-from-top-1 sm:mx-6">
+        <div className="mx-4 mt-2 flex items-center gap-2 text-[13px] text-muted-foreground animate-in fade-in sm:mx-6">
           <Loader2 className="size-3.5 animate-spin" />
           <span className="truncate">{status}</span>
         </div>
       )}
 
-      <div className={cn('px-4 pb-4 pt-3 transition-[opacity,filter] duration-300 sm:px-6 sm:pb-6 sm:pt-4', status && !streaming && 'pointer-events-none opacity-50 blur-[1px]')}>
-        <Nodes key={version} nodes={card.body} className="gap-4 sm:gap-5" stagger={!streaming} />
+      <div className={cn('px-4 pb-5 pt-4 transition-[opacity,filter] duration-300 sm:px-6 sm:pb-6', status && !streaming && 'pointer-events-none opacity-50 blur-[1px]')}>
+        <Nodes key={version} nodes={card.body} className="gap-5" stagger={!streaming} />
       </div>
     </Card>
+    </div>
   );
 }

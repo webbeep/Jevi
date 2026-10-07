@@ -61,7 +61,7 @@ export function Hero({ node }: { node: Of<'hero'> }) {
   const value = useCountUp(node.value);
   return (
     <div className="flex min-w-0 flex-col">
-      {node.label && <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{plain(node.label)}</span>}
+      {node.label && <span className="zo-label">{plain(node.label)}</span>}
       <div className="flex items-start gap-3">
         <span className={cn('text-5xl font-semibold leading-none tracking-tighter sm:text-6xl', node.value.length > 14 && 'text-3xl sm:text-4xl leading-tight tracking-tight', TONE_TEXT[node.tone ?? 'default'])}>
           <span className="tabular-nums">{plain(value)}</span>
@@ -77,7 +77,7 @@ export function Hero({ node }: { node: Of<'hero'> }) {
 export function Heading({ node }: { node: Of<'heading'> }) {
   return (
     <div>
-      {node.eyebrow && <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{node.eyebrow}</div>}
+      {node.eyebrow && <div className="zo-label">{node.eyebrow}</div>}
       <div className={cn('font-semibold tracking-tight', node.level === 1 ? 'text-2xl' : node.level === 3 ? 'text-base' : 'text-lg')}>{plain(node.text)}</div>
     </div>
   );
@@ -305,7 +305,7 @@ export function Steps({ node }: { node: Of<'steps'> }) {
 export function ProsCons({ node }: { node: Of<'proscons'> }) {
   const column = (items: string[], positive: boolean) => (
     <div className={cn('rounded-xl border p-3 sm:p-4', positive ? TONE_SURFACE.positive : TONE_SURFACE.negative)}>
-      <div className={cn('mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider', positive ? 'text-positive' : 'text-negative')}>
+      <div className={cn('mb-2 flex items-center gap-1.5 text-[12.5px] font-medium', positive ? 'text-positive' : 'text-negative')}>
         {positive ? <ThumbsUp className="size-3.5" /> : <ThumbsDown className="size-3.5" />}{positive ? 'Pros' : 'Cons'}
       </div>
       <ul className="space-y-1.5 text-sm">{items.map((p, i) => <li key={i} className="leading-snug"><RichText text={p} inline /></li>)}</ul>
