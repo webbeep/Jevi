@@ -4,7 +4,7 @@ import { cardDigest } from '../shared/digest';
 import type { SearchResponse, SearchResult } from '../shared/types';
 import { api } from './api';
 import { withBrowserFallback } from './fallback';
-import { type StreamBody, type StreamEvent, stream } from './sse';
+import { StreamError, type StreamBody, type StreamEvent, shouldAutoRetry, stream } from './sse';
 
 export type TurnKind = 'search' | 'answer' | 'digest';
 
@@ -50,6 +50,8 @@ export interface Turn {
   simple: boolean;
   pins: CardNode[];
   error?: string;
+  /** The failure can be tried again from the same turn. */
+  retryable?: boolean;
 }
 
 const emptyLive = (): LiveCard => ({ regions: [], nodes: [], followups: [], credits: [] });
@@ -73,6 +75,7 @@ export function useSession() {
   const ref = useRef<Turn[]>([]);
   const epoch = useRef(0);
   const controllers = useRef(new Map<number, AbortController>());
+  const bodies = useRef(new Map<number, StreamBody>());
 
   const commit = useCallback((fn: (prev: Turn[]) => Turn[]) => {
     ref.current = fn(ref.current);
@@ -111,12 +114,14 @@ export function useSession() {
    * re-routed mid-flight: to an existing card (redesign) or into a new search.
    */
   const run = useCallback(async (id: number, body: StreamBody) => {
+    bodies.current.set(id, body);
     controllers.current.get(id)?.abort();
     const controller = new AbortController();
     controllers.current.set(id, controller);
     const mine = epoch.current;
     const alive = () => mine === epoch.current && !controller.signal.aborted;
     let route = id;
+    let sawContent = false;
 
     const onEvent = (e: StreamEvent) => {
       if (!alive()) return;
@@ -159,8 +164,10 @@ export function useSession() {
         case 'layout':
           return update(route, (t) => ({ live: { ...(t.live ?? emptyLive()), regions: e.data } }));
         case 'head':
+          sawContent = true;
           return update(route, (t) => ({ live: { ...(t.live ?? emptyLive()), head: e.data } }));
         case 'node':
+          sawContent = true;
           return update(route, (t) => {
             const live = t.live ?? emptyLive();
             const nodes = [...live.nodes];
@@ -172,7 +179,7 @@ export function useSession() {
         case 'done':
           return update(route, (t) => {
             if (!t.live?.nodes.some(Boolean)) {
-              return { live: undefined, filling: false, status: undefined, thinking: false, error: t.result ? undefined : "Couldn't build an answer — try asking again." };
+              return { live: undefined, filling: false, status: undefined, thinking: false, retryable: undefined, error: t.result ? undefined : "Couldn't build an answer — try asking again." };
             }
             const result: CardResponse = {
               card: { title: t.live.head?.title ?? t.question, ...t.live.head, body: liveBody(t.live, false), credits: t.live.credits },
@@ -183,10 +190,10 @@ export function useSession() {
               ms: e.data.ms,
               via: e.data.via,
             };
-            return { result, variants: { ...t.variants, [variantKey(t.pattern, t.simple)]: result }, live: undefined, filling: false, status: undefined, thinking: false };
+            return { result, variants: { ...t.variants, [variantKey(t.pattern, t.simple)]: result }, live: undefined, filling: false, status: undefined, thinking: false, error: undefined, retryable: undefined };
           });
         case 'error':
-          throw new Error(e.data.message);
+          throw new StreamError(e.data.message, 'server', e.data.retryable ?? true);
         default: {
           const unreachable: never = e;
           return unreachable;
@@ -195,9 +202,23 @@ export function useSession() {
     };
 
     try {
-      await stream(body, onEvent, controller.signal);
+      let attempt = 0;
+      for (;;) {
+        try {
+          await stream(body, onEvent, controller.signal, attempt > 0 ? { retry: true } : undefined);
+          break;
+        } catch (err) {
+          if (!shouldAutoRetry(err, attempt, sawContent) || !alive()) throw err;
+          attempt += 1;
+          route = id;
+          sawContent = false;
+          update(id, { live: undefined, error: undefined, retryable: undefined, filling: true, thinking: false, status: undefined });
+          await new Promise((resolve) => setTimeout(resolve, 600));
+          if (!alive()) throw err;
+        }
+      }
     } catch (err) {
-      if (alive()) update(route, { filling: false, status: undefined, live: undefined, thinking: false, error: errMsg(err) });
+      if (alive()) update(route, { filling: false, status: undefined, live: undefined, thinking: false, error: errMsg(err), retryable: err instanceof StreamError ? err.retryable : false });
       throw err;
     } finally {
       controller.abort();
@@ -320,6 +341,19 @@ export function useSession() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [update, design]);
 
+  const retry = useCallback((id: number) => {
+    const turn = get(id);
+    if (!turn) return;
+    if (turn.kind === 'search') {
+      void runSearchTurn(id, turn.question);
+      return;
+    }
+    const body = bodies.current.get(id);
+    if (!body) return;
+    update(id, { error: undefined, result: undefined, live: undefined, filling: true, status: undefined, thinking: false, retryable: undefined });
+    void run(id, body).catch(() => undefined);
+  }, [run, runSearchTurn, update]);
+
   const pin = useCallback((id: number, node: CardNode) => update(id, (t) => ({ pins: [...t.pins, node] })), [update]);
   const setPattern = useCallback((id: number, pattern: string) => switchView(id, pattern, get(id)?.simple ?? false), [switchView]);
   const setSimple = useCallback((id: number, simple: boolean) => {
@@ -330,8 +364,8 @@ export function useSession() {
 
   // Stable across renders, so turns that didn't change can skip re-rendering.
   const actions = useMemo(
-    () => ({ searchOf, clear, search, followup, digest, pin, setPattern, setSimple, redesign }),
-    [searchOf, clear, search, followup, digest, pin, setPattern, setSimple, redesign],
+    () => ({ searchOf, clear, search, followup, digest, retry, pin, setPattern, setSimple, redesign }),
+    [searchOf, clear, search, followup, digest, retry, pin, setPattern, setSimple, redesign],
   );
   return { turns, actions };
 }

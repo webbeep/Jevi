@@ -1,5 +1,5 @@
 import { type FormEvent, type RefObject, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowUp, CornerDownRight, CornerLeftUp, Moon, Plus, Search, SlidersHorizontal, Sun, X } from 'lucide-react';
+import { ArrowUp, CornerDownRight, CornerLeftUp, Moon, Plus, RotateCw, Search, SlidersHorizontal, Sun, X } from 'lucide-react';
 import type { AnswerCard, CardNode } from '../shared/card';
 import type { SearchResponse, SearchResult } from '../shared/types';
 import { api } from './api';
@@ -478,7 +478,15 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
       )}
 
       {turn.error && !turn.result ? (
-        <div className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">{turn.error}</div>
+        <div className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
+          <p>{turn.error}</p>
+          {turn.retryable && (
+            <button type="button" data-testid="retry" onClick={() => actions.retry(id)} className="mx-auto mt-4 inline-flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-md px-4 text-foreground transition-colors hover:bg-foreground/5">
+              <RotateCw className="size-4" />
+              Retry
+            </button>
+          )}
+        </div>
       ) : (
         <CardContext.Provider value={context}>
           <AnswerCardView
