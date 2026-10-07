@@ -1,7 +1,8 @@
+import { applyGate } from '../../server/auth/gate';
 import type { Freshness, SearchResponse } from '../../shared/types';
 import { serveStream } from '../../server/answerCache';
 import { type StreamRequest, runStream } from '../../server/stream';
-import { Env, errorJson, readJson } from '../../server/util';
+import { Env, errorJson, json, readJson } from '../../server/util';
 
 const FRESHNESS = new Set<Freshness>(['any', 'day', 'week', 'month', 'year']);
 const text = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
@@ -45,14 +46,22 @@ function clean(body: StreamRequest | null): StreamRequest | undefined {
   }
 }
 
+function stamp(res: Response, headers?: Record<string, string>): Response {
+  if (!headers) return res;
+  for (const [k, v] of Object.entries(headers)) res.headers.set(k, v);
+  return res;
+}
+
 export const onRequestPost: PagesFunction<Env> = async ({ request, env, waitUntil }) => {
+  const gate = await applyGate(request, env);
+  if (!gate.ok) return json(gate.body, 401);
   let body: StreamRequest | undefined;
   try {
     body = clean(await readJson<StreamRequest>(request));
   } catch (err) {
-    return errorJson(err, 400);
+    return stamp(errorJson(err, 400), gate.headers);
   }
-  if (!body) return errorJson('Invalid request', 400);
+  if (!body) return stamp(errorJson('Invalid request', 400), gate.headers);
   const req = body;
-  return serveStream({ request, env, req, run: (send) => runStream(req, env, send), waitUntil });
+  return stamp(serveStream({ request, env, req, run: (send) => runStream(req, env, send), waitUntil }), gate.headers);
 };

@@ -1,3 +1,5 @@
+import { ensureDevice, stampDevice, withDevice } from '../../server/auth/device';
+import { sessionSecret, testBypass } from '../../server/auth/env';
 import { Env, json } from '../../server/util';
 
 /**
@@ -6,6 +8,7 @@ import { Env, json } from '../../server/util';
  * Limits: RL_STREAM_PER_MIN (default 30) for /api/stream, RL_TYPEAHEAD_PER_MIN
  * (default 120) for /api/suggest-typeahead, RL_API_PER_MIN (default 60) for the
  * rest. /api/health is exempt. Set a limit to 0 to disable it.
+ * X-ZO-Test-Token matching ZO_TEST_TOKEN skips this limiter (the daily gate checks it too).
  */
 const WINDOW_MS = 60_000;
 const MAX_KEYS = 5_000;
@@ -26,8 +29,13 @@ const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '0.0.0.0']);
 export const onRequest: PagesFunction<Env> = async ({ request, env, next }) => {
   const url = new URL(request.url);
   if (LOCAL_HOSTS.has(url.hostname) && env.WORKERS_AI !== 'on') env.WORKERS_AI = 'off';
+  const device = await ensureDevice(request, sessionSecret(env));
+  const forwarded = withDevice(request, device);
+  const finish = (res: Response) => stampDevice(res, device);
+
   const path = url.pathname.replace(/\/+$/, '');
-  if (path === '/api/health' || request.method === 'OPTIONS') return next();
+  if (path === '/api/health' || forwarded.method === 'OPTIONS') return finish(await next(forwarded));
+  if (testBypass(forwarded, env)) return finish(await next(forwarded));
 
   const isStream = path === '/api/stream';
   const isTypeahead = path === '/api/suggest-typeahead';
@@ -36,9 +44,9 @@ export const onRequest: PagesFunction<Env> = async ({ request, env, next }) => {
     : isStream
       ? limitFor(env, 'RL_STREAM_PER_MIN', 30)
       : limitFor(env, 'RL_API_PER_MIN', 60);
-  if (limit === 0) return next();
+  if (limit === 0) return finish(await next(forwarded));
 
-  const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+  const ip = forwarded.headers.get('CF-Connecting-IP') || 'unknown';
   const key = `${isTypeahead ? 't' : isStream ? 's' : 'a'}:${ip}`;
   const now = Date.now();
   let entry = hits.get(key);
@@ -54,7 +62,7 @@ export const onRequest: PagesFunction<Env> = async ({ request, env, next }) => {
 
   if (entry.count > limit) {
     const retryAfter = Math.max(1, Math.ceil((entry.start + WINDOW_MS - now) / 1000));
-    return json({ error: 'Too many requests, slow down and try again shortly.' }, 429, { 'Retry-After': String(retryAfter) });
+    return finish(json({ error: 'Too many requests, slow down and try again shortly.' }, 429, { 'Retry-After': String(retryAfter) }));
   }
-  return next();
+  return finish(await next(forwarded));
 };
