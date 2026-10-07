@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useState } from 'react';
-import { ArrowUpRight, BookOpen, Check, ChevronLeft, ChevronRight, Copy, MessageCircle, Minus, Play, Star, ThumbsDown, ThumbsUp, TrendingDown, TrendingUp } from 'lucide-react';
+import { ArrowUpRight, Check, ChevronLeft, ChevronRight, Copy, MessageCircle, Minus, Play, Search, Star, ThumbsDown, ThumbsUp, TrendingDown, TrendingUp } from 'lucide-react';
 import type { CardNode, Tone } from '../../shared/card';
 import type { SearchResult } from '../../shared/types';
 import { cn } from '@/lib/utils';
@@ -134,11 +134,12 @@ function useSource(n: number | undefined) {
 const subjectOf = (text: string) => plain(text).replace(/\*\*/g, '').split(/\s[—–-]\s|:\s/)[0].trim().slice(0, 80);
 
 /**
- * What to do with a source an item points at: read it here, ask about it in the conversation, or leave for the site.
+ * What to do with a source an item points at: ask about it or search it within the conversation, or leave for the site.
  * `children` is the trigger (a whole row or tile); without it, a small button is shown.
  */
 function SourceMenu({ result: r, subject, children, className }: { result: SearchResult; subject: string; children?: ReactNode; className?: string }) {
-  const { onRead, onAsk, busy } = useCard();
+  const { onAsk, onSearch, busy } = useCard();
+  const topic = subject || r.title;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -153,11 +154,11 @@ function SourceMenu({ result: r, subject, children, className }: { result: Searc
           <img src={`https://icons.duckduckgo.com/ip3/${r.domain}.ico`} alt="" className="size-3.5 rounded-sm" />
           <span className="truncate">{domainLabel(r.domain)}</span>
         </DropdownMenuLabel>
-        <DropdownMenuItem onSelect={() => onRead(r)}>
-          <BookOpen />Read it here
-        </DropdownMenuItem>
-        <DropdownMenuItem disabled={busy} onSelect={() => onAsk(`Tell me more about ${subject || r.title}, based on ${domainLabel(r.domain)}`)}>
+        <DropdownMenuItem disabled={busy} onSelect={() => onAsk(`Tell me more about ${topic}, based on ${domainLabel(r.domain)}`)}>
           <MessageCircle /><span className="truncate">Ask about {subject || 'this'}</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem disabled={busy} onSelect={() => onSearch(topic)}>
+          <Search /><span className="truncate">Search {subject || 'this'}</span>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
