@@ -1,47 +1,147 @@
-import { Fragment, type ReactNode } from 'react';
+import { Fragment, useRef, type ReactNode } from 'react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import type { SearchResult } from '../../shared/types';
 import { useCard } from './context';
 
-const CITE = "mx-0.5 inline-flex h-4 min-w-4 -translate-y-px items-center justify-center rounded-sm bg-muted px-1 align-middle text-[10px] font-medium text-muted-foreground no-underline relative after:absolute after:-inset-y-[14px] after:content-['']";
+const CITE = "mx-0.5 inline-flex h-4 min-w-4 -translate-y-px items-center justify-center rounded-sm bg-muted px-1 align-middle text-[10px] font-medium text-muted-foreground no-underline relative after:absolute after:-inset-[14px] after:content-['']";
+const HOVER = 'transition-colors hover:bg-foreground hover:text-background';
+const domainLabel = (d: string) => d.replace(/^(www|en|m)\./, '');
+
+type Cite = { n: number; result: SearchResult };
+
+function readCite(part: string | undefined, results: SearchResult[]): Cite | null {
+  const m = part?.match(/^\[(\d+)\]$/);
+  if (!m) return null;
+  const n = Number(m[1]);
+  const result = results[n - 1];
+  return result ? { n, result } : null;
+}
+
+/** `6–8` when three or more numbers ascend with no gaps; otherwise `4,5`. */
+function citeLabel(nums: number[]) {
+  const consecutive = nums.length >= 3 && nums.every((n, i) => i === 0 || n === nums[i - 1] + 1);
+  return consecutive ? `${nums[0]}–${nums[nums.length - 1]}` : nums.join(',');
+}
+
+function sourcesLabel(nums: number[]) {
+  if (nums.length === 2) return `Sources ${nums[0]} and ${nums[1]}`;
+  return `Sources ${nums.slice(0, -1).join(', ')} and ${nums[nums.length - 1]}`;
+}
+
+function CiteRun({ cites, noLinks }: { cites: Cite[]; noLinks: boolean }) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const interactedOutside = useRef(false);
+  const { n, result: r } = cites[0];
+  if (cites.length === 1) {
+    if (noLinks) return <span title={r.title} className={CITE}>{n}</span>;
+    return (
+      <a href={r.url} target="_blank" rel="noreferrer" title={r.title} className={`${CITE} ${HOVER}`}>
+        {n}
+      </a>
+    );
+  }
+  const nums = cites.map((c) => c.n);
+  const label = citeLabel(nums);
+  const aria = sourcesLabel(nums);
+  if (noLinks) {
+    return <span title={cites.map((c) => c.result.title).join(' · ')} aria-label={aria} className={CITE}>{label}</span>;
+  }
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button ref={triggerRef} type="button" aria-label={aria} className={`${CITE} cursor-pointer ${HOVER} data-[state=open]:bg-foreground data-[state=open]:text-background`}>
+          {label}
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="start"
+        collisionPadding={8}
+        className="w-72 max-w-[calc(100vw-1rem)]"
+        onInteractOutside={() => { interactedOutside.current = true; }}
+        onCloseAutoFocus={(e) => {
+          // Radix focuses the trigger without preventScroll, which yanks the page back to the chip after a wheel-scroll close.
+          e.preventDefault();
+          if (!interactedOutside.current) triggerRef.current?.focus({ preventScroll: true });
+          interactedOutside.current = false;
+        }}
+      >
+        {cites.map((c) => (
+          <DropdownMenuItem key={c.n} asChild className="min-h-11">
+            <a href={c.result.url} target="_blank" rel="noreferrer">
+              <span className="inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-sm bg-muted px-1 text-[10px] font-medium text-muted-foreground">{c.n}</span>
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate text-sm">{c.result.title}</span>
+                <span className="truncate text-xs text-muted-foreground">{domainLabel(c.result.domain)}</span>
+              </span>
+            </a>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function renderParts(parts: string[], results: SearchResult[], noLinks: boolean): ReactNode[] {
+  const out: ReactNode[] = [];
+  let i = 0;
+  while (i < parts.length) {
+    const part = parts[i];
+    const bold = part.match(/^\*\*(.+)\*\*$/);
+    if (bold) {
+      out.push(<strong key={i} className="font-semibold text-foreground">{bold[1]}</strong>);
+      i++;
+      continue;
+    }
+    if (/^\[\d+\]$/.test(part)) {
+      const hit = readCite(part, results);
+      if (!hit) {
+        i++;
+        continue;
+      }
+      const cites: Cite[] = [hit];
+      const seen = new Set([hit.n]);
+      let j = i + 1;
+      while (j < parts.length && !parts[j].trim()) {
+        let k = j;
+        while (k < parts.length && !parts[k].trim()) k++;
+        const next = readCite(parts[k], results);
+        if (!next) break;
+        if (!seen.has(next.n)) {
+          seen.add(next.n);
+          cites.push(next);
+        }
+        j = k + 1;
+      }
+      out.push(<CiteRun key={i} cites={cites} noLinks={noLinks} />);
+      i = j;
+      continue;
+    }
+    out.push(<Fragment key={i}>{part}</Fragment>);
+    i++;
+  }
+  return out;
+}
 
 /**
  * Renders **bold** and [n] citations that link to the nth search result.
- * Inside buttons pass `noLinks`: links can't nest in interactive elements, so citations become plain badges.
+ * Neighbouring citations merge into one chip. Inside buttons pass `noLinks`:
+ * links can't nest in interactive elements, so citations become plain badges.
  */
 export function RichText({ text, inline = false, noLinks = false }: { text: string; inline?: boolean; noLinks?: boolean }) {
   const { results } = useCard();
   const Para = inline ? 'span' : 'p';
-  const citeOk = (s: string | undefined) => {
-    const m = s?.match(/^\[(\d+)\]$/);
-    return !!m && !!results[Number(m[1]) - 1];
-  };
   return (
     <>
-      {text.split(/\n{2,}/).map((para, p) => {
-        const parts = para.split(/(\*\*[^*]+\*\*|\[\d+\])/g);
-        return (
-          <Para key={p} className={inline ? undefined : '[&:not(:first-child)]:mt-2'}>
-            {parts.map((part, i): ReactNode => {
-              const bold = part.match(/^\*\*(.+)\*\*$/);
-              if (bold) return <strong key={i} className="font-semibold text-foreground">{bold[1]}</strong>;
-              const cite = part.match(/^\[(\d+)\]$/);
-              if (cite) {
-                const r = results[Number(cite[1]) - 1];
-                if (!r) return null;
-                const l = !parts[i - 1]?.trim() && citeOk(parts[i - 2]) ? 'after:-left-0.5' : 'after:-left-[14px]';
-                const right = !parts[i + 1]?.trim() && citeOk(parts[i + 2]) ? 'after:-right-0.5' : 'after:-right-[14px]';
-                const cls = `${CITE} ${l} ${right}`;
-                if (noLinks) return <span key={i} title={r.title} className={cls}>{cite[1]}</span>;
-                return (
-                  <a key={i} href={r.url} target="_blank" rel="noreferrer" title={r.title} className={`${cls} transition-colors hover:bg-foreground hover:text-background`}>
-                    {cite[1]}
-                  </a>
-                );
-              }
-              return <Fragment key={i}>{part}</Fragment>;
-            })}
-          </Para>
-        );
-      })}
+      {text.split(/\n{2,}/).map((para, p) => (
+        <Para key={p} className={inline ? undefined : '[&:not(:first-child)]:mt-2'}>
+          {renderParts(para.split(/(\*\*[^*]+\*\*|\[\d+\])/g), results, noLinks)}
+        </Para>
+      ))}
     </>
   );
 }
