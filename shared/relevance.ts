@@ -10,14 +10,6 @@ const STOP = new Set([
   'now', 'vs', 'versus',
 ]);
 
-/**
- * Words that ask for a fact about the topic ("what year did X open") rather than
- * name a different topic. They are left out of the coverage ratio only.
- */
-const FACT = new Set([
-  'year', 'years', 'date', 'open', 'opened', 'built', 'founded', 'born', 'died', 'tall', 'old',
-]);
-
 function words(text: string): string[] {
   return [...new Set(text.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 1 && !STOP.has(w)))];
 }
@@ -37,7 +29,5 @@ export function knowledgeMatches(query: string, title: string, description?: str
   const querySet = new Set(queryWords);
   if (!titleWords.every((w) => querySet.has(w))) return false;
   const coveredBy = new Set([...titleWords, ...qualifierWords, ...words(description ?? '')]);
-  const topicWords = queryWords.filter((w) => !FACT.has(w) || coveredBy.has(w));
-  const counted = topicWords.length ? topicWords : queryWords;
-  return counted.filter((w) => coveredBy.has(w)).length / counted.length > 0.5;
+  return queryWords.filter((w) => coveredBy.has(w)).length / queryWords.length > 0.5;
 }

@@ -5,7 +5,6 @@ import { knowledgeMatches } from '../shared/relevance.ts';
 const accept: [string, string][] = [
   ['Taylor Swift age', 'Taylor Swift'],
   ['eiffel tower height', 'Eiffel Tower'],
-  ['what year did the eiffel tower open', 'Eiffel Tower'],
   ['who is Robert Pattinson', 'Robert Pattinson'],
   ['python list comprehension', 'List comprehension'],
   ['apple pie recipe', 'Apple pie'],
@@ -18,8 +17,6 @@ const reject: [string, string][] = [
   ['3 days in Lisbon on a budget', 'RMS Virginian'],
   ['how to spend 3 days in lisbon complete 2026 itinerary', 'RMS Virginian'],
   ['best running shoes for beginners', 'Running'],
-  ['what year did the eiffel tower open', 'Tower Bridge'],
-  ['when was the best invoicing app founded', 'Invoice'],
 ];
 
 test('accepts encyclopedia entries about the query', () => {

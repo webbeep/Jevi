@@ -1,5 +1,4 @@
 import type { AnswerCard, CardNode } from './card';
-import { formatMoney, monthlyTotal, priceForBasis } from './pricing';
 
 /** A compact summary of a card — title, headline values and key statements — for conversation context. */
 export function cardDigest(card: AnswerCard, max = 420): string {
@@ -45,17 +44,6 @@ export function cardDigest(card: AnswerCard, max = 420): string {
       case 'slider':
       case 'scaler':
         facts.push(`${n.label}: ${n.value ?? (n.type === 'scaler' ? n.base : '')}${n.unit ? ` ${n.unit}` : ''}`);
-        break;
-      case 'pricing':
-        facts.push(
-          n.plans
-            .map((plan) => {
-              const price = priceForBasis(plan.prices, n.billing) ?? plan.prices[0];
-              const total = price ? monthlyTotal(price, n.seats) : null;
-              return `${plan.name}: ${total == null ? '—' : `${formatMoney(total, price?.currency)}/mo`} for ${n.seats}`;
-            })
-            .join(', '),
-        );
         break;
       case 'draft':
         facts.push(`${n.label ?? 'draft'}: "${n.text.slice(0, Math.max(200, max / 2))}"`);

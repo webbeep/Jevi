@@ -1,5 +1,4 @@
 import type { AnswerCard, CardNode, Tone } from '../shared/card';
-import { formatAsOf, inferSeats, sameSource, type BillingBasis, type Price, type PricePeriod, type PriceUnit } from '../shared/pricing';
 
 const TONES: Tone[] = ['default', 'muted', 'primary', 'positive', 'negative', 'warning'];
 const MAX_DEPTH = 5;
@@ -31,21 +30,15 @@ const icon = (v: unknown): string | undefined => {
   return s || undefined;
 };
 
-/** A search result a price may cite. */
-export interface PriceSource {
-  url: string;
-  date?: string;
-}
-
-export function sanitizeNodes(raw: unknown, imageCount: number, depth = 0, ctx?: { sources?: PriceSource[]; query?: string }): CardNode[] {
+export function sanitizeNodes(raw: unknown, imageCount: number, depth = 0): CardNode[] {
   if (depth > MAX_DEPTH) return [];
-  return arr(raw).map((n) => sanitizeNode(n, imageCount, depth, ctx)).filter((n): n is CardNode => !!n);
+  return arr(raw).map((n) => sanitizeNode(n, imageCount, depth)).filter((n): n is CardNode => !!n);
 }
 
-function sanitizeNode(raw: unknown, imageCount: number, depth: number, ctx?: { sources?: PriceSource[]; query?: string }): CardNode | undefined {
+function sanitizeNode(raw: unknown, imageCount: number, depth: number): CardNode | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const n = raw as Raw;
-  const kids = () => sanitizeNodes(n.children, imageCount, depth + 1, ctx);
+  const kids = () => sanitizeNodes(n.children, imageCount, depth + 1);
   const ref = (v: unknown) => {
     const i = num(v);
     return i !== undefined && i >= 0 && i < imageCount ? Math.floor(i) : undefined;
@@ -72,7 +65,7 @@ function sanitizeNode(raw: unknown, imageCount: number, depth: number, ctx?: { s
     }
     case 'tabs': {
       const tabs = arr(n.tabs)
-        .map((t) => ({ label: str((t as Raw)?.label, 40) ?? '', children: sanitizeNodes((t as Raw)?.children, imageCount, depth + 1, ctx) }))
+        .map((t) => ({ label: str((t as Raw)?.label, 40) ?? '', children: sanitizeNodes((t as Raw)?.children, imageCount, depth + 1) }))
         .filter((t) => t.label && t.children.length);
       return tabs.length ? { type, tabs } : undefined;
     }
@@ -220,8 +213,6 @@ function sanitizeNode(raw: unknown, imageCount: number, depth: number, ctx?: { s
       const value = num(n.value);
       return { type, label, base, value: value === undefined ? undefined : Math.min(max, Math.max(min, value)), min, max, step: num(n.step), unit: str(n.unit, 20), items };
     }
-    case 'pricing':
-      return sanitizePricing(n, ctx);
     case 'accordion': {
       const items = arr(n.items).map((i) => ({ title: str((i as Raw)?.title, 120) ?? '', text: str((i as Raw)?.text, 800) ?? '' })).filter((i) => i.title && i.text);
       return items.length ? { type, items } : undefined;
@@ -243,68 +234,6 @@ function sanitizeNode(raw: unknown, imageCount: number, depth: number, ctx?: { s
       return undefined;
     }
   }
-}
-
-function wholeSeats(v: unknown, max = 10000): number | undefined {
-  const n = num(v);
-  if (n === undefined || n < 0 || n > max) return undefined;
-  return Math.round(n);
-}
-
-/** Resolves a source number or URL to a search result. Amounts whose URL is not in the results are dropped. */
-function groundPrice(raw: unknown, sources: PriceSource[] | undefined): Price | undefined {
-  if (!raw || typeof raw !== 'object') return undefined;
-  const p = raw as Raw;
-  const unit = oneOf(p.unit, ['seat', 'flat'] as const satisfies readonly PriceUnit[]);
-  const period = oneOf(p.period, ['month', 'year'] as const satisfies readonly PricePeriod[]);
-  const billing = oneOf(p.billing, ['monthly', 'annual'] as const satisfies readonly BillingBasis[]);
-  if (!unit || !period || !billing) return undefined;
-  const amount = num(p.amount);
-  const idx = source(p.source);
-  let hit: PriceSource | undefined;
-  if (idx && sources?.[idx - 1]) hit = sources[idx - 1];
-  else if (typeof p.sourceUrl === 'string' && sources) hit = sources.find((s) => sameSource(s.url, p.sourceUrl as string));
-  const minSeats = wholeSeats(p.minSeats, 100000);
-  const included = wholeSeats(p.includedSeats, 100000);
-  const currency = str(p.currency, 3)?.toUpperCase();
-  const price: Price = {
-    currency: currency && /^[A-Z]{3}$/.test(currency) ? currency : 'USD',
-    unit,
-    period,
-    billing,
-    minSeats: minSeats && minSeats >= 1 ? minSeats : undefined,
-    includedSeats: included,
-    sourceUrl: hit?.url,
-    asOf: formatAsOf(hit?.date),
-  };
-  if (hit && amount !== undefined && amount >= 0) price.amount = amount;
-  return price;
-}
-
-function sanitizePricing(n: Raw, ctx?: { sources?: PriceSource[]; query?: string }): CardNode | undefined {
-  const plans = arr(n.plans).flatMap((raw) => {
-    if (!raw || typeof raw !== 'object') return [];
-    const plan = raw as Raw;
-    const name = str(plan.name, 80);
-    if (!name) return [];
-    const listed = arr(plan.prices);
-    if (plan.monthly) listed.push({ ...(plan.monthly as Raw), billing: (plan.monthly as Raw).billing ?? 'monthly' });
-    if (plan.annual) listed.push({ ...(plan.annual as Raw), billing: (plan.annual as Raw).billing ?? 'annual' });
-    const prices = listed.map((p) => groundPrice(p, ctx?.sources)).filter((p): p is Price => !!p);
-    return prices.length ? [{ name, note: str(plan.note, 120), prices }] : [];
-  });
-  if (!plans.length) return undefined;
-  const inferred = ctx?.query ? inferSeats(ctx.query) : undefined;
-  let min = Math.max(1, wholeSeats(n.min, 500) ?? 1);
-  if (inferred != null && inferred < min) min = inferred;
-  let max = wholeSeats(n.max, 500) ?? Math.max(50, inferred ?? 1);
-  const asked = inferred ?? wholeSeats(n.seats, 10000) ?? 1;
-  if (asked > max) max = Math.min(500, asked);
-  if (max < min) max = min;
-  const seats = Math.min(max, Math.max(min, asked));
-  const bases = new Set(plans.flatMap((p) => p.prices.map((price) => price.billing)));
-  const billing = oneOf(n.billing, ['monthly', 'annual'] as const) ?? (bases.has('annual') ? 'annual' : 'monthly');
-  return { type: 'pricing', label: str(n.label, 60), seats, min, max, billing, plans };
 }
 
 export function sanitizeCard(raw: unknown, imageCount: number, fallbackTitle: string): AnswerCard {

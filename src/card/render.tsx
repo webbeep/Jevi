@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Icon } from './Icon';
-import { AccordionNode, Choices, Pricing, Reveal, Scaler, SliderNode } from './interactive';
+import { AccordionNode, Choices, Reveal, Scaler, SliderNode } from './interactive';
 import {
   Actions, Badges, Callout, CodeView, Draft, Gallery, Heading, Hero, ImageView, KeyValue, Links, List, Profile,
   ProgressView, ProsCons, Quote, Rating, SlotView, StatView, Steps, TableView, Text, Tile, Timeline, TONE_TEXT, VideoView,
@@ -137,7 +137,6 @@ export function NodeView({ node }: { node: CardNode }): ReactNode {
     case 'choices': return <Choices node={node} />;
     case 'slider': return <SliderNode node={node} />;
     case 'scaler': return <Scaler node={node} />;
-    case 'pricing': return <Pricing node={node} />;
     case 'accordion': return <AccordionNode node={node} />;
     case 'reveal': return <Reveal node={node} />;
     default: {
