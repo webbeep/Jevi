@@ -213,11 +213,7 @@ type Parsed = { kind: 'head'; head: Omit<AnswerCard, 'body'> } | { kind: 'node';
 
 /** Parses one streamed output line into a sanitized, grounded piece of the card. */
 function priceSources(req: DesignRequest): PriceSource[] {
-  return req.search.results.slice(0, 30).map((r) => ({
-    url: r.url,
-    date: r.date,
-    text: `${r.title}\n${r.snippet}\n${r.content ?? ''}`.slice(0, 2500),
-  }));
+  return req.search.results.slice(0, 30).map((r) => ({ url: r.url, date: r.date }));
 }
 
 function parseLine(line: string, g: Grounding, imageCount: number, query: string, sources?: PriceSource[], seatQuery?: string): Parsed | undefined {

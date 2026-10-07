@@ -1,5 +1,5 @@
 import type { AnswerCard, CardNode, Tone } from '../shared/card';
-import { billingNearAmount, inferSeats, isPlanQuery, priceAsOf, sameSource, stripPricesDeep, type BillingBasis, type Price, type PricePeriod, type PriceUnit } from '../shared/pricing';
+import { inferSeats, priceAsOf, sameSource, type BillingBasis, type Price, type PricePeriod, type PriceUnit } from '../shared/pricing';
 
 const TONES: Tone[] = ['default', 'muted', 'primary', 'positive', 'negative', 'warning'];
 const MAX_DEPTH = 5;
@@ -31,18 +31,15 @@ const icon = (v: unknown): string | undefined => {
   return s || undefined;
 };
 
-/** A search result a price may cite. `text` is the snippet (and page text) used to read billing basis. */
+/** A search result a price may cite. */
 export interface PriceSource {
   url: string;
   date?: string;
-  text?: string;
 }
 
 export function sanitizeNodes(raw: unknown, imageCount: number, depth = 0, ctx?: { sources?: PriceSource[]; query?: string }): CardNode[] {
   if (depth > MAX_DEPTH) return [];
-  const nodes = arr(raw).map((n) => sanitizeNode(n, imageCount, depth, ctx)).filter((n): n is CardNode => !!n);
-  if (!ctx?.query || !isPlanQuery(ctx.query)) return nodes;
-  return nodes.map((n) => (n.type === 'pricing' ? n : stripPricesDeep(n)));
+  return arr(raw).map((n) => sanitizeNode(n, imageCount, depth, ctx)).filter((n): n is CardNode => !!n);
 }
 
 function sanitizeNode(raw: unknown, imageCount: number, depth: number, ctx?: { sources?: PriceSource[]; query?: string }): CardNode | undefined {
@@ -270,12 +267,11 @@ function groundPrice(raw: unknown, sources: PriceSource[] | undefined): Price | 
   const minSeats = wholeSeats(p.minSeats, 100000);
   const included = wholeSeats(p.includedSeats, 100000);
   const currency = str(p.currency, 3)?.toUpperCase();
-  const fromPage = amount !== undefined ? billingNearAmount(hit?.text, amount) : undefined;
   const price: Price = {
     currency: currency && /^[A-Z]{3}$/.test(currency) ? currency : 'USD',
     unit,
     period,
-    billing: fromPage ?? billing,
+    billing,
     minSeats: minSeats && minSeats >= 1 ? minSeats : undefined,
     includedSeats: included,
     sourceUrl: hit?.url,

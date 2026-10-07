@@ -182,6 +182,20 @@ export function formatAsOf(raw: string | undefined): string | undefined {
   return undefined;
 }
 
+/** Title, snippet and page text, capped to the window billing is read from. */
+export function priceSourceText(part: { title?: string; snippet?: string; content?: string } | undefined): string | undefined {
+  if (!part) return undefined;
+  const text = `${part.title ?? ''}\n${part.snippet ?? ''}\n${part.content ?? ''}`.slice(0, 2500);
+  return text.trim() ? text : undefined;
+}
+
+/** Billing the source states for this amount. The model's billing stands when the page doesn't say. */
+export function billingFromSources(price: Price, sources: { url: string; title?: string; snippet?: string; content?: string }[]): BillingBasis {
+  if (price.amount == null || !price.sourceUrl) return price.billing;
+  const hit = sources.find((s) => sameSource(s.url, price.sourceUrl!));
+  return billingNearAmount(priceSourceText(hit), price.amount) ?? price.billing;
+}
+
 /** Host + path, so a cited URL matches the result it came from. */
 export function sameSource(a: string, b: string): boolean {
   const norm = (url: string) => {

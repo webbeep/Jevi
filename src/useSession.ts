@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import type { AnswerCard, CardNode, CardResponse, FollowupContext, FollowupIntent, ImageCredit, LayoutPlan } from '../shared/card';
 import { cardDigest } from '../shared/digest';
+import { billingFromSources, isPlanQuery, stripPricesDeep } from '../shared/pricing';
 import type { SearchResponse, SearchResult } from '../shared/types';
 import { api } from './api';
 import { withBrowserFallback } from './fallback';
@@ -58,6 +59,30 @@ export interface Turn {
 const emptyLive = (): LiveCard => ({ regions: [], nodes: [], followups: [], credits: [] });
 const variantKey = (pattern: string | undefined, simple: boolean) => `${pattern ?? ''}|${simple ? 1 : 0}`;
 const errMsg = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+/** Billing basis and stray dollar amounts are settled here, not on the worker. */
+function settleNode(node: CardNode, query: string, results: SearchResult[]): CardNode {
+  const fix = (n: CardNode): CardNode => {
+    if (n.type === 'pricing') {
+      return {
+        ...n,
+        plans: n.plans.map((plan) => ({
+          ...plan,
+          prices: plan.prices.map((price) => {
+            const billing = billingFromSources(price, results);
+            return billing === price.billing ? price : { ...price, billing };
+          }),
+        })),
+      };
+    }
+    if (n.type === 'tabs') return { ...n, tabs: n.tabs.map((tab) => ({ ...tab, children: tab.children.map(fix) })) };
+    if ('children' in n) return { ...n, children: n.children.map(fix) };
+    return n;
+  };
+  const priced = fix(node);
+  if (!isPlanQuery(query) || priced.type === 'pricing') return priced;
+  return stripPricesDeep(priced);
+}
 
 /** The body to show right now: designed nodes where ready, placeholders for regions still being designed. */
 export function liveBody(live: LiveCard, stillDesigning: boolean): CardNode[] {
@@ -172,7 +197,8 @@ export function useSession() {
           return update(route, (t) => {
             const live = t.live ?? emptyLive();
             const nodes = [...live.nodes];
-            nodes[e.data.index] = e.data.node;
+            const results = ref.current.find((x) => x.id === t.searchId)?.search?.results ?? [];
+            nodes[e.data.index] = settleNode(e.data.node, t.question, results);
             return { live: { ...live, nodes }, thinking: false, version: live.nodes.some(Boolean) ? t.version : t.version + 1 };
           });
         case 'followups':

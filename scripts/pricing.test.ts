@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { billingNearAmount, inferSeats, isPlanQuery, monthlyTotal, priceAsOf, stripPricesDeep, stripStrayPrices, type Price } from '../shared/pricing.ts';
+import { billingFromSources, billingNearAmount, inferSeats, isPlanQuery, monthlyTotal, priceAsOf, stripPricesDeep, stripStrayPrices, type Price } from '../shared/pricing.ts';
 
 const WS = 'https://workspace.google.com/pricing';
 const LINEAR = 'https://linear.app/pricing';
@@ -86,6 +86,16 @@ test('billed annually wins when the figure is quoted per month', () => {
   assert.equal(billingNearAmount(page, 24), 'monthly');
   assert.equal(billingNearAmount('Professional $49/mo', 49), undefined);
   assert.equal(billingNearAmount(page, 140), undefined);
+});
+
+test('billing basis is read from the cited page, not invented on the server', () => {
+  const page = 'Starter is $14 per user/month, billed annually. Flexible is $24 per user/month, billed monthly.';
+  const sources = [{ url: 'https://workspace.google.com/pricing', title: 'Pricing', snippet: page }];
+  const annual = price({ amount: 14, currency: 'USD', unit: 'seat', period: 'month', billing: 'monthly', sourceUrl: WS });
+  const flexible = price({ amount: 24, currency: 'USD', unit: 'seat', period: 'month', billing: 'annual', sourceUrl: WS });
+  assert.equal(billingFromSources(annual, sources), 'annual');
+  assert.equal(billingFromSources(flexible, sources), 'monthly');
+  assert.equal(billingFromSources(annual, []), 'monthly');
 });
 
 test('sourced prices get a retrieval date when the page has none', () => {
