@@ -11,7 +11,7 @@ import { RichText } from './RichText';
 type Of<T extends CardNode['type']> = Extract<CardNode, { type: T }>;
 
 export function Choices({ node }: { node: Of<'choices'> }) {
-  const { onRefine, busy } = useCard();
+  const { onRefine } = useCard();
   const initial = node.options.find((o) => o.selected)?.label ?? '';
   const [value, setValue] = useState(initial);
   return (
@@ -22,17 +22,17 @@ export function Choices({ node }: { node: Of<'choices'> }) {
         variant="outline"
         size="sm"
         value={value}
-        disabled={busy}
         onValueChange={(v) => {
           const option = node.options.find((o) => o.label === v);
           if (!option || v === value) return;
           setValue(v);
           onRefine(option.prompt);
         }}
-        className="no-scrollbar w-full justify-start overflow-x-auto"
+        spacing={1.5}
+        className="w-full flex-wrap justify-start gap-y-3"
       >
         {node.options.map((o) => (
-          <ToggleGroupItem key={o.label} value={o.label} className="h-8 shrink-0 px-3 text-xs data-[state=on]:bg-foreground data-[state=on]:text-background">
+          <ToggleGroupItem key={o.label} value={o.label} className="relative h-8 shrink-0 rounded-full px-3 text-xs after:absolute after:inset-x-0 after:-inset-y-[7px] after:content-[''] data-[state=on]:border-foreground data-[state=on]:bg-foreground data-[state=on]:text-background">
             {o.label}
           </ToggleGroupItem>
         ))}
@@ -44,7 +44,7 @@ export function Choices({ node }: { node: Of<'choices'> }) {
 const fmt = (n: number, unit?: string) => `${Number.isInteger(n) ? n : n.toFixed(1)}${unit ? ` ${unit}` : ''}`;
 
 export function SliderNode({ node }: { node: Of<'slider'> }) {
-  const { onRefine, busy } = useCard();
+  const { onRefine } = useCard();
   const [value, setValue] = useState(node.value);
   return (
     <div className="rounded-xl border bg-card p-3 sm:p-4">
@@ -57,7 +57,6 @@ export function SliderNode({ node }: { node: Of<'slider'> }) {
         max={node.max}
         step={node.step ?? 1}
         value={[value]}
-        disabled={busy}
         onValueChange={([v]) => setValue(v)}
         onValueCommit={([v]) => v !== node.value && onRefine(node.prompt.replace('{value}', fmt(v, node.unit)))}
       />

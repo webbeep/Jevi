@@ -1,7 +1,7 @@
 import { Fragment, type ReactNode } from 'react';
 import { useCard } from './context';
 
-const CITE = 'mx-0.5 inline-flex h-4 min-w-4 -translate-y-px items-center justify-center rounded-sm bg-muted px-1 align-middle text-[10px] font-medium text-muted-foreground no-underline';
+const CITE = "mx-0.5 inline-flex h-4 min-w-4 -translate-y-px items-center justify-center rounded-sm bg-muted px-1 align-middle text-[10px] font-medium text-muted-foreground no-underline relative after:absolute after:-inset-[14px] after:content-['']";
 
 /**
  * Renders **bold** and [n] citations that link to the nth search result.

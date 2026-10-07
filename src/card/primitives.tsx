@@ -138,12 +138,12 @@ const subjectOf = (text: string) => plain(text).replace(/\*\*/g, '').split(/\s[�
  * `children` is the trigger (a whole row or tile); without it, a small button is shown.
  */
 function SourceMenu({ result: r, subject, children, className }: { result: SearchResult; subject: string; children?: ReactNode; className?: string }) {
-  const { onRead, onAsk, busy } = useCard();
+  const { onRead, onAsk } = useCard();
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         {children ?? (
-          <button type="button" title={`${r.title} — ${r.domain}`} aria-label={`Options for ${subject || r.domain}`} className={cn('flex size-7 shrink-0 items-center justify-center self-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground', className)}>
+          <button type="button" title={`${r.title} — ${r.domain}`} aria-label={`Options for ${subject || r.domain}`} className={cn("relative flex size-7 shrink-0 items-center justify-center self-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground after:absolute after:-inset-2 after:content-['']", className)}>
             <ChevronRight className="size-4" />
           </button>
         )}
@@ -156,7 +156,7 @@ function SourceMenu({ result: r, subject, children, className }: { result: Searc
         <DropdownMenuItem onSelect={() => onRead(r)}>
           <BookOpen />Read it here
         </DropdownMenuItem>
-        <DropdownMenuItem disabled={busy} onSelect={() => onAsk(`Tell me more about ${subject || r.title}, based on ${domainLabel(r.domain)}`)}>
+        <DropdownMenuItem onSelect={() => onAsk(`Tell me more about ${subject || r.title}, based on ${domainLabel(r.domain)}`)}>
           <MessageCircle /><span className="truncate">Ask about {subject || 'this'}</span>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
@@ -331,19 +331,32 @@ function MediaThumb({ item, index }: { item: Of<'list'>['items'][number]; index:
   );
 }
 
+function MediaRow({ item, index }: { item: Of<'list'>['items'][number]; index: number }) {
+  const r = useSource(item.source);
+  const { onAsk } = useCard();
+  const button = (
+    <button type="button" onClick={r ? undefined : () => onAsk(`Tell me more about ${subjectOf(item.text)}`)} className="flex w-full items-center gap-3 p-2.5 text-left transition-colors hover:bg-foreground/[0.03] data-[state=open]:bg-foreground/[0.04] sm:p-3">
+      <MediaThumb item={item} index={index} />
+      <span className="flex min-w-0 flex-1 flex-col items-start gap-1 text-sm leading-snug">
+        <RichText text={item.text} inline noLinks />
+        {item.meta && <span className="rounded-md bg-muted px-2 py-0.5 text-xs font-medium leading-snug tabular-nums sm:hidden">{item.meta}</span>}
+      </span>
+      {item.meta && <span className="hidden max-w-[40%] shrink-0 rounded-md bg-muted px-2 py-0.5 text-right text-xs font-medium leading-snug tabular-nums sm:inline">{item.meta}</span>}
+      <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+    </button>
+  );
+  return (
+    <li>
+      {r ? <SourceMenu result={r} subject={subjectOf(item.text)}>{button}</SourceMenu> : button}
+    </li>
+  );
+}
+
 function MediaList({ node }: { node: Of<'list'> }) {
   return (
     <ul className="divide-y rounded-xl border bg-card">
       {node.items.map((item, i) => (
-        <li key={i} className="flex items-center gap-3 p-2.5 sm:p-3">
-          <MediaThumb item={item} index={i} />
-          <span className="flex min-w-0 flex-1 flex-col items-start gap-1 text-sm leading-snug">
-            <RichText text={item.text} inline />
-            {item.meta && <span className="rounded-md bg-muted px-2 py-0.5 text-xs font-medium leading-snug tabular-nums sm:hidden">{item.meta}</span>}
-          </span>
-          {item.meta && <span className="hidden max-w-[40%] shrink-0 rounded-md bg-muted px-2 py-0.5 text-right text-xs font-medium leading-snug tabular-nums sm:inline">{item.meta}</span>}
-          <SourceLink n={item.source} subject={subjectOf(item.text)} />
-        </li>
+        <MediaRow key={i} item={item} index={i} />
       ))}
     </ul>
   );
@@ -541,7 +554,7 @@ export function CodeView({ node }: { node: Of<'code'> }) {
         <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-muted-foreground">{node.lang ?? 'code'}</span>
         <CopyButton text={node.code} />
       </div>
-      <pre className="no-scrollbar overflow-x-auto px-3.5 py-3 font-mono text-[12.5px] leading-relaxed sm:text-[13px]"><code>{node.code}</code></pre>
+      <pre className="no-scrollbar overflow-x-auto overscroll-x-contain px-3.5 py-3 font-mono text-[12.5px] leading-relaxed sm:text-[13px]"><code>{node.code}</code></pre>
     </div>
   );
 }
@@ -635,7 +648,7 @@ export function Profile({ node }: { node: Of<'profile'> }) {
 }
 
 export function Actions({ node }: { node: Of<'actions'> }) {
-  const { onSearch, onAsk, onRefine, busy } = useCard();
+  const { onSearch, onAsk, onRefine } = useCard();
   const run = (a: Of<'actions'>['items'][number]) => {
     switch (a.kind ?? 'search') {
       case 'refine': return onRefine(a.query);
@@ -648,9 +661,9 @@ export function Actions({ node }: { node: Of<'actions'> }) {
     }
   };
   return (
-    <div className="flex flex-wrap gap-2">
+    <div className="flex flex-wrap gap-x-2 gap-y-3">
       {node.items.map((a) => (
-        <Button key={a.label} variant={a.kind === 'refine' ? 'secondary' : 'outline'} size="sm" className="rounded-full" disabled={busy && a.kind === 'refine'} onClick={() => run(a)}>
+        <Button key={a.label} variant={a.kind === 'refine' ? 'secondary' : 'outline'} size="sm" className="relative rounded-full after:absolute after:inset-x-0 after:-inset-y-[7px] after:content-['']" onClick={() => run(a)}>
           <Icon name={a.icon} fallback={a.kind === 'refine' ? 'wand-sparkles' : a.kind === 'ask' ? 'message-circle' : 'search'} className="size-3.5" />{a.label}
         </Button>
       ))}

@@ -3,10 +3,49 @@ import { cn } from "@/lib/utils"
 import { CheckIcon, ChevronRightIcon, CircleIcon } from "lucide-react"
 import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui"
 
+const DropdownMenuContext = React.createContext<{
+  open: boolean
+  setOpen: (next: boolean) => void
+}>({
+  open: false,
+  setOpen: () => {},
+})
+
 function DropdownMenu({
+  open: openProp,
+  defaultOpen,
+  onOpenChange,
+  modal = false,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
-  return <DropdownMenuPrimitive.Root data-slot="dropdown-menu" {...props} />
+  const [internal, setInternal] = React.useState(defaultOpen ?? false)
+  const open = openProp ?? internal
+  const setOpen = React.useCallback((next: boolean) => {
+    if (openProp === undefined) setInternal(next)
+    onOpenChange?.(next)
+  }, [openProp, onOpenChange])
+
+  React.useEffect(() => {
+    if (!open) return
+    const yAtOpen = window.scrollY
+    const onScroll = () => {
+      if (Math.abs(window.scrollY - yAtOpen) > 8) setOpen(false)
+    }
+    window.addEventListener("scroll", onScroll, { passive: true })
+    return () => window.removeEventListener("scroll", onScroll)
+  }, [open, setOpen])
+
+  return (
+    <DropdownMenuContext.Provider value={{ open, setOpen }}>
+      <DropdownMenuPrimitive.Root
+        data-slot="dropdown-menu"
+        open={open}
+        onOpenChange={setOpen}
+        modal={modal}
+        {...props}
+      />
+    </DropdownMenuContext.Provider>
+  )
 }
 
 function DropdownMenuPortal({
@@ -18,12 +57,26 @@ function DropdownMenuPortal({
 }
 
 function DropdownMenuTrigger({
+  onPointerDown,
+  onClick,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Trigger>) {
+  const pointer = React.useRef("mouse")
+  const menu = React.useContext(DropdownMenuContext)
   return (
     <DropdownMenuPrimitive.Trigger
       data-slot="dropdown-menu-trigger"
       {...props}
+      onPointerDown={(e) => {
+        onPointerDown?.(e)
+        pointer.current = e.pointerType
+        if (e.pointerType !== "mouse") e.preventDefault()
+      }}
+      onClick={(e) => {
+        onClick?.(e)
+        if (pointer.current !== "mouse") menu.setOpen(!menu.open)
+        pointer.current = "mouse"
+      }}
     />
   )
 }

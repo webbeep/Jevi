@@ -361,9 +361,9 @@ function Composer({ actions, topic, mainRef }: { actions: SessionActions; topic:
   };
 
   return (
-    <div className="fixed inset-x-0 bottom-0 z-30 bg-gradient-to-t from-background via-background/85 to-transparent pb-[calc(env(safe-area-inset-bottom)+12px)] pt-10">
+    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 bg-gradient-to-t from-background via-background/85 to-transparent pb-[calc(env(safe-area-inset-bottom)+12px)] pt-10">
       <div className={cn(SHELL, GRID)}>
-        <form onSubmit={send} className="overflow-hidden rounded-2xl border border-input bg-popover shadow-float">
+        <form onSubmit={send} className="pointer-events-auto overflow-hidden rounded-2xl border border-input bg-popover shadow-float">
           {quote && (
             <div className="space-y-2 border-b px-3 pb-2.5 pt-3 animate-in fade-in slide-in-from-bottom-1">
               <div className="flex items-start gap-2">
@@ -373,7 +373,7 @@ function Composer({ actions, topic, mainRef }: { actions: SessionActions; topic:
                   <X className="size-3.5" />
                 </button>
               </div>
-              <ToggleGroup type="single" size="sm" value={quoteMode} onValueChange={(v) => v && setQuoteMode(v as QuoteMode)} className="no-scrollbar w-full justify-start overflow-x-auto">
+              <ToggleGroup type="single" size="sm" value={quoteMode} onValueChange={(v) => v && setQuoteMode(v as QuoteMode)} className="no-scrollbar w-full justify-start overflow-x-auto overscroll-x-contain">
                 {QUOTE_MODES.map((m) => (
                   <ToggleGroupItem key={m.id} value={m.id} title={m.hint} className="h-7 shrink-0 rounded-lg px-2.5 text-xs data-[state=on]:bg-foreground/[0.08] data-[state=on]:text-foreground">
                     <Icon name={m.icon} className="size-3.5" />
@@ -433,6 +433,14 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
   }, [search?.images, turn.live?.credits, card.credits]);
 
   const id = turn.id;
+  const pendingRefine = useRef<string | null>(null);
+  useEffect(() => {
+    if (!turn.filling && pendingRefine.current) {
+      const value = pendingRefine.current;
+      pendingRefine.current = null;
+      void actions.followup(value, id, 'adjust');
+    }
+  }, [turn.filling, actions, id]);
   const context: CardContextValue = useMemo(() => ({
     results: search?.results ?? [],
     images: search?.images ?? [],
@@ -440,7 +448,13 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
     busy: turn.filling,
     onSearch: (q) => void actions.followup(q, id, 'search'),
     onAsk: (q) => void actions.followup(q, id, 'ask'),
-    onRefine: (instruction) => void actions.followup(instruction, id, 'adjust'),
+    onRefine: (instruction) => {
+      if (turn.filling) {
+        pendingRefine.current = instruction;
+        return;
+      }
+      void actions.followup(instruction, id, 'adjust');
+    },
     onSources: () => onSources(id),
     onRead: (r) => onRead(r, turn.searchId),
   }), [search?.results, search?.images, credits, turn.filling, actions, id, onSources, onRead, turn.searchId]);
