@@ -1,5 +1,6 @@
 import { cleanMarkdown } from '../shared/text';
 import type { SearchResult } from '../shared/types';
+import { readPage } from './htmlcap';
 import { type LateExtras, normalizeUrl } from './search';
 import { type Env, hedge, stripHtml } from './util';
 
@@ -26,7 +27,17 @@ function ogImage(html: string, base: string): string | undefined {
 }
 
 function htmlToText(html: string): string {
-  const main = html.match(/<(main|article)[\s\S]*?<\/\1>/i)?.[0] ?? html.match(/<body[\s\S]*<\/body>/i)?.[0] ?? html;
+  // A window may start at `<main`/`<article>` with no close tag, or end before `</body>`.
+  const opener = /^\s*<(main|article)(?=[\s>/])/i.exec(html);
+  let main: string | undefined;
+  if (opener && !new RegExp(`</${opener[1]}>`, 'i').test(html)) main = html;
+  if (main === undefined) {
+    main = html.match(/<(main|article)[\s\S]*?<\/\1>/i)?.[0] ?? html.match(/<body[\s\S]*<\/body>/i)?.[0];
+  }
+  if (main === undefined) {
+    const bodyAt = /<\/body>/i.test(html) ? -1 : html.search(/<body/i);
+    main = bodyAt >= 0 ? html.slice(bodyAt) : html;
+  }
   return stripHtml(main.replace(/<(script|style|noscript|svg|nav|footer|header|form|iframe|aside)[\s\S]*?<\/\1>/gi, ' '));
 }
 
@@ -42,30 +53,13 @@ export function isFetchable(raw: string): boolean {
   }
 }
 
-/** Reads at most `limit` bytes of a body, so a huge page can't exhaust CPU time in the regex passes. */
-async function cappedText(res: Response, limit = 600_000): Promise<string> {
-  if (!res.body) return '';
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let out = '';
-  let bytes = 0;
-  while (bytes < limit) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    bytes += value.byteLength;
-    out += decoder.decode(value, { stream: true });
-  }
-  await reader.cancel().catch(() => undefined);
-  return out;
-}
-
 async function direct(url: string, signal: AbortSignal, images?: Map<string, string>): Promise<string> {
   const res = await fetch(url, { headers: { 'User-Agent': BROWSER_UA, Accept: 'text/html' }, signal, redirect: 'follow' });
   if (!res.ok || !res.headers.get('content-type')?.includes('html') || !isFetchable(res.url || url)) throw new Error(`HTTP ${res.status}`);
-  const html = await cappedText(res);
-  const image = ogImage(html, url);
+  const { head, body } = await readPage(res);
+  const image = ogImage(head || body.slice(0, 20_000), url);
   if (image) images?.set(url, image);
-  return htmlToText(html);
+  return htmlToText(body);
 }
 
 async function jina(url: string, env: Env, signal: AbortSignal): Promise<string> {
@@ -79,7 +73,8 @@ async function jina(url: string, env: Env, signal: AbortSignal): Promise<string>
 async function allOrigins(url: string, signal: AbortSignal): Promise<string> {
   const res = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`, { signal });
   if (!res.ok) throw new Error(`AllOrigins HTTP ${res.status}`);
-  return htmlToText(await cappedText(res));
+  const { body } = await readPage(res);
+  return htmlToText(body);
 }
 
 /** Fetches one page's readable text, racing direct fetch, Jina reader and AllOrigins. */
