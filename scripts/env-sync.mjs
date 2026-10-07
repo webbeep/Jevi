@@ -2,12 +2,19 @@
 //   dev     -> writes .dev.vars for `wrangler pages dev`
 //   secrets -> uploads app keys as Cloudflare Pages secrets
 //   deploy  -> creates the Pages project if needed, uploads secrets, deploys dist/
+// The git branch picks the site: main -> jevi.pages.dev (project jev), experiment -> zo2.pages.dev (project zo2).
 // CLOUDFLARE_* entries configure wrangler itself and are never uploaded as secrets.
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 
-const PROJECT = 'jev';
+const SITES = { main: 'jev', experiment: 'zo2' };
 const mode = process.argv[2];
+const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { encoding: 'utf8' }).trim();
+const PROJECT = SITES[branch];
+if (mode !== 'dev' && !PROJECT) {
+  console.error(`Branch "${branch}" has no site. Deploy from: ${Object.entries(SITES).map(([b, p]) => `${b} (${p})`).join(', ')}`);
+  process.exit(1);
+}
 
 const all = existsSync('.env')
   ? Object.fromEntries(
@@ -48,13 +55,14 @@ switch (mode) {
     break;
   case 'deploy':
     try {
-      wrangler(['pages', 'project', 'create', PROJECT, '--production-branch', 'main'], { stdio: 'pipe' });
+      wrangler(['pages', 'project', 'create', PROJECT, '--production-branch', branch], { stdio: 'pipe' });
       console.log(`Created Pages project ${PROJECT}`);
     } catch {
       // already exists
     }
     uploadSecrets();
-    wrangler(['pages', 'deploy', 'dist', '--project-name', PROJECT, '--branch', 'main', '--commit-dirty=true']);
+    console.log(`Deploying ${branch} to ${PROJECT}`);
+    wrangler(['pages', 'deploy', 'dist', '--project-name', PROJECT, '--branch', branch, '--commit-dirty=true']);
     break;
   default:
     console.error('usage: env-sync.mjs dev|secrets|deploy');
