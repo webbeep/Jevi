@@ -127,8 +127,8 @@ function PriceFacts({ price, seats }: { price: Price | undefined; seats: number 
       </div>
       {floor && <div className="text-[11px] text-muted-foreground">Minimum {price.minSeats} seats</div>}
       {price.sourceUrl ? (
-        <div className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
-          <a href={price.sourceUrl} target="_blank" rel="noopener noreferrer" className="underline decoration-foreground/20 underline-offset-2 hover:text-foreground">
+        <div className="text-[11px] leading-snug text-muted-foreground">
+          <a href={price.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center underline decoration-foreground/20 underline-offset-2 hover:text-foreground">
             {hostOf(price.sourceUrl)}
           </a>
           {price.asOf ? <span> · as of {price.asOf}</span> : null}
@@ -162,12 +162,12 @@ export function Pricing({ node }: { node: Of<'pricing'> }) {
             }}
             className="justify-start"
           >
-            <ToggleGroupItem value="monthly" className="h-8 px-3 text-xs data-[state=on]:bg-foreground data-[state=on]:text-background">Monthly</ToggleGroupItem>
-            <ToggleGroupItem value="annual" className="h-8 px-3 text-xs data-[state=on]:bg-foreground data-[state=on]:text-background">Annual</ToggleGroupItem>
+            <ToggleGroupItem value="monthly" className="h-11 min-h-11 px-3 text-xs data-[state=on]:bg-foreground data-[state=on]:text-background">Monthly</ToggleGroupItem>
+            <ToggleGroupItem value="annual" className="h-11 min-h-11 px-3 text-xs data-[state=on]:bg-foreground data-[state=on]:text-background">Annual</ToggleGroupItem>
           </ToggleGroup>
         </div>
         <div className="flex items-center gap-2">
-          <Button type="button" variant="outline" size="icon-sm" aria-label="Fewer seats" onClick={() => setClamped(seats - 1)} disabled={seats <= min}>
+          <Button type="button" variant="outline" size="icon-sm" className="size-11" aria-label="Fewer seats" onClick={() => setClamped(seats - 1)} disabled={seats <= min}>
             <Minus />
           </Button>
           <div className="min-w-0 flex-1">
@@ -177,7 +177,7 @@ export function Pricing({ node }: { node: Of<'pricing'> }) {
             </div>
             <Slider min={min} max={max} step={1} value={[seats]} onValueChange={([v]) => v !== undefined && setClamped(v)} />
           </div>
-          <Button type="button" variant="outline" size="icon-sm" aria-label="More seats" onClick={() => setClamped(seats + 1)} disabled={seats >= max}>
+          <Button type="button" variant="outline" size="icon-sm" className="size-11" aria-label="More seats" onClick={() => setClamped(seats + 1)} disabled={seats >= max}>
             <Plus />
           </Button>
         </div>

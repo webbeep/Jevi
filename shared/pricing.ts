@@ -95,6 +95,75 @@ export function priceForBasis(prices: Price[], billing: BillingBasis): Price | u
   return matches.find((p) => p.amount != null && p.sourceUrl) ?? matches[0];
 }
 
+/**
+ * As-of label for a grounded price. A date on the result wins.
+ * Otherwise the day we fetched it, so a sourced price is never undated.
+ */
+export function priceAsOf(sourceDate: string | undefined, retrieved: Date = new Date()): string | undefined {
+  return formatAsOf(sourceDate) ?? formatAsOf(retrieved.toISOString().slice(0, 10));
+}
+
+const RE_BILLED_ANNUAL = /\b(billed annually|billed yearly|annual billing|yearly billing|per year|a year|\/\s?yr|\/\s?year)\b/i;
+const RE_BILLED_MONTHLY = /\b(billed monthly|month-to-month|month to month|pay monthly|no commitment)\b/i;
+
+/**
+ * Billing basis stated next to this amount in the source.
+ * "per month, billed annually" is annual. Undefined when the page doesn't say.
+ */
+export function billingNearAmount(text: string | undefined, amount: number): BillingBasis | undefined {
+  if (!text || !Number.isFinite(amount)) return undefined;
+  const variants = [...new Set([String(amount), amount.toLocaleString('en-US')])];
+  let annual = false;
+  let monthly = false;
+  for (const v of variants) {
+    const re = new RegExp(`(?<![\\d.])${v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\d.])`, 'g');
+    for (const m of text.matchAll(re)) {
+      const i = m.index ?? 0;
+      const nextDollar = text.indexOf('$', i + v.length);
+      const end = nextDollar === -1 ? i + v.length + 120 : Math.min(i + v.length + 120, nextDollar);
+      const window = text.slice(i, end);
+      if (RE_BILLED_ANNUAL.test(window)) annual = true;
+      if (RE_BILLED_MONTHLY.test(window)) monthly = true;
+    }
+  }
+  if (annual && !monthly) return 'annual';
+  if (monthly && !annual) return 'monthly';
+  return undefined;
+}
+
+/** A tool/plan/cost question, where prices belong in the pricing node only. */
+export function isPlanQuery(query: string): boolean {
+  if (inferSeats(query) != null) return true;
+  return /\b(pric\w*|plans?|costs?|cheap\w*|seats?|billing|per\s+seat|per\s+user|vs|versus|invoic\w*|help\s*desk|subscription)\b|under\s+\$|\/\s?seat|\/\s?user/i.test(query);
+}
+
+const PRICE_TOKEN = /(?<![\w£€])(?:US)?\$\s?\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?(?:\s?[kK]\b)?/g;
+const BUDGET_PRE = /(under|below|less than|fewer than|≤|<=|<|up to|max(?:imum)?|budget(?: of)?|cap of|within|over|above|more than)\s*$/i;
+
+/** Drop dollar amounts that are not a budget constraint ("under $50"). */
+export function stripStrayPrices(text: string): string {
+  const stripped = text.replace(PRICE_TOKEN, (m, offset) => {
+    const pre = text.slice(Math.max(0, offset - 24), offset);
+    return BUDGET_PRE.test(pre) ? m : '';
+  });
+  return stripped.replace(/[ \t]{2,}/g, ' ').replace(/\s+([,.;:])/g, '$1').replace(/\(\s*\)/g, '').trim();
+}
+
+const STRIP_SKIP = new Set(['type', 'icon', 'href', 'url', 'src', 'query', 'prompt', 'imageQuery', 'sourceUrl', 'credit', 'image', 'imageSrc']);
+
+/** Remove stray dollar amounts from every node except pricing. */
+export function stripPricesDeep<T>(value: T): T {
+  if (typeof value === 'string') return stripStrayPrices(value) as T;
+  if (Array.isArray(value)) return value.map((item) => stripPricesDeep(item)) as T;
+  if (!value || typeof value !== 'object') return value;
+  if ((value as { type?: string }).type === 'pricing') return value;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    out[k] = STRIP_SKIP.has(k) ? v : stripPricesDeep(v);
+  }
+  return out as T;
+}
+
 /** "Oct 7, 2026" from an ISO fetch date. Anything else without a real date is omitted. */
 export function formatAsOf(raw: string | undefined): string | undefined {
   if (!raw) return undefined;

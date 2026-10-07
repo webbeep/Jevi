@@ -1,5 +1,5 @@
 import type { AnswerCard, CardNode, Tone } from '../shared/card';
-import { formatAsOf, inferSeats, sameSource, type BillingBasis, type Price, type PricePeriod, type PriceUnit } from '../shared/pricing';
+import { billingNearAmount, inferSeats, isPlanQuery, priceAsOf, sameSource, stripPricesDeep, type BillingBasis, type Price, type PricePeriod, type PriceUnit } from '../shared/pricing';
 
 const TONES: Tone[] = ['default', 'muted', 'primary', 'positive', 'negative', 'warning'];
 const MAX_DEPTH = 5;
@@ -31,15 +31,18 @@ const icon = (v: unknown): string | undefined => {
   return s || undefined;
 };
 
-/** A search result a price may cite. */
+/** A search result a price may cite. `text` is the snippet (and page text) used to read billing basis. */
 export interface PriceSource {
   url: string;
   date?: string;
+  text?: string;
 }
 
 export function sanitizeNodes(raw: unknown, imageCount: number, depth = 0, ctx?: { sources?: PriceSource[]; query?: string }): CardNode[] {
   if (depth > MAX_DEPTH) return [];
-  return arr(raw).map((n) => sanitizeNode(n, imageCount, depth, ctx)).filter((n): n is CardNode => !!n);
+  const nodes = arr(raw).map((n) => sanitizeNode(n, imageCount, depth, ctx)).filter((n): n is CardNode => !!n);
+  if (!ctx?.query || !isPlanQuery(ctx.query)) return nodes;
+  return nodes.map((n) => (n.type === 'pricing' ? n : stripPricesDeep(n)));
 }
 
 function sanitizeNode(raw: unknown, imageCount: number, depth: number, ctx?: { sources?: PriceSource[]; query?: string }): CardNode | undefined {
@@ -267,15 +270,16 @@ function groundPrice(raw: unknown, sources: PriceSource[] | undefined): Price | 
   const minSeats = wholeSeats(p.minSeats, 100000);
   const included = wholeSeats(p.includedSeats, 100000);
   const currency = str(p.currency, 3)?.toUpperCase();
+  const fromPage = amount !== undefined ? billingNearAmount(hit?.text, amount) : undefined;
   const price: Price = {
     currency: currency && /^[A-Z]{3}$/.test(currency) ? currency : 'USD',
     unit,
     period,
-    billing,
+    billing: fromPage ?? billing,
     minSeats: minSeats && minSeats >= 1 ? minSeats : undefined,
     includedSeats: included,
     sourceUrl: hit?.url,
-    asOf: formatAsOf(hit?.date),
+    asOf: hit ? priceAsOf(hit.date) : undefined,
   };
   if (hit && amount !== undefined && amount >= 0) price.amount = amount;
   return price;

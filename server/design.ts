@@ -52,7 +52,7 @@ INTERACTIVE (make the card something to play with, not just read)
 - choices {label, options:[{label, prompt, selected}]}  (segmented control; picking an option opens a new card adjusted by its prompt, e.g. time range, focus, audience. The prompt names the subject: "Show the apple pie recipe for a vegan diet")
 - slider {label, min, max, step, value, unit, prompt}  (prompt must contain {value} and name the subject; releasing the slider opens a new adjusted card, e.g. "Plan the Tokyo trip for {value} people")
 - scaler {label, base, value, min, max, step, unit, items:[{name, amount:number, unit}]}  (live, instant rescaling of quantities such as ingredients or costs; base is the amount the sources describe, value is where the control starts, e.g. the amount the person asked for)
-- pricing {label, seats, billing:"monthly"|"annual", plans:[{name, prices:[{amount, currency:"USD", unit:"seat"|"flat", period:"month"|"year", billing:"monthly"|"annual", minSeats, includedSeats, source}]}]}  (plan or subscription prices. amount is the published figure only — per seat, or a flat tier — never a team total. source is the SOURCES number of the page that states that exact price. Give both a monthly and an annual price when both are published. seats is the team size asked about. The card multiplies seats × price locally and toggles billing with no new search.)
+- pricing {label, seats, billing:"monthly"|"annual", plans:[{name, prices:[{amount, currency:"USD", unit:"seat"|"flat", period:"month"|"year", billing:"monthly"|"annual", minSeats, includedSeats, source}]}]}  (plan or subscription prices. amount is the published figure only — per seat, or a flat tier — never a team total. source is the SOURCES number of the page that states that exact price. billing is "annual" when that page says billed annually or yearly, even if the figure is quoted per month; "monthly" only for month-to-month. Give both prices when both are published. seats is the team size asked about. The card multiplies seats × price locally and toggles billing with no new search. Do not repeat any dollar amount outside this node.)
 - accordion {items:[{title, text}]}  (tap to expand details)
 - reveal {items:[{front, back}]}  (tap-to-flip cards for quizzes, myths vs facts, terms)
 icon: any lucide icon name in kebab-case, e.g. "thermometer", "map-pin", "clock", "trending-up".
@@ -162,7 +162,7 @@ HEADER
 RULES
 - Every number, value and fact must come from SOURCES or PAGE TEXT. Never estimate, never use typical or example values, never fill a slot from general knowledge. Any number not found in the sources is automatically deleted, so leave such nodes out.
 - Never compute new numbers yourself (multiplying, converting, summing). When quantities should change with an amount (servings, loaves, people, budget), use a scaler node whose base and amounts are exactly the source values; the person rescales it live.
-- Plan and subscription prices always go in a pricing node, as the published per-seat or flat amount with its source number. Never multiply by people or seats, and never write a team total anywhere else on the card. If the sources do not state a price, leave that amount out.
+- Plan and subscription prices always go in a pricing node, as the published per-seat or flat amount with its source number. Set billing to annual when the source says billed annually, even if the number is per month. Never multiply by people or seats, and never write a dollar amount or team total anywhere else on the card. If the sources do not state a price, leave that amount out.
 - If the sources don't contain what the person asked for (for example a live reading or a price), say so honestly in a short callout and point to the best sources to check.
 - Put citations like [2] inside text nodes where useful. Prefer visual components (hero, tiles, stats, charts, tables, timelines) over paragraphs; keep text short.
 - Nesting depth at most 4.`;
@@ -213,7 +213,11 @@ type Parsed = { kind: 'head'; head: Omit<AnswerCard, 'body'> } | { kind: 'node';
 
 /** Parses one streamed output line into a sanitized, grounded piece of the card. */
 function priceSources(req: DesignRequest): PriceSource[] {
-  return req.search.results.slice(0, 30).map((r) => ({ url: r.url, date: r.date }));
+  return req.search.results.slice(0, 30).map((r) => ({
+    url: r.url,
+    date: r.date,
+    text: `${r.title}\n${r.snippet}\n${r.content ?? ''}`.slice(0, 2500),
+  }));
 }
 
 function parseLine(line: string, g: Grounding, imageCount: number, query: string, sources?: PriceSource[], seatQuery?: string): Parsed | undefined {
