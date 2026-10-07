@@ -6,7 +6,8 @@ import { AnswerCardView } from './card/AnswerCardView';
 import { CardContext } from './card/context';
 import { Icon } from './card/Icon';
 import { LogoMark, Wordmark } from './Logo';
-import { Sources } from './Sources';
+import { type LibraryEntry, buildLibrary } from './library';
+import { FaviconStack, Reader, SourcesRail, SourcesSheet } from './Sources';
 import { type Turn, liveBody, scrollToTurn, useSession } from './useSession';
 import { useSuggestions } from './useSuggestions';
 import { cn } from '@/lib/utils';
@@ -43,8 +44,8 @@ function useTheme() {
 function engineLabel(t: Turn): string | undefined {
   const r = t.result;
   if (r) {
-    const source = r.engine === 'reasoning' ? 'Reasoned answer — not from live sources' : r.engine === 'deepseek' ? 'Composed from sources' : 'Quoted from sources';
-    return [source, r.pagesRead ? `${r.pagesRead} pages read` : '', r.removed ? `${r.removed} unverified removed` : '', r.ms ? `${(r.ms / 1000).toFixed(1)}s` : ''].filter(Boolean).join(' · ');
+    const source = r.engine === 'reasoning' ? 'Reasoned answer — not from live sources' : r.engine === 'composed' ? 'Composed from sources' : 'Quoted from sources';
+    return [source, r.pagesRead ? `${r.pagesRead} pages read` : '', r.removed ? `${r.removed} unverified removed` : '', r.ms ? `${(r.ms / 1000).toFixed(1)}s` : '', r.via ?? ''].filter(Boolean).join(' · ');
   }
   if (t.live?.nodes.length) return 'Composing…';
   if (t.search) return `${t.search.results.length} sources · reading`;
@@ -69,6 +70,21 @@ export default function App() {
   const busy = turns.some((t) => t.filling);
   const title = root?.result?.card.title ?? root?.question ?? '';
   const railTurn = [...turns].reverse().find((t) => t.kind === 'search' && t.search?.results.length);
+  const library = useMemo(() => buildLibrary(turns), [turns]);
+  const [sheet, setSheet] = useState<{ open: boolean; scope?: number }>({ open: false });
+  const [reading, setReading] = useState<LibraryEntry | null>(null);
+  const scopeTurn = turns.find((t) => t.id === sheet.scope);
+  const openSources = (scope?: number) => setSheet({ open: true, scope });
+
+  // The header repeats the conversation title only once the first card's own title has scrolled away.
+  const [titleInView, setTitleInView] = useState(true);
+  useEffect(() => {
+    const el = root ? document.querySelector(`#turn-${root.id} h2`) : null;
+    if (!el) return setTitleInView(true);
+    const io = new IntersectionObserver(([e]) => setTitleInView(e.isIntersecting), { rootMargin: '-56px 0px 0px 0px' });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [root?.id, root?.result]);
 
   const startSearch = (q: string) => {
     const query = q.trim();
@@ -217,7 +233,13 @@ export default function App() {
                 <button onClick={newChat} className="shrink-0 rounded-full" aria-label="Home">
                   <LogoMark className="size-7" />
                 </button>
-                <h1 className="min-w-0 flex-1 truncate text-[15px] font-medium tracking-[-0.01em]">{title}</h1>
+                <h1 className={cn('min-w-0 flex-1 truncate text-[15px] font-medium tracking-[-0.01em] transition-opacity duration-200', titleInView && 'opacity-0')}>{title}</h1>
+                {library.length > 0 && (
+                  <Button variant="ghost" size="sm" className="h-8 shrink-0 gap-2 rounded-lg px-2 text-muted-foreground hover:text-foreground lg:hidden" onClick={() => openSources()} aria-label="Sources">
+                    <FaviconStack domains={library.slice(0, 3).map((e) => e.result.domain)} />
+                    <span className="zo-meta">{library.length}</span>
+                  </Button>
+                )}
                 <Button variant="ghost" size="sm" className="h-8 shrink-0 gap-1.5 rounded-lg px-2.5 text-muted-foreground hover:text-foreground" onClick={newChat}>
                   <Plus className="size-4" />
                   <span className="hidden sm:inline">New chat</span>
@@ -227,16 +249,16 @@ export default function App() {
             </header>
 
             <div className={cn(SHELL, GRID, 'relative pb-[50vh] pt-5 sm:pt-8')}>
-              <main ref={mainRef} className="min-w-0 space-y-10">
-                {turns.map((t, i) => <TurnView key={t.id} turn={t} first={i === 0} session={session} />)}
+              <main ref={mainRef} className="min-w-0 space-y-8 sm:space-y-10">
+                {turns.map((t, i) => <TurnView key={t.id} turn={t} first={i === 0} session={session} onSources={() => openSources(t.id)} />)}
 
                 {last?.result && last.result.followups.length > 0 && !busy && (
-                  <section className="-mt-4 animate-in fade-in">
-                    <h3 className="zo-label mb-1 px-1">Related</h3>
+                  <section className="-mt-2 px-4 animate-in fade-in sm:-mt-4 sm:px-6">
+                    <h3 className="zo-label mb-0.5">Related</h3>
                     <ul className="divide-y">
                       {last.result.followups.map((f) => (
                         <li key={f}>
-                          <button onClick={() => session.followup(f, last.id, 'ask')} className="group flex w-full items-center gap-3 px-1 py-3 text-left text-[14px] leading-snug text-foreground/80 transition-colors hover:text-foreground">
+                          <button onClick={() => session.followup(f, last.id, 'ask')} className="group flex w-full items-center gap-3 py-3 text-left text-[14px] leading-snug text-foreground/80 transition-colors hover:text-foreground">
                             <CornerDownRight className="size-4 shrink-0 text-muted-foreground" />
                             <span className="flex-1">{f}</span>
                             <Plus className="size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
@@ -249,13 +271,28 @@ export default function App() {
               </main>
 
               <aside className="hidden lg:block">
-                {railTurn?.search && (
+                {library.length > 0 && (
                   <div className="sticky top-[5.5rem] max-h-[calc(100dvh-7rem)] overflow-y-auto no-scrollbar">
-                    <Sources key={railTurn.id} layout="rail" results={railTurn.search.results} engines={railTurn.search.engines} query={railTurn.question} onDigest={(r) => session.digest(r, railTurn.id)} />
+                    <SourcesRail entries={library} engines={railTurn?.search?.engines ?? []} onRead={setReading} onAll={() => openSources()} />
                   </div>
                 )}
               </aside>
             </div>
+
+            <SourcesSheet
+              open={sheet.open}
+              onOpenChange={(open) => setSheet((s) => ({ ...s, open }))}
+              entries={library}
+              scope={scopeTurn?.result ? { id: scopeTurn.id, title: scopeTurn.result.card.title } : undefined}
+              onClearScope={() => setSheet({ open: true })}
+              onRead={(e) => { setSheet((s) => ({ ...s, open: false })); setReading(e); }}
+            />
+            <Reader
+              result={reading?.result ?? null}
+              query={turns.find((t) => t.id === reading?.searchId)?.question ?? ''}
+              onClose={() => setReading(null)}
+              onDigest={(r) => reading && session.digest(r, reading.searchId)}
+            />
           </>
         )}
 
@@ -317,7 +354,7 @@ function ThemeToggle({ dark, onToggle }: { dark: boolean; onToggle: () => void }
   );
 }
 
-function TurnView({ turn, first, session }: { turn: Turn; first: boolean; session: ReturnType<typeof useSession> }) {
+function TurnView({ turn, first, session, onSources }: { turn: Turn; first: boolean; session: ReturnType<typeof useSession>; onSources: () => void }) {
   const ctx = session.searchOf(turn);
   const streaming = !!turn.live?.nodes.some(Boolean);
   const card: AnswerCard = useMemo(() => {
@@ -370,6 +407,7 @@ function TurnView({ turn, first, session }: { turn: Turn; first: boolean; sessio
             onSearch: (q) => void session.followup(q, turn.id, 'search'),
             onAsk: (q) => void session.followup(q, turn.id, 'ask'),
             onRefine: (instruction) => void session.followup(instruction, turn.id, 'adjust'),
+            onSources,
           }}
         >
           <AnswerCardView
@@ -387,12 +425,6 @@ function TurnView({ turn, first, session }: { turn: Turn; first: boolean; sessio
             onRegenerate={() => session.redesign(turn.id)}
           />
         </CardContext.Provider>
-      )}
-
-      {turn.kind === 'search' && turn.search && turn.search.results.length > 0 && (
-        <div className="lg:hidden">
-          <Sources layout="strip" results={turn.search.results} engines={turn.search.engines} query={turn.question} onDigest={(r) => session.digest(r, turn.id)} />
-        </div>
       )}
     </section>
   );

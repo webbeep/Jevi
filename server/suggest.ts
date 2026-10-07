@@ -1,4 +1,4 @@
-import { deepseekJson, hasDeepSeek } from './deepseek';
+import { hasLlm, llmJson } from './llm';
 import type { Env } from './util';
 
 export interface Suggestion {
@@ -10,9 +10,9 @@ const SEASONS = ['winter', 'winter', 'spring', 'spring', 'spring', 'summer', 'su
 
 /** Starter prompts that show what ZO is for: getting things done, not just finding links. */
 export async function generateSuggestions(env: Env, now = new Date()): Promise<Suggestion[]> {
-  if (!hasDeepSeek(env)) return [];
+  if (!hasLlm(env)) return [];
   const today = now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
-  const out = await deepseekJson<{ suggestions?: { text?: unknown; icon?: unknown }[] }>(
+  const out = await llmJson<{ suggestions?: { text?: unknown; icon?: unknown }[] }>(
     env,
     `You write the starter prompts on the home screen of ZO, an assistant that searches the web, thinks, and answers with interactive cards (live numbers, comparisons, step-by-step plans, sliders to tweak the answer). The prompts should make someone want to tap one and show the range of what it does.
 

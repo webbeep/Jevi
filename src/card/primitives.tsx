@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Check, ChevronLeft, ChevronRight, Minus, Star, ThumbsDown, ThumbsUp, TrendingDown, TrendingUp } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, Copy, Minus, Star, ThumbsDown, ThumbsUp, TrendingDown, TrendingUp } from 'lucide-react';
 import type { CardNode, Tone } from '../../shared/card';
 import { cn } from '@/lib/utils';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -143,11 +143,12 @@ export function Tile({ node }: { node: Of<'tile'> }) {
 
 export function KeyValue({ node }: { node: Of<'keyvalue'> }) {
   return (
-    <dl className="divide-y rounded-xl border bg-card">
+    <dl className="@container divide-y rounded-xl border bg-card">
       {node.items.map((i) => (
-        <div key={i.label} className="flex items-center justify-between gap-3 px-3 py-2 text-sm sm:px-4 sm:py-2.5">
-          <dt className="flex items-center gap-2 text-muted-foreground"><Icon name={i.icon} className="size-3.5" />{i.label}</dt>
-          <dd className="text-right font-medium"><RichText text={i.value} inline /></dd>
+        // Side by side when there is room; label above value in narrow spots so neither gets squeezed.
+        <div key={i.label} className="flex flex-col gap-0.5 px-3 py-2 text-sm @xs:flex-row @xs:items-center @xs:justify-between @xs:gap-3 sm:px-4 sm:py-2.5">
+          <dt className="flex shrink-0 items-center gap-2 text-muted-foreground @xs:max-w-[45%]"><Icon name={i.icon} className="size-3.5 shrink-0" />{i.label}</dt>
+          <dd className="min-w-0 font-medium @xs:text-right"><RichText text={i.value} inline /></dd>
         </div>
       ))}
     </dl>
@@ -332,6 +333,51 @@ export function Quote({ node }: { node: Of<'quote'> }) {
   );
 }
 
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const t = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(t);
+  }, [copied]);
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="h-7 gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:text-foreground"
+      onClick={() => void navigator.clipboard.writeText(text).then(() => setCopied(true))}
+    >
+      {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+      {copied ? 'Copied' : 'Copy'}
+    </Button>
+  );
+}
+
+/** Something the person asked to have written: shown as a ready-to-use document. */
+export function Draft({ node }: { node: Of<'draft'> }) {
+  return (
+    <div className="overflow-hidden rounded-xl border bg-background/60">
+      <div className="flex h-10 items-center gap-2 border-b pl-3.5 pr-1.5">
+        <span className="zo-label min-w-0 flex-1 truncate">{node.label ?? 'Draft'}</span>
+        <CopyButton text={node.text} />
+      </div>
+      <div className="whitespace-pre-wrap px-3.5 py-3 text-[15px] leading-[1.65] text-foreground/90 sm:px-4 sm:py-3.5">{node.text}</div>
+    </div>
+  );
+}
+
+export function CodeView({ node }: { node: Of<'code'> }) {
+  return (
+    <div className="overflow-hidden rounded-xl border bg-muted/40">
+      <div className="flex h-9 items-center gap-2 border-b pl-3.5 pr-1.5">
+        <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-muted-foreground">{node.lang ?? 'code'}</span>
+        <CopyButton text={node.code} />
+      </div>
+      <pre className="no-scrollbar overflow-x-auto px-3.5 py-3 font-mono text-[12.5px] leading-relaxed sm:text-[13px]"><code>{node.code}</code></pre>
+    </div>
+  );
+}
+
 export function Callout({ node }: { node: Of<'callout'> }) {
   const tone = node.tone ?? 'default';
   return (
@@ -439,23 +485,6 @@ export function Actions({ node }: { node: Of<'actions'> }) {
         <Button key={a.label} variant={a.kind === 'refine' ? 'secondary' : 'outline'} size="sm" className="rounded-full" disabled={busy && a.kind === 'refine'} onClick={() => run(a)}>
           <Icon name={a.icon} fallback={a.kind === 'refine' ? 'wand-sparkles' : a.kind === 'ask' ? 'message-circle' : 'search'} className="size-3.5" />{a.label}
         </Button>
-      ))}
-    </div>
-  );
-}
-
-export function Citations({ node }: { node: Of<'citations'> }) {
-  const { results } = useCard();
-  const items = node.refs.map((r) => ({ n: r, r: results[r - 1] })).filter((x) => x.r);
-  if (!items.length) return null;
-  return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      <span className="zo-label mr-1">Sources</span>
-      {items.map(({ n, r }) => (
-        <a key={n} href={r!.url} target="_blank" rel="noreferrer" title={r!.title} className="inline-flex items-center gap-1.5 rounded-full border bg-card py-0.5 pl-1 pr-2.5 text-xs text-muted-foreground transition-colors hover:text-foreground">
-          <img src={`https://icons.duckduckgo.com/ip3/${r!.domain}.ico`} alt="" className="size-4 rounded-full" />
-          {r!.domain.replace(/^en\./, '')}
-        </a>
       ))}
     </div>
   );

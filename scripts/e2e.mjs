@@ -46,7 +46,7 @@ async function main() {
 
   console.log('health');
   const health = await (await fetch(`${BASE}/api/health`)).json();
-  check(health.jev && health.deepseek, 'Jev and DeepSeek configured', JSON.stringify(health));
+  check(health.jev && health.llm?.[0] === 'DeepSeek', 'Jev configured, DeepSeek first', JSON.stringify(health));
 
   console.log('suggestions');
   const sug = await (await fetch(`${BASE}/api/suggestions`)).json();
@@ -103,6 +103,22 @@ async function main() {
   const productCredits = ps.of('credit');
   check(productCredits.length >= 3, 'each product gets its own picture', `${productCredits.length} pictures: ${productCredits.slice(0, 4).map((c) => c.credit).join(', ')}`);
   check(new Set(productCredits.map((c) => c.src)).size === productCredits.length, 'no picture reused');
+
+  console.log('writing task: "write an email to my landlord about a broken heater"');
+  const wd = await stream({ kind: 'search', query: 'write an email to my landlord about a broken heater', freshness: 'any' });
+  const draft = wd.nodes.find((n) => n.type === 'draft');
+  check(wd.of('plan')[0]?.pattern === 'draft', 'planned as a draft', wd.of('plan')[0]?.pattern);
+  check(!!draft && /heat/i.test(draft.text) && draft.text.length > 200, 'complete draft to copy', `${draft?.text.length ?? 0} chars in ${wd.ms}ms`);
+
+  console.log('code task: "python function to remove duplicates from a list but keep order"');
+  const cd = await stream({ kind: 'search', query: 'python function to remove duplicates from a list but keep order', freshness: 'any' });
+  const code = JSON.stringify(cd.nodes).match(/"type":"code"/);
+  check(!!code && /def /.test(words(cd.nodes)), 'working code block', `${cd.of('plan')[0]?.pattern} in ${cd.ms}ms`);
+
+  console.log('titles');
+  for (const [label, t] of [['apple pie', s.card.title], ['shoes', ps.card.title], ['email', wd.card.title], ['code', cd.card.title]]) {
+    check(t.length > 0 && t.length <= 48 && !/\?$/.test(t), `${label} card has a short screen title`, `"${t}"`);
+  }
 
   console.log(`\n${failures ? `${failures} check(s) failed` : 'All checks passed'}`);
   process.exit(failures ? 1 : 0);

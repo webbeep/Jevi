@@ -1,6 +1,6 @@
 import type { AnswerCard, CardNode, FollowupContext, ImageCredit, LayoutPlan } from '../shared/card';
 import type { SearchResponse } from '../shared/types';
-import { deepseekLines, hasDeepSeek } from './deepseek';
+import { hasLlm, llmLines } from './llm';
 import { candidates, extractStats, extractTimeline } from './extract';
 import { Grounding, groundNodes } from './ground';
 import { PictureResolver } from './pictures';
@@ -36,6 +36,8 @@ DISPLAY
 - badges {items:[string]}
 - quote {text, source}
 - callout {tone, title, text, icon}
+- draft {label, text}  (a finished piece of writing the person asked for — email, message, post, letter, bio, cover letter — shown as a document with a copy button; label names it, e.g. "Email to landlord"; use \\n for line breaks)
+- code {lang, code}  (a complete, runnable code snippet with a copy button; lang like "python", "sql", "bash")
 - image {query | ref, caption, aspect:"wide"|"square"|"tall"}
 - gallery {query | refs}  (several real photos of one subject)
 - profile {name, subtitle, imageQuery | imageRef, facts:[{label, value}]}
@@ -94,8 +96,9 @@ export interface DesignEvents {
 
 export interface DesignSummary {
   /** 'reasoning' marks answers built from thinking and general knowledge rather than sources. */
-  engine: 'deepseek' | 'reasoning' | 'extractive';
+  engine: 'composed' | 'reasoning' | 'extractive';
   removed: number;
+  via?: string;
 }
 
 function followupRules(f: FollowupContext | undefined, originalQuery: string): string {
@@ -127,6 +130,22 @@ STYLE — visual first, minimal text
 - Predict what they will want next: offer the 1-3 most likely adjustments as controls (choices, slider, scaler) or "refine" actions — e.g. a different budget, size, date range, audience or level of detail — so they never have to type a clarification.
 - Pictures: every picture must show the specific item it sits next to — each product, place, dish or person gets its own imageQuery with its exact name. Use pictures where seeing the item helps (products, places, food, people, animals, landmarks, designs); skip them for abstract topics. Never reuse one picture for several items and never use a general stock-style photo.
 - Charts and tables only when they add understanding: a chart needs 3+ comparable numbers from the sources (a trend, a ranking, shares of a whole); a table needs 2+ items compared across 3+ attributes. Never chart two numbers or non-numeric facts; a stat or tile is better there.
+
+FIT THE KIND OF REQUEST
+- Quick fact (who, when, how tall, what time, define a word): the answer in a hero or one sentence, a line of context, and little else — 2-3 nodes.
+- How-to or recipe: time, difficulty or servings tiles, what you need, numbered steps, then one tip.
+- Best X / what to buy: the verdict first, then a media list of picks — each with its own picture and a price or score badge — then what to look for.
+- X vs Y: a table across the attributes that matter and a one-line verdict on who should pick which.
+- Person, place, company or product: profile with picture and key facts, then a short background.
+- News or anything recent: the latest development first with its date; date every item; cite each one.
+- Health, medical, legal, money or safety: give the useful answer plainly, then one short callout on when to see a professional. Never alarmist, never refuse a general question.
+- Writing for them (email, message, post, letter, rewrite): one complete draft node first, ready to send — no placeholders like [Name] unless the detail is truly unknown — then choices for tone or length.
+- Code: a complete, runnable code node first, then a short explanation of the key lines and how to run it.
+- Plans (trip, workout, study, meals): key numbers as tiles, then the plan in tabs by day or phase.
+
+HEADER
+- title: 2-6 words, at most 40 characters, naming the subject like an app screen title ("Apple Pie Recipe", "Tokyo in 3 Days") — never a question or a full sentence.
+- subtitle: at most 8 words of useful context (what kind of answer, for whom, or how fresh), never a repeat of the title.
 
 RULES
 - Every number, value and fact must come from SOURCES or PAGE TEXT. Never estimate, never use typical or example values, never fill a slot from general knowledge. Any number not found in the sources is automatically deleted, so leave such nodes out.
@@ -204,7 +223,7 @@ function parseLine(line: string, g: Grounding, imageCount: number, query: string
   return grounded ? { kind: 'node', node: grounded } : { kind: 'dropped' };
 }
 
-const NODE_TYPES = new Set<string>(['stack', 'grid', 'section', 'tabs', 'scroller', 'divider', 'hero', 'heading', 'text', 'stat', 'tile', 'keyvalue', 'list', 'chart', 'progress', 'rating', 'table', 'timeline', 'steps', 'proscons', 'badges', 'quote', 'callout', 'image', 'gallery', 'profile', 'actions', 'choices', 'slider', 'scaler', 'accordion', 'reveal', 'citations'] satisfies CardNode['type'][]);
+const NODE_TYPES = new Set<string>(['stack', 'grid', 'section', 'tabs', 'scroller', 'divider', 'hero', 'heading', 'text', 'stat', 'tile', 'keyvalue', 'list', 'chart', 'progress', 'rating', 'table', 'timeline', 'steps', 'proscons', 'badges', 'quote', 'callout', 'draft', 'code', 'image', 'gallery', 'profile', 'actions', 'choices', 'slider', 'scaler', 'accordion', 'reveal', 'citations'] satisfies CardNode['type'][]);
 
 /** Explanations and conversation turns may run longer; everything else stays glanceable. */
 function textCap(req: DesignRequest): number {
@@ -218,7 +237,7 @@ const isContent = (n: CardNode) => n.type !== 'actions' && n.type !== 'citations
 /** Streams a designed card from a single call: header first, then each grounded top-level node as soon as it is written. */
 export async function designStream(req: DesignRequest, env: Env, on: DesignEvents): Promise<DesignSummary> {
   const imageCount = Math.min(req.search.images.length, 12);
-  if (!hasDeepSeek(env)) return extractive(req, on);
+  if (!hasLlm(env)) return extractive(req, on);
 
   const chat = req.followup?.mode === 'chat';
   const g = new Grounding(corpusOf(req), chat);
@@ -231,8 +250,9 @@ export async function designStream(req: DesignRequest, env: Env, on: DesignEvent
   let index = 0;
   let contentNodes = 0;
   let removed = 0;
+  let via: string | undefined;
   try {
-    await deepseekLines(env, SYSTEM_WHOLE, user, 2800, (line) => {
+    via = await llmLines(env, SYSTEM_WHOLE, user, 2800, (line) => {
       const parsed = parseLine(line, g, imageCount, req.query);
       if (!parsed) return;
       switch (parsed.kind) {
@@ -261,11 +281,23 @@ export async function designStream(req: DesignRequest, env: Env, on: DesignEvent
       }
     }, { think: req.think, onThinking: on.thinking });
   } catch (err) {
-    console.error('DeepSeek stream failed', err);
+    console.error('Design stream failed', err);
   }
   await pictures.flush();
   if (!contentNodes) return extractive(req, on);
-  return { engine: chat ? 'reasoning' : 'deepseek', removed };
+  return { engine: chat ? 'reasoning' : 'composed', removed, via };
+}
+
+const SMALL_WORDS = new Set(['a', 'an', 'and', 'as', 'at', 'by', 'for', 'in', 'of', 'on', 'or', 'the', 'to', 'vs', 'with']);
+
+/** "symptoms of vitamin d deficiency" → "Symptoms of Vitamin D Deficiency", for when the model sends no title. */
+function titleCase(q: string): string {
+  return q
+    .trim()
+    .replace(/[?.!]+$/, '')
+    .split(/\s+/)
+    .map((w, i) => (i > 0 && SMALL_WORDS.has(w.toLowerCase()) ? w.toLowerCase() : w === w.toLowerCase() ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(' ');
 }
 
 /** Plain-language summary of what a skeleton region is for, from its slot hints. */
@@ -291,7 +323,7 @@ const FINISH_SLOTS = 3;
  */
 export async function designParallel(req: DesignRequest, env: Env, on: DesignEvents): Promise<DesignSummary> {
   const imageCount = Math.min(req.search.images.length, 12);
-  if (!hasDeepSeek(env)) return extractive(req, on);
+  if (!hasLlm(env)) return extractive(req, on);
 
   const regions = patternById(req.pattern).skeleton;
   on.layout(regions);
@@ -308,7 +340,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
   const regionCall = (region: CardNode, i: number) => {
     const user = `${shared}\n- YOU DESIGN R${i + 1}: ${JSON.stringify(region)}. Replace its slots with real components; you may reshape it (a stack or grid can hold several components) but keep to this region's purpose.${i === 0 ? ' R1 is the lead: it must answer the question at a glance.' : ''}\n- Output exactly one line: one JSON node.\n\nQUERY: ${query}`;
     let done = false;
-    return deepseekLines(env, SYSTEM_REGION, user, 1200, (line) => {
+    return llmLines(env, SYSTEM_REGION, user, 1200, (line) => {
       if (done) return;
       const parsed = parseLine(line, g, imageCount, req.query);
       if (parsed?.kind === 'node') {
@@ -324,7 +356,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
   const finishCall = () => {
     const user = `${shared}\n- YOU DESIGN FINISH. Output these lines:\n  1. {"title":string,"subtitle":string,"icon":string,"accent":tone} for the whole card\n  2. only if the answer has something worth adjusting, exploring or testing: one interactive node such as {"type":"choices",...} or {"type":"slider",...} that the regions above don't already cover\n  3. {"type":"actions","items":[...]} with 2-4 useful next steps (prefer kind "refine" for changes to this card)\n  4. {"type":"citations","refs":[...]} with the source numbers that matter most\n  5. {"followups":[4 short follow-up questions, each naming the subject so it stands alone]}\n\nQUERY: ${query}`;
     let extra = 0;
-    return deepseekLines(env, SYSTEM_REGION, user, 1000, (line) => {
+    return llmLines(env, SYSTEM_REGION, user, 1000, (line) => {
       const parsed = parseLine(line, g, imageCount, req.query);
       if (!parsed) return;
       switch (parsed.kind) {
@@ -354,11 +386,12 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
   };
 
   const results = await Promise.allSettled([...regions.map(regionCall), finishCall()]);
-  if (!headSentAny) on.head({ title: req.query.replace(/^./, (c) => c.toUpperCase()) });
+  if (!headSentAny) on.head({ title: titleCase(req.query) });
   results.filter((r) => r.status === 'rejected').forEach((r) => console.error('region failed', (r as PromiseRejectedResult).reason));
   await pictures.flush();
   if (!contentNodes) return extractive(req, on);
-  return { engine: 'deepseek', removed };
+  const via = [...new Set(results.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : [])))].join(' + ') || undefined;
+  return { engine: 'composed', removed, via };
 }
 
 /** Builds a card straight from snippet sentences when no generator is available. */

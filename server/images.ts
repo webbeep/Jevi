@@ -8,9 +8,12 @@ const STOP = new Set(['the', 'and', 'for', 'with', 'photo', 'image', 'picture', 
 /** Publisher preview images are allowed unless the deployment opts into open-licensed pictures only. */
 export const allowsSourceImages = (env: Env) => env.IMAGE_POLICY !== 'open';
 
-/** Drops pictures the deployment's image policy does not allow. */
+/** Site-wide publisher previews (logos, placeholders, icons) say nothing about the subject. */
+const GENERIC_PREVIEW = /logo|fallback|placeholder|default|favicon|sprite|share[-_]?image|social[-_]?(card|share)|\bicons?\b|blank|spacer|\.(gif|svg|ico)(\?|$)/i;
+
+/** Drops pictures the deployment's image policy does not allow, and publisher previews that are just branding. */
 export function permitted(images: ImageResult[], env: Env): ImageResult[] {
-  return allowsSourceImages(env) ? images : images.filter((i) => i.license !== 'source');
+  return images.filter((i) => i.license !== 'source' || (allowsSourceImages(env) && !GENERIC_PREVIEW.test(i.thumb.split('#')[0])));
 }
 
 /** Significant words of an image query, used to check that a found picture is of that exact item. */

@@ -45,6 +45,15 @@ export function cardDigest(card: AnswerCard, max = 420): string {
       case 'scaler':
         facts.push(`${n.label}: ${n.value ?? (n.type === 'scaler' ? n.base : '')}${n.unit ? ` ${n.unit}` : ''}`);
         break;
+      case 'draft':
+        facts.push(`${n.label ?? 'draft'}: "${n.text.slice(0, Math.max(200, max / 2))}"`);
+        break;
+      case 'code':
+        facts.push(`${n.lang ?? ''} code: ${n.code.slice(0, Math.max(160, max / 3))}`);
+        break;
+      case 'tabs':
+        n.tabs.forEach((t) => t.children.forEach(walk));
+        break;
       default:
         if ('children' in n) n.children.forEach(walk);
     }

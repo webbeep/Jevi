@@ -1,4 +1,4 @@
-import { Image as ImageIcon, Loader2, MoreHorizontal, RefreshCw } from 'lucide-react';
+import { ChevronRight, Image as ImageIcon, Loader2, MoreHorizontal, RefreshCw } from 'lucide-react';
 import type { AnswerCard, CardNode, CardPattern } from '../../shared/card';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -18,7 +18,9 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Skeleton } from '@/components/ui/skeleton';
+import { citedRefs } from '../library';
 import { LogoMark } from '../Logo';
+import { FaviconStack } from '../Sources';
 import { useCard } from './context';
 import { Icon } from './Icon';
 import { Nodes } from './render';
@@ -70,19 +72,20 @@ export function AnswerCardView({ card, version, filling, streaming, status, patt
   onSimple: (v: boolean) => void;
   onRegenerate: () => void;
 }) {
-  const { images, credits } = useCard();
+  const { images, credits, results, onSources } = useCard();
   const credited = filling ? [] : pictureSources(card.body, images).flatMap((src) => (credits[src] ? [{ src, ...credits[src] }] : []));
+  const cited = filling ? [] : citedRefs(card).flatMap((n) => (results[n - 1] ? [results[n - 1]] : []));
   return (
     <div className="relative isolate rounded-2xl">
     <div className="zo-aura" data-on={filling} />
     <Card className="relative gap-0 overflow-hidden rounded-2xl py-0 shadow-card">
-      <div className="flex items-center gap-3 px-4 pb-1 pt-4 sm:px-6 sm:pt-5">
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-background">
-          {filling && !card.icon ? <LogoMark className="size-4 animate-pulse" /> : <Icon name={card.icon} fallback="layout-grid" className="size-[18px] text-foreground/80" />}
+      <div className="flex items-start gap-2.5 pb-1 pl-4 pr-2 pt-3.5 sm:gap-3 sm:pl-6 sm:pr-3 sm:pt-5">
+        <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg border bg-background sm:size-9">
+          {filling && !card.icon ? <LogoMark className="size-4 animate-pulse" /> : <Icon name={card.icon} fallback="layout-grid" className="size-4 text-foreground/80 sm:size-[18px]" />}
         </div>
-        <div className="min-w-0 flex-1">
-          <h2 className="truncate text-[17px] font-semibold leading-snug tracking-[-0.02em]">{card.title}</h2>
-          {filling && !card.subtitle ? <Skeleton className="mt-1 h-3 w-32" /> : card.subtitle && <p className="truncate text-[13px] text-muted-foreground">{card.subtitle}</p>}
+        <div className="min-w-0 flex-1 self-center">
+          <h2 className="text-balance text-[16.5px] font-semibold leading-[1.3] tracking-[-0.02em] sm:text-[17px]">{card.title}</h2>
+          {filling && !card.subtitle ? <Skeleton className="mt-1 h-3 w-32" /> : card.subtitle && <p className="mt-0.5 line-clamp-2 text-[13px] leading-snug text-muted-foreground">{card.subtitle}</p>}
         </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -136,9 +139,20 @@ export function AnswerCardView({ card, version, filling, streaming, status, patt
         </div>
       )}
 
-      <div className={cn('px-4 pb-5 pt-4 transition-[opacity,filter] duration-300 sm:px-6 sm:pb-6', status && !streaming && 'pointer-events-none opacity-50 blur-[1px]')}>
+      <div className={cn('px-4 pb-5 pt-3.5 transition-[opacity,filter] duration-300 sm:px-6 sm:pb-6 sm:pt-4', status && !streaming && 'pointer-events-none opacity-50 blur-[1px]', cited.length && 'pb-4 sm:pb-5')}>
         <Nodes key={version} nodes={card.body} className="gap-5" stagger={!streaming} />
       </div>
+
+      {cited.length > 0 && (
+        <button onClick={onSources} className="flex h-11 w-full items-center gap-2.5 border-t px-4 text-left text-[13px] text-muted-foreground transition-colors animate-in fade-in hover:bg-foreground/[0.03] hover:text-foreground sm:px-6">
+          <FaviconStack domains={cited.map((r) => r.domain)} />
+          <span className="min-w-0 flex-1 truncate">
+            {cited.length} {cited.length === 1 ? 'source' : 'sources'}
+            <span className="text-muted-foreground/70"> · {[...new Set(cited.map((r) => r.domain.replace(/^(www|en|m)\./, '')))].slice(0, 3).join(', ')}</span>
+          </span>
+          <ChevronRight className="size-4 shrink-0" />
+        </button>
+      )}
     </Card>
     </div>
   );

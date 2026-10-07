@@ -7,7 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Icon } from './Icon';
 import { AccordionNode, Choices, Reveal, Scaler, SliderNode } from './interactive';
 import {
-  Actions, Badges, Callout, Citations, Gallery, Heading, Hero, ImageView, KeyValue, List, Profile,
+  Actions, Badges, Callout, CodeView, Draft, Gallery, Heading, Hero, ImageView, KeyValue, List, Profile,
   ProgressView, ProsCons, Quote, Rating, SlotView, StatView, Steps, TableView, Text, Tile, Timeline, TONE_TEXT,
 } from './primitives';
 
@@ -15,6 +15,7 @@ const ChartView = lazy(() => import('./ChartView'));
 
 const GAP: Record<Gap, string> = { sm: 'gap-1.5 sm:gap-2', md: 'gap-2 sm:gap-3', lg: 'gap-3 sm:gap-5' };
 const COLS = { 2: 'grid-cols-2', 3: 'grid-cols-2 sm:grid-cols-3', 4: 'grid-cols-2 sm:grid-cols-4' } as const;
+const WIDE_COLS = { 2: 'sm:grid-cols-2', 3: 'sm:grid-cols-3', 4: 'sm:grid-cols-2 lg:grid-cols-4' } as const;
 const ALIGN = { start: 'sm:items-start', center: 'sm:items-center', end: 'sm:items-end', between: 'sm:items-center sm:justify-between' } as const;
 
 /** Whether a node is (or contains) a placeholder, so swapping it for real content remounts and animates it. */
@@ -30,7 +31,7 @@ function isCompact(n: CardNode): boolean {
 export function Nodes({ nodes, className, stagger = false }: { nodes: CardNode[]; className?: string; stagger?: boolean }) {
   return (
     <div className={cn('flex flex-col gap-4', className)}>
-      {nodes.map((n, i) => (
+      {nodes.filter((n) => n.type !== 'citations').map((n, i) => (
         <div key={`${i}-${hasSlot(n) ? 'placeholder' : n.type}`} className={cn('min-w-0', !hasSlot(n) && 'animate-in fade-in slide-in-from-bottom-2 fill-mode-backwards duration-500')} style={stagger ? { animationDelay: `${i * 70}ms` } : undefined}>
           <NodeView node={n} />
         </div>
@@ -51,7 +52,8 @@ export function NodeView({ node }: { node: CardNode }): ReactNode {
       );
     }
     case 'grid':
-      return <div className={cn('grid', COLS[node.cols], GAP[node.gap ?? 'md'], '[&>*]:h-full')}>{node.children.map((c, i) => <NodeView key={i} node={c} />)}</div>;
+      // Only small cells (tiles, stats) stay two-up on phones; larger blocks get the full width.
+      return <div className={cn('grid', node.children.every(isCompact) ? COLS[node.cols] : WIDE_COLS[node.cols], GAP[node.gap ?? 'md'], '[&>*]:h-full')}>{node.children.map((c, i) => <NodeView key={i} node={c} />)}</div>;
     case 'section':
       return (
         <section className="space-y-2 sm:space-y-3">
@@ -100,11 +102,14 @@ export function NodeView({ node }: { node: CardNode }): ReactNode {
     case 'badges': return <Badges node={node} />;
     case 'quote': return <Quote node={node} />;
     case 'callout': return <Callout node={node} />;
+    case 'draft': return <Draft node={node} />;
+    case 'code': return <CodeView node={node} />;
     case 'image': return <ImageView node={node} />;
     case 'gallery': return <Gallery node={node} />;
     case 'profile': return <Profile node={node} />;
     case 'actions': return <Actions node={node} />;
-    case 'citations': return <Citations node={node} />;
+    // Cited sources are listed once, in the card's footer.
+    case 'citations': return null;
     case 'slot': return <SlotView node={node} />;
     case 'choices': return <Choices node={node} />;
     case 'slider': return <SliderNode node={node} />;

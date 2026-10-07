@@ -102,6 +102,7 @@ export interface ReadResponse {
 
 export interface HealthResponse {
   jev: boolean;
-  deepseek: boolean;
+  /** Language model providers in fallback order. */
+  llm: string[];
   keyedEngines: string[];
 }

@@ -50,6 +50,9 @@ function groundNode(node: CardNode, g: Grounding): CardNode | undefined {
     case 'actions':
     case 'citations':
     case 'slot':
+    // Written output the person asked for, not claims about the world.
+    case 'draft':
+    case 'code':
       return node.type === 'badges' ? { ...node, items: node.items.filter((b) => g.ok(b)) } : node;
     case 'hero':
       return g.ok(node.value) ? { ...node, caption: node.caption && g.sentences(node.caption) } : undefined;

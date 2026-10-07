@@ -1,11 +1,11 @@
 import { cn } from '@/lib/utils';
 
-/** ZO mark: a half-disc (the O) and a wedge (the Z's diagonal) split along one cut. */
+/** ZO mark: a half-disc (the O) and a wedge of equal area (the Z's diagonal), split along one wide cut. */
 export function LogoMark({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 32 32" className={cn('size-7', className)} fill="currentColor" aria-hidden>
-      <path d="M23.79 5.41A13 13 0 0 0 5.41 23.79Z" />
-      <path d="M8.21 26.59L26.59 8.21V26.59Z" />
+      <path d="M24.1 5.8A12.95 12.95 0 0 0 5.8 24.1Z" />
+      <path d="M7.06 30H26.5A3.5 3.5 0 0 0 30 26.5V7.06Z" />
     </svg>
   );
 }

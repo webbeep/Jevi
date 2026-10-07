@@ -1,15 +1,19 @@
 import { useEffect, useState } from 'react';
-import { ExternalLink, FileText, LayoutGrid, List } from 'lucide-react';
+import { ExternalLink, FileText, LayoutGrid, X } from 'lucide-react';
 import type { EngineStatus, SearchResult } from '../shared/types';
 import { api } from './api';
+import type { LibraryEntry } from './library';
 import { cn } from '@/lib/utils';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Skeleton } from '@/components/ui/skeleton';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
-const favicon = (domain: string) => `https://icons.duckduckgo.com/ip3/${domain}.ico`;
+export const favicon = (domain: string) => `https://icons.duckduckgo.com/ip3/${domain}.ico`;
+const shortDomain = (d: string) => d.replace(/^(www|en|m)\./, '');
+
+export type SourceFilter = 'cited' | 'all';
 
 function useIsDesktop() {
   const [desktop, setDesktop] = useState(() => matchMedia('(min-width: 768px)').matches);
@@ -22,7 +26,18 @@ function useIsDesktop() {
   return desktop;
 }
 
-function Reader({ result, query, onClose, onDigest }: { result: SearchResult | null; query: string; onClose: () => void; onDigest: (r: SearchResult) => void }) {
+/** Overlapping favicons of the first few sources. */
+export function FaviconStack({ domains, size = 'sm' }: { domains: string[]; size?: 'sm' | 'md' }) {
+  return (
+    <span className="flex shrink-0 -space-x-1.5">
+      {[...new Set(domains)].slice(0, 4).map((d) => (
+        <img key={d} src={favicon(d)} alt="" loading="lazy" className={cn('rounded-full bg-background ring-2 ring-card', size === 'sm' ? 'size-4' : 'size-[18px]')} />
+      ))}
+    </span>
+  );
+}
+
+export function Reader({ result, query, onClose, onDigest }: { result: SearchResult | null; query: string; onClose: () => void; onDigest: (r: SearchResult) => void }) {
   const desktop = useIsDesktop();
   const [text, setText] = useState<string>();
   const [error, setError] = useState<string>();
@@ -48,7 +63,7 @@ function Reader({ result, query, onClose, onDigest }: { result: SearchResult | n
             <SheetHeader className="border-b p-4 pr-12">
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <img src={favicon(result.domain)} alt="" className="size-4 rounded-sm" />
-                {result.domain}
+                {shortDomain(result.domain)}
               </div>
               <SheetTitle className="text-base leading-snug">{result.title}</SheetTitle>
               <SheetDescription className="sr-only">Readable text of this source</SheetDescription>
@@ -77,17 +92,49 @@ function Reader({ result, query, onClose, onDigest }: { result: SearchResult | n
   );
 }
 
-export function Sources({ layout, results, engines, query, onDigest }: { layout: 'strip' | 'rail'; results: SearchResult[]; engines: EngineStatus[]; query: string; onDigest: (r: SearchResult) => void }) {
-  const [reading, setReading] = useState<SearchResult | null>(null);
-  const [all, setAll] = useState(false);
-  const withText = results.filter((r) => r.content).length;
+function FilterToggle({ value, onChange, cited, all }: { value: SourceFilter; onChange: (v: SourceFilter) => void; cited: number; all: number }) {
+  return (
+    <ToggleGroup type="single" size="sm" value={value} onValueChange={(v) => v && onChange(v as SourceFilter)} className="rounded-lg bg-foreground/[0.05] p-0.5">
+      {(['cited', 'all'] as const).map((f) => (
+        <ToggleGroupItem key={f} value={f} disabled={f === 'cited' && !cited} className="h-6 rounded-md px-2 text-[11.5px] text-muted-foreground data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm">
+          {f === 'cited' ? 'Cited' : 'All'}
+          <span className="zo-meta">{f === 'cited' ? cited : all}</span>
+        </ToggleGroupItem>
+      ))}
+    </ToggleGroup>
+  );
+}
+
+function SourceRow({ entry, onRead, detail = false }: { entry: LibraryEntry; onRead: (e: LibraryEntry) => void; detail?: boolean }) {
+  const r = entry.result;
+  return (
+    <button onClick={() => onRead(entry)} className={cn('flex w-full flex-col gap-1 text-left transition-colors hover:bg-foreground/[0.04]', detail ? 'px-4 py-3' : 'rounded-lg px-2 py-2.5')}>
+      <span className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
+        <img src={favicon(r.domain)} alt="" className="size-3.5 rounded-[3px]" loading="lazy" />
+        <span className="truncate">{shortDomain(r.domain)}</span>
+        {r.content && <FileText className="size-3 shrink-0 opacity-60" aria-label="Full text read" />}
+        {entry.citedBy.length > 0 && <span className="zo-meta ml-auto shrink-0 text-foreground/60">cited{entry.citedBy.length > 1 ? ` ×${entry.citedBy.length}` : ''}</span>}
+      </span>
+      <span className="line-clamp-2 text-[13px] font-medium leading-snug">{r.title}</span>
+      {detail && r.snippet && <span className="line-clamp-2 text-xs leading-relaxed text-muted-foreground">{r.snippet}</span>}
+    </button>
+  );
+}
+
+/** Desktop side rail: the conversation's sources, cited ones first. */
+export function SourcesRail({ entries, engines, onRead, onAll }: { entries: LibraryEntry[]; engines: EngineStatus[]; onRead: (e: LibraryEntry) => void; onAll: () => void }) {
+  const cited = entries.filter((e) => e.citedBy.length);
+  const [filter, setFilter] = useState<SourceFilter>('all');
+  const [touched, setTouched] = useState(false);
+  // Once cards cite something, show what they used — unless the person already picked a filter.
+  const active: SourceFilter = touched ? filter : cited.length ? 'cited' : 'all';
+  const shown = (active === 'cited' ? cited : entries).slice(0, 10);
 
   return (
-    <section className="space-y-2.5">
-      <div className="flex items-center gap-2">
+    <section className="space-y-2">
+      <div className="flex h-7 items-center gap-2">
         <h3 className="zo-label text-foreground">Sources</h3>
-        <span className="zo-meta">{results.length}{withText ? ` · ${withText} read` : ''}</span>
-        <div className="ml-auto flex items-center gap-1">
+        <div className="flex items-center gap-1">
           {engines.map((e) => (
             <Tooltip key={e.name}>
               <TooltipTrigger asChild>
@@ -96,68 +143,61 @@ export function Sources({ layout, results, engines, query, onDigest }: { layout:
               <TooltipContent>{e.name}: {e.ok ? `${e.count} results · ${e.ms}ms` : e.error}</TooltipContent>
             </Tooltip>
           ))}
-          <Button variant="ghost" size="sm" className="ml-1 h-7 rounded-lg px-2 text-xs text-muted-foreground" onClick={() => setAll(true)}><List className="size-3.5" />All</Button>
+        </div>
+        <div className="ml-auto">
+          <FilterToggle value={active} onChange={(v) => { setTouched(true); setFilter(v); }} cited={cited.length} all={entries.length} />
         </div>
       </div>
-
-      {layout === 'strip' ? (
-        <div className="no-scrollbar -mx-3 flex snap-x gap-2 overflow-x-auto px-3 pb-1 sm:mx-0 sm:px-0">
-          {results.slice(0, 10).map((r, i) => (
-            <button key={r.url} onClick={() => setReading(r)} className="flex w-56 shrink-0 snap-start flex-col gap-1.5 rounded-xl border bg-card p-3 text-left transition-colors hover:bg-accent/60 sm:w-60">
-              <SourceMeta result={r} index={i} />
-              <span className="line-clamp-2 text-[13px] font-medium leading-snug">{r.title}</span>
-            </button>
-          ))}
-        </div>
-      ) : (
-        <ol className="-mx-2">
-          {results.slice(0, 8).map((r, i) => (
-            <li key={r.url}>
-              <button onClick={() => setReading(r)} className="flex w-full flex-col gap-1 rounded-lg px-2 py-2.5 text-left transition-colors hover:bg-foreground/[0.04]">
-                <SourceMeta result={r} index={i} />
-                <span className="line-clamp-2 text-[13px] font-medium leading-snug">{r.title}</span>
-              </button>
-            </li>
-          ))}
-        </ol>
+      <ol className="-mx-2">
+        {shown.map((e) => <li key={e.result.url}><SourceRow entry={e} onRead={onRead} /></li>)}
+      </ol>
+      {entries.length > shown.length && (
+        <button onClick={onAll} className="px-0 text-xs text-muted-foreground transition-colors hover:text-foreground">Show all {entries.length} sources</button>
       )}
-
-      <Sheet open={all} onOpenChange={setAll}>
-        <SheetContent side="right" className="w-full gap-0 p-0 sm:max-w-md">
-          <SheetHeader className="border-b p-4">
-            <SheetTitle>All sources</SheetTitle>
-            <SheetDescription>{results.length} results merged from {engines.filter((e) => e.ok && e.count).length} engines</SheetDescription>
-          </SheetHeader>
-          <div className="flex-1 divide-y overflow-y-auto">
-            {results.map((r, i) => (
-              <button key={r.url} onClick={() => { setAll(false); setReading(r); }} className="flex w-full gap-3 px-4 py-3 text-left hover:bg-muted/40">
-                <span className="w-4 shrink-0 pt-0.5 text-right text-xs tabular-nums text-muted-foreground">{i + 1}</span>
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <img src={favicon(r.domain)} alt="" className="size-3.5 rounded-sm" loading="lazy" />{r.domain}
-                    {r.engines.length > 1 && <Badge variant="secondary" className="h-4 px-1 text-[10px]">×{r.engines.length}</Badge>}
-                  </span>
-                  <span className="mt-0.5 line-clamp-1 block text-sm font-medium">{r.title}</span>
-                  <span className="mt-0.5 line-clamp-2 block text-xs text-muted-foreground">{r.snippet}</span>
-                </span>
-              </button>
-            ))}
-          </div>
-        </SheetContent>
-      </Sheet>
-
-      <Reader result={reading} query={query} onClose={() => setReading(null)} onDigest={onDigest} />
     </section>
   );
 }
 
-function SourceMeta({ result, index }: { result: SearchResult; index: number }) {
+/** Every source in the conversation; optionally narrowed to the ones one card cites. */
+export function SourcesSheet({ open, onOpenChange, entries, scope, onClearScope, onRead }: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  entries: LibraryEntry[];
+  scope?: { id: number; title: string };
+  onClearScope: () => void;
+  onRead: (e: LibraryEntry) => void;
+}) {
+  const desktop = useIsDesktop();
+  const cited = entries.filter((e) => e.citedBy.length);
+  const [filter, setFilter] = useState<SourceFilter>('cited');
+  useEffect(() => {
+    if (open) setFilter(scope || cited.length ? 'cited' : 'all');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, scope?.id]);
+  const scoped = scope ? entries.filter((e) => e.citedBy.includes(scope.id)) : cited;
+  const shown = filter === 'cited' ? scoped : entries;
+
   return (
-    <span className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
-      <img src={favicon(result.domain)} alt="" className="size-3.5 rounded-[3px]" loading="lazy" />
-      <span className="truncate">{result.domain.replace(/^(www|en)\./, '')}</span>
-      {result.content && <FileText className="size-3 shrink-0 opacity-60" aria-label="Full text available" />}
-      <span className="zo-meta ml-auto">{String(index + 1).padStart(2, "0")}</span>
-    </span>
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent side={desktop ? 'right' : 'bottom'} className={cn('gap-0 p-0', desktop ? 'w-full sm:max-w-md' : 'h-[85dvh] rounded-t-2xl')}>
+        <SheetHeader className="gap-3 border-b px-4 pb-3 pt-4">
+          <SheetTitle className="text-base">Sources</SheetTitle>
+          <SheetDescription className="sr-only">Sources gathered in this conversation</SheetDescription>
+          <div className="flex flex-wrap items-center gap-2">
+            <FilterToggle value={filter} onChange={setFilter} cited={scoped.length} all={entries.length} />
+            {scope && filter === 'cited' && (
+              <button onClick={onClearScope} className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-md bg-foreground/[0.05] py-1 pl-2 pr-1.5 text-[11.5px] text-muted-foreground transition-colors hover:text-foreground">
+                <span className="truncate">In “{scope.title}”</span>
+                <X className="size-3 shrink-0" />
+              </button>
+            )}
+          </div>
+        </SheetHeader>
+        <div className="flex-1 divide-y overflow-y-auto pb-[env(safe-area-inset-bottom)]">
+          {shown.map((e) => <SourceRow key={e.result.url} entry={e} onRead={onRead} detail />)}
+          {!shown.length && <p className="p-6 text-center text-sm text-muted-foreground">No cited sources yet.</p>}
+        </div>
+      </SheetContent>
+    </Sheet>
   );
 }

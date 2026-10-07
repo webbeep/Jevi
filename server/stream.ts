@@ -4,6 +4,7 @@ import { rewriteQuery } from './ai';
 import { designParallel, designStream } from './design';
 import { permitted } from './images';
 import { collectPages } from './pages';
+import { MADE_PATTERNS } from './patterns';
 import { planLayout } from './plan';
 import { type LateExtras, searchWithLate } from './search';
 import type { Send } from './sse';
@@ -57,6 +58,8 @@ interface DesignArgs {
 const pageBudget = (readPages: boolean) => (readPages ? { count: 5, need: 3, budgetMs: 2200 } : { count: 3, need: 2, budgetMs: 1000 });
 
 async function design(send: Send, env: Env, req: DesignArgs, started: number, late?: Promise<LateExtras>) {
+  // Writing and code are made for the person, not looked up, so they are composed like a conversation turn.
+  if (!req.followup && MADE_PATTERNS.has(req.pattern)) req = { ...req, followup: { mode: 'chat', question: req.query } };
   // Conversation turns reason from what is already known; everything else reads pages first.
   const chat = req.followup?.mode === 'chat';
   const budget = chat ? { count: 3, need: 0, budgetMs: 0 } : pageBudget(req.readPages);

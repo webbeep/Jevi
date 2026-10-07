@@ -142,6 +142,14 @@ function sanitizeNode(raw: unknown, imageCount: number, depth: number): CardNode
       const text = str(n.text, 400);
       return text ? { type, text, title: str(n.title, 80), tone: tone(n.tone), icon: icon(n.icon) } : undefined;
     }
+    case 'draft': {
+      const text = str(n.text, 4000);
+      return text ? { type, text, label: str(n.label, 60) } : undefined;
+    }
+    case 'code': {
+      const code = typeof n.code === 'string' ? n.code.replace(/^\n+|\s+$/g, '').slice(0, 6000) : '';
+      return code ? { type, code, lang: str(n.lang, 24)?.toLowerCase() } : undefined;
+    }
     case 'image': {
       const r = ref(n.ref);
       const query = str(n.query, 80);

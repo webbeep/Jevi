@@ -81,6 +81,24 @@ export const PATTERNS: PatternDef[] = [
     skeleton: [slot('headline story', 'hero'), slot('what happened', 'block'), section('Related updates', slot('update'), slot('update'), slot('update'))],
   },
   {
+    id: 'draft',
+    label: 'Draft',
+    description: 'Asks to have something written or rewritten — an email, message, post, letter, bio, caption, cover letter or speech: the finished text first, then tone and length options',
+    skeleton: [slot('the finished draft', 'block'), slot('tone, length or audience options', 'line'), slot('tips for sending or using it', 'line')],
+  },
+  {
+    id: 'code',
+    label: 'Code',
+    description: 'Programming help — write, fix, convert or explain code, a formula, a query or a command: working code first, then how it works and how to run it',
+    skeleton: [slot('one-line answer', 'line'), slot('the code', 'block'), slot('how it works', 'block')],
+  },
+  {
+    id: 'plan',
+    label: 'Plan',
+    description: 'A plan or schedule to follow — trip itinerary, workout, study, meal or savings plan: key numbers up front, then the plan by day or phase',
+    skeleton: [row(slot('duration', 'tile'), slot('budget or effort', 'tile'), slot('focus', 'tile')), slot('the plan by day or phase, in tabs', 'block'), slot('tips', 'line')],
+  },
+  {
     id: 'decision',
     label: 'Decision helper',
     description: 'Helping decide whether to do or choose something: pros and cons, key considerations and a verdict',
@@ -98,8 +116,14 @@ export function skeletonCard(query: string, patternId: string): AnswerCard {
   return { title: query, subtitle: patternById(patternId).label, body: patternById(patternId).skeleton };
 }
 
+/** Layouts where the answer is something produced for the person rather than facts from the web. */
+export const MADE_PATTERNS = new Set(['draft', 'code']);
+
 export function heuristicPattern(q: string): string {
   const s = q.toLowerCase();
+  if (/^(write|draft|rewrite|reword|compose|proofread|polish|make (this|it) (sound|more))\b/.test(s) || /\b(email|cover letter|caption|linkedin post|toast|speech) (to|for|about)\b/.test(s)) return 'draft';
+  if (/\b(code|function|script|regex|sql|query|python|javascript|typescript|bash|excel formula|error|exception|bug)\b/.test(s) && /^(write|fix|how (do|to|can)|convert|debug|why does|what does)/.test(s)) return 'code';
+  if (/\b(itinerary|workout plan|meal plan|study plan|schedule|routine|\d+[- ]day)\b/.test(s)) return 'plan';
   if (/\b(vs\.?|versus|compare|or)\b/.test(s) && /\b(vs\.?|versus|compare)\b/.test(s)) return 'compare';
   if (/^(how (to|do i|can i)|steps to|recipe|guide)/.test(s)) return 'steps';
   if (/\b(best|top \d+|recommend)\b/.test(s)) return 'ranked';

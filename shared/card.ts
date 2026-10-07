@@ -1,6 +1,6 @@
 /**
  * The UI grammar an answer card is composed from. Layout nodes arrange children;
- * display nodes render content. The designer (Jev picks the skeleton, DeepSeek
+ * display nodes render content. The designer (Jev picks the skeleton, a language model
  * refines and fills it) may combine these freely — nothing is tied to a topic.
  */
 
@@ -44,6 +44,9 @@ export type CardNode =
   | { type: 'badges'; items: string[] }
   | { type: 'quote'; text: string; source?: string }
   | { type: 'callout'; tone?: Tone; title?: string; text: string; icon?: string }
+  /** Something the person asked to have written (email, message, post, letter), ready to copy. */
+  | { type: 'draft'; label?: string; text: string }
+  | { type: 'code'; lang?: string; code: string }
   /** Pictures reference IMAGES by index, or name what they show (`query`) for the server to find. */
   | { type: 'image'; ref?: number; query?: string; src?: string; link?: string; caption?: string; aspect?: 'wide' | 'square' | 'tall' }
   | { type: 'gallery'; refs: number[]; query?: string; pics?: { src: string; link: string; title: string }[] }
@@ -113,8 +116,10 @@ export interface FollowupContext {
 export interface CardResponse {
   card: AnswerCard;
   followups: string[];
-  engine: 'deepseek' | 'reasoning' | 'extractive';
+  engine: 'composed' | 'reasoning' | 'extractive';
   pagesRead: number;
   removed: number;
   ms: number;
+  /** The language model provider that wrote the card. */
+  via?: string;
 }

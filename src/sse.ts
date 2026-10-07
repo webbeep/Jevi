@@ -20,7 +20,7 @@ export type StreamEvent =
   | { event: 'head'; data: Omit<AnswerCard, 'body'> }
   | { event: 'node'; data: { index: number; node: CardNode } }
   | { event: 'followups'; data: string[] }
-  | { event: 'done'; data: { engine: 'deepseek' | 'reasoning' | 'extractive'; removed: number; pagesRead: number; ms: number } }
+  | { event: 'done'; data: { engine: 'composed' | 'reasoning' | 'extractive'; removed: number; pagesRead: number; ms: number; via?: string } }
   | { event: 'error'; data: { message: string } };
 
 /** POSTs to the streaming endpoint and calls `onEvent` for every Server-Sent Event as it arrives. */

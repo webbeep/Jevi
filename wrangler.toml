@@ -1,3 +1,7 @@
 name = "jev"
 pages_build_output_dir = "dist"
 compatibility_date = "2026-09-01"
+
+# Cloudflare Workers AI: keyless last-resort language model when every keyed provider is down.
+[ai]
+binding = "AI"

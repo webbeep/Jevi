@@ -25,7 +25,6 @@ function ogImage(html: string, base: string): string | undefined {
   }
 }
 
-
 function htmlToText(html: string): string {
   const main = html.match(/<(main|article)[\s\S]*?<\/\1>/i)?.[0] ?? html.match(/<body[\s\S]*<\/body>/i)?.[0] ?? html;
   return stripHtml(main.replace(/<(script|style|noscript|svg|nav|footer|header|form|iframe|aside)[\s\S]*?<\/\1>/gi, ' '));

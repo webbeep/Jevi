@@ -175,6 +175,7 @@ export function useSession() {
               pagesRead: e.data.pagesRead,
               removed: e.data.removed,
               ms: e.data.ms,
+              via: e.data.via,
             };
             return { result, variants: { ...t.variants, [variantKey(t.pattern, t.simple)]: result }, live: undefined, filling: false, status: undefined, thinking: false };
           });
