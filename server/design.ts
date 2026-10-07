@@ -8,7 +8,7 @@ import { PictureResolver } from './pictures';
 import { Polisher } from './polish';
 import type { PageText } from './pages';
 import { patternById } from './patterns';
-import { sanitizeCard, sanitizeNodes } from './sanitize';
+import { sanitizeCard, sanitizeNodes, type PriceSource } from './sanitize';
 import { clip, type Env } from './util';
 
 const GRAMMAR = `Each node is a JSON object with a "type" field.
@@ -52,6 +52,7 @@ INTERACTIVE (make the card something to play with, not just read)
 - choices {label, options:[{label, prompt, selected}]}  (segmented control; picking an option opens a new card adjusted by its prompt, e.g. time range, focus, audience. The prompt names the subject: "Show the apple pie recipe for a vegan diet")
 - slider {label, min, max, step, value, unit, prompt}  (prompt must contain {value} and name the subject; releasing the slider opens a new adjusted card, e.g. "Plan the Tokyo trip for {value} people")
 - scaler {label, base, value, min, max, step, unit, items:[{name, amount:number, unit}]}  (live, instant rescaling of quantities such as ingredients or costs; base is the amount the sources describe, value is where the control starts, e.g. the amount the person asked for)
+- pricing {label, seats, billing:"monthly"|"annual", plans:[{name, prices:[{amount, currency:"USD", unit:"seat"|"flat", period:"month"|"year", billing:"monthly"|"annual", minSeats, includedSeats, source}]}]}  (plan or subscription prices. amount is the published figure only — per seat, or a flat tier — never a team total. source is the SOURCES number of the page that states that exact price. Give both a monthly and an annual price when both are published. seats is the team size asked about. The card multiplies seats × price locally and toggles billing with no new search.)
 - accordion {items:[{title, text}]}  (tap to expand details)
 - reveal {items:[{front, back}]}  (tap-to-flip cards for quizzes, myths vs facts, terms)
 icon: any lucide icon name in kebab-case, e.g. "thermometer", "map-pin", "clock", "trending-up".
@@ -144,7 +145,8 @@ FIT THE KIND OF REQUEST
 - Quick fact (who, when, how tall, what time, define a word): the answer in a hero or one sentence, a line of context, and little else — 2-3 nodes.
 - How-to or recipe: time, difficulty or servings tiles, what you need, numbered steps, then one tip.
 - Best X / what to buy: the verdict first, then a media list of picks — each with its own picture and a price or score badge — then what to look for.
-- X vs Y: a table across the attributes that matter and a one-line verdict on who should pick which.
+- X vs Y: a table across the attributes that matter and a one-line verdict on who should pick which. When the comparison is priced plans or tools, a pricing node carries each plan's published price.
+- Best tool / which plan / what it costs for a team: a pricing node, one row per plan. Do not put the team total in a hero, stat, tile or table.
 - Person, place, company or product: profile with picture and key facts, then a short background.
 - News or anything recent: the latest development first with its date; date every item; cite each one and link each story to its source.
 - Wants to watch, listen or go somewhere (videos, tutorials, channels, tools, booking, official sites): put the destinations first as video or links nodes, then a short summary. If they ask for a video or tutorial and a VIDEO source fits, the card opens with one video node.
@@ -160,6 +162,7 @@ HEADER
 RULES
 - Every number, value and fact must come from SOURCES or PAGE TEXT. Never estimate, never use typical or example values, never fill a slot from general knowledge. Any number not found in the sources is automatically deleted, so leave such nodes out.
 - Never compute new numbers yourself (multiplying, converting, summing). When quantities should change with an amount (servings, loaves, people, budget), use a scaler node whose base and amounts are exactly the source values; the person rescales it live.
+- Plan and subscription prices always go in a pricing node, as the published per-seat or flat amount with its source number. Never multiply by people or seats, and never write a team total anywhere else on the card. If the sources do not state a price, leave that amount out.
 - If the sources don't contain what the person asked for (for example a live reading or a price), say so honestly in a short callout and point to the best sources to check.
 - Put citations like [2] inside text nodes where useful. Prefer visual components (hero, tiles, stats, charts, tables, timelines) over paragraphs; keep text short.
 - Nesting depth at most 4.`;
@@ -168,7 +171,7 @@ RULES
 const SYSTEM_WHOLE = `${DESIGNER}
 - Start from the SKELETON layout given in the TASK. Replace every slot with real components; you may add, drop or rearrange nodes if it serves the answer better.
 - Lead with the answer: the first body node must be small and already useful on its own (a hero or a one-sentence answer), so it appears on screen immediately.
-- Include at least one interactive node (choices, slider, scaler, accordion or reveal) whenever the answer has something worth adjusting, exploring or testing.
+- Include at least one interactive node (choices, slider, scaler, pricing, accordion or reveal) whenever the answer has something worth adjusting, exploring or testing. For plan prices, the interactive node is pricing.
 - Finish with an actions node (2-4 useful next steps; prefer "refine" for changes to this card) and a citations node when sources were used.
 
 OUTPUT FORMAT — JSON Lines, streamed to the screen as you write:
@@ -209,7 +212,11 @@ function corpusOf(req: DesignRequest): string {
 type Parsed = { kind: 'head'; head: Omit<AnswerCard, 'body'> } | { kind: 'node'; node: CardNode } | { kind: 'followups'; items: string[] } | { kind: 'dropped' };
 
 /** Parses one streamed output line into a sanitized, grounded piece of the card. */
-function parseLine(line: string, g: Grounding, imageCount: number, query: string): Parsed | undefined {
+function priceSources(req: DesignRequest): PriceSource[] {
+  return req.search.results.slice(0, 30).map((r) => ({ url: r.url, date: r.date }));
+}
+
+function parseLine(line: string, g: Grounding, imageCount: number, query: string, sources?: PriceSource[], seatQuery?: string): Parsed | undefined {
   const json = line.replace(/^```(?:json)?|```$/g, '').replace(/^\s*(?:\d+[.)]|[-*•])\s*/, '').replace(/,$/, '').trim();
   if (!json.startsWith('{')) return undefined;
   let obj: Record<string, unknown>;
@@ -229,12 +236,12 @@ function parseLine(line: string, g: Grounding, imageCount: number, query: string
     const head = sanitizeCard({ ...obj, type: undefined, body: [] }, imageCount, query);
     return { kind: 'head', head: { title: head.title, subtitle: head.subtitle && g.ok(head.subtitle) ? head.subtitle : undefined, icon: head.icon, accent: head.accent } };
   }
-  const [clean] = sanitizeNodes([obj], imageCount);
+  const [clean] = sanitizeNodes([obj], imageCount, 0, { sources, query: seatQuery ?? query });
   const [grounded] = clean ? groundNodes([clean], g) : [];
   return grounded ? { kind: 'node', node: grounded } : { kind: 'dropped' };
 }
 
-const NODE_TYPES = new Set<string>(['stack', 'grid', 'section', 'tabs', 'scroller', 'divider', 'hero', 'heading', 'text', 'stat', 'tile', 'keyvalue', 'list', 'chart', 'progress', 'rating', 'table', 'timeline', 'steps', 'proscons', 'badges', 'quote', 'callout', 'draft', 'code', 'links', 'video', 'image', 'gallery', 'profile', 'actions', 'choices', 'slider', 'scaler', 'accordion', 'reveal', 'citations'] satisfies CardNode['type'][]);
+const NODE_TYPES = new Set<string>(['stack', 'grid', 'section', 'tabs', 'scroller', 'divider', 'hero', 'heading', 'text', 'stat', 'tile', 'keyvalue', 'list', 'chart', 'progress', 'rating', 'table', 'timeline', 'steps', 'proscons', 'badges', 'quote', 'callout', 'draft', 'code', 'links', 'video', 'image', 'gallery', 'profile', 'actions', 'choices', 'slider', 'scaler', 'pricing', 'accordion', 'reveal', 'citations'] satisfies CardNode['type'][]);
 
 /** Explanations and conversation turns may run longer; everything else stays glanceable. */
 function textCap(req: DesignRequest): number {
@@ -263,8 +270,9 @@ export async function designStream(req: DesignRequest, env: Env, on: DesignEvent
   let removed = 0;
   let via: string | undefined;
   try {
+    const sources = priceSources(req);
     via = await llmLines(env, SYSTEM_WHOLE, user, 2800, (line) => {
-      const parsed = parseLine(line, g, imageCount, req.query);
+      const parsed = parseLine(line, g, imageCount, req.query, sources, req.followup?.question ?? req.query);
       if (!parsed) return;
       switch (parsed.kind) {
         case 'followups':
@@ -323,7 +331,7 @@ function regionPurpose(node: CardNode): string {
 }
 
 /** Finish-call nodes go after the regions: interactive control, then actions, then citations. */
-const FINISH_ORDER: Partial<Record<CardNode['type'], number>> = { choices: 0, slider: 0, scaler: 0, accordion: 0, reveal: 0, actions: 1, citations: 2 };
+const FINISH_ORDER: Partial<Record<CardNode['type'], number>> = { choices: 0, slider: 0, scaler: 0, pricing: 0, accordion: 0, reveal: 0, actions: 1, citations: 2 };
 const FINISH_SLOTS = 3;
 
 /**
@@ -338,6 +346,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
 
   const regions = patternById(req.pattern).skeleton;
   on.layout(regions);
+  const sources = priceSources(req);
   const g = new Grounding(corpusOf(req));
   const pictures = new PictureResolver(env, req.search.images, on.credit);
   const polish = new Polisher(textCap(req));
@@ -353,7 +362,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
     let done = false;
     return llmLines(env, SYSTEM_REGION, user, 1200, (line) => {
       if (done) return;
-      const parsed = parseLine(line, g, imageCount, req.query);
+      const parsed = parseLine(line, g, imageCount, req.query, sources, req.followup?.question ?? req.query);
       if (parsed?.kind === 'node') {
         done = true;
         const node = polish.apply(parsed.node);
@@ -365,10 +374,10 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
   };
 
   const finishCall = () => {
-    const user = `${shared}\n- YOU DESIGN FINISH. Output these lines:\n  1. {"title":string,"subtitle":string,"icon":string,"accent":tone} for the whole card\n  2. only if the answer has something worth adjusting, exploring or testing: one interactive node such as {"type":"choices",...} or {"type":"slider",...} that the regions above don't already cover\n  3. {"type":"actions","items":[...]} with 2-4 useful next steps (prefer kind "refine" for changes to this card)\n  4. {"type":"citations","refs":[...]} with the source numbers that matter most\n  5. {"followups":[4 short follow-up questions, each naming the subject so it stands alone]}\n\nQUERY: ${query}`;
+    const user = `${shared}\n- YOU DESIGN FINISH. Output these lines:\n  1. {"title":string,"subtitle":string,"icon":string,"accent":tone} for the whole card\n  2. only if the answer has something worth adjusting, exploring or testing: one interactive node such as {"type":"pricing",...}, {"type":"choices",...} or {"type":"slider",...} that the regions above don't already cover. For plan or subscription prices this must be a pricing node.\n  3. {"type":"actions","items":[...]} with 2-4 useful next steps (prefer kind "refine" for changes to this card)\n  4. {"type":"citations","refs":[...]} with the source numbers that matter most\n  5. {"followups":[4 short follow-up questions, each naming the subject so it stands alone]}\n\nQUERY: ${query}`;
     let extra = 0;
     return llmLines(env, SYSTEM_REGION, user, 1000, (line) => {
-      const parsed = parseLine(line, g, imageCount, req.query);
+      const parsed = parseLine(line, g, imageCount, req.query, sources, req.followup?.question ?? req.query);
       if (!parsed) return;
       switch (parsed.kind) {
         case 'head':

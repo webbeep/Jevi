@@ -4,6 +4,7 @@
  * refines and fills it) may combine these freely — nothing is tied to a topic.
  */
 
+import type { BillingBasis, Price } from './pricing';
 import type { ImageLicense } from './types';
 
 /** search = new web search, ask = answer as a new card, refine = a new card that adjusts this one. */
@@ -61,6 +62,11 @@ export type CardNode =
   | { type: 'choices'; label?: string; options: { label: string; prompt: string; selected?: boolean }[] }
   | { type: 'slider'; label: string; min: number; max: number; step?: number; value: number; unit?: string; prompt: string }
   | { type: 'scaler'; label: string; base: number; value?: number; min: number; max: number; step?: number; unit?: string; items: { name: string; amount: number; unit?: string }[] }
+  /**
+   * Plan prices. Totals are seats × the published amount (or the flat tier), computed in the client.
+   * Changing seats or billing does not start a new search.
+   */
+  | { type: 'pricing'; label?: string; seats: number; min?: number; max?: number; billing: BillingBasis; plans: { name: string; note?: string; prices: Price[] }[] }
   | { type: 'accordion'; items: { title: string; text: string }[] }
   | { type: 'reveal'; items: { front: string; back: string }[] }
   | { type: 'citations'; refs: number[] }
