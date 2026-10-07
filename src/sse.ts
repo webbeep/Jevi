@@ -14,6 +14,7 @@ export type StreamEvent =
   | { event: 'designing'; data: { pagesRead: number; ms: number } }
   | { event: 'thinking'; data: Record<string, never> }
   | { event: 'rewrite'; data: { query: string } }
+  | { event: 'intent'; data: { intent: string; queries: string[] } }
   | { event: 'base'; data: { id: number } }
   | { event: 'credit'; data: ImageCredit }
   | { event: 'layout'; data: CardNode[] }

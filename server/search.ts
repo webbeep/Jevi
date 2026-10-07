@@ -15,7 +15,14 @@ interface Query {
   q: string;
   freshness: Freshness;
   count: number;
+  /**
+   * Web results only, from the keyed engines (DuckDuckGo when there are none): for searches that run
+   * beside a full one. Workers allow 50 subrequests per request, and a full search alone uses about 25.
+   */
+  lite?: boolean;
 }
+
+const KEYED_ENGINES = new Set(['brave', 'tavily', 'exa', 'perplexity', 'serper', 'jina']);
 
 interface Hit {
   title: string;
@@ -474,7 +481,9 @@ async function wikiKnowledge(q: string): Promise<Knowledge | undefined> {
 }
 
 export async function searchWithLate(q: Query, env: Env): Promise<SearchWithLate> {
-  const engines = WEB_ENGINES.filter((e) => e.enabled(env));
+  const enabled = WEB_ENGINES.filter((e) => e.enabled(env));
+  const keyed = enabled.filter((e) => KEYED_ENGINES.has(e.name));
+  const engines = !q.lite ? enabled : keyed.length ? keyed : enabled.filter((e) => e.name === 'duckduckgo');
   const statuses: EngineStatus[] = [];
 
   const done: { engine: string; hits: Hit[]; images?: ImageResult[] }[] = [];
@@ -515,10 +524,10 @@ export async function searchWithLate(q: Query, env: Env): Promise<SearchWithLate
   const bounded = <T,>(p: Promise<T>, fallback: T) => Promise.race([settle(p, fallback), graceOver.then(() => fallback)]);
   const [web, instant, wiki, imgs, hn] = await Promise.all([
     webPromise,
-    bounded(instantAnswer(q.q), undefined),
-    bounded(wikiKnowledge(q.q), undefined),
-    bounded(images(q.q), [] as ImageResult[]),
-    bounded(discussions(q.q), [] as Discussion[]),
+    q.lite ? undefined : bounded(instantAnswer(q.q), undefined),
+    q.lite ? undefined : bounded(wikiKnowledge(q.q), undefined),
+    q.lite ? [] : bounded(images(q.q), [] as ImageResult[]),
+    q.lite ? [] : bounded(discussions(q.q), [] as Discussion[]),
   ]);
 
   const results = fuse(web, q.count, q.q);

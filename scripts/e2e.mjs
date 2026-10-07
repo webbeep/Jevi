@@ -115,6 +115,18 @@ async function main() {
   const code = JSON.stringify(cd.nodes).match(/"type":"code"/);
   check(!!code && /def /.test(words(cd.nodes)), 'working code block', `${cd.of('plan')[0]?.pattern} in ${cd.ms}ms`);
 
+  console.log('intent: "news tldr today"');
+  const nw = await stream({ kind: 'search', query: 'news tldr today', freshness: 'any' });
+  const intent = nw.of('intent')[0];
+  const top = (nw.of('search')[0]?.results ?? []).slice(0, 8);
+  check(!!intent && intent.queries.some((q) => /headline|top news|stories/i.test(q)), 'understood as today\'s headlines', intent && `${intent.intent} → ${intent.queries.join(' | ')}`);
+  check(top.filter((r) => /youtube|tldr/i.test(r.domain)).length <= 1, 'top results are news, not a TLDR channel', top.map((r) => r.domain).join(', '));
+  check(/"source":\d/.test(JSON.stringify(nw.nodes)), 'stories link to their sources', `${nw.of('plan')[0]?.pattern} in ${nw.ms}ms`);
+
+  console.log('video: "how to tie a tie video tutorial"');
+  const vd = await stream({ kind: 'search', query: 'how to tie a tie video tutorial', freshness: 'any' });
+  check(/"type":"video"/.test(JSON.stringify(vd.nodes)), 'plays a video from the sources', `${vd.nodes.map((n) => n.type).join(', ')}`);
+
   console.log('titles');
   for (const [label, t] of [['apple pie', s.card.title], ['shoes', ps.card.title], ['email', wd.card.title], ['code', cd.card.title]]) {
     check(t.length > 0 && t.length <= 48 && !/\?$/.test(t), `${label} card has a short screen title`, `"${t}"`);

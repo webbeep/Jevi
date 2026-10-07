@@ -7,8 +7,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Icon } from './Icon';
 import { AccordionNode, Choices, Reveal, Scaler, SliderNode } from './interactive';
 import {
-  Actions, Badges, Callout, CodeView, Draft, Gallery, Heading, Hero, ImageView, KeyValue, List, Profile,
-  ProgressView, ProsCons, Quote, Rating, SlotView, StatView, Steps, TableView, Text, Tile, Timeline, TONE_TEXT,
+  Actions, Badges, Callout, CodeView, Draft, Gallery, Heading, Hero, ImageView, KeyValue, Links, List, Profile,
+  ProgressView, ProsCons, Quote, Rating, SlotView, StatView, Steps, TableView, Text, Tile, Timeline, TONE_TEXT, VideoView,
 } from './primitives';
 
 const ChartView = lazy(() => import('./ChartView'));
@@ -103,6 +103,8 @@ export function NodeView({ node }: { node: CardNode }): ReactNode {
     case 'quote': return <Quote node={node} />;
     case 'callout': return <Callout node={node} />;
     case 'draft': return <Draft node={node} />;
+    case 'links': return <Links node={node} />;
+    case 'video': return <VideoView node={node} />;
     case 'code': return <CodeView node={node} />;
     case 'image': return <ImageView node={node} />;
     case 'gallery': return <Gallery node={node} />;

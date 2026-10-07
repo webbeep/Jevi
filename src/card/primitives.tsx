@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Check, ChevronLeft, ChevronRight, Copy, Minus, Star, ThumbsDown, ThumbsUp, TrendingDown, TrendingUp } from 'lucide-react';
+import { ArrowUpRight, Check, ChevronLeft, ChevronRight, Copy, Minus, Play, Star, ThumbsDown, ThumbsUp, TrendingDown, TrendingUp } from 'lucide-react';
 import type { CardNode, Tone } from '../../shared/card';
 import { cn } from '@/lib/utils';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -115,14 +115,120 @@ function usePicture(src: string | undefined, ref: number | undefined): string | 
   return src ?? (ref !== undefined ? images[ref]?.thumb : undefined);
 }
 
+/** The search result a source number points at, if it exists. */
+function useSource(n: number | undefined) {
+  const { results } = useCard();
+  return n ? results[n - 1] : undefined;
+}
+
+/** Small "open" button for an item that links to one of the sources. */
+function SourceLink({ n }: { n?: number }) {
+  const r = useSource(n);
+  if (!r) return null;
+  return (
+    <a href={r.url} target="_blank" rel="noreferrer" title={`${r.title} — ${r.domain}`} aria-label={`Open ${r.domain}`} className="flex size-7 shrink-0 items-center justify-center self-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+      <ArrowUpRight className="size-4" />
+    </a>
+  );
+}
+
+const domainLabel = (d: string) => d.replace(/^(www|en|m)\./, '');
+
+/** Video id and embeddable player for YouTube and Vimeo watch pages; undefined for channels and other pages. */
+export function videoEmbed(url: string): { id: string; player: string; thumb?: string } | undefined {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^(www|m)\./, '');
+    const yt = host === 'youtu.be' ? u.pathname.slice(1) : host.endsWith('youtube.com') ? (u.searchParams.get('v') ?? u.pathname.match(/^\/(?:shorts|embed|live)\/([\w-]{11})/)?.[1]) : undefined;
+    if (yt && /^[\w-]{11}$/.test(yt)) return { id: yt, player: `https://www.youtube-nocookie.com/embed/${yt}?autoplay=1&rel=0`, thumb: `https://i.ytimg.com/vi/${yt}/hqdefault.jpg` };
+    const vimeo = host === 'vimeo.com' ? u.pathname.match(/^\/(\d+)/)?.[1] : undefined;
+    if (vimeo) return { id: vimeo, player: `https://player.vimeo.com/video/${vimeo}?autoplay=1` };
+  } catch {
+    // not a URL
+  }
+  return undefined;
+}
+
+export function VideoView({ node }: { node: Of<'video'> }) {
+  const r = useSource(node.source);
+  const [playing, setPlaying] = useState(false);
+  if (!r) return null;
+  const embed = videoEmbed(r.url);
+  const thumb = embed?.thumb ?? r.image;
+  return (
+    <figure className="space-y-2">
+      <div className="relative aspect-video overflow-hidden rounded-xl border bg-muted">
+        {playing && embed ? (
+          <iframe src={embed.player} title={r.title} allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowFullScreen className="absolute inset-0 size-full" />
+        ) : (
+          <a
+            href={r.url}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(e) => {
+              if (!embed) return;
+              e.preventDefault();
+              setPlaying(true);
+            }}
+            className="group absolute inset-0 flex items-center justify-center"
+            aria-label={`Play ${r.title}`}
+          >
+            {thumb && <img src={thumb} alt="" loading="lazy" className="absolute inset-0 size-full object-cover" />}
+            <span className="relative flex size-14 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-sm transition-transform group-hover:scale-105">
+              <Play className="ml-0.5 size-6 fill-current" />
+            </span>
+          </a>
+        )}
+      </div>
+      <figcaption className="flex items-start gap-2 text-sm">
+        <img src={`https://icons.duckduckgo.com/ip3/${r.domain}.ico`} alt="" className="mt-0.5 size-4 shrink-0 rounded-sm" />
+        <span className="min-w-0 flex-1">
+          <a href={r.url} target="_blank" rel="noreferrer" className="font-medium leading-snug hover:underline">{node.caption ?? r.title}</a>
+          <span className="block text-xs text-muted-foreground">{domainLabel(r.domain)}{r.date ? ` · ${r.date.slice(0, 10)}` : ''}</span>
+        </span>
+      </figcaption>
+    </figure>
+  );
+}
+
+export function Links({ node }: { node: Of<'links'> }) {
+  const { results } = useCard();
+  const items = node.items.flatMap((i) => (results[i.source - 1] ? [{ ...i, r: results[i.source - 1] }] : []));
+  if (!items.length) return null;
+  return (
+    <ul className="divide-y rounded-xl border bg-card">
+      {items.map(({ r, label, note }) => {
+        const video = !!videoEmbed(r.url);
+        return (
+          <li key={r.url}>
+            <a href={r.url} target="_blank" rel="noreferrer" className="flex items-center gap-3 p-2.5 transition-colors hover:bg-foreground/[0.03] sm:p-3">
+              <span className="relative flex size-9 shrink-0 items-center justify-center rounded-lg border bg-background">
+                <img src={`https://icons.duckduckgo.com/ip3/${r.domain}.ico`} alt="" className="size-[18px] rounded-sm" loading="lazy" />
+                {video && <Play className="absolute -bottom-1 -right-1 size-3.5 rounded-full bg-foreground fill-background p-0.5 text-background" />}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-medium leading-snug">{label ?? r.title}</span>
+                <span className="block text-xs leading-snug text-muted-foreground">{note ? `${note} · ` : ''}{domainLabel(r.domain)}</span>
+              </span>
+              <ArrowUpRight className="size-4 shrink-0 text-muted-foreground" />
+            </a>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 export function Tile({ node }: { node: Of<'tile'> }) {
   const { onAsk, busy } = useCard();
   const img = usePicture(node.imageSrc, node.imageRef);
   const credit = useCredit(img);
   const pending = !img && !!node.imageQuery && busy;
+  const link = useSource(node.source);
+  const Root = link ? 'a' : 'button';
   return (
-    <button
-      onClick={() => onAsk(`Tell me more about ${node.label}${node.value ? ` (${node.value})` : ''}`)}
+    <Root
+      {...(link ? { href: link.url, target: '_blank', rel: 'noreferrer', title: `${link.title} — ${link.domain}` } : { onClick: () => onAsk(`Tell me more about ${node.label}${node.value ? ` (${node.value})` : ''}`) })}
       className={cn(
         'flex min-w-[72px] flex-col items-center gap-0.5 rounded-xl border px-2 py-2.5 text-center transition-colors hover:border-foreground/20 sm:min-w-[84px] sm:gap-1 sm:px-3 sm:py-3',
         node.active ? 'border-foreground/25 bg-muted ring-1 ring-foreground/10' : 'bg-card',
@@ -136,8 +242,8 @@ export function Tile({ node }: { node: Of<'tile'> }) {
       <span className="text-[11px] font-medium text-muted-foreground">{plain(node.label)}</span>
       {!img && !pending && <Icon name={node.icon} className="size-[18px] text-foreground/70 sm:size-5" />}
       {node.value && <span className="text-[15px] font-semibold tracking-tight sm:text-base">{plain(node.value)}</span>}
-      {node.sub && <span className="text-[11px] leading-tight text-muted-foreground"><RichText text={node.sub} inline /></span>}
-    </button>
+      {node.sub && <span className="text-[11px] leading-tight text-muted-foreground">{link ? plain(node.sub) : <RichText text={node.sub} inline />}</span>}
+    </Root>
   );
 }
 
@@ -176,9 +282,10 @@ function MediaList({ node }: { node: Of<'list'> }) {
           <MediaThumb item={item} index={i} />
           <span className="flex min-w-0 flex-1 flex-col items-start gap-1 text-sm leading-snug">
             <RichText text={item.text} inline />
-            {item.meta && <span className="max-w-full truncate rounded-full bg-muted px-2 py-0.5 text-xs font-medium tabular-nums sm:hidden">{item.meta}</span>}
+            {item.meta && <span className="rounded-md bg-muted px-2 py-0.5 text-xs font-medium leading-snug tabular-nums sm:hidden">{item.meta}</span>}
           </span>
-          {item.meta && <span className="hidden max-w-[40%] shrink-0 truncate rounded-full bg-muted px-2 py-0.5 text-xs font-medium tabular-nums sm:inline">{item.meta}</span>}
+          {item.meta && <span className="hidden max-w-[40%] shrink-0 rounded-md bg-muted px-2 py-0.5 text-right text-xs font-medium leading-snug tabular-nums sm:inline">{item.meta}</span>}
+          <SourceLink n={item.source} />
         </li>
       ))}
     </ul>
@@ -200,6 +307,7 @@ export function List({ node }: { node: Of<'list'> }) {
           </span>
           <span className="flex-1 text-foreground/85"><RichText text={item.text} /></span>
           {item.meta && <span className="shrink-0 text-xs text-muted-foreground">{item.meta}</span>}
+          <SourceLink n={item.source} />
         </li>
       ))}
     </ul>
@@ -270,11 +378,14 @@ export function Timeline({ node }: { node: Of<'timeline'> }) {
   return (
     <ol className="relative space-y-4 pl-6 before:absolute before:inset-y-1.5 before:left-[5px] before:w-px before:bg-border">
       {node.items.map((t, i) => (
-        <li key={i} className="relative">
+        <li key={i} className="relative flex gap-2">
           <span className="absolute -left-6 top-1 size-[11px] rounded-full border-2 border-background bg-foreground ring-1 ring-border" />
-          <div className="text-xs font-semibold tabular-nums text-muted-foreground">{t.when}</div>
-          <div className="text-sm font-medium"><RichText text={t.title} inline /></div>
-          {t.text && <div className="mt-0.5 text-sm text-muted-foreground"><RichText text={t.text} inline /></div>}
+          <div className="min-w-0 flex-1">
+            <div className="text-xs font-semibold tabular-nums text-muted-foreground">{t.when}</div>
+            <div className="text-sm font-medium"><RichText text={t.title} inline /></div>
+            {t.text && <div className="mt-0.5 text-sm text-muted-foreground"><RichText text={t.text} inline /></div>}
+          </div>
+          <SourceLink n={t.source} />
         </li>
       ))}
     </ol>

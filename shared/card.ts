@@ -31,14 +31,19 @@ export type CardNode =
   | { type: 'heading'; text: string; eyebrow?: string; level?: 1 | 2 | 3 }
   | { type: 'text'; text: string; tone?: Tone; size?: 'sm' | 'md' | 'lg' }
   | { type: 'stat'; label: string; value: string; unit?: string; icon?: string; delta?: string; trend?: 'up' | 'down' | 'flat' }
-  | { type: 'tile'; label: string; value?: string; sub?: string; icon?: string; imageRef?: number; imageQuery?: string; imageSrc?: string; active?: boolean }
+  /** `source` (a source number) makes the tile open that page. */
+  | { type: 'tile'; label: string; value?: string; sub?: string; icon?: string; imageRef?: number; imageQuery?: string; imageSrc?: string; active?: boolean; source?: number }
   | { type: 'keyvalue'; items: { label: string; value: string; icon?: string }[] }
-  | { type: 'list'; style?: 'bullet' | 'check' | 'number' | 'icon' | 'media'; items: { text: string; icon?: string; meta?: string; imageRef?: number; imageQuery?: string; imageSrc?: string }[] }
+  | { type: 'list'; style?: 'bullet' | 'check' | 'number' | 'icon' | 'media'; items: { text: string; icon?: string; meta?: string; imageRef?: number; imageQuery?: string; imageSrc?: string; source?: number }[] }
+  /** Pages, videos or sites to open, by source number — links only ever point at real search results. */
+  | { type: 'links'; items: { source: number; label?: string; note?: string }[] }
+  /** A video from the sources, played in place when the site allows embedding. */
+  | { type: 'video'; source: number; caption?: string }
   | { type: 'chart'; kind: 'bar' | 'hbar' | 'line' | 'area' | 'pie'; title?: string; unit?: string; data: { label: string; value: number }[] }
   | { type: 'progress'; label: string; value: number; caption?: string }
   | { type: 'rating'; value: number; max?: number; label?: string }
   | { type: 'table'; columns: string[]; rows: string[][]; highlight?: number }
-  | { type: 'timeline'; items: { when: string; title: string; text?: string }[] }
+  | { type: 'timeline'; items: { when: string; title: string; text?: string; source?: number }[] }
   | { type: 'steps'; items: { title: string; detail?: string }[] }
   | { type: 'proscons'; pros: string[]; cons: string[] }
   | { type: 'badges'; items: string[] }

@@ -23,14 +23,17 @@ DISPLAY
 - heading {text, eyebrow, level:1|2|3}
 - text {text, tone, size:"sm"|"md"|"lg"}  (supports **bold** and [n] source citations)
 - stat {label, value, unit, icon, delta, trend:"up"|"down"|"flat"}
-- tile {label, value, sub, icon, imageQuery, imageRef, active:boolean}  (compact cell for scrollers and grids; with a picture it becomes a picture tile, great for products, places, dishes, people)
+- tile {label, value, sub, icon, imageQuery, imageRef, active:boolean, source}  (compact cell for scrollers and grids; with a picture it becomes a picture tile, great for products, places, dishes, people)
 - keyvalue {items:[{label, value, icon}]}
-- list {style:"bullet"|"check"|"number"|"icon"|"media", items:[{text, icon, meta, imageQuery, imageRef}]}  ("media" shows each item as a row with its own thumbnail; meta is a short badge like a price or score)
+- list {style:"bullet"|"check"|"number"|"icon"|"media", items:[{text, icon, meta, imageQuery, imageRef, source}]}  ("media" shows each item as a row with its own thumbnail; meta is a short badge like a price or score)
+- links {items:[{source, label, note}]}  (pages, videos, channels, tools or official sites to open — each is a SOURCES number; label is a short name for it, note says what it is: "Official site", "Video · 12 min", "Live coverage")
+- video {source, caption}  (a VIDEO source, playable in place; use it when watching beats reading — tutorials, highlights, trailers, talks)
+LINKS: anything the person will want to open (an article, video, product page, booking or official site) carries "source": its SOURCES number, on a tile, list item or links item. Never write raw URLs.
 - chart {kind:"bar"|"hbar"|"line"|"area"|"pie", title, unit, data:[{label, value:number}]}  (bar: compare categories; hbar: rankings with long names; line/area: change over time; pie: shares of a whole)
 - progress {label, value:0-100, caption}
 - rating {value, max, label}
 - table {columns:[string], rows:[[string]], highlight:column index}
-- timeline {items:[{when, title, text}]}
+- timeline {items:[{when, title, text, source}]}
 - steps {items:[{title, detail}]}
 - proscons {pros:[string], cons:[string]}
 - badges {items:[string]}
@@ -59,8 +62,11 @@ const DEPTH_HINT = {
   detailed: 'Be thorough but tidy: up to 8 top-level nodes, grouping extra detail into tabs or accordions.',
 } as const;
 
+/** Watch pages that play in place (channels and playlists are ordinary links). */
+const isVideo = (url: string) => /(youtube\.com\/(watch\?|shorts\/|live\/)|youtu\.be\/|vimeo\.com\/\d)/.test(url);
+
 function sourcesBlock(search: SearchResponse, pages: PageText[], pageChars = 2800): string {
-  const results = search.results.slice(0, 10).map((r, i) => `[${i + 1}] ${r.title} (${r.domain}${r.date ? `, ${r.date}` : ''}): ${clip(r.snippet, 420)}`);
+  const results = search.results.slice(0, 12).map((r, i) => `[${i + 1}] ${isVideo(r.url) ? 'VIDEO ' : ''}${r.title} (${r.domain}${r.date ? `, ${r.date}` : ''}): ${clip(r.snippet, 420)}`);
   const pageBlock = pages.length ? `\n\nPAGE TEXT (readable content of some sources, cite with the same number)\n${pages.map((p) => `[${p.n}] ${clip(p.text, pageChars)}`).join('\n\n')}` : '';
   const knowledge = search.knowledge ? `\nEncyclopedia (${search.knowledge.url}): ${search.knowledge.title} — ${clip(search.knowledge.extract, 900)}` : '';
   const images = search.images.slice(0, 12).map((img, i) => `${i}: ${img.title || img.source}`);
@@ -79,6 +85,8 @@ export interface DesignRequest {
   context?: string;
   /** Reason step by step before designing (slower, for hard questions). */
   think?: boolean;
+  /** What the person actually wants, read from the query before searching. */
+  intent?: string;
 }
 
 export interface DesignEvents {
@@ -137,7 +145,8 @@ FIT THE KIND OF REQUEST
 - Best X / what to buy: the verdict first, then a media list of picks — each with its own picture and a price or score badge — then what to look for.
 - X vs Y: a table across the attributes that matter and a one-line verdict on who should pick which.
 - Person, place, company or product: profile with picture and key facts, then a short background.
-- News or anything recent: the latest development first with its date; date every item; cite each one.
+- News or anything recent: the latest development first with its date; date every item; cite each one and link each story to its source.
+- Wants to watch, listen or go somewhere (videos, tutorials, channels, tools, booking, official sites): put the destinations first as video or links nodes, then a short summary. If they ask for a video or tutorial and a VIDEO source fits, the card opens with one video node.
 - Health, medical, legal, money or safety: give the useful answer plainly, then one short callout on when to see a professional. Never alarmist, never refuse a general question.
 - Writing for them (email, message, post, letter, rewrite): one complete draft node first, ready to send — no placeholders like [Name] unless the detail is truly unknown — then choices for tone or length.
 - Code: a complete, runnable code node first, then a short explanation of the key lines and how to run it.
@@ -176,6 +185,7 @@ function taskBlock(req: DesignRequest): string {
   return [
     `- Pre-selected layout: "${pattern.label}" (${pattern.description}).`,
     `- ${DEPTH_HINT[req.depth]}`,
+    req.intent ? `- What the person wants: ${req.intent} Answer that; sources that only match their words but not this are background at most.` : '',
     req.simple ? '- Write for a 10-year-old: plain words and a friendly analogy.' : '',
     followupRules(req.followup, req.search.query).trim().replace(/^/, '- '),
     req.context ? `- Conversation so far (use it to resolve references like "it" or "the cheaper one"; don't repeat it):\n${req.context}` : '',
@@ -223,7 +233,7 @@ function parseLine(line: string, g: Grounding, imageCount: number, query: string
   return grounded ? { kind: 'node', node: grounded } : { kind: 'dropped' };
 }
 
-const NODE_TYPES = new Set<string>(['stack', 'grid', 'section', 'tabs', 'scroller', 'divider', 'hero', 'heading', 'text', 'stat', 'tile', 'keyvalue', 'list', 'chart', 'progress', 'rating', 'table', 'timeline', 'steps', 'proscons', 'badges', 'quote', 'callout', 'draft', 'code', 'image', 'gallery', 'profile', 'actions', 'choices', 'slider', 'scaler', 'accordion', 'reveal', 'citations'] satisfies CardNode['type'][]);
+const NODE_TYPES = new Set<string>(['stack', 'grid', 'section', 'tabs', 'scroller', 'divider', 'hero', 'heading', 'text', 'stat', 'tile', 'keyvalue', 'list', 'chart', 'progress', 'rating', 'table', 'timeline', 'steps', 'proscons', 'badges', 'quote', 'callout', 'draft', 'code', 'links', 'video', 'image', 'gallery', 'profile', 'actions', 'choices', 'slider', 'scaler', 'accordion', 'reveal', 'citations'] satisfies CardNode['type'][]);
 
 /** Explanations and conversation turns may run longer; everything else stays glanceable. */
 function textCap(req: DesignRequest): number {

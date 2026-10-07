@@ -20,6 +20,11 @@ const tone = (v: unknown): Tone | undefined => (TONES.includes(v as Tone) ? (v a
 const oneOf = <const T extends string | number>(v: unknown, options: readonly T[]): T | undefined => (options.includes(v as T) ? (v as T) : undefined);
 const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v.slice(0, MAX_ITEMS) : []);
 const strings = (v: unknown, max = 200): string[] => arr(v).map((x) => str(x, max)).filter((x): x is string => !!x);
+/** A source number ([n] in SOURCES); links never carry raw URLs, so they can only point at real results. */
+const source = (v: unknown): number | undefined => {
+  const n = typeof v === 'string' ? Number(v.replace(/[^\d]/g, '')) : v;
+  return typeof n === 'number' && Number.isInteger(n) && n >= 1 && n <= 30 ? n : undefined;
+};
 const icon = (v: unknown): string | undefined => {
   const s = str(v, 40)?.toLowerCase().replace(/[^a-z0-9-]/g, '');
   return s || undefined;
@@ -85,7 +90,7 @@ function sanitizeNode(raw: unknown, imageCount: number, depth: number): CardNode
     }
     case 'tile': {
       const label = str(n.label, 60);
-      return label ? { type, label, value: str(n.value, 40), sub: str(n.sub, 80), icon: icon(n.icon), imageRef: ref(n.imageRef), imageQuery: str(n.imageQuery, 80), active: n.active === true } : undefined;
+      return label ? { type, label, value: str(n.value, 40), sub: str(n.sub, 80), icon: icon(n.icon), imageRef: ref(n.imageRef), imageQuery: str(n.imageQuery, 80), active: n.active === true, source: source(n.source) } : undefined;
     }
     case 'keyvalue': {
       const items = arr(n.items).map((i) => ({ label: str((i as Raw)?.label, 60) ?? '', value: str((i as Raw)?.value, 160) ?? '', icon: icon((i as Raw)?.icon) })).filter((i) => i.label && i.value);
@@ -93,7 +98,7 @@ function sanitizeNode(raw: unknown, imageCount: number, depth: number): CardNode
     }
     case 'list': {
       const items = arr(n.items)
-        .map((i) => (typeof i === 'string' ? { text: i } : { text: str((i as Raw)?.text, 300) ?? '', icon: icon((i as Raw)?.icon), meta: str((i as Raw)?.meta, 60), imageRef: ref((i as Raw)?.imageRef), imageQuery: str((i as Raw)?.imageQuery, 80) }))
+        .map((i) => (typeof i === 'string' ? { text: i } : { text: str((i as Raw)?.text, 300) ?? '', icon: icon((i as Raw)?.icon), meta: str((i as Raw)?.meta, 60), imageRef: ref((i as Raw)?.imageRef), imageQuery: str((i as Raw)?.imageQuery, 80), source: source((i as Raw)?.source) }))
         .filter((i) => i.text);
       return items.length ? { type, items, style: oneOf(n.style, ['bullet', 'check', 'number', 'icon', 'media'] as const) } : undefined;
     }
@@ -118,7 +123,7 @@ function sanitizeNode(raw: unknown, imageCount: number, depth: number): CardNode
       return columns.length && rows.length ? { type, columns, rows, highlight: num(n.highlight) } : undefined;
     }
     case 'timeline': {
-      const items = arr(n.items).map((i) => ({ when: str((i as Raw)?.when, 30) ?? '', title: str((i as Raw)?.title, 120) ?? '', text: str((i as Raw)?.text, 240) })).filter((i) => i.when && i.title);
+      const items = arr(n.items).map((i) => ({ when: str((i as Raw)?.when, 30) ?? '', title: str((i as Raw)?.title, 120) ?? '', text: str((i as Raw)?.text, 240), source: source((i as Raw)?.source) })).filter((i) => i.when && i.title);
       return items.length ? { type, items } : undefined;
     }
     case 'steps': {
@@ -141,6 +146,16 @@ function sanitizeNode(raw: unknown, imageCount: number, depth: number): CardNode
     case 'callout': {
       const text = str(n.text, 400);
       return text ? { type, text, title: str(n.title, 80), tone: tone(n.tone), icon: icon(n.icon) } : undefined;
+    }
+    case 'links': {
+      const items = arr(n.items)
+        .map((i) => (typeof i === 'number' ? { source: i } : { source: source((i as Raw)?.source ?? (i as Raw)?.ref) ?? 0, label: str((i as Raw)?.label, 100), note: str((i as Raw)?.note, 80) }))
+        .filter((i) => i.source >= 1);
+      return items.length ? { type, items } : undefined;
+    }
+    case 'video': {
+      const s = source(n.source ?? n.ref);
+      return s ? { type, source: s, caption: str(n.caption, 120) } : undefined;
     }
     case 'draft': {
       const text = str(n.text, 4000);

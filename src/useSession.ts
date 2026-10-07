@@ -32,6 +32,8 @@ export interface Turn {
   /** How a follow-up was answered, so redesigns keep the same approach. */
   mode?: Exclude<FollowupContext['mode'], 'refine'>;
   plan?: LayoutPlan;
+  /** What the search was understood to want, and the searches run for it. */
+  intent?: { intent: string; queries: string[] };
   pattern?: string;
   search?: SearchResponse;
   /** The card as it streams in; replaced by `result` when complete. */
@@ -132,6 +134,8 @@ export function useSession() {
           });
         case 'rewrite':
           return update(route, { kind: 'search', question: e.data.query, searchId: route, mode: undefined });
+        case 'intent':
+          return update(route, { intent: e.data });
         case 'search':
           return update(route, { search: e.data });
         case 'pages': {

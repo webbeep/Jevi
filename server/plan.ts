@@ -19,6 +19,8 @@ export interface PlanContext {
   cards?: { id: number; title: string }[];
   /** Compact summary of earlier turns. */
   context?: string;
+  /** What the person actually wants, read from the query before searching. */
+  intent?: string;
 }
 
 export async function planLayout(query: string, env: Env, ctx: PlanContext = {}): Promise<LayoutPlan> {
@@ -45,7 +47,7 @@ export async function planLayout(query: string, env: Env, ctx: PlanContext = {})
   try {
     const state = original
       ? `A person is in a conversation with an assistant that can both search the web and think. It started with the search "${original}".${context ? `\nConversation so far:\n${context}` : ''}\nThey now wrote: "${query}".`
-      : `Someone typed this into a search engine: "${query}". Before any results load, decide how the answer card should be laid out so the answer is instantly readable at a glance.`;
+      : `Someone typed this into a search engine: "${query}".${ctx.intent ? ` What they want: ${ctx.intent}` : ''} Before any results load, decide how the answer card should be laid out so the answer is instantly readable at a glance.`;
     const answers = await askJev(env, state, {
       ...(original
         ? {

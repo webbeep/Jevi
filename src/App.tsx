@@ -45,7 +45,8 @@ function engineLabel(t: Turn): string | undefined {
   const r = t.result;
   if (r) {
     const source = r.engine === 'reasoning' ? 'Reasoned answer — not from live sources' : r.engine === 'composed' ? 'Composed from sources' : 'Quoted from sources';
-    return [source, r.pagesRead ? `${r.pagesRead} pages read` : '', r.removed ? `${r.removed} unverified removed` : '', r.ms ? `${(r.ms / 1000).toFixed(1)}s` : '', r.via ?? ''].filter(Boolean).join(' · ');
+    const line = [source, r.pagesRead ? `${r.pagesRead} pages read` : '', r.removed ? `${r.removed} unverified removed` : '', r.ms ? `${(r.ms / 1000).toFixed(1)}s` : '', r.via ?? ''].filter(Boolean).join(' · ');
+    return t.intent ? `${line}\nSearched: ${t.intent.queries.join(' · ')}` : line;
   }
   if (t.live?.nodes.length) return 'Composing…';
   if (t.search) return `${t.search.results.length} sources · reading`;
@@ -75,16 +76,6 @@ export default function App() {
   const [reading, setReading] = useState<LibraryEntry | null>(null);
   const scopeTurn = turns.find((t) => t.id === sheet.scope);
   const openSources = (scope?: number) => setSheet({ open: true, scope });
-
-  // The header repeats the conversation title only once the first card's own title has scrolled away.
-  const [titleInView, setTitleInView] = useState(true);
-  useEffect(() => {
-    const el = root ? document.querySelector(`#turn-${root.id} h2`) : null;
-    if (!el) return setTitleInView(true);
-    const io = new IntersectionObserver(([e]) => setTitleInView(e.isIntersecting), { rootMargin: '-56px 0px 0px 0px' });
-    io.observe(el);
-    return () => io.disconnect();
-  }, [root?.id, root?.result]);
 
   const startSearch = (q: string) => {
     const query = q.trim();
@@ -233,7 +224,7 @@ export default function App() {
                 <button onClick={newChat} className="shrink-0 rounded-full" aria-label="Home">
                   <LogoMark className="size-7" />
                 </button>
-                <h1 className={cn('min-w-0 flex-1 truncate text-[15px] font-medium tracking-[-0.01em] transition-opacity duration-200', titleInView && 'opacity-0')}>{title}</h1>
+                <h1 className="min-w-0 flex-1 truncate text-[15px] font-medium tracking-[-0.01em]">{title}</h1>
                 {library.length > 0 && (
                   <Button variant="ghost" size="sm" className="h-8 shrink-0 gap-2 rounded-lg px-2 text-muted-foreground hover:text-foreground lg:hidden" onClick={() => openSources()} aria-label="Sources">
                     <FaviconStack domains={library.slice(0, 3).map((e) => e.result.domain)} />

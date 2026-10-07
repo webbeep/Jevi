@@ -8,6 +8,7 @@ import { MADE_PATTERNS } from './patterns';
 import { planLayout } from './plan';
 import { type LateExtras, searchWithLate } from './search';
 import type { Send } from './sse';
+import { extraQueries, mergeLate, mergeSearches, understand } from './understand';
 import type { Env } from './util';
 
 export interface CardOnScreen {
@@ -52,6 +53,7 @@ interface DesignArgs {
   followup?: FollowupContext;
   context?: string;
   think?: boolean;
+  intent?: string;
 }
 
 /** How many pages to read and how long to wait for them before designing. */
@@ -94,16 +96,31 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, la
   send('done', { ...summary, pagesRead: pages.length, ms: Date.now() - started });
 }
 
-async function searchAndDesign(send: Send, env: Env, query: string, freshness: Freshness, context: string | undefined, started: number) {
-  const planned = planLayout(query, env).then((plan) => {
+/**
+ * Searches the literal words straight away while working out what the person means; searches for that
+ * intent ("news tldr today" → today's top headlines) lead the results, the literal ones follow.
+ * Rewritten follow-ups already say what they mean, so they skip the understanding step.
+ */
+async function searchAndDesign(send: Send, env: Env, query: string, freshness: Freshness, context: string | undefined, started: number, rewritten = false) {
+  const literal = searchWithLate({ q: query, freshness, count: 20 }, env);
+  const understood = rewritten ? Promise.resolve(undefined) : understand(query, env, context);
+  const planned = understood.then((u) => planLayout(query, env, { intent: u?.intent })).then((plan) => {
     send('plan', plan);
     return plan;
   });
-  const { response: results, late } = await searchWithLate({ q: query, freshness, count: 20 }, env);
+
+  const u = await understood;
+  const extras = extraQueries(query, u);
+  if (u) send('intent', { intent: u.intent, queries: u.queries });
+  const intended = (await Promise.all(extras.map((q) => searchWithLate({ q, freshness: freshness === 'any' ? u!.freshness : freshness, count: 12, lite: true }, env).catch(() => undefined)))).filter((s) => !!s);
+  const lit = await literal;
+  const results = intended.length ? mergeSearches(query, lit.response, intended.map((s) => s.response), extras.length < (u?.queries.length ?? 0)) : lit.response;
+  const late = intended.length ? mergeLate([lit.late, ...intended.map((s) => s.late)]) : lit.late;
+
   send('search', results);
   if (!results.results.length) throw new Error('No results from any engine. Try rephrasing.');
   const plan = await planned;
-  await design(send, env, { query, pattern: plan.pattern, depth: plan.depth, readPages: plan.readPages, search: results, context }, started, late);
+  await design(send, env, { query, pattern: plan.pattern, depth: plan.depth, readPages: plan.readPages, search: results, context, intent: u?.intent }, started, late);
 }
 
 async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind: 'followup' }>, started: number) {
@@ -114,7 +131,7 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
   if (req.intent === 'search') {
     const query = await rewriteQuery(req.original, req.question, env, context, from?.title).catch(() => req.question);
     send('rewrite', { query });
-    await searchAndDesign(send, env, query, 'any', context, started);
+    await searchAndDesign(send, env, query, 'any', context, started, true);
     return;
   }
 
@@ -128,7 +145,7 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
       send('plan', plan);
       const query = await rewritten;
       send('rewrite', { query });
-      await searchAndDesign(send, env, query, 'any', context, started);
+      await searchAndDesign(send, env, query, 'any', context, started, true);
       return;
     }
     case 'refine': {

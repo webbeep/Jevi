@@ -53,6 +53,9 @@ function groundNode(node: CardNode, g: Grounding): CardNode | undefined {
     // Written output the person asked for, not claims about the world.
     case 'draft':
     case 'code':
+    // Links point at search results by number, so there is nothing to verify beyond that.
+    case 'links':
+    case 'video':
       return node.type === 'badges' ? { ...node, items: node.items.filter((b) => g.ok(b)) } : node;
     case 'hero':
       return g.ok(node.value) ? { ...node, caption: node.caption && g.sentences(node.caption) } : undefined;

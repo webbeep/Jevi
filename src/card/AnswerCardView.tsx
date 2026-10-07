@@ -85,7 +85,7 @@ export function AnswerCardView({ card, version, filling, streaming, status, patt
         </div>
         <div className="min-w-0 flex-1 self-center">
           <h2 className="text-balance text-[16.5px] font-semibold leading-[1.3] tracking-[-0.02em] sm:text-[17px]">{card.title}</h2>
-          {filling && !card.subtitle ? <Skeleton className="mt-1 h-3 w-32" /> : card.subtitle && <p className="mt-0.5 line-clamp-2 text-[13px] leading-snug text-muted-foreground">{card.subtitle}</p>}
+          {filling && !card.subtitle ? <Skeleton className="mt-1 h-3 w-32" /> : card.subtitle && <p className="mt-0.5 text-pretty text-[13px] leading-snug text-muted-foreground">{card.subtitle}</p>}
         </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -125,7 +125,7 @@ export function AnswerCardView({ card, version, filling, streaming, status, patt
             {engine && (
               <>
                 <DropdownMenuSeparator />
-                <p className="px-2 py-1.5 text-[11px] leading-snug text-muted-foreground">{engine}</p>
+                <p className="whitespace-pre-line px-2 py-1.5 text-[11px] leading-snug text-muted-foreground">{engine}</p>
               </>
             )}
           </DropdownMenuContent>
