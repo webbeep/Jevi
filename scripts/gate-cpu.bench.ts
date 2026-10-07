@@ -25,15 +25,16 @@ function fakeDb() {
             },
             async all() {
               const day = String(args[0]);
+              const writing = /insert/i.test(sql);
               const keys = args.slice(1).filter((k): k is string => typeof k === 'string' && k.length > 0);
-              return {
-                results: keys.map((key) => {
-                  const id = `${day}\0${key}`;
-                  const count = (counts.get(id) ?? 0) + 1;
-                  counts.set(id, count);
-                  return { subject_key: key, count };
-                }),
-              };
+              const results = [];
+              for (const key of keys) {
+                const id = `${day}\0${key}`;
+                if (writing) counts.set(id, (counts.get(id) ?? 0) + 1);
+                else if (!counts.has(id)) continue;
+                results.push({ subject_key: key, count: counts.get(id) ?? 0 });
+              }
+              return { results };
             },
             async run() {
               return { success: true, meta: { changes: 0 } };
@@ -60,11 +61,10 @@ async function bench(label: string, headers: Record<string, string>, env: Env) {
 
 const env = { DB: fakeDb(), SESSION_SECRET: SECRET, IP_HASH_SALT: 'bench-salt', AUTH_ENABLED: 'true' } as unknown as Env;
 const dev = await signDevice('a'.repeat(32), SECRET);
-await bench('gate anon', { cookie: `zo_dev=${encodeURIComponent(dev)}`, 'CF-Connecting-IP': '203.0.113.10' }, env);
-
+const anonHeaders = { cookie: `zo_dev=${encodeURIComponent(dev)}`, 'CF-Connecting-IP': '203.0.113.10' };
 const sess = await signSessionToken('bench-session-token', SECRET);
-await bench(
-  'gate signed',
-  { cookie: `zo_dev=${encodeURIComponent(dev)}; zo_sess=${encodeURIComponent(sess)}`, 'CF-Connecting-IP': '203.0.113.10' },
-  env,
-);
+const signedHeaders = { cookie: `zo_dev=${encodeURIComponent(dev)}; zo_sess=${encodeURIComponent(sess)}`, 'CF-Connecting-IP': '203.0.113.10' };
+await bench('gate anon retry', { ...anonHeaders, 'x-zo-retry': '1' }, env);
+await bench('gate signed retry', { ...signedHeaders, 'x-zo-retry': '1' }, env);
+await bench('gate anon', anonHeaders, env);
+await bench('gate signed', signedHeaders, env);

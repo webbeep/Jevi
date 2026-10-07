@@ -74,6 +74,69 @@ test('counts anonymous asks and blocks on the device limit', async () => {
   }
 });
 
+function usageRows(db: DatabaseSync): { subject_key: string; count: number }[] {
+  return db.prepare('SELECT subject_key, count FROM usage ORDER BY subject_key').all() as { subject_key: string; count: number }[];
+}
+
+test('x-zo-retry does not increment device, IP, or signed counts', async () => {
+  const { db, env } = mem();
+  env.AUTH_ENABLED = 'true';
+  env.GATE_ANON_PER_DAY = '5';
+  env.GATE_IP_PER_DAY = '30';
+  const when = new Date('2026-10-07T12:00:00Z');
+  const headers = { cookie: await cookie(), 'CF-Connecting-IP': IP };
+  const first = await applyGate(new Request('http://127.0.0.1/api/stream', { headers }), env, when, nobody);
+  assert.equal(first.ok, true);
+  const afterOne = usageRows(db);
+  const under = await applyGate(new Request('http://127.0.0.1/api/stream', { headers: { ...headers, 'x-zo-retry': '1' } }), env, when, nobody);
+  assert.equal(under.ok, true);
+  if (under.ok) {
+    assert.equal(under.headers?.['X-ZO-Used'], '1');
+    assert.equal(under.headers?.['X-ZO-Remaining'], '4');
+  }
+  assert.deepEqual(usageRows(db), afterOne);
+
+  for (let i = 0; i < 4; i++) await applyGate(new Request('http://127.0.0.1/api/stream', { headers }), env, when, nobody);
+  const atCap = usageRows(db);
+  assert.equal(atCap.find((r) => r.subject_key.startsWith('d:'))?.count, 5);
+  assert.equal(atCap.find((r) => r.subject_key.startsWith('ip:'))?.count, 5);
+  const atLimit = await applyGate(new Request('http://127.0.0.1/api/stream', { headers: { ...headers, 'X-ZO-Retry': '1' } }), env, when, nobody);
+  assert.equal(atLimit.ok, true);
+  if (atLimit.ok) {
+    assert.equal(atLimit.headers?.['X-ZO-Used'], '5');
+    assert.equal(atLimit.headers?.['X-ZO-Remaining'], '0');
+  }
+  assert.deepEqual(usageRows(db), atCap);
+
+  const manual = await applyGate(new Request('http://127.0.0.1/api/stream', { headers: { ...headers, 'x-zo-retry': '0' } }), env, when, nobody);
+  assert.equal(manual.ok, false);
+  if (!manual.ok) assert.deepEqual(manual.body, { need_signin: true, used: 6, limit: 5, remaining: 0, signedIn: false, reason: 'device' });
+  const over = usageRows(db);
+  assert.equal(over.find((r) => r.subject_key.startsWith('d:'))?.count, 6);
+  assert.equal(over.find((r) => r.subject_key.startsWith('ip:'))?.count, 6);
+  const stillOver = await applyGate(new Request('http://127.0.0.1/api/stream', { headers: { ...headers, 'x-zo-retry': '1' } }), env, when, nobody);
+  assert.equal(stillOver.ok, false);
+  if (!stillOver.ok) assert.equal(stillOver.body.used, 6);
+  assert.deepEqual(usageRows(db), over);
+
+  env.GATE_SIGNED_PER_DAY = '1';
+  const signedHeaders = { ...headers };
+  const allowed = await applyGate(new Request('http://127.0.0.1/api/stream', { headers: signedHeaders }), env, when, signed);
+  assert.equal(allowed.ok, true);
+  const signedRows = usageRows(db);
+  assert.equal(signedRows.find((r) => r.subject_key === 'u:user-1')?.count, 1);
+  assert.equal(signedRows.some((r) => r.subject_key.startsWith('d:')), true);
+  const signedRetry = await applyGate(
+    new Request('http://127.0.0.1/api/stream', { headers: { ...signedHeaders, 'x-zo-retry': '1' } }),
+    env,
+    when,
+    signed,
+  );
+  assert.equal(signedRetry.ok, true);
+  if (signedRetry.ok) assert.equal(signedRetry.headers?.['X-ZO-Used'], '1');
+  assert.deepEqual(usageRows(db), signedRows);
+});
+
 test('a new device cookie starts its own count', async () => {
   const { db, env } = mem();
   env.AUTH_ENABLED = 'true';

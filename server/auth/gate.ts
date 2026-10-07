@@ -48,15 +48,40 @@ SELECT ?1, k, 1 FROM (
 ON CONFLICT(day, subject_key) DO UPDATE SET count = count + 1
 RETURNING subject_key, count`;
 
+const READ_SQL = `SELECT subject_key, count FROM usage
+WHERE day = ?1 AND subject_key IN (?2, ?3, ?4)`;
+
+function slotsOf(keys: string[]): Array<string | null> | null {
+  const unique = [...new Set(keys.filter((k) => !!k))];
+  if (!unique.length) return null;
+  return [unique[0] ?? null, unique[1] ?? null, unique[2] ?? null];
+}
+
+function countsFrom(rows: Array<{ subject_key: string; count: number }>): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const row of rows) out.set(row.subject_key, Number(row.count));
+  return out;
+}
+
 /** One upsert for every key that should move. Empty slots are bound as NULL and skipped. */
 export async function bumpMany(db: D1Database, day: string, keys: string[]): Promise<Map<string, number>> {
-  const unique = [...new Set(keys.filter((k) => !!k))];
-  const out = new Map<string, number>();
-  if (!unique.length) return out;
-  const slots: Array<string | null> = [unique[0] ?? null, unique[1] ?? null, unique[2] ?? null];
+  const slots = slotsOf(keys);
+  if (!slots) return new Map();
   const result = await db.prepare(BUMP_SQL).bind(day, slots[0], slots[1], slots[2]).all<{ subject_key: string; count: number }>();
-  for (const row of result.results) out.set(row.subject_key, Number(row.count));
-  return out;
+  return countsFrom(result.results);
+}
+
+/** Same keys as bumpMany, without writing. Missing rows stay absent (count 0). */
+export async function readMany(db: D1Database, day: string, keys: string[]): Promise<Map<string, number>> {
+  const slots = slotsOf(keys);
+  if (!slots) return new Map();
+  const result = await db.prepare(READ_SQL).bind(day, slots[0], slots[1], slots[2]).all<{ subject_key: string; count: number }>();
+  return countsFrom(result.results);
+}
+
+/** K's automatic client retry. A manual Retry button does not send this header. */
+export function isAutoRetry(request: Request): boolean {
+  return (request.headers.get('x-zo-retry') || '').trim() === '1';
 }
 
 export async function readUsage(db: D1Database, day: string, key: string): Promise<number> {
@@ -105,9 +130,12 @@ function deny(used: number, limit: number, signedIn: boolean, reason: GateReason
 
 /**
  * Daily gate. Counts device, salted IP, and signed-in user in one upsert.
+ * `x-zo-retry: 1` reads those counters and does not increment them. A retry is
+ * allowed while the stored count is still under or at the limit (the ask that
+ * already counted). Over the limit, a retry is still 401 and still does not count.
  * Session identity is an HMAC plus a session-row read (no Better Auth).
  * No D1 binding: allow, no headers. Test token: allow without counting.
- * AUTH_ENABLED off: count and set headers, never 401.
+ * AUTH_ENABLED off: count and set headers, never 401. A retry still does not count.
  */
 export async function applyGate(
   request: Request,
@@ -140,7 +168,8 @@ export async function applyGate(
     const facingKey = userKey || deviceKey;
     const facingLimit = userKey ? limits.signed : limits.anon;
 
-    const counts = await bumpMany(db, day, [deviceKey && !userKey ? deviceKey : '', userKey || '', ipKey || '']);
+    const tracked = [deviceKey && !userKey ? deviceKey : '', userKey || '', ipKey || ''];
+    const counts = isAutoRetry(request) ? await readMany(db, day, tracked) : await bumpMany(db, day, tracked);
     const deviceCount = deviceKey && !userKey ? (counts.get(deviceKey) ?? 0) : 0;
     const userCount = userKey ? (counts.get(userKey) ?? 0) : 0;
     const ipCount = ipKey ? (counts.get(ipKey) ?? 0) : 0;
