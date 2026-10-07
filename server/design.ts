@@ -269,18 +269,11 @@ export async function designStream(req: DesignRequest, env: Env, on: DesignEvent
   let contentNodes = 0;
   let removed = 0;
   let via: string | undefined;
-  let lines = 0;
-  let unparsed = 0;
-  let failure: string | undefined;
   try {
     const sources = priceSources(req);
     via = await llmLines(env, SYSTEM_WHOLE, user, 2800, (line) => {
-      lines++;
       const parsed = parseLine(line, g, imageCount, req.query, sources, req.followup?.question ?? req.query);
-      if (!parsed) {
-        unparsed++;
-        return;
-      }
+      if (!parsed) return;
       switch (parsed.kind) {
         case 'followups':
           return on.followups(parsed.items);
@@ -308,14 +301,9 @@ export async function designStream(req: DesignRequest, env: Env, on: DesignEvent
     }, { think: req.think, onThinking: on.thinking });
   } catch (err) {
     console.error('Design stream failed', err);
-    failure = err instanceof Error ? err.message : String(err);
   }
   await pictures.flush();
-  if (!contentNodes) {
-    // One line per fallback so `wrangler pages deployment tail` shows why the model gave no card.
-    console.warn('design fallback', JSON.stringify({ via: via ?? null, lines, unparsed, removed, head: headSent, failure: failure?.slice(0, 200) ?? null }));
-    return extractive(req, on);
-  }
+  if (!contentNodes) return extractive(req, on);
   return { engine: chat ? 'reasoning' : 'composed', removed, via };
 }
 
