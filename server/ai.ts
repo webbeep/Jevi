@@ -8,12 +8,16 @@ import { askJev, choice, jevKey } from './jev';
 import { pageText } from './pages';
 import { Env, clip } from './util';
 
-export async function rewriteQuery(original: string, question: string, env: Env, context = ''): Promise<string> {
-  if (!hasDeepSeek(env)) return `${original} ${question}`;
+/**
+ * Turns a follow-up (typed, or a short button label like "apple varieties") into a standalone web
+ * search query that keeps the conversation's subject ("best apple varieties for apple pie").
+ */
+export async function rewriteQuery(original: string, question: string, env: Env, context = '', fromCard?: string): Promise<string> {
+  if (!hasDeepSeek(env)) return question.toLowerCase().includes(original.toLowerCase()) ? question : `${question} ${original}`;
   const { query } = await deepseekJson<{ query: string }>(
     env,
-    'Rewrite the follow-up into a standalone web search query of at most 10 words, resolving references like "it" or "the cheaper one" from the conversation. Reply as JSON: {"query": string}.',
-    `Original search: ${original}\n${context ? `Conversation so far:\n${context}\n` : ''}Follow-up: ${question}`,
+    'Rewrite the follow-up into one standalone web search query (4-12 words) for what the person wants next. Keep the subject of the conversation and its qualifiers (dish, product, place, audience, budget) unless the follow-up clearly changes topic; resolve references like "it" or "the cheaper one". A short label such as "apple varieties" asked from a card about apple pie means "best apple varieties for apple pie". Reply as JSON: {"query": string}.',
+    `Conversation started with: ${original}\n${context ? `Conversation so far:\n${context}\n` : ''}${fromCard ? `Asked from the card: ${fromCard}\n` : ''}Follow-up: ${question}`,
     80,
   );
   return query?.trim() || question;

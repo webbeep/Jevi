@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { RotateCw, Wand2 } from 'lucide-react';
+import { RotateCw } from 'lucide-react';
 import type { CardNode } from '../../shared/card';
 import { cn } from '@/lib/utils';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
@@ -46,7 +46,6 @@ const fmt = (n: number, unit?: string) => `${Number.isInteger(n) ? n : n.toFixed
 export function SliderNode({ node }: { node: Of<'slider'> }) {
   const { onRefine, busy } = useCard();
   const [value, setValue] = useState(node.value);
-  const changed = value !== node.value;
   return (
     <div className="rounded-xl border bg-card p-3 sm:p-4">
       <div className="mb-3 flex items-center justify-between text-sm">
@@ -64,7 +63,6 @@ export function SliderNode({ node }: { node: Of<'slider'> }) {
       />
       <div className="mt-2 flex justify-between text-[11px] text-muted-foreground">
         <span>{fmt(node.min, node.unit)}</span>
-        {changed && busy && <span className="inline-flex items-center gap-1"><Wand2 className="size-3" />Redesigning…</span>}
         <span>{fmt(node.max, node.unit)}</span>
       </div>
     </div>

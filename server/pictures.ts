@@ -1,31 +1,50 @@
-import type { CardNode } from '../shared/card';
-import { findImages } from './images';
+import type { CardNode, ImageCredit } from '../shared/card';
+import type { ImageResult } from '../shared/types';
+import { findImages, matchScore } from './images';
 import type { Env } from './util';
 
 type Emit = (node: CardNode, index: number) => void;
+type Pic = { src: string; link: string; title: string };
 
 /**
  * Finds real pictures for items the designer named (`imageQuery`) and patches
- * them into the card. Nodes are shown immediately; each one is re-emitted with
- * its pictures as soon as they are found, so thumbnails fill in progressively.
+ * them into the card. Pictures already gathered with the search are checked
+ * first (instant); otherwise the image sources are raced. Nodes are shown
+ * immediately and re-emitted with their pictures as soon as they are found.
  */
 export class PictureResolver {
   private readonly pending: Promise<void>[] = [];
   private readonly used = new Set<string>();
 
-  constructor(private readonly env: Env) {}
+  constructor(
+    private readonly env: Env,
+    /** Pictures that came with the search results (already allowed by the image policy). */
+    private readonly pool: ImageResult[],
+    private readonly onCredit: (credit: ImageCredit) => void,
+  ) {}
 
-  private async one(query: string, allowGeneric = false): Promise<{ src: string; link: string; title: string } | undefined> {
-    const found = await findImages(query, this.env, 3, allowGeneric);
-    const pick = found.find((img) => !this.used.has(img.thumb));
-    if (!pick) return undefined;
-    this.used.add(pick.thumb);
-    return { src: pick.thumb, link: pick.url, title: pick.title };
+  private take(img: ImageResult): Pic {
+    this.used.add(img.thumb);
+    this.onCredit({ src: img.thumb, link: img.url, credit: img.credit ?? img.source, license: img.license });
+    return { src: img.thumb, link: img.url, title: img.title };
   }
 
-  private async many(query: string, n: number) {
+  /** A pooled picture whose title names every significant word of the item. */
+  private fromPool(query: string): ImageResult | undefined {
+    return this.pool.find((img) => !this.used.has(img.thumb) && img.title && matchScore(query, img.title) === 1);
+  }
+
+  private async one(query: string, allowGeneric = false): Promise<Pic | undefined> {
+    const pooled = this.fromPool(query);
+    if (pooled) return this.take(pooled);
+    const found = await findImages(query, this.env, 3, allowGeneric);
+    const pick = found.find((img) => !this.used.has(img.thumb));
+    return pick && this.take(pick);
+  }
+
+  private async many(query: string, n: number): Promise<Pic[]> {
     const found = await findImages(query, this.env, n, true);
-    return found.filter((img) => !this.used.has(img.thumb) && this.used.add(img.thumb)).map((img) => ({ src: img.thumb, link: img.url, title: img.title }));
+    return found.filter((img) => !this.used.has(img.thumb)).map((img) => this.take(img));
   }
 
   private static needs(node: CardNode): boolean {

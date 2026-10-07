@@ -12,11 +12,23 @@ export interface SearchResult {
   content?: string;
 }
 
+/**
+ * How a picture may be shown:
+ * - open: Creative Commons / public domain, licensed for commercial use with attribution
+ * - stock: free stock library (Pexels, Unsplash) whose license allows commercial use
+ * - source: the publisher's own preview image, shown as a credited thumbnail linking back (search-engine style)
+ */
+export type ImageLicense = 'open' | 'stock' | 'source';
+
 export interface ImageResult {
+  /** Page the picture comes from; thumbnails link here. */
   url: string;
   thumb: string;
   title: string;
   source: string;
+  license: ImageLicense;
+  /** Attribution line, e.g. "Jane Doe · CC BY-SA 4.0 · Wikimedia Commons". */
+  credit?: string;
 }
 
 export interface Knowledge {

@@ -86,7 +86,7 @@ export function Sources({ layout, results, engines, query, onDigest }: { layout:
     <section className="space-y-2.5">
       <div className="flex items-center gap-2">
         <h3 className="zo-label text-foreground">Sources</h3>
-        <span className="text-xs tabular-nums text-muted-foreground">{results.length}{withText ? ` · ${withText} read` : ''}</span>
+        <span className="zo-meta">{results.length}{withText ? ` · ${withText} read` : ''}</span>
         <div className="ml-auto flex items-center gap-1">
           {engines.map((e) => (
             <Tooltip key={e.name}>
@@ -157,7 +157,7 @@ function SourceMeta({ result, index }: { result: SearchResult; index: number }) 
       <img src={favicon(result.domain)} alt="" className="size-3.5 rounded-[3px]" loading="lazy" />
       <span className="truncate">{result.domain.replace(/^(www|en)\./, '')}</span>
       {result.content && <FileText className="size-3 shrink-0 opacity-60" aria-label="Full text available" />}
-      <span className="ml-auto tabular-nums opacity-60">{index + 1}</span>
+      <span className="zo-meta ml-auto">{String(index + 1).padStart(2, "0")}</span>
     </span>
   );
 }

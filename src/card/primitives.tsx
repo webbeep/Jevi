@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { useCard } from './context';
+import { useCard, useCredit } from './context';
 import { Icon } from './Icon';
 import { RichText } from './RichText';
 
@@ -63,13 +63,13 @@ export function Hero({ node }: { node: Of<'hero'> }) {
     <div className="flex min-w-0 flex-col">
       {node.label && <span className="zo-label">{plain(node.label)}</span>}
       <div className="flex items-start gap-3">
-        <span className={cn('text-5xl font-semibold leading-none tracking-tighter sm:text-6xl', node.value.length > 14 && 'text-3xl sm:text-4xl leading-tight tracking-tight', TONE_TEXT[node.tone ?? 'default'])}>
+        <span className={cn('text-[52px] font-semibold leading-[0.95] tracking-[-0.045em] sm:text-[64px]', node.value.length > 14 && 'text-[32px] leading-tight tracking-[-0.03em] sm:text-[40px]', TONE_TEXT[node.tone === 'primary' || !node.tone ? 'default' : node.tone])}>
           <span className="tabular-nums">{plain(value)}</span>
-          {node.unit && <span className="ml-1 align-top text-2xl font-normal text-muted-foreground">{node.unit}</span>}
+          {node.unit && <span className="ml-1 align-top text-xl font-normal tracking-[-0.02em] text-muted-foreground sm:text-2xl">{node.unit}</span>}
         </span>
         {node.icon && <Icon name={node.icon} className="mt-1 size-10 text-muted-foreground/60 sm:size-12" />}
       </div>
-      {node.caption && <p className="mt-2 text-sm text-muted-foreground"><RichText text={node.caption} inline /></p>}
+      {node.caption && <p className="mt-2.5 text-[14px] text-muted-foreground"><RichText text={node.caption} inline /></p>}
     </div>
   );
 }
@@ -78,14 +78,14 @@ export function Heading({ node }: { node: Of<'heading'> }) {
   return (
     <div>
       {node.eyebrow && <div className="zo-label">{node.eyebrow}</div>}
-      <div className={cn('font-semibold tracking-tight', node.level === 1 ? 'text-2xl' : node.level === 3 ? 'text-base' : 'text-lg')}>{plain(node.text)}</div>
+      <div className={cn('font-semibold tracking-[-0.02em]', node.level === 1 ? 'text-[22px]' : node.level === 3 ? 'text-[15px]' : 'text-[17px]')}>{plain(node.text)}</div>
     </div>
   );
 }
 
 export function Text({ node }: { node: Of<'text'> }) {
   return (
-    <div className={cn('leading-relaxed', node.size === 'lg' ? 'text-base sm:text-lg' : node.size === 'sm' ? 'text-xs' : 'text-sm', node.tone ? TONE_TEXT[node.tone] : 'text-foreground/85')}>
+    <div className={cn(node.size === 'lg' ? 'text-[16.5px] leading-[1.55] tracking-[-0.011em] sm:text-[17.5px]' : node.size === 'sm' ? 'text-[13px] leading-relaxed' : 'text-[15px] leading-[1.65]', node.tone ? TONE_TEXT[node.tone] : 'text-foreground/90')}>
       <RichText text={node.text} />
     </div>
   );
@@ -95,9 +95,9 @@ export function StatView({ node }: { node: Of<'stat'> }) {
   const Trend = node.trend === 'up' ? TrendingUp : node.trend === 'down' ? TrendingDown : Minus;
   return (
     <div className="rounded-xl border bg-card p-3 sm:p-4">
-      <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><Icon name={node.icon} className="size-3.5" />{node.label}</div>
+      <div className="flex items-center gap-1.5 text-[12.5px] text-muted-foreground"><Icon name={node.icon} className="size-3.5" />{node.label}</div>
       <div className="mt-1 flex items-baseline gap-1 sm:mt-1.5">
-        <span className="text-xl font-semibold tracking-tight sm:text-2xl">{plain(node.value)}</span>
+        <span className="text-[22px] font-semibold tabular-nums tracking-[-0.03em] sm:text-[26px]">{plain(node.value)}</span>
         {node.unit && <span className="text-sm text-muted-foreground">{node.unit}</span>}
       </div>
       {node.delta && (
@@ -118,6 +118,7 @@ function usePicture(src: string | undefined, ref: number | undefined): string | 
 export function Tile({ node }: { node: Of<'tile'> }) {
   const { onAsk, busy } = useCard();
   const img = usePicture(node.imageSrc, node.imageRef);
+  const credit = useCredit(img);
   const pending = !img && !!node.imageQuery && busy;
   return (
     <button
@@ -128,7 +129,7 @@ export function Tile({ node }: { node: Of<'tile'> }) {
       )}
     >
       {img ? (
-        <img src={img} alt={node.label} loading="lazy" className="mb-1 aspect-square w-full max-w-24 rounded-lg bg-muted object-cover animate-in fade-in" onError={(e) => ((e.target as HTMLElement).style.display = 'none')} />
+        <img src={img} alt={node.label} title={credit} loading="lazy" className="mb-1 aspect-square w-full max-w-24 rounded-lg bg-muted object-cover animate-in fade-in" onError={(e) => ((e.target as HTMLElement).style.display = 'none')} />
       ) : pending ? (
         <Skeleton className="mb-1 aspect-square w-full max-w-24 rounded-lg" />
       ) : null}
@@ -156,7 +157,8 @@ export function KeyValue({ node }: { node: Of<'keyvalue'> }) {
 function MediaThumb({ item, index }: { item: Of<'list'>['items'][number]; index: number }) {
   const { busy } = useCard();
   const img = usePicture(item.imageSrc, item.imageRef);
-  if (img) return <img src={img} alt="" loading="lazy" className="size-12 shrink-0 rounded-lg bg-muted object-cover animate-in fade-in sm:size-14" onError={(e) => ((e.target as HTMLElement).style.visibility = 'hidden')} />;
+  const credit = useCredit(img);
+  if (img) return <img src={img} alt="" title={credit} loading="lazy" className="size-12 shrink-0 rounded-lg bg-muted object-cover animate-in fade-in sm:size-14" onError={(e) => ((e.target as HTMLElement).style.visibility = 'hidden')} />;
   if (item.imageQuery && busy) return <Skeleton className="size-12 shrink-0 rounded-lg sm:size-14" />;
   return (
     <span className="flex size-12 shrink-0 items-center justify-center rounded-lg bg-muted text-sm font-semibold text-muted-foreground sm:size-14">
@@ -344,12 +346,18 @@ export function ImageView({ node }: { node: Of<'image'> }) {
   const { images, busy } = useCard();
   const ref = node.ref !== undefined ? images[node.ref] : undefined;
   const src = node.src ?? ref?.thumb;
+  const credit = useCredit(src);
   const aspect = node.aspect === 'square' ? 'aspect-square' : node.aspect === 'tall' ? 'aspect-[3/4]' : 'aspect-video';
   if (!src) return node.query && busy ? <Skeleton className={cn('w-full rounded-xl', aspect)} /> : null;
   return (
     <figure className="overflow-hidden rounded-xl border bg-muted animate-in fade-in">
       <img src={src} alt={node.caption ?? ref?.title ?? ''} loading="lazy" className={cn('w-full object-cover', node.aspect === 'square' ? 'aspect-square' : node.aspect === 'tall' ? 'aspect-[3/4]' : 'aspect-video')} />
-      {node.caption && <figcaption className="px-3 py-2 text-xs text-muted-foreground">{node.caption}</figcaption>}
+      {(node.caption || credit) && (
+        <figcaption className="flex items-baseline gap-3 px-3 py-2 text-xs text-muted-foreground">
+          {node.caption && <span className="min-w-0 flex-1">{node.caption}</span>}
+          {credit && <a href={node.link ?? ref?.url} target="_blank" rel="noreferrer" className="ml-auto max-w-[60%] shrink-0 truncate text-[11px] opacity-70 hover:opacity-100">{credit}</a>}
+        </figcaption>
+      )}
     </figure>
   );
 }
@@ -359,6 +367,7 @@ export function Gallery({ node }: { node: Of<'gallery'> }) {
   const items = node.pics?.length
     ? node.pics.map((p) => ({ thumb: p.src, url: p.link, title: p.title, source: p.link ? new URL(p.link).hostname.replace(/^www\./, '') : '' }))
     : node.refs.map((r) => images[r]).filter(Boolean);
+  const { credits } = useCard();
   const [open, setOpen] = useState<number | null>(null);
   const current = open === null ? undefined : items[open];
   if (!items.length) return node.query && busy ? <div className="grid grid-cols-3 gap-1.5">{[0, 1, 2].map((i) => <Skeleton key={i} className="aspect-square rounded-lg" />)}</div> : null;
@@ -377,7 +386,7 @@ export function Gallery({ node }: { node: Of<'gallery'> }) {
           {current && <img src={current.thumb} alt={current.title} className="max-h-[70vh] w-full rounded-lg object-contain" />}
           <div className="flex items-center justify-between">
             <Button variant="ghost" size="icon" onClick={() => setOpen(((open ?? 0) - 1 + items.length) % items.length)}><ChevronLeft /></Button>
-            <a href={current?.url} target="_blank" rel="noreferrer" className="text-xs text-muted-foreground hover:text-foreground">{current?.source} ↗</a>
+            <a href={current?.url} target="_blank" rel="noreferrer" className="text-xs text-muted-foreground hover:text-foreground">{(current && credits[current.thumb]?.credit) ?? current?.source} ↗</a>
             <Button variant="ghost" size="icon" onClick={() => setOpen(((open ?? 0) + 1) % items.length)}><ChevronRight /></Button>
           </div>
         </DialogContent>
@@ -388,10 +397,11 @@ export function Gallery({ node }: { node: Of<'gallery'> }) {
 
 export function Profile({ node }: { node: Of<'profile'> }) {
   const img = usePicture(node.imageSrc, node.imageRef);
+  const credit = useCredit(img);
   return (
     <div className="flex items-center gap-3 sm:gap-4">
       <Avatar className="size-16 rounded-2xl border sm:size-20">
-        {img && <AvatarImage src={img} alt={node.name} className="object-cover" />}
+        {img && <AvatarImage src={img} alt={node.name} title={credit} className="object-cover" />}
         <AvatarFallback className="rounded-2xl text-xl">{node.name.slice(0, 2).toUpperCase()}</AvatarFallback>
       </Avatar>
       <div className="min-w-0 flex-1">
@@ -437,7 +447,7 @@ export function Citations({ node }: { node: Of<'citations'> }) {
   if (!items.length) return null;
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      <span className="mr-1 text-xs text-muted-foreground">Sources</span>
+      <span className="zo-label mr-1">Sources</span>
       {items.map(({ n, r }) => (
         <a key={n} href={r!.url} target="_blank" rel="noreferrer" title={r!.title} className="inline-flex items-center gap-1.5 rounded-full border bg-card py-0.5 pl-1 pr-2.5 text-xs text-muted-foreground transition-colors hover:text-foreground">
           <img src={`https://icons.duckduckgo.com/ip3/${r!.domain}.ico`} alt="" className="size-4 rounded-full" />

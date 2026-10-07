@@ -1,20 +1,20 @@
 import { cn } from '@/lib/utils';
 
-/** ZO mark: a solid O with a Z cut through it. Monochrome; the generating aura carries the color. */
+/** ZO mark: a half-disc (the O) and a wedge (the Z's diagonal) split along one cut. */
 export function LogoMark({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 32 32" className={cn('size-7', className)} aria-hidden>
-      <circle cx="16" cy="16" r="15" fill="currentColor" />
-      <path d="M10.5 10.5h11l-11 11h11" fill="none" stroke="var(--background)" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+    <svg viewBox="0 0 32 32" className={cn('size-7', className)} fill="currentColor" aria-hidden>
+      <path d="M23.79 5.41A13 13 0 0 0 5.41 23.79Z" />
+      <path d="M8.21 26.59L26.59 8.21V26.59Z" />
     </svg>
   );
 }
 
 export function Wordmark({ className }: { className?: string }) {
   return (
-    <span className={cn('inline-flex items-center gap-2', className)}>
-      <LogoMark className="size-[1.15em]" />
-      <span className="font-semibold tracking-[-0.04em]">zo</span>
+    <span className={cn('inline-flex items-center gap-[0.3em]', className)}>
+      <LogoMark className="size-[0.86em] translate-y-[0.05em]" />
+      <span className="font-semibold leading-none tracking-[-0.045em]">zo</span>
     </span>
   );
 }

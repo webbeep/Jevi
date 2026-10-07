@@ -1,5 +1,5 @@
-import { Loader2, MoreHorizontal, RefreshCw } from 'lucide-react';
-import type { AnswerCard, CardPattern } from '../../shared/card';
+import { Image as ImageIcon, Loader2, MoreHorizontal, RefreshCw } from 'lucide-react';
+import type { AnswerCard, CardNode, CardPattern } from '../../shared/card';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -12,12 +12,46 @@ import {
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Skeleton } from '@/components/ui/skeleton';
 import { LogoMark } from '../Logo';
+import { useCard } from './context';
 import { Icon } from './Icon';
 import { Nodes } from './render';
+
+/** Every picture shown on the card, by URL. */
+function pictureSources(body: CardNode[], images: { thumb: string }[]): string[] {
+  const out: string[] = [];
+  const ref = (i?: number) => (i !== undefined ? images[i]?.thumb : undefined);
+  const walk = (n: CardNode) => {
+    switch (n.type) {
+      case 'tile':
+      case 'profile':
+        out.push(n.imageSrc ?? ref(n.imageRef) ?? '');
+        break;
+      case 'list':
+        n.items.forEach((i) => out.push(i.imageSrc ?? ref(i.imageRef) ?? ''));
+        break;
+      case 'image':
+        out.push(n.src ?? ref(n.ref) ?? '');
+        break;
+      case 'gallery':
+        (n.pics?.length ? n.pics.map((p) => p.src) : n.refs.map((r) => ref(r) ?? '')).forEach((src) => out.push(src));
+        break;
+      case 'tabs':
+        n.tabs.forEach((t) => t.children.forEach(walk));
+        break;
+      default:
+        if ('children' in n) n.children.forEach(walk);
+    }
+  };
+  body.forEach(walk);
+  return [...new Set(out.filter(Boolean))];
+}
 
 export function AnswerCardView({ card, version, filling, streaming, status, pattern, alternatives, engine, onPattern, simple, onSimple, onRegenerate }: {
   card: AnswerCard;
@@ -36,6 +70,8 @@ export function AnswerCardView({ card, version, filling, streaming, status, patt
   onSimple: (v: boolean) => void;
   onRegenerate: () => void;
 }) {
+  const { images, credits } = useCard();
+  const credited = filling ? [] : pictureSources(card.body, images).flatMap((src) => (credits[src] ? [{ src, ...credits[src] }] : []));
   return (
     <div className="relative isolate rounded-2xl">
     <div className="zo-aura" data-on={filling} />
@@ -45,7 +81,7 @@ export function AnswerCardView({ card, version, filling, streaming, status, patt
           {filling && !card.icon ? <LogoMark className="size-4 animate-pulse" /> : <Icon name={card.icon} fallback="layout-grid" className="size-[18px] text-foreground/80" />}
         </div>
         <div className="min-w-0 flex-1">
-          <h2 className="truncate text-base font-semibold leading-snug tracking-[-0.015em]">{card.title}</h2>
+          <h2 className="truncate text-[17px] font-semibold leading-snug tracking-[-0.02em]">{card.title}</h2>
           {filling && !card.subtitle ? <Skeleton className="mt-1 h-3 w-32" /> : card.subtitle && <p className="truncate text-[13px] text-muted-foreground">{card.subtitle}</p>}
         </div>
         <DropdownMenu>
@@ -68,6 +104,21 @@ export function AnswerCardView({ card, version, filling, streaming, status, patt
               </>
             )}
             <DropdownMenuItem disabled={filling} onSelect={onRegenerate}><RefreshCw className="size-4" />Redesign</DropdownMenuItem>
+            {credited.length > 0 && (
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger><ImageIcon className="size-4 text-muted-foreground" />Image credits</DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="max-h-80 w-72 overflow-y-auto">
+                  {credited.map((c) => (
+                    <DropdownMenuItem key={c.src} asChild>
+                      <a href={c.link} target="_blank" rel="noreferrer" className="gap-2.5">
+                        <img src={c.src} alt="" className="size-8 shrink-0 rounded-md object-cover" />
+                        <span className="min-w-0 flex-1 truncate text-xs">{c.credit}</span>
+                      </a>
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+            )}
             {engine && (
               <>
                 <DropdownMenuSeparator />

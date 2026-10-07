@@ -1,4 +1,4 @@
-import type { AnswerCard, CardNode, FollowupContext, LayoutPlan } from '../shared/card';
+import type { AnswerCard, CardNode, FollowupContext, ImageCredit, LayoutPlan } from '../shared/card';
 import type { SearchResponse } from '../shared/types';
 import { deepseekLines, hasDeepSeek } from './deepseek';
 import { candidates, extractStats, extractTimeline } from './extract';
@@ -40,11 +40,11 @@ DISPLAY
 - gallery {query | refs}  (several real photos of one subject)
 - profile {name, subtitle, imageQuery | imageRef, facts:[{label, value}]}
 PICTURES: imageQuery / query is the exact name of what the picture must show ("Nike Downshifter 13", "Eiffel Tower at night", "Taylor Swift"); a real photo of that exact item is found for it. imageRef / ref is an IMAGES index — use it only when that image's description clearly shows the same item.
-- actions {items:[{label, icon, query, kind:"search"|"ask"|"refine"}]}  (next-step buttons: "refine" redesigns THIS card with the query as an instruction, "ask" answers a follow-up in a new card, "search" runs a new search)
+- actions {items:[{label, icon, query, kind:"search"|"ask"|"refine"}]}  (next-step buttons, each opens a NEW card below: "refine" = this card with a change, query is the instruction; "ask" = answers a follow-up question; "search" = new web search, query is a complete search query. Every query must stand alone and name the subject: "Gluten-free apple pie crust", never "gluten-free" or "apples")
 - citations {refs:[source numbers]}
 INTERACTIVE (make the card something to play with, not just read)
-- choices {label, options:[{label, prompt, selected}]}  (segmented control; picking an option redesigns the card using its prompt, e.g. time range, focus, audience)
-- slider {label, min, max, step, value, unit, prompt}  (prompt must contain {value}; releasing the slider redesigns the card, e.g. "plan for {value} people")
+- choices {label, options:[{label, prompt, selected}]}  (segmented control; picking an option opens a new card adjusted by its prompt, e.g. time range, focus, audience. The prompt names the subject: "Show the apple pie recipe for a vegan diet")
+- slider {label, min, max, step, value, unit, prompt}  (prompt must contain {value} and name the subject; releasing the slider opens a new adjusted card, e.g. "Plan the Tokyo trip for {value} people")
 - scaler {label, base, value, min, max, step, unit, items:[{name, amount:number, unit}]}  (live, instant rescaling of quantities such as ingredients or costs; base is the amount the sources describe, value is where the control starts, e.g. the amount the person asked for)
 - accordion {items:[{title, text}]}  (tap to expand details)
 - reveal {items:[{front, back}]}  (tap-to-flip cards for quizzes, myths vs facts, terms)
@@ -88,6 +88,8 @@ export interface DesignEvents {
   /** `index` is the node's position in the card; parallel regions may arrive out of order. */
   node: (node: CardNode, index: number) => void;
   followups: (items: string[]) => void;
+  /** Attribution for a picture placed on the card. */
+  credit: (credit: ImageCredit) => void;
 }
 
 export interface DesignSummary {
@@ -100,7 +102,7 @@ function followupRules(f: FollowupContext | undefined, originalQuery: string): s
   if (!f) return '';
   switch (f.mode) {
     case 'refine':
-      return `\n\nTHIS IS A REDESIGN. The person is looking at CURRENT CARD (below) for "${originalQuery}" and asked: "${f.question}". Output the full updated card: apply the change, keep what still applies, and restructure freely if the change calls for a different layout. Mark the matching choices option as selected and move any slider or scaler to the requested value.`;
+      return `\n\nTHIS IS AN ADJUSTED VERSION of CURRENT CARD (below), which answered "${originalQuery}". The person asked: "${f.question}". Output a complete new card that applies the change: keep the same subject and everything that still applies, restructure freely if the change calls for a different layout, and make the change obvious in the subtitle. Mark the matching choices option as selected and move any slider or scaler to the requested value. The original card stays on screen above, so do not describe what changed in prose.`;
     case 'answer':
       return `\n\nTHIS IS A FOLLOW-UP. The original search was "${originalQuery}". Design a focused card that answers only the follow-up question "${f.question}". Do not repeat the original answer; pick the components that fit this question best.`;
     case 'chat':
@@ -143,7 +145,7 @@ const SYSTEM_WHOLE = `${DESIGNER}
 OUTPUT FORMAT — JSON Lines, streamed to the screen as you write:
 Line 1: {"title":string,"subtitle":string,"icon":string,"accent":tone}
 Then exactly one line per top-level body node, each a complete compact JSON object (children nested inside it).
-Last line: {"followups":[4 short follow-up questions]}
+Last line: {"followups":[4 short follow-up questions, each naming the subject, e.g. "How long does apple pie keep?" not "How long does it keep?"]}
 No code fences, no prose, no blank lines, no line breaks inside a JSON object.`;
 
 const SYSTEM_REGION = `${DESIGNER}
@@ -221,7 +223,7 @@ export async function designStream(req: DesignRequest, env: Env, on: DesignEvent
   const chat = req.followup?.mode === 'chat';
   const g = new Grounding(corpusOf(req), chat);
   const polish = new Polisher(textCap(req));
-  const pictures = new PictureResolver(env);
+  const pictures = new PictureResolver(env, req.search.images, on.credit);
   const base = req.followup?.mode === 'refine' && req.followup.baseCard ? `CURRENT CARD\n${JSON.stringify(req.followup.baseCard).slice(0, 12000)}\n\n` : '';
   const user = `${sourcesBlock(req.search, req.pages)}\n\n${base}SKELETON\n${JSON.stringify(patternById(req.pattern).skeleton)}\n\nTASK\n${taskBlock(req)}\n\nQUERY: ${req.followup?.question ?? req.query}`;
 
@@ -294,7 +296,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
   const regions = patternById(req.pattern).skeleton;
   on.layout(regions);
   const g = new Grounding(corpusOf(req));
-  const pictures = new PictureResolver(env);
+  const pictures = new PictureResolver(env, req.search.images, on.credit);
   const polish = new Polisher(textCap(req));
   const shared = `${sourcesBlock(req.search, req.pages, 2000)}\n\nTASK\n${taskBlock(req)}\n- Card regions, top to bottom:\n${regions.map((r, i) => `  R${i + 1}: ${regionPurpose(r)}`).join('\n')}\n  FINISH: header, interactive control, actions, citations, follow-ups`;
   const query = req.followup?.question ?? req.query;
@@ -320,7 +322,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
   };
 
   const finishCall = () => {
-    const user = `${shared}\n- YOU DESIGN FINISH. Output these lines:\n  1. {"title":string,"subtitle":string,"icon":string,"accent":tone} for the whole card\n  2. only if the answer has something worth adjusting, exploring or testing: one interactive node such as {"type":"choices",...} or {"type":"slider",...} that the regions above don't already cover\n  3. {"type":"actions","items":[...]} with 2-4 useful next steps (prefer kind "refine" for changes to this card)\n  4. {"type":"citations","refs":[...]} with the source numbers that matter most\n  5. {"followups":[4 short follow-up questions]}\n\nQUERY: ${query}`;
+    const user = `${shared}\n- YOU DESIGN FINISH. Output these lines:\n  1. {"title":string,"subtitle":string,"icon":string,"accent":tone} for the whole card\n  2. only if the answer has something worth adjusting, exploring or testing: one interactive node such as {"type":"choices",...} or {"type":"slider",...} that the regions above don't already cover\n  3. {"type":"actions","items":[...]} with 2-4 useful next steps (prefer kind "refine" for changes to this card)\n  4. {"type":"citations","refs":[...]} with the source numbers that matter most\n  5. {"followups":[4 short follow-up questions, each naming the subject so it stands alone]}\n\nQUERY: ${query}`;
     let extra = 0;
     return deepseekLines(env, SYSTEM_REGION, user, 1000, (line) => {
       const parsed = parseLine(line, g, imageCount, req.query);

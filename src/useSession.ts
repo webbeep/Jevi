@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
-import type { AnswerCard, CardNode, CardResponse, FollowupContext, LayoutPlan } from '../shared/card';
+import type { AnswerCard, CardNode, CardResponse, FollowupContext, FollowupIntent, ImageCredit, LayoutPlan } from '../shared/card';
 import { cardDigest } from '../shared/digest';
 import type { SearchResponse, SearchResult } from '../shared/types';
 import { api } from './api';
@@ -15,6 +15,7 @@ export interface LiveCard {
   /** Designed nodes by position; parallel regions may arrive out of order. */
   nodes: (CardNode | undefined)[];
   followups: string[];
+  credits: ImageCredit[];
 }
 
 export interface Turn {
@@ -24,6 +25,10 @@ export interface Turn {
   question: string;
   /** The search turn whose results this turn is built from (itself for search turns). */
   searchId: number;
+  /** Set when this turn came from a control or button on a card rather than being typed. */
+  origin?: FollowupIntent;
+  /** The card this one is an adjusted version of. */
+  base?: { id: number; title: string; card: AnswerCard };
   /** How a follow-up was answered, so redesigns keep the same approach. */
   mode?: Exclude<FollowupContext['mode'], 'refine'>;
   plan?: LayoutPlan;
@@ -40,13 +45,12 @@ export interface Turn {
   thinking?: boolean;
   /** Set while an existing card is being redesigned. */
   status?: string;
-  refinements: string[];
   simple: boolean;
   pins: CardNode[];
   error?: string;
 }
 
-const emptyLive = (): LiveCard => ({ regions: [], nodes: [], followups: [] });
+const emptyLive = (): LiveCard => ({ regions: [], nodes: [], followups: [], credits: [] });
 const variantKey = (pattern: string | undefined, simple: boolean) => `${pattern ?? ''}|${simple ? 1 : 0}`;
 const errMsg = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
@@ -76,20 +80,29 @@ export function useSession() {
   const update = useCallback((id: number, patch: Partial<Turn> | ((t: Turn) => Partial<Turn>)) => {
     commit((all) => all.map((t) => (t.id === id ? { ...t, ...(typeof patch === 'function' ? patch(t) : patch) } : t)));
   }, [commit]);
-  const add = useCallback((turn: Omit<Turn, 'id' | 'version' | 'refinements' | 'simple' | 'pins' | 'searchId' | 'variants'> & { searchId?: number }) => {
+  const add = useCallback((turn: Omit<Turn, 'id' | 'version' | 'simple' | 'pins' | 'searchId' | 'variants'> & { searchId?: number }) => {
     const id = ++nextId;
-    commit((all) => [...all, { version: 0, refinements: [], simple: false, pins: [], variants: {}, ...turn, searchId: turn.searchId ?? id, id }]);
+    commit((all) => [...all, { version: 0, simple: false, pins: [], variants: {}, ...turn, searchId: turn.searchId ?? id, id }]);
     return id;
   }, [commit]);
   const searchOf = (t: Turn | undefined) => (t ? get(t.searchId) : undefined);
 
-  /** Compact summary of the finished turns before `beforeId`, oldest first. */
-  const contextBefore = (beforeId?: number) =>
-    ref.current
-      .filter((t) => t.result && (beforeId === undefined || t.id < beforeId))
-      .slice(-6)
-      .map((t) => `- Q: ${t.question}\n  A: ${cardDigest(t.result!.card)}`)
-      .join('\n');
+  /**
+   * Conversation memory for the model: the topic the conversation started with,
+   * short digests of earlier turns, and a fuller digest of the card being acted
+   * on (or the latest one), so follow-ups never lose the subject.
+   */
+  const memory = (beforeId?: number, focusId?: number) => {
+    const done = ref.current.filter((t) => t.result && (beforeId === undefined || t.id < beforeId));
+    if (!done.length) return '';
+    const focus = done.find((t) => t.id === focusId) ?? done[done.length - 1];
+    const earlier = done.filter((t) => t !== focus).slice(-7);
+    return [
+      `Topic: ${ref.current[0]?.question ?? focus.question}`,
+      ...(earlier.length ? ['Earlier turns, oldest first:', ...earlier.map((t) => `- Q: ${t.question} → ${cardDigest(t.result!.card, 260)}`)] : []),
+      `${focusId === focus.id ? 'Card they are acting on' : 'Latest card'} (Q: ${focus.question}): ${cardDigest(focus.result!.card, 1100)}`,
+    ].join('\n');
+  };
 
   /**
    * Streams `body` into turn `id`, event by event. A follow-up stream can be
@@ -108,15 +121,15 @@ export function useSession() {
       switch (e.event) {
         case 'plan':
           return update(route, (t) => (t.result ? {} : { plan: e.data, pattern: e.data.pattern, mode: e.data.mode === 'answer' || e.data.mode === 'chat' ? e.data.mode : t.mode }));
-        case 'target': {
-          const placeholder = route;
-          route = e.data.id;
-          commit((all) => all.filter((t) => t.id !== placeholder));
-          const question = body.kind === 'followup' ? body.question : '';
-          update(route, (t) => ({ filling: true, live: undefined, status: `Redesigning: ${question}`, refinements: [...t.refinements, question] }));
-          scrollToTurn(route);
-          return;
+        case 'base': {
+          const base = get(e.data.id)?.result;
+          return base ? update(route, { base: { id: e.data.id, title: base.card.title, card: base.card } }) : undefined;
         }
+        case 'credit':
+          return update(route, (t) => {
+            const live = t.live ?? emptyLive();
+            return live.credits.some((c) => c.src === e.data.src) ? {} : { live: { ...live, credits: [...live.credits, e.data] } };
+          });
         case 'rewrite':
           return update(route, { kind: 'search', question: e.data.query, searchId: route, mode: undefined });
         case 'search':
@@ -156,7 +169,7 @@ export function useSession() {
           return update(route, (t) => {
             if (!t.live?.nodes.some(Boolean)) return { live: undefined, filling: false, status: undefined, thinking: false };
             const result: CardResponse = {
-              card: { title: t.live.head?.title ?? t.question, ...t.live.head, body: liveBody(t.live, false) },
+              card: { title: t.live.head?.title ?? t.question, ...t.live.head, body: liveBody(t.live, false), credits: t.live.credits },
               followups: t.live.followups,
               engine: e.data.engine,
               pagesRead: e.data.pagesRead,
@@ -190,9 +203,10 @@ export function useSession() {
     if (!turn?.plan || !ctx?.search) return;
     const pattern = opts.pattern ?? turn.pattern ?? turn.plan.pattern;
     const simple = opts.simple ?? turn.simple;
-    const followup = opts.followup ?? (turn.kind === 'answer' ? { mode: turn.mode ?? 'answer', question: turn.question } : undefined);
+    const followup = opts.followup
+      ?? (turn.base ? { mode: 'refine' as const, question: turn.question, baseCard: turn.base.card } : turn.kind === 'answer' ? { mode: turn.mode ?? 'answer', question: turn.question } : undefined);
     update(id, { filling: true, status: opts.status, pattern, simple, error: undefined, live: undefined });
-    const context = turn.kind === 'search' ? undefined : contextBefore(id) || undefined;
+    const context = memory(id, turn.base?.id) || undefined;
     await run(id, { kind: 'design', query: ctx.search.query, pattern, depth: turn.plan.depth, readPages: turn.plan.readPages, search: ctx.search, simple, followup, context }).catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [update, run]);
@@ -200,7 +214,7 @@ export function useSession() {
   const runSearchTurn = useCallback(async (id: number, query: string) => {
     update(id, { kind: 'search', question: query, searchId: id, filling: true, plan: undefined, search: undefined, result: undefined, live: undefined, error: undefined });
     try {
-      await run(id, { kind: 'search', query, freshness: 'any', context: contextBefore(id) || undefined });
+      await run(id, { kind: 'search', query, freshness: 'any', context: memory(id) || undefined });
     } catch {
       const turn = get(id);
       if (!turn || turn.search?.results.length) return;
@@ -233,26 +247,30 @@ export function useSession() {
     void runSearchTurn(id, q);
   }, [add, clear, runSearchTurn]);
 
-  /** Redesigns an existing card in place, straight from a control or action on it. */
-  const refine = useCallback((id: number, instruction: string) => {
-    const turn = get(id);
-    if (!turn?.result) return;
-    scrollToTurn(id);
-    update(id, (t) => ({ refinements: [...t.refinements, instruction] }));
-    void design(id, { status: `Redesigning: ${instruction}`, followup: { mode: 'refine', question: instruction, baseCard: turn.result.card } });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [update, design]);
-
-  /** Any message after the first search: Jev decides whether to chat, answer, redesign a card or search. */
-  const followup = useCallback(async (question: string, fromId?: number) => {
+  /**
+   * Any message after the first search, typed or from a card. Typed messages let Jev decide whether to chat,
+   * answer, adjust a card or search; card controls say what they want (`intent`). Either way the answer is a
+   * new card — the card it came from stays as it was.
+   */
+  const followup = useCallback(async (question: string, fromId?: number, intent?: FollowupIntent) => {
     const q = question.trim();
     const from = fromId ? get(fromId) : [...ref.current].reverse().find((t) => t.result || t.search);
     const ctx = searchOf(from) ?? [...ref.current].reverse().find((t) => t.search);
     if (!q || !ctx?.search) return;
-    const id = add({ kind: 'answer', question: q, searchId: ctx.id, filling: true });
+    const base = intent === 'adjust' && from?.result ? { id: from.id, title: from.result.card.title, card: from.result.card } : undefined;
+    const id = add({ kind: intent === 'search' ? 'search' : 'answer', question: q, searchId: ctx.id, filling: true, origin: intent, base, pattern: base ? from?.pattern : undefined });
     scrollToTurn(id);
-    const cards = ref.current.filter((t) => t.result && t.id !== id).slice(-6).map((t) => ({ id: t.id, title: t.result!.card.title, card: t.result!.card }));
-    await run(id, { kind: 'followup', question: q, original: ctx.question, search: ctx.search, cards, context: contextBefore(id) || undefined }).catch(() => undefined);
+    const cards = ref.current.filter((t) => t.result && t.id !== id).slice(-8).map((t) => ({ id: t.id, title: t.result!.card.title, card: t.result!.card, pattern: t.pattern }));
+    await run(id, {
+      kind: 'followup',
+      question: q,
+      original: ref.current[0]?.question ?? ctx.question,
+      search: ctx.search,
+      cards,
+      context: memory(id, from?.id) || undefined,
+      intent,
+      from: from?.id,
+    }).catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [add, run]);
 
@@ -302,5 +320,5 @@ export function useSession() {
   }, [switchView]);
   const redesign = useCallback((id: number) => void design(id), [design]);
 
-  return { turns, searchOf, clear, search, followup, refine, digest, pin, setPattern, setSimple, redesign };
+  return { turns, searchOf, clear, search, followup, digest, pin, setPattern, setSimple, redesign };
 }

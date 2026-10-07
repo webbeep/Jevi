@@ -8,6 +8,7 @@ import type {
   SearchResult,
 } from '../shared/types';
 import { cleanMarkdown, parseDuckDuckGo } from '../shared/text';
+import { commons, openverse, permitted } from './images';
 import { Env, UA, clip, domainOf, fetchJson, fetchText, hedge, stripHtml } from './util';
 
 interface Query {
@@ -103,7 +104,7 @@ const tavily: Engine = {
       })),
       images: (data.images ?? []).map((img) => {
         const url = typeof img === 'string' ? img : img.url;
-        return { url, thumb: url, title: typeof img === 'string' ? '' : img.description ?? '', source: domainOf(url) };
+        return { url, thumb: url, title: typeof img === 'string' ? '' : img.description ?? '', source: domainOf(url), license: 'source' as const, credit: domainOf(url) };
       }),
     };
   },
@@ -333,7 +334,23 @@ export function normalizeUrl(url: string): string {
 const ENGINE_WEIGHT: Record<string, number> = { brave: 1.2, serper: 1.2, exa: 1.2, perplexity: 1.2, tavily: 1.1, jina: 1.1, marginalia: 0.5, wikipedia: 0.8 };
 
 /** Reciprocal rank fusion across engines, so results found by several engines rise. */
-function fuse(outputs: { engine: string; hits: Hit[] }[], count: number): SearchResult[] {
+const QUERY_STOP = new Set(['the', 'and', 'for', 'with', 'how', 'what', 'why', 'when', 'who', 'are', 'is', 'to', 'of', 'in', 'on', 'a', 'an', 'vs', 'best', 'my', 'do', 'does', 'can', 'i']);
+const stem = (w: string) => w.replace(/(ies|es|s)$/, '');
+
+/** Share of the query's significant words a result mentions in its title, snippet or URL (0-1). */
+function coverage(query: string, hit: Hit): number {
+  const words = [...new Set(query.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 1 && !QUERY_STOP.has(w)).map(stem))];
+  if (!words.length) return 1;
+  const text = `${hit.title} ${hit.snippet} ${hit.url}`.toLowerCase();
+  return words.filter((w) => text.includes(w)).length / words.length;
+}
+
+/**
+ * Weighted reciprocal-rank fusion, scaled by how much of the query each result
+ * covers. Results that only one engine returned and that miss most of the
+ * query ("Apple Store" for "apple pie recipe") are dropped.
+ */
+function fuse(outputs: { engine: string; hits: Hit[] }[], count: number, query: string): SearchResult[] {
   const merged = new Map<string, SearchResult & { score: number }>();
   for (const { engine, hits } of outputs) {
     hits.forEach((hit, rank) => {
@@ -354,6 +371,9 @@ function fuse(outputs: { engine: string; hits: Hit[] }[], count: number): Search
     });
   }
   return [...merged.values()]
+    .map((r) => ({ r, cover: coverage(query, r) }))
+    .filter(({ r, cover }) => cover >= 0.5 || r.engines.length > 1)
+    .map(({ r, cover }) => ({ ...r, score: r.score * (0.3 + cover) }))
     .sort((a, b) => b.score - a.score)
     .slice(0, count)
     .map(({ score: _score, ...r }) => r);
@@ -394,46 +414,14 @@ async function wikiSummary(title: string): Promise<Knowledge | undefined> {
   };
 }
 
-async function images(q: string): Promise<ImageResult[]> {
-  const openverse = async () => {
-    const data = await fetchJson<{ results?: { url: string; thumbnail?: string; title?: string; foreign_landing_url?: string }[] }>(
-      `https://api.openverse.org/v1/images/?q=${encodeURIComponent(q)}&page_size=12&mature=false`,
-      { headers: { 'User-Agent': UA } },
-      4500,
-    );
-    const out = (data.results ?? []).map((r) => ({
-      url: r.foreign_landing_url ?? r.url,
-      thumb: r.thumbnail ?? r.url,
-      title: r.title ?? '',
-      source: domainOf(r.foreign_landing_url ?? r.url),
-    }));
+/** Topic imagery from open-licensed libraries only (commercial use allowed). */
+function images(q: string): Promise<ImageResult[]> {
+  const nonEmpty = (task: () => Promise<ImageResult[]>) => async () => {
+    const out = await task();
     if (!out.length) throw new Error('no images');
     return out;
   };
-  const commons = async () => {
-    const u = new URL('https://commons.wikimedia.org/w/api.php');
-    Object.entries({
-      action: 'query',
-      generator: 'search',
-      gsrnamespace: '6',
-      gsrsearch: q,
-      gsrlimit: '12',
-      prop: 'imageinfo',
-      iiprop: 'url',
-      iiurlwidth: '480',
-      format: 'json',
-      origin: '*',
-    }).forEach(([k, v]) => u.searchParams.set(k, v));
-    const data = await fetchJson<{
-      query?: { pages?: Record<string, { title: string; imageinfo?: { thumburl?: string; url: string; descriptionurl: string }[] }> };
-    }>(u.toString(), { headers: { 'User-Agent': UA } }, 4500);
-    const out = Object.values(data.query?.pages ?? {})
-      .map((p) => p.imageinfo?.[0] && { url: p.imageinfo[0].url, thumb: p.imageinfo[0].thumburl ?? p.imageinfo[0].url, title: p.title.replace(/^File:|\.\w+$/g, ''), source: 'commons.wikimedia.org' })
-      .filter((x): x is ImageResult => !!x && /\.(jpe?g|png|webp)$/i.test(x.url));
-    if (!out.length) throw new Error('no images');
-    return out;
-  };
-  return hedge([openverse, commons], 1200);
+  return hedge([nonEmpty(() => openverse(q, 12)), nonEmpty(() => commons(q, 12))], 600);
 }
 
 async function discussions(q: string): Promise<Discussion[]> {
@@ -533,22 +521,22 @@ export async function searchWithLate(q: Query, env: Env): Promise<SearchWithLate
     bounded(discussions(q.q), [] as Discussion[]),
   ]);
 
-  const results = fuse(web, q.count);
+  const results = fuse(web, q.count, q.q);
   const knowledge = instant ?? wiki;
   const early = new Set(web.map((w) => w.engine));
   const late = allEngines.then(() => {
     const content = new Map<string, string>();
     done.forEach((d) => d.hits.forEach((h) => h.content && content.set(normalizeUrl(h.url), h.content)));
-    return { content, images: done.filter((d) => !early.has(d.engine)).flatMap((d) => d.images ?? []) };
+    return { content, images: permitted(done.filter((d) => !early.has(d.engine)).flatMap((d) => d.images ?? []), env) };
   });
 
   const seen = new Set<string>();
-  const allImages = [
-    ...(knowledge?.image ? [{ url: knowledge.url, thumb: knowledge.image, title: knowledge.title, source: domainOf(knowledge.url) }] : []),
+  const allImages = permitted([
+    ...(knowledge?.image ? [{ url: knowledge.url, thumb: knowledge.image, title: knowledge.title, source: domainOf(knowledge.url), license: 'source' as const, credit: 'Wikipedia' }] : []),
     ...web.flatMap((w) => w.images ?? []),
-    ...results.filter((r) => r.image).map((r) => ({ url: r.url, thumb: r.image!, title: r.title, source: r.domain })),
+    ...results.filter((r) => r.image).map((r) => ({ url: r.url, thumb: r.image!, title: r.title, source: r.domain, license: 'source' as const, credit: r.domain })),
     ...imgs,
-  ].filter((img) => img.thumb && !seen.has(img.thumb) && seen.add(img.thumb));
+  ], env).filter((img) => img.thumb && !seen.has(img.thumb) && seen.add(img.thumb));
 
   return {
     response: {

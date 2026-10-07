@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowUp, CornerDownRight, Moon, Plus, Search, Sun, X } from 'lucide-react';
+import { ArrowUp, CornerDownRight, CornerLeftUp, Moon, Plus, Search, SlidersHorizontal, Sun, X } from 'lucide-react';
 import type { AnswerCard, CardNode } from '../shared/card';
 import { api } from './api';
 import { AnswerCardView } from './card/AnswerCardView';
@@ -7,7 +7,7 @@ import { CardContext } from './card/context';
 import { Icon } from './card/Icon';
 import { LogoMark, Wordmark } from './Logo';
 import { Sources } from './Sources';
-import { type Turn, liveBody, useSession } from './useSession';
+import { type Turn, liveBody, scrollToTurn, useSession } from './useSession';
 import { useSuggestions } from './useSuggestions';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -146,7 +146,7 @@ export default function App() {
           void session.followup(`Go deeper on "${q.text}"${note ? ` — ${note}` : ''}`, q.turnId);
           break;
         case 'search':
-          session.search(note ? `${q.text} ${note}` : q.text, { reset: false });
+          void session.followup(note ? `${q.text} — ${note}` : q.text, q.turnId, 'search');
           break;
         case 'save':
           void save(q);
@@ -236,7 +236,7 @@ export default function App() {
                     <ul className="divide-y">
                       {last.result.followups.map((f) => (
                         <li key={f}>
-                          <button onClick={() => session.followup(f, last.id)} className="group flex w-full items-center gap-3 px-1 py-3 text-left text-[14px] leading-snug text-foreground/80 transition-colors hover:text-foreground">
+                          <button onClick={() => session.followup(f, last.id, 'ask')} className="group flex w-full items-center gap-3 px-1 py-3 text-left text-[14px] leading-snug text-foreground/80 transition-colors hover:text-foreground">
                             <CornerDownRight className="size-4 shrink-0 text-muted-foreground" />
                             <span className="flex-1">{f}</span>
                             <Plus className="size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
@@ -333,12 +333,26 @@ function TurnView({ turn, first, session }: { turn: Turn; first: boolean; sessio
     return turn.pins.length ? { ...base, body: [...base.body, { type: 'section', title: 'Pinned by you', icon: 'pin', children: turn.pins }] } : base;
   }, [streaming, turn.live, turn.result, turn.plan, turn.question, turn.kind, turn.pins, turn.filling]);
 
+  const credits = useMemo(() => {
+    const out: Record<string, { credit: string; link: string }> = {};
+    (ctx?.search?.images ?? []).forEach((i) => (out[i.thumb] = { credit: i.credit ?? i.source, link: i.url }));
+    [...(turn.live?.credits ?? []), ...(card.credits ?? [])].forEach((c) => (out[c.src] = { credit: c.credit, link: c.link }));
+    return out;
+  }, [ctx?.search?.images, turn.live?.credits, card.credits]);
+
   return (
     <section id={`turn-${turn.id}`} data-turn={turn.id} className="scroll-mt-20 space-y-3 animate-in fade-in slide-in-from-bottom-3 duration-500">
       {!first && (
-        <div className="flex justify-end">
+        <div className="flex flex-col items-end gap-1.5">
+          {turn.base && (
+            <button onClick={() => scrollToTurn(turn.base!.id)} className="inline-flex max-w-[85%] items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground">
+              <CornerLeftUp className="size-3.5 shrink-0" />
+              <span className="truncate">From “{turn.base.title}”</span>
+            </button>
+          )}
           <div className="flex max-w-[85%] items-center gap-2 rounded-2xl rounded-br-md bg-foreground/[0.06] px-4 py-2.5 text-[15px] leading-snug dark:bg-foreground/[0.09]">
             {turn.kind === 'search' && <Search className="size-3.5 shrink-0 text-muted-foreground" />}
+            {turn.origin === 'adjust' && <SlidersHorizontal className="size-3.5 shrink-0 text-muted-foreground" />}
             {turn.question}
           </div>
         </div>
@@ -351,10 +365,11 @@ function TurnView({ turn, first, session }: { turn: Turn; first: boolean; sessio
           value={{
             results: ctx?.search?.results ?? [],
             images: ctx?.search?.images ?? [],
+            credits,
             busy: turn.filling,
-            onSearch: (q) => session.search(q, { reset: false }),
-            onAsk: (q) => void session.followup(q, turn.id),
-            onRefine: (instruction) => session.refine(turn.id, instruction),
+            onSearch: (q) => void session.followup(q, turn.id, 'search'),
+            onAsk: (q) => void session.followup(q, turn.id, 'ask'),
+            onRefine: (instruction) => void session.followup(instruction, turn.id, 'adjust'),
           }}
         >
           <AnswerCardView
@@ -372,14 +387,6 @@ function TurnView({ turn, first, session }: { turn: Turn; first: boolean; sessio
             onRegenerate={() => session.redesign(turn.id)}
           />
         </CardContext.Provider>
-      )}
-
-      {turn.refinements.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 px-1">
-          {turn.refinements.map((r, i) => (
-            <span key={i} className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-0.5 text-xs text-muted-foreground"><CornerDownRight className="size-3" />{r}</span>
-          ))}
-        </div>
       )}
 
       {turn.kind === 'search' && turn.search && turn.search.results.length > 0 && (

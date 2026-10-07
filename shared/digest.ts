@@ -36,6 +36,15 @@ export function cardDigest(card: AnswerCard, max = 420): string {
       case 'list':
         facts.push(n.items.slice(0, 4).map((i) => i.text).join(', '));
         break;
+      case 'choices': {
+        const picked = n.options.find((o) => o.selected);
+        if (picked) facts.push(`${n.label ?? 'option'}: ${picked.label}`);
+        break;
+      }
+      case 'slider':
+      case 'scaler':
+        facts.push(`${n.label}: ${n.value ?? (n.type === 'scaler' ? n.base : '')}${n.unit ? ` ${n.unit}` : ''}`);
+        break;
       default:
         if ('children' in n) n.children.forEach(walk);
     }

@@ -1,10 +1,10 @@
-import type { AnswerCard, CardNode, FollowupContext, LayoutPlan } from '../shared/card';
+import type { AnswerCard, CardNode, FollowupContext, FollowupIntent, ImageCredit, LayoutPlan } from '../shared/card';
 import type { Freshness, ImageResult, SearchResponse } from '../shared/types';
 
 export type StreamBody =
   | { kind: 'search'; query: string; freshness: Freshness; context?: string }
   | { kind: 'design'; query: string; pattern: string; depth: LayoutPlan['depth']; readPages: boolean; search: SearchResponse; simple?: boolean; followup?: FollowupContext; context?: string }
-  | { kind: 'followup'; question: string; original: string; search: SearchResponse; cards: { id: number; title: string; card?: AnswerCard }[]; context?: string };
+  | { kind: 'followup'; question: string; original: string; search: SearchResponse; cards: { id: number; title: string; card?: AnswerCard; pattern?: string }[]; context?: string; intent?: FollowupIntent; from?: number };
 
 export type StreamEvent =
   | { event: 'plan'; data: LayoutPlan }
@@ -14,7 +14,8 @@ export type StreamEvent =
   | { event: 'designing'; data: { pagesRead: number; ms: number } }
   | { event: 'thinking'; data: Record<string, never> }
   | { event: 'rewrite'; data: { query: string } }
-  | { event: 'target'; data: { id: number } }
+  | { event: 'base'; data: { id: number } }
+  | { event: 'credit'; data: ImageCredit }
   | { event: 'layout'; data: CardNode[] }
   | { event: 'head'; data: Omit<AnswerCard, 'body'> }
   | { event: 'node'; data: { index: number; node: CardNode } }

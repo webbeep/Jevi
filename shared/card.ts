@@ -4,8 +4,16 @@
  * refines and fills it) may combine these freely — nothing is tied to a topic.
  */
 
-/** search = new web search, ask = answer as a new card from these results, refine = redesign this card. */
+import type { ImageLicense } from './types';
+
+/** search = new web search, ask = answer as a new card, refine = a new card that adjusts this one. */
 export type ActionKind = 'search' | 'ask' | 'refine';
+
+/**
+ * Where a follow-up came from when it is not typed: a card control or button.
+ * adjust = new card that is this card with a change; ask = answer about it; search = new web search about it.
+ */
+export type FollowupIntent = 'adjust' | 'ask' | 'search';
 
 export type Tone = 'default' | 'muted' | 'primary' | 'positive' | 'negative' | 'warning';
 export type Gap = 'sm' | 'md' | 'lg';
@@ -53,12 +61,21 @@ export type CardNode =
 
 export type NodeType = CardNode['type'];
 
+export interface ImageCredit {
+  src: string;
+  link: string;
+  credit: string;
+  license: ImageLicense;
+}
+
 export interface AnswerCard {
   title: string;
   subtitle?: string;
   icon?: string;
   accent?: Tone;
   body: CardNode[];
+  /** Attribution for pictures the server found for this card. */
+  credits?: ImageCredit[];
 }
 
 export interface CardPattern {

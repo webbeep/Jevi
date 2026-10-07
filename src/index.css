@@ -110,6 +110,7 @@
   --shadow-card: var(--shadow-card);
   --shadow-float: var(--shadow-float);
   --font-sans: 'Geist Variable', ui-sans-serif, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'Geist Mono Variable', ui-monospace, 'SF Mono', Menlo, monospace;
 }
 
 @layer base {
@@ -117,7 +118,8 @@
   html { -webkit-tap-highlight-color: transparent; }
   body {
     @apply bg-background text-foreground antialiased;
-    font-feature-settings: 'ss01', 'cv11';
+    font-size: 15px;
+    letter-spacing: -0.006em;
     text-rendering: optimizeLegibility;
   }
   /* Film grain over the whole page: gives flat surfaces a printed, tactile feel. */
@@ -142,6 +144,11 @@
 /* Section label: small, sentence case, quiet. One style everywhere. */
 .zo-label {
   @apply text-[12.5px] font-medium tracking-[-0.005em] text-muted-foreground;
+}
+
+/* Metadata (source numbers, dates, counts): monospaced, small, quiet. */
+.zo-meta {
+  @apply font-mono text-[11px] tracking-normal tabular-nums text-muted-foreground;
 }
 
 /* Shimmer for placeholders: a soft light passing over, calmer than a pulse. */
