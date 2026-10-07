@@ -1,11 +1,20 @@
-import { useEffect, useState } from 'react';
-import { ArrowUpRight, Check, ChevronLeft, ChevronRight, Copy, Minus, Play, Star, ThumbsDown, ThumbsUp, TrendingDown, TrendingUp } from 'lucide-react';
+import { type ReactNode, useEffect, useState } from 'react';
+import { ArrowUpRight, BookOpen, Check, ChevronLeft, ChevronRight, Copy, MessageCircle, Minus, Play, Star, ThumbsDown, ThumbsUp, TrendingDown, TrendingUp } from 'lucide-react';
 import type { CardNode, Tone } from '../../shared/card';
+import type { SearchResult } from '../../shared/types';
 import { cn } from '@/lib/utils';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -121,15 +130,50 @@ function useSource(n: number | undefined) {
   return n ? results[n - 1] : undefined;
 }
 
-/** Small "open" button for an item that links to one of the sources. */
-function SourceLink({ n }: { n?: number }) {
-  const r = useSource(n);
-  if (!r) return null;
+/** The thing an item is about: "**Golden Delicious** — holds shape" → "Golden Delicious". */
+const subjectOf = (text: string) => plain(text).replace(/\*\*/g, '').split(/\s[—–-]\s|:\s/)[0].trim().slice(0, 80);
+
+/**
+ * What to do with a source an item points at: read it here, ask about it in the conversation, or leave for the site.
+ * `children` is the trigger (a whole row or tile); without it, a small button is shown.
+ */
+function SourceMenu({ result: r, subject, children, className }: { result: SearchResult; subject: string; children?: ReactNode; className?: string }) {
+  const { onRead, onAsk, busy } = useCard();
   return (
-    <a href={r.url} target="_blank" rel="noreferrer" title={`${r.title} — ${r.domain}`} aria-label={`Open ${r.domain}`} className="flex size-7 shrink-0 items-center justify-center self-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
-      <ArrowUpRight className="size-4" />
-    </a>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        {children ?? (
+          <button type="button" title={`${r.title} — ${r.domain}`} aria-label={`Options for ${subject || r.domain}`} className={cn('flex size-7 shrink-0 items-center justify-center self-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground', className)}>
+            <ChevronRight className="size-4" />
+          </button>
+        )}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-60">
+        <DropdownMenuLabel className="flex items-center gap-2 text-xs font-normal text-muted-foreground">
+          <img src={`https://icons.duckduckgo.com/ip3/${r.domain}.ico`} alt="" className="size-3.5 rounded-sm" />
+          <span className="truncate">{domainLabel(r.domain)}</span>
+        </DropdownMenuLabel>
+        <DropdownMenuItem onSelect={() => onRead(r)}>
+          <BookOpen />Read it here
+        </DropdownMenuItem>
+        <DropdownMenuItem disabled={busy} onSelect={() => onAsk(`Tell me more about ${subject || r.title}, based on ${domainLabel(r.domain)}`)}>
+          <MessageCircle /><span className="truncate">Ask about {subject || 'this'}</span>
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem asChild>
+          <a href={r.url} target="_blank" rel="noreferrer">
+            <ArrowUpRight />Open site
+          </a>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
+}
+
+/** Small menu button for an item that links to one of the sources. */
+function SourceLink({ n, subject }: { n?: number; subject: string }) {
+  const r = useSource(n);
+  return r ? <SourceMenu result={r} subject={subject} /> : null;
 }
 
 const domainLabel = (d: string) => d.replace(/^(www|en|m)\./, '');
@@ -210,17 +254,19 @@ export function Links({ node }: { node: Of<'links'> }) {
         const video = !!videoEmbed(r.url);
         return (
           <li key={r.url}>
-            <a href={r.url} target="_blank" rel="noreferrer" className="flex items-center gap-3 p-2.5 transition-colors hover:bg-foreground/[0.03] sm:p-3">
-              <span className="relative flex size-9 shrink-0 items-center justify-center rounded-lg border bg-background">
-                <img src={`https://icons.duckduckgo.com/ip3/${r.domain}.ico`} alt="" className="size-[18px] rounded-sm" loading="lazy" />
-                {video && <Play className="absolute -bottom-1 -right-1 size-3.5 rounded-full bg-foreground fill-background p-0.5 text-background" />}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-sm font-medium leading-snug">{label ?? r.title}</span>
-                <span className="block text-xs leading-snug text-muted-foreground">{note ? `${note} · ` : ''}{domainLabel(r.domain)}</span>
-              </span>
-              <ArrowUpRight className="size-4 shrink-0 text-muted-foreground" />
-            </a>
+            <SourceMenu result={r} subject={subjectOf(label ?? r.title)}>
+              <button type="button" className="flex w-full items-center gap-3 p-2.5 text-left transition-colors hover:bg-foreground/[0.03] data-[state=open]:bg-foreground/[0.04] sm:p-3">
+                <span className="relative flex size-9 shrink-0 items-center justify-center rounded-lg border bg-background">
+                  <img src={`https://icons.duckduckgo.com/ip3/${r.domain}.ico`} alt="" className="size-[18px] rounded-sm" loading="lazy" />
+                  {video && <Play className="absolute -bottom-1 -right-1 size-3.5 rounded-full bg-foreground fill-background p-0.5 text-background" />}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-medium leading-snug">{label ?? r.title}</span>
+                  <span className="block text-xs leading-snug text-muted-foreground">{note ? `${note} · ` : ''}{domainLabel(r.domain)}</span>
+                </span>
+                <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+              </button>
+            </SourceMenu>
           </li>
         );
       })}
@@ -234,10 +280,11 @@ export function Tile({ node }: { node: Of<'tile'> }) {
   const credit = useCredit(img);
   const pending = !img && !!node.imageQuery && busy;
   const link = useSource(node.source);
-  const Root = link ? 'a' : 'button';
-  return (
-    <Root
-      {...(link ? { href: link.url, target: '_blank', rel: 'noreferrer', title: `${link.title} — ${link.domain}` } : { onClick: () => onAsk(`Tell me more about ${node.label}${node.value ? ` (${node.value})` : ''}`) })}
+  const tile = (
+    <button
+      type="button"
+      title={link ? `${link.title} — ${link.domain}` : undefined}
+      onClick={link ? undefined : () => onAsk(`Tell me more about ${plain(node.label)}${node.value ? ` (${plain(node.value)})` : ''}`)}
       className={cn(
         'flex min-w-[72px] flex-col items-center gap-0.5 rounded-xl border px-2 py-2.5 text-center transition-colors hover:border-foreground/20 sm:min-w-[84px] sm:gap-1 sm:px-3 sm:py-3',
         node.active ? 'border-foreground/25 bg-muted ring-1 ring-foreground/10' : 'bg-card',
@@ -252,8 +299,9 @@ export function Tile({ node }: { node: Of<'tile'> }) {
       {!img && !pending && <Icon name={node.icon} className="size-[18px] text-foreground/70 sm:size-5" />}
       {node.value && <span className="text-[15px] font-semibold tracking-tight sm:text-base">{plain(node.value)}</span>}
       {node.sub && <span className="text-[11px] leading-tight text-muted-foreground"><RichText text={node.sub} inline noLinks /></span>}
-    </Root>
+    </button>
   );
+  return link ? <SourceMenu result={link} subject={plain(node.label)}>{tile}</SourceMenu> : tile;
 }
 
 export function KeyValue({ node }: { node: Of<'keyvalue'> }) {
@@ -294,7 +342,7 @@ function MediaList({ node }: { node: Of<'list'> }) {
             {item.meta && <span className="rounded-md bg-muted px-2 py-0.5 text-xs font-medium leading-snug tabular-nums sm:hidden">{item.meta}</span>}
           </span>
           {item.meta && <span className="hidden max-w-[40%] shrink-0 rounded-md bg-muted px-2 py-0.5 text-right text-xs font-medium leading-snug tabular-nums sm:inline">{item.meta}</span>}
-          <SourceLink n={item.source} />
+          <SourceLink n={item.source} subject={subjectOf(item.text)} />
         </li>
       ))}
     </ul>
@@ -316,7 +364,7 @@ export function List({ node }: { node: Of<'list'> }) {
           </span>
           <span className="flex-1 text-foreground/85"><RichText text={item.text} /></span>
           {item.meta && <span className="shrink-0 text-xs text-muted-foreground">{item.meta}</span>}
-          <SourceLink n={item.source} />
+          <SourceLink n={item.source} subject={subjectOf(item.text)} />
         </li>
       ))}
     </ul>
@@ -394,7 +442,7 @@ export function Timeline({ node }: { node: Of<'timeline'> }) {
             <div className="text-sm font-medium"><RichText text={t.title} inline /></div>
             {t.text && <div className="mt-0.5 text-sm text-muted-foreground"><RichText text={t.text} inline /></div>}
           </div>
-          <SourceLink n={t.source} />
+          <SourceLink n={t.source} subject={subjectOf(t.title)} />
         </li>
       ))}
     </ol>
