@@ -6,7 +6,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 
-const PROJECT = 'zo-page';
+const PROJECT = 'jev';
 const mode = process.argv[2];
 
 const all = existsSync('.env')
