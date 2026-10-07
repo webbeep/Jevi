@@ -64,7 +64,7 @@ export function hedge<T>(tasks: (() => Promise<T>)[], staggerMs = 700): Promise<
   });
 }
 
-export { decodeEntities, stripHtml } from '../shared/text';
+export { decodeEntities, stripHtml } from '../shared/text.ts';
 
 export function domainOf(url: string): string {
   try {
