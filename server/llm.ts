@@ -111,8 +111,21 @@ async function post(p: Extract<Provider, { kind: 'http' }>, body: Record<string,
     clearTimeout(headerTimer);
     clearTimeout(totalTimer);
     if (err instanceof ProviderError) throw err;
-    throw new ProviderError(err instanceof Error ? err.message : String(err), 45_000);
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new ProviderError(msg, localFailure(msg) ? 0 : 45_000);
   }
+}
+
+/** Errors from this request's own limits say nothing about the provider, so they must not bench it for everyone. */
+const localFailure = (msg: string) => /too many subrequests/i.test(msg);
+
+/** Workers AI calls have no built-in deadline; one stuck call must not hold the stream open. */
+function deadline<T>(work: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new ProviderError(`${label} timed out`, 45_000)), ms);
+  });
+  return Promise.race([work, timeout]).finally(() => clearTimeout(timer));
 }
 
 function messages(system: string, user: string) {
@@ -154,7 +167,7 @@ async function jsonFrom<T>(p: Provider, system: string, user: string, maxTokens:
       return parseObject<T>(data.choices?.[0]?.message?.content ?? '');
     }
     case 'binding': {
-      const out = (await p.ai.run(p.model, { messages: messages(system, user), max_tokens: maxTokens + 500, temperature: 0.4 })) as { response?: unknown };
+      const out = (await deadline(p.ai.run(p.model, { messages: messages(system, user), max_tokens: maxTokens + 500, temperature: 0.4 }), 25_000, p.label)) as { response?: unknown };
       return typeof out.response === 'object' && out.response ? (out.response as T) : parseObject<T>(String(out.response ?? ''));
     }
     default: {
@@ -206,8 +219,8 @@ async function streamFrom(p: Provider, system: string, user: string, maxTokens: 
       return readSse(res.body, onText, onReasoning);
     }
     case 'binding': {
-      const out = await p.ai.run(p.model, { messages: messages(system, user), max_tokens: maxTokens + 500, temperature: 0.4, stream: true });
-      if (out instanceof ReadableStream) return readSse(out as ReadableStream<Uint8Array>, onText, onReasoning);
+      const out = await deadline(p.ai.run(p.model, { messages: messages(system, user), max_tokens: maxTokens + 500, temperature: 0.4, stream: true }), 15_000, p.label);
+      if (out instanceof ReadableStream) return deadline(readSse(out as ReadableStream<Uint8Array>, onText, onReasoning), 60_000, p.label);
       onText(String((out as { response?: unknown }).response ?? ''));
       return;
     }
@@ -219,7 +232,7 @@ async function streamFrom(p: Provider, system: string, user: string, maxTokens: 
 }
 
 function fail(p: Provider, err: unknown) {
-  const cooldown = err instanceof ProviderError ? err.cooldownMs : 30_000;
+  const cooldown = err instanceof ProviderError ? err.cooldownMs : localFailure(String(err)) ? 0 : 30_000;
   if (cooldown) markDown(p, cooldown);
   console.error(`LLM ${p.label} failed`, err instanceof Error ? err.message : err);
 }

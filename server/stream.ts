@@ -60,6 +60,8 @@ interface DesignArgs {
 const pageBudget = (readPages: boolean) => (readPages ? { count: 5, need: 3, budgetMs: 2200 } : { count: 3, need: 2, budgetMs: 1000 });
 
 async function design(send: Send, env: Env, req: DesignArgs, started: number, late?: Promise<LateExtras>) {
+  // Cards already on screen point into this search's image list by index, so only a new search may reorder it.
+  const newSearch = !req.followup;
   // Writing and code are made for the person, not looked up, so they are composed like a conversation turn.
   if (!req.followup && MADE_PATTERNS.has(req.pattern)) req = { ...req, followup: { mode: 'chat', question: req.query } };
   // Conversation turns reason from what is already known; everything else reads pages first.
@@ -78,7 +80,8 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, la
   const seen = new Set(req.search.images.map((i) => i.thumb));
   const extra = permitted([...pageImgs, ...lateImages], env).filter((i) => i.thumb && !seen.has(i.thumb) && seen.add(i.thumb));
   if (extra.length) {
-    req = { ...req, search: { ...req.search, images: [...extra, ...req.search.images].slice(0, 16) } };
+    const images = newSearch ? [...extra, ...req.search.images].slice(0, 16) : [...req.search.images, ...extra].slice(0, 24);
+    req = { ...req, search: { ...req.search, images } };
     send('images', req.search.images);
   }
 
@@ -136,7 +139,7 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
   }
 
   // Classify and speculatively rewrite at the same time; the rewrite is only used if Jev says a new search is needed.
-  const rewritten = rewriteQuery(req.original, req.question, env, context, from?.title).catch(() => req.question);
+  const rewritten = req.intent === 'adjust' ? Promise.resolve(req.question) : rewriteQuery(req.original, req.question, env, context, from?.title).catch(() => req.question);
   const plan = await planLayout(req.question, env, { original: req.original, cards: req.cards.map(({ id, title }) => ({ id, title })), context });
   const mode = req.intent === 'adjust' ? 'refine' : req.intent === 'ask' && plan.mode === 'refine' ? 'answer' : plan.mode ?? 'chat';
 

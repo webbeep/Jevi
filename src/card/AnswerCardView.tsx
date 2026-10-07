@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { ChevronRight, Image as ImageIcon, Loader2, MoreHorizontal, RefreshCw } from 'lucide-react';
 import type { AnswerCard, CardNode, CardPattern } from '../../shared/card';
 import { cn } from '@/lib/utils';
@@ -73,8 +74,11 @@ export function AnswerCardView({ card, version, filling, streaming, status, patt
   onRegenerate: () => void;
 }) {
   const { images, credits, results, onSources } = useCard();
-  const credited = filling ? [] : pictureSources(card.body, images).flatMap((src) => (credits[src] ? [{ src, ...credits[src] }] : []));
-  const cited = filling ? [] : citedRefs(card).flatMap((n) => (results[n - 1] ? [results[n - 1]] : []));
+  const credited = useMemo(
+    () => (filling ? [] : pictureSources(card.body, images).flatMap((src) => (credits[src] ? [{ src, ...credits[src] }] : []))),
+    [filling, card.body, images, credits],
+  );
+  const cited = useMemo(() => (filling ? [] : citedRefs(card).flatMap((n) => (results[n - 1] ? [results[n - 1]] : []))), [filling, card, results]);
   return (
     <div className="relative isolate rounded-2xl">
     <div className="zo-aura" data-on={filling} />

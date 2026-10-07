@@ -34,15 +34,20 @@ export class PictureResolver {
     return this.pool.find((img) => !this.used.has(img.thumb) && img.title && matches(query, img.title));
   }
 
+  /** Remote lookups left for this card; each costs one or more of the request's 50 subrequests. */
+  private lookupsLeft = 10;
+
   private async one(query: string, allowGeneric = false): Promise<Pic | undefined> {
     const pooled = this.fromPool(query);
     if (pooled) return this.take(pooled);
+    if (this.lookupsLeft-- <= 0) return undefined;
     const found = await findImages(query, this.env, 3, allowGeneric);
     const pick = found.find((img) => !this.used.has(img.thumb));
     return pick && this.take(pick);
   }
 
   private async many(query: string, n: number): Promise<Pic[]> {
+    if (this.lookupsLeft-- <= 0) return [];
     const found = await findImages(query, this.env, n, true);
     return found.filter((img) => !this.used.has(img.thumb)).map((img) => this.take(img));
   }

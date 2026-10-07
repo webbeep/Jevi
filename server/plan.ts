@@ -4,6 +4,7 @@ import { PATTERNS, heuristicPattern, patternById, skeletonCard } from './pattern
 import type { Env } from './util';
 
 const DEPTHS = ['brief', 'standard', 'detailed'] as const;
+const PLAN_DEADLINE_MS = 4000;
 
 const MODES: Record<FollowupMode, string> = {
   refine: 'Asks to change a card already on screen: a different unit, time range, focus, audience, amount, layout or level of detail',
@@ -48,7 +49,12 @@ export async function planLayout(query: string, env: Env, ctx: PlanContext = {})
     const state = original
       ? `A person is in a conversation with an assistant that can both search the web and think. It started with the search "${original}".${context ? `\nConversation so far:\n${context}` : ''}\nThey now wrote: "${query}".`
       : `Someone typed this into a search engine: "${query}".${ctx.intent ? ` What they want: ${ctx.intent}` : ''} Before any results load, decide how the answer card should be laid out so the answer is instantly readable at a glance.`;
-    const answers = await askJev(env, state, {
+    // The card waits on the plan, so a slow planner falls back to the heuristic rather than hold it up.
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`plan timed out after ${PLAN_DEADLINE_MS}ms`)), PLAN_DEADLINE_MS);
+    });
+    const answers = await Promise.race([deadline, askJev(env, state, {
       ...(original
         ? {
             mode: { type: 'choice' as const, instructions: 'What does answering this message need?', criteria: MODES },
@@ -72,7 +78,7 @@ export async function planLayout(query: string, env: Env, ctx: PlanContext = {})
         type: 'noul',
         instructions: 'A good answer needs precise figures, current readings, specs, prices or step details that short search-result snippets usually leave out.',
       },
-    });
+    })]).finally(() => clearTimeout(timer));
     const pick = choice(answers, 'pattern');
     if (!pick) return fallback();
     const ranked = Object.entries(pick.probabilities).sort((a, b) => b[1] - a[1]).map(([id]) => patternById(id));

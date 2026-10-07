@@ -6,9 +6,10 @@ export function decodeEntities(s: string): string {
   return s.replace(/&(#x[0-9a-f]+|#\d+|[a-z0-9]+);/gi, (m, e: string) => {
     const lower = e.toLowerCase();
     if (ENTITIES[lower]) return ENTITIES[lower];
-    if (lower.startsWith('#x')) return String.fromCodePoint(parseInt(lower.slice(2), 16));
-    if (lower.startsWith('#')) return String.fromCodePoint(parseInt(lower.slice(1), 10));
-    return m;
+    if (!lower.startsWith('#')) return m;
+    const cp = lower.startsWith('#x') ? parseInt(lower.slice(2), 16) : parseInt(lower.slice(1), 10);
+    // An out-of-range entity in one title must not throw away an engine's whole result list.
+    return cp > 0 && cp <= 0x10ffff ? String.fromCodePoint(cp) : m;
   });
 }
 

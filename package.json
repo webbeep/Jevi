@@ -4,8 +4,8 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "node scripts/env-sync.mjs dev && mkdir -p dist && concurrently -k -n api,web \"wrangler pages dev dist --port 8788\" \"vite\"",
-    "build": "tsc -b && vite build",
+    "dev": "node scripts/icons.mjs && node scripts/env-sync.mjs dev && mkdir -p dist && concurrently -k -n api,web \"wrangler pages dev dist --port 8788\" \"vite\"",
+    "build": "node scripts/icons.mjs && tsc -b && vite build",
     "typecheck": "tsc -b",
     "preview": "npm run build && node scripts/env-sync.mjs dev && wrangler pages dev dist --port 8788",
     "secrets": "node scripts/env-sync.mjs secrets",

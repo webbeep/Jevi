@@ -30,10 +30,39 @@ function htmlToText(html: string): string {
   return stripHtml(main.replace(/<(script|style|noscript|svg|nav|footer|header|form|iframe|aside)[\s\S]*?<\/\1>/gi, ' '));
 }
 
+/** Public web pages only: no other schemes or ports, IP literals, or local and internal hostnames. */
+export function isFetchable(raw: string): boolean {
+  try {
+    const u = new URL(raw);
+    if (!/^https?:$/.test(u.protocol) || (u.port && u.port !== '80' && u.port !== '443') || u.username) return false;
+    const host = u.hostname.toLowerCase();
+    return host.includes('.') && !/^[\d.]+$|^\[|(^|\.)(localhost|local|internal|lan|home|arpa)$|pages\.dev$/.test(host);
+  } catch {
+    return false;
+  }
+}
+
+/** Reads at most `limit` bytes of a body, so a huge page can't exhaust CPU time in the regex passes. */
+async function cappedText(res: Response, limit = 600_000): Promise<string> {
+  if (!res.body) return '';
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let out = '';
+  let bytes = 0;
+  while (bytes < limit) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    bytes += value.byteLength;
+    out += decoder.decode(value, { stream: true });
+  }
+  await reader.cancel().catch(() => undefined);
+  return out;
+}
+
 async function direct(url: string, signal: AbortSignal, images?: Map<string, string>): Promise<string> {
   const res = await fetch(url, { headers: { 'User-Agent': BROWSER_UA, Accept: 'text/html' }, signal, redirect: 'follow' });
-  if (!res.ok || !res.headers.get('content-type')?.includes('html')) throw new Error(`HTTP ${res.status}`);
-  const html = await res.text();
+  if (!res.ok || !res.headers.get('content-type')?.includes('html') || !isFetchable(res.url || url)) throw new Error(`HTTP ${res.status}`);
+  const html = await cappedText(res);
   const image = ogImage(html, url);
   if (image) images?.set(url, image);
   return htmlToText(html);
@@ -50,11 +79,12 @@ async function jina(url: string, env: Env, signal: AbortSignal): Promise<string>
 async function allOrigins(url: string, signal: AbortSignal): Promise<string> {
   const res = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`, { signal });
   if (!res.ok) throw new Error(`AllOrigins HTTP ${res.status}`);
-  return htmlToText(await res.text());
+  return htmlToText(await cappedText(res));
 }
 
 /** Fetches one page's readable text, racing direct fetch, Jina reader and AllOrigins. */
 export async function pageText(url: string, env: Env, timeoutMs = 9000, maxChars = 6000, images?: Map<string, string>): Promise<string> {
+  if (!isFetchable(url)) throw new Error('URL not allowed');
   const signal = AbortSignal.timeout(timeoutMs);
   const readable = (task: () => Promise<string>) => async () => {
     const text = await task();
@@ -77,7 +107,8 @@ export async function collectPages(
   opts: { count: number; need: number; budgetMs: number },
   late?: Promise<LateExtras>,
 ): Promise<PageText[]> {
-  const numbered = results.map((r, i) => ({ r, n: i + 1 }));
+  // Only sources the designer is shown (numbered 1-12) are worth reading.
+  const numbered = results.slice(0, 12).map((r, i) => ({ r, n: i + 1 }));
   const ready: PageText[] = numbered
     .filter(({ r }) => r.content && r.content.length >= MIN_TEXT)
     .slice(0, opts.count)
@@ -86,7 +117,7 @@ export async function collectPages(
 
   const have = new Set(ready.map((p) => p.n));
   const seen = new Set<string>();
-  const missing = numbered.filter(({ r, n }) => !have.has(n) && !seen.has(r.domain) && seen.add(r.domain)).slice(0, opts.count - ready.length + 1);
+  const missing = numbered.filter(({ r, n }) => !have.has(n) && !seen.has(r.domain) && seen.add(r.domain)).slice(0, opts.count - ready.length);
   const fromLate = async (url: string) => {
     const text = (await late)?.content.get(normalizeUrl(url));
     if (!text || text.length < MIN_TEXT) throw new Error('no late content');

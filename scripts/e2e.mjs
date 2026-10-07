@@ -120,7 +120,7 @@ async function main() {
   const intent = nw.of('intent')[0];
   const top = (nw.of('search')[0]?.results ?? []).slice(0, 8);
   check(!!intent && intent.queries.some((q) => /headline|top news|stories/i.test(q)), 'understood as today\'s headlines', intent && `${intent.intent} → ${intent.queries.join(' | ')}`);
-  check(top.filter((r) => /youtube|tldr/i.test(r.domain)).length <= 1, 'top results are news, not a TLDR channel', top.map((r) => r.domain).join(', '));
+  check(top.filter((r) => /tldr/i.test(`${r.domain} ${r.title}`)).length <= 1 && top.filter((r) => /headline|news|bulletin/i.test(r.title)).length >= 4, 'top results are news, not a TLDR channel', top.map((r) => r.domain).join(', '));
   check(/"source":\d/.test(JSON.stringify(nw.nodes)), 'stories link to their sources', `${nw.of('plan')[0]?.pattern} in ${nw.ms}ms`);
 
   console.log('video: "how to tie a tie video tutorial"');

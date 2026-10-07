@@ -6,3 +6,4 @@ dist
 .wrangler
 *.tsbuildinfo
 .DS_Store
+public/icons

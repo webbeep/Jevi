@@ -11,8 +11,16 @@ export interface LibraryEntry {
   citedBy: number[];
 }
 
-/** Source numbers ([n] markers and citations nodes) a card refers to. */
+const citedCache = new WeakMap<AnswerCard, number[]>();
+
+/** Source numbers ([n] markers and citations nodes) a card refers to. Cards are immutable, so results are cached. */
 export function citedRefs(card: AnswerCard): number[] {
+  let out = citedCache.get(card);
+  if (!out) citedCache.set(card, (out = scanRefs(card)));
+  return out;
+}
+
+function scanRefs(card: AnswerCard): number[] {
   const refs = new Set<number>();
   const walk = (v: unknown): void => {
     if (typeof v === 'string') {

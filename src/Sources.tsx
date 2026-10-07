@@ -8,8 +8,6 @@ import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-
 export const favicon = (domain: string) => `https://icons.duckduckgo.com/ip3/${domain}.ico`;
 const shortDomain = (d: string) => d.replace(/^(www|en|m)\./, '');
 
@@ -136,12 +134,13 @@ export function SourcesRail({ entries, engines, onRead, onAll }: { entries: Libr
         <h3 className="zo-label text-foreground">Sources</h3>
         <div className="flex items-center gap-1">
           {engines.map((e) => (
-            <Tooltip key={e.name}>
-              <TooltipTrigger asChild>
-                <span className={cn('size-1.5 rounded-full', e.ok && e.count ? 'bg-positive' : 'bg-muted-foreground/30')} />
-              </TooltipTrigger>
-              <TooltipContent>{e.name}: {e.ok ? `${e.count} results · ${e.ms}ms` : e.error}</TooltipContent>
-            </Tooltip>
+            <span
+              key={e.name}
+              role="img"
+              title={`${e.name}: ${e.ok ? `${e.count} results · ${e.ms}ms` : e.error}`}
+              aria-label={`${e.name}: ${e.ok ? `${e.count} results` : 'unavailable'}`}
+              className={cn('size-1.5 rounded-full', e.ok && e.count ? 'bg-positive' : 'bg-muted-foreground/30')}
+            />
           ))}
         </div>
         <div className="ml-auto">

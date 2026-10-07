@@ -134,6 +134,15 @@ function SourceLink({ n }: { n?: number }) {
 
 const domainLabel = (d: string) => d.replace(/^(www|en|m)\./, '');
 
+/** Hostname of a link the model wrote; malformed links give an empty string instead of throwing. */
+function hostOf(url?: string): string {
+  try {
+    return url ? new URL(url).hostname.replace(/^www\./, '') : '';
+  } catch {
+    return '';
+  }
+}
+
 /** Video id and embeddable player for YouTube and Vimeo watch pages; undefined for channels and other pages. */
 export function videoEmbed(url: string): { id: string; player: string; thumb?: string } | undefined {
   try {
@@ -242,7 +251,7 @@ export function Tile({ node }: { node: Of<'tile'> }) {
       <span className="text-[11px] font-medium text-muted-foreground">{plain(node.label)}</span>
       {!img && !pending && <Icon name={node.icon} className="size-[18px] text-foreground/70 sm:size-5" />}
       {node.value && <span className="text-[15px] font-semibold tracking-tight sm:text-base">{plain(node.value)}</span>}
-      {node.sub && <span className="text-[11px] leading-tight text-muted-foreground">{link ? plain(node.sub) : <RichText text={node.sub} inline />}</span>}
+      {node.sub && <span className="text-[11px] leading-tight text-muted-foreground"><RichText text={node.sub} inline noLinks /></span>}
     </Root>
   );
 }
@@ -410,7 +419,7 @@ export function Steps({ node }: { node: Of<'steps'> }) {
             </span>
             <span className={cn('min-w-0 transition-opacity', done.has(i) && 'opacity-50')}>
               <span className={cn('block text-sm font-medium', done.has(i) && 'line-through')}>{s.title}</span>
-              {s.detail && <span className="block text-sm text-muted-foreground"><RichText text={s.detail} inline /></span>}
+              {s.detail && <span className="block text-sm text-muted-foreground"><RichText text={s.detail} inline noLinks /></span>}
             </span>
           </button>
         </li>
@@ -525,7 +534,7 @@ export function ImageView({ node }: { node: Of<'image'> }) {
 export function Gallery({ node }: { node: Of<'gallery'> }) {
   const { images, busy } = useCard();
   const items = node.pics?.length
-    ? node.pics.map((p) => ({ thumb: p.src, url: p.link, title: p.title, source: p.link ? new URL(p.link).hostname.replace(/^www\./, '') : '' }))
+    ? node.pics.map((p) => ({ thumb: p.src, url: p.link, title: p.title, source: hostOf(p.link) }))
     : node.refs.map((r) => images[r]).filter(Boolean);
   const { credits } = useCard();
   const [open, setOpen] = useState<number | null>(null);
@@ -535,7 +544,7 @@ export function Gallery({ node }: { node: Of<'gallery'> }) {
     <>
       <div className={cn('grid gap-1.5', items.length >= 3 ? 'grid-cols-3' : 'grid-cols-2')}>
         {items.slice(0, 6).map((img, i) => (
-          <button key={img.thumb} onClick={() => setOpen(i)} className={cn('overflow-hidden rounded-lg bg-muted', i === 0 && items.length >= 5 ? 'col-span-2 row-span-2 aspect-square' : 'aspect-square')}>
+          <button key={img.thumb} onClick={() => setOpen(i)} aria-label={img.title || `Open image ${i + 1}`} className={cn('overflow-hidden rounded-lg bg-muted', i === 0 && items.length >= 5 ? 'col-span-2 row-span-2 aspect-square' : 'aspect-square')}>
             <img src={img.thumb} alt={img.title} loading="lazy" className="size-full object-cover transition-transform duration-300 hover:scale-105" onError={(e) => ((e.target as HTMLElement).parentElement!.style.display = 'none')} />
           </button>
         ))}
@@ -545,9 +554,9 @@ export function Gallery({ node }: { node: Of<'gallery'> }) {
           <DialogTitle className="truncate px-1 text-sm font-medium">{current?.title || current?.source}</DialogTitle>
           {current && <img src={current.thumb} alt={current.title} className="max-h-[70vh] w-full rounded-lg object-contain" />}
           <div className="flex items-center justify-between">
-            <Button variant="ghost" size="icon" onClick={() => setOpen(((open ?? 0) - 1 + items.length) % items.length)}><ChevronLeft /></Button>
+            <Button variant="ghost" size="icon" aria-label="Previous image" onClick={() => setOpen(((open ?? 0) - 1 + items.length) % items.length)}><ChevronLeft /></Button>
             <a href={current?.url} target="_blank" rel="noreferrer" className="text-xs text-muted-foreground hover:text-foreground">{(current && credits[current.thumb]?.credit) ?? current?.source} ↗</a>
-            <Button variant="ghost" size="icon" onClick={() => setOpen(((open ?? 0) + 1) % items.length)}><ChevronRight /></Button>
+            <Button variant="ghost" size="icon" aria-label="Next image" onClick={() => setOpen(((open ?? 0) + 1) % items.length)}><ChevronRight /></Button>
           </div>
         </DialogContent>
       </Dialog>

@@ -1,7 +1,6 @@
-import { type ReactNode, Suspense, lazy } from 'react';
+import { Component, type ReactNode, Suspense, lazy } from 'react';
 import type { CardNode, Gap } from '../../shared/card';
 import { cn } from '@/lib/utils';
-import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Icon } from './Icon';
@@ -28,14 +27,37 @@ function isCompact(n: CardNode): boolean {
   return n.type === 'tile' || n.type === 'stat' || (n.type === 'slot' && n.shape === 'tile');
 }
 
+/** One malformed node from the model hides itself instead of taking down the card (or the app). */
+class NodeBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  componentDidCatch(err: unknown) {
+    console.error('card node failed to render', err);
+  }
+  render() {
+    return this.state.failed ? null : this.props.children;
+  }
+}
+
 export function Nodes({ nodes, className, stagger = false }: { nodes: CardNode[]; className?: string; stagger?: boolean }) {
+  // Keyed by type and its occurrence, not position: parallel regions arrive out of order and leave gaps,
+  // and a positional key would remount (and reset) every node after a gap that fills in.
+  const seen: Record<string, number> = {};
   return (
     <div className={cn('flex flex-col gap-4', className)}>
-      {nodes.filter((n) => n.type !== 'citations').map((n, i) => (
-        <div key={`${i}-${hasSlot(n) ? 'placeholder' : n.type}`} className={cn('min-w-0', !hasSlot(n) && 'animate-in fade-in slide-in-from-bottom-2 fill-mode-backwards duration-500')} style={stagger ? { animationDelay: `${i * 70}ms` } : undefined}>
-          <NodeView node={n} />
-        </div>
-      ))}
+      {nodes.filter((n) => n.type !== 'citations').map((n, i) => {
+        const kind = hasSlot(n) ? 'placeholder' : n.type;
+        seen[kind] = (seen[kind] ?? 0) + 1;
+        return (
+          <div key={`${kind}-${seen[kind]}`} className={cn('min-w-0', !hasSlot(n) && 'animate-in fade-in slide-in-from-bottom-2 fill-mode-backwards duration-500')} style={stagger ? { animationDelay: `${i * 70}ms` } : undefined}>
+            <NodeBoundary>
+              <NodeView node={n} />
+            </NodeBoundary>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -68,12 +90,11 @@ export function NodeView({ node }: { node: CardNode }): ReactNode {
     case 'tabs':
       return (
         <Tabs defaultValue="0" className="gap-3">
-          <ScrollArea className="w-full">
+          <div className="no-scrollbar w-full overflow-x-auto">
             <TabsList className="w-max">
               {node.tabs.map((t, i) => <TabsTrigger key={i} value={String(i)}>{t.label}</TabsTrigger>)}
             </TabsList>
-            <ScrollBar orientation="horizontal" className="h-1.5" />
-          </ScrollArea>
+          </div>
           {node.tabs.map((t, i) => <TabsContent key={i} value={String(i)}><Nodes nodes={t.children} className="gap-3" /></TabsContent>)}
         </Tabs>
       );

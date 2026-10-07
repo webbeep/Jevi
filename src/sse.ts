@@ -33,16 +33,26 @@ export async function stream(body: StreamBody, onEvent: (e: StreamEvent) => void
   }
   const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
   let buffer = '';
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += value;
-    const frames = buffer.split('\n\n');
-    buffer = frames.pop() ?? '';
-    for (const frame of frames) {
-      const event = frame.match(/^event: (.*)$/m)?.[1];
-      const data = frame.match(/^data: (.*)$/m)?.[1];
-      if (event && data) onEvent({ event, data: JSON.parse(data) } as StreamEvent);
+  let finished = false;
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += value;
+      const frames = buffer.split('\n\n');
+      buffer = frames.pop() ?? '';
+      for (const frame of frames) {
+        const event = frame.match(/^event: (.*)$/m)?.[1];
+        const data = frame.match(/^data: (.*)$/m)?.[1];
+        if (!event || !data) continue;
+        if (event === 'done' || event === 'error') finished = true;
+        onEvent({ event, data: JSON.parse(data) } as StreamEvent);
+      }
     }
+  } finally {
+    // Stops the download when a handler throws (e.g. an `error` event) instead of leaving the connection open.
+    reader.cancel().catch(() => undefined);
   }
+  // A worker that hit a platform limit just closes the stream; without this the card would spin forever.
+  if (!finished && !signal?.aborted) throw new Error('The answer was cut off. Please try again.');
 }

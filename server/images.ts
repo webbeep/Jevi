@@ -210,26 +210,28 @@ function sources(env: Env): { name: string; run: Source; specificOnly?: boolean 
   ];
 }
 
-const memory = new Map<string, ImageResult[]>();
+/** Lookups by key, including ones still in flight so identical queries share one search. */
+const memory = new Map<string, Promise<ImageResult[]>>();
 const MEMORY_MAX = 400;
 const CACHE_TTL_S = 7 * 24 * 3600;
 
-async function cached(key: string, find: () => Promise<ImageResult[]>): Promise<ImageResult[]> {
+function cached(key: string, find: () => Promise<ImageResult[]>): Promise<ImageResult[]> {
   const hit = memory.get(key);
   if (hit) return hit;
-  const url = `https://zo.page/__images/${encodeURIComponent(key)}`;
-  const store = typeof caches !== 'undefined' ? (caches as unknown as { default?: Cache }).default : undefined;
-  const stored = await store?.match(url).catch(() => undefined);
-  if (stored) {
-    const images = (await stored.json()) as ImageResult[];
-    memory.set(key, images);
+  const lookup = (async () => {
+    const url = `https://zo.page/__images/${encodeURIComponent(key)}`;
+    const store = typeof caches !== 'undefined' ? (caches as unknown as { default?: Cache }).default : undefined;
+    const stored = await store?.match(url).catch(() => undefined);
+    if (stored) return (await stored.json()) as ImageResult[];
+    const images = await find();
+    if (images.length) await store?.put(url, new Response(JSON.stringify(images), { headers: { 'content-type': 'application/json', 'cache-control': `max-age=${CACHE_TTL_S}` } })).catch(() => undefined);
     return images;
-  }
-  const images = await find();
+  })();
   if (memory.size > MEMORY_MAX) memory.delete(memory.keys().next().value!);
-  memory.set(key, images);
-  if (images.length) await store?.put(url, new Response(JSON.stringify(images), { headers: { 'content-type': 'application/json', 'cache-control': `max-age=${CACHE_TTL_S}` } })).catch(() => undefined);
-  return images;
+  memory.set(key, lookup);
+  // Misses (often timeouts or rate limits) are retried next time rather than remembered.
+  void lookup.then((images) => images.length || memory.delete(key), () => memory.delete(key));
+  return lookup;
 }
 
 /**

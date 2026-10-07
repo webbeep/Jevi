@@ -131,7 +131,7 @@ export function Reveal({ node }: { node: Of<'reveal'> }) {
               <RotateCw className="size-3.5 text-muted-foreground" />
             </span>
             <span className="absolute inset-0 flex items-center justify-center overflow-y-auto rounded-xl border border-brand/30 bg-brand/8 p-4 text-center text-sm [backface-visibility:hidden] [transform:rotateY(180deg)]">
-              <RichText text={item.back} inline />
+              <RichText text={item.back} inline noLinks />
             </span>
           </span>
         </button>

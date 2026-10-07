@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import type { AnswerCard, CardNode, CardResponse, FollowupContext, FollowupIntent, ImageCredit, LayoutPlan } from '../shared/card';
 import { cardDigest } from '../shared/digest';
 import type { SearchResponse, SearchResult } from '../shared/types';
@@ -87,7 +87,7 @@ export function useSession() {
     commit((all) => [...all, { version: 0, simple: false, pins: [], variants: {}, ...turn, searchId: turn.searchId ?? id, id }]);
     return id;
   }, [commit]);
-  const searchOf = (t: Turn | undefined) => (t ? get(t.searchId) : undefined);
+  const searchOf = useCallback((t: Turn | undefined) => (t ? ref.current.find((x) => x.id === t.searchId) : undefined), []);
 
   /**
    * Conversation memory for the model: the topic the conversation started with,
@@ -171,7 +171,9 @@ export function useSession() {
           return update(route, (t) => ({ live: { ...(t.live ?? emptyLive()), followups: e.data } }));
         case 'done':
           return update(route, (t) => {
-            if (!t.live?.nodes.some(Boolean)) return { live: undefined, filling: false, status: undefined, thinking: false };
+            if (!t.live?.nodes.some(Boolean)) {
+              return { live: undefined, filling: false, status: undefined, thinking: false, error: t.result ? undefined : "Couldn't build an answer — try asking again." };
+            }
             const result: CardResponse = {
               card: { title: t.live.head?.title ?? t.question, ...t.live.head, body: liveBody(t.live, false), credits: t.live.credits },
               followups: t.live.followups,
@@ -198,6 +200,7 @@ export function useSession() {
       if (alive()) update(route, { filling: false, status: undefined, live: undefined, thinking: false, error: errMsg(err) });
       throw err;
     } finally {
+      controller.abort();
       if (controllers.current.get(id) === controller) controllers.current.delete(id);
     }
   }, [update, commit]);
@@ -325,5 +328,12 @@ export function useSession() {
   }, [switchView]);
   const redesign = useCallback((id: number) => void design(id), [design]);
 
-  return { turns, searchOf, clear, search, followup, digest, pin, setPattern, setSimple, redesign };
+  // Stable across renders, so turns that didn't change can skip re-rendering.
+  const actions = useMemo(
+    () => ({ searchOf, clear, search, followup, digest, pin, setPattern, setSimple, redesign }),
+    [searchOf, clear, search, followup, digest, pin, setPattern, setSimple, redesign],
+  );
+  return { turns, actions };
 }
+
+export type SessionActions = ReturnType<typeof useSession>['actions'];

@@ -1,8 +1,13 @@
 import { Fragment, type ReactNode } from 'react';
 import { useCard } from './context';
 
-/** Renders **bold** and [n] citations that link to the nth search result. */
-export function RichText({ text, inline = false }: { text: string; inline?: boolean }) {
+const CITE = 'mx-0.5 inline-flex h-4 min-w-4 -translate-y-px items-center justify-center rounded-sm bg-muted px-1 align-middle text-[10px] font-medium text-muted-foreground no-underline';
+
+/**
+ * Renders **bold** and [n] citations that link to the nth search result.
+ * Inside buttons pass `noLinks`: links can't nest in interactive elements, so citations become plain badges.
+ */
+export function RichText({ text, inline = false, noLinks = false }: { text: string; inline?: boolean; noLinks?: boolean }) {
   const { results } = useCard();
   const Para = inline ? 'span' : 'p';
   return (
@@ -15,11 +20,13 @@ export function RichText({ text, inline = false }: { text: string; inline?: bool
             const cite = part.match(/^\[(\d+)\]$/);
             if (cite) {
               const r = results[Number(cite[1]) - 1];
-              return r ? (
-                <a key={i} href={r.url} target="_blank" rel="noreferrer" title={r.title} className="mx-0.5 inline-flex h-4 min-w-4 -translate-y-px items-center justify-center rounded-sm bg-muted px-1 align-middle text-[10px] font-medium text-muted-foreground no-underline transition-colors hover:bg-foreground hover:text-background">
+              if (!r) return null;
+              if (noLinks) return <span key={i} title={r.title} className={CITE}>{cite[1]}</span>;
+              return (
+                <a key={i} href={r.url} target="_blank" rel="noreferrer" title={r.title} className={`${CITE} transition-colors hover:bg-foreground hover:text-background`}>
                   {cite[1]}
                 </a>
-              ) : null;
+              );
             }
             return <Fragment key={i}>{part}</Fragment>;
           })}

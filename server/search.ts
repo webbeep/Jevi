@@ -49,6 +49,10 @@ const EARLY_RETURN_MS = 1100;
 const EARLY_RETURN_HITS = 10;
 /** Engines that return page content are worth a short extra wait. */
 const CONTENT_ENGINE_WAIT_MS = 1600;
+/** Past this, answer with whatever has arrived rather than wait for the slowest engine. */
+const HARD_RETURN_MS = 2800;
+/** Lite searches only add to a full one, so they settle for fewer hits sooner. */
+const LITE = { earlyMs: 900, hits: 6, hardMs: 2000 };
 
 function freshnessCode(f: Freshness, codes: Record<Exclude<Freshness, 'any'>, string>): string | undefined {
   return f === 'any' ? undefined : codes[f];
@@ -507,7 +511,10 @@ export async function searchWithLate(q: Query, env: Env): Promise<SearchWithLate
       const elapsed = Date.now() - startedAt;
       const contentEngines = engines.filter((e) => CONTENT_ENGINES.has(e.name));
       const contentPending = contentEngines.length > 0 && !done.some((d) => CONTENT_ENGINES.has(d.engine)) && contentEngines.some((e) => !statuses.some((st) => st.name === e.name));
-      if (elapsed >= EARLY_RETURN_MS && webHits >= EARLY_RETURN_HITS && (!contentPending || elapsed >= CONTENT_ENGINE_WAIT_MS)) {
+      const early = q.lite
+        ? (elapsed >= LITE.earlyMs && webHits >= LITE.hits) || (elapsed >= LITE.hardMs && webHits > 0)
+        : (elapsed >= EARLY_RETURN_MS && webHits >= EARLY_RETURN_HITS && (!contentPending || elapsed >= CONTENT_ENGINE_WAIT_MS)) || (elapsed >= HARD_RETURN_MS && webHits > 0);
+      if (early) {
         clearInterval(tick);
         resolve();
       }
