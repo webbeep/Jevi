@@ -1,11 +1,12 @@
-import { betterAuth } from 'better-auth';
-import { anonymous, oneTap } from 'better-auth/plugins';
 import type { Env } from '../util.ts';
 import { carrySubject } from './carry.ts';
 import { readCookie, verifyDevice } from './device.ts';
 import { d1, sessionSecret } from './env.ts';
 
-type Auth = ReturnType<typeof betterAuth>;
+type Auth = {
+  handler: (request: Request) => Promise<Response>;
+};
+
 const cache = new Map<string, Auth>();
 
 function utmFromRequest(request: Request | undefined): string | null {
@@ -15,8 +16,11 @@ function utmFromRequest(request: Request | undefined): string | null {
   return raw.slice(0, 180);
 }
 
-/** Better Auth on the request's D1 binding. Cached per origin + secret inside the isolate. */
-export function createAuth(env: Env, request: Request): Auth {
+/**
+ * Better Auth on the request's D1 binding. Cached per origin + secret inside the isolate.
+ * The package is imported only when an /api/auth/* handler calls this — never from the stream path.
+ */
+export async function createAuth(env: Env, request: Request): Promise<Auth> {
   const db = d1(env);
   const secret = sessionSecret(env);
   if (!db || !secret) throw new Error('auth is not configured');
@@ -25,6 +29,8 @@ export function createAuth(env: Env, request: Request): Auth {
   const key = `${baseURL}\0${secret}\0${env.GOOGLE_CLIENT_ID || ''}`;
   const hit = cache.get(key);
   if (hit) return hit;
+  const { betterAuth } = await import('better-auth');
+  const { anonymous, oneTap } = await import('better-auth/plugins');
   const https = url.protocol === 'https:';
   const auth = betterAuth({
     appName: 'zo',

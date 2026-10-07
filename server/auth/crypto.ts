@@ -22,10 +22,34 @@ export function safeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
+const hmacKeys = new Map<string, Promise<CryptoKey>>();
+
+/** One imported HMAC key per secret, reused for the life of the isolate. */
+export function hmacKey(secret: string): Promise<CryptoKey> {
+  let pending = hmacKeys.get(secret);
+  if (!pending) {
+    pending = crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify']);
+    hmacKeys.set(secret, pending);
+  }
+  return pending;
+}
+
 export async function hmacB64url(secret: string, data: string): Promise<string> {
-  const key = await crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-  const sig = await crypto.subtle.sign('HMAC', key, enc.encode(data));
+  const sig = await crypto.subtle.sign('HMAC', await hmacKey(secret), enc.encode(data));
   return bytesToB64url(new Uint8Array(sig));
+}
+
+/** Better Auth session cookies: standard base64 (padded) HMAC-SHA256, checked with WebCrypto verify. */
+export async function hmacVerifyB64(secret: string, data: string, signatureB64: string): Promise<boolean> {
+  let bytes: Uint8Array;
+  try {
+    const bin = atob(signatureB64);
+    bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  } catch {
+    return false;
+  }
+  return crypto.subtle.verify('HMAC', await hmacKey(secret), bytes, enc.encode(data));
 }
 
 /** Salted SHA-256 hex. The raw IP is an input only and is not part of the result. */

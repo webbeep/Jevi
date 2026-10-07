@@ -7,7 +7,7 @@ export const onRequest: PagesFunction<Env> = async ({ request, env }) => {
   if (!authEnabled(env)) return json({ error: 'Sign-in is disabled' }, 404);
   if (!d1(env) || !sessionSecret(env)) return json({ error: 'Sign-in is unavailable' }, 503);
   try {
-    return await createAuth(env, request).handler(request);
+    return await (await createAuth(env, request)).handler(request);
   } catch (err) {
     return errorJson(err);
   }

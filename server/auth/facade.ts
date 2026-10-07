@@ -1,9 +1,8 @@
 import type { Env } from '../util.ts';
 import { json } from '../util.ts';
 import { createAuth } from './better.ts';
-import { readCookie, verifyDevice } from './device.ts';
-import { authEnabled, d1, intEnv, sessionSecret } from './env.ts';
-import { readUsage } from './gate.ts';
+import { authEnabled, d1, sessionSecret } from './env.ts';
+import { readFacingUsage } from './gate.ts';
 import { currentUser } from './session.ts';
 
 function originOf(request: Request): string {
@@ -43,31 +42,17 @@ function appendCookies(out: Headers, from: Headers) {
 
 export async function me(request: Request, env: Env): Promise<Response> {
   const enabled = authEnabled(env);
-  const day = new Date().toISOString().slice(0, 10);
-  const db = d1(env);
   const user = await currentUser(request, env);
   const signed = user && !user.anonymous ? user : null;
-  const limit = signed ? intEnv(env, 'GATE_SIGNED_PER_DAY', 100) : intEnv(env, 'GATE_ANON_PER_DAY', 5);
-  let used = 0;
-  if (db) {
-    try {
-      if (signed) used = await readUsage(db, day, `u:${signed.id}`);
-      else {
-        const secret = sessionSecret(env);
-        const raw = readCookie(request.headers.get('cookie'), 'zo_dev');
-        if (secret && raw) {
-          const id = await verifyDevice(raw, secret);
-          if (id) used = await readUsage(db, day, `d:${id}`);
-        }
-      }
-    } catch {
-      used = 0;
-    }
-  }
+  const usage = await readFacingUsage(request, env, user);
   return json({
     auth_enabled: enabled,
     user: signed ? { id: signed.id, email: signed.email, name: signed.name, avatar: signed.avatar } : null,
-    usage: { used, limit, remaining: Math.max(0, limit - used), day },
+    used: usage.used,
+    limit: usage.limit,
+    remaining: usage.remaining,
+    signedIn: usage.signedIn,
+    day: usage.day,
   });
 }
 
@@ -77,7 +62,7 @@ export async function start(request: Request, env: Env): Promise<Response> {
   if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) return json({ error: 'Sign-in is unavailable' }, 503);
   const url = new URL(request.url);
   const callbackURL = `${originOf(request)}${safeReturnPath(url.searchParams.get('return'))}`;
-  const auth = createAuth(env, request);
+  const auth = await createAuth(env, request);
   const ba = await auth.handler(
     new Request(new URL('/api/auth/sign-in/social', url.origin), {
       method: 'POST',
@@ -108,7 +93,7 @@ export async function onetap(request: Request, env: Env): Promise<Response> {
   }
   if (!credential) return json({ error: 'bad token' }, 400);
   const url = new URL(request.url);
-  const auth = createAuth(env, request);
+  const auth = await createAuth(env, request);
   const ba = await auth.handler(
     new Request(new URL('/api/auth/one-tap/callback', url.origin), {
       method: 'POST',
@@ -130,7 +115,7 @@ export async function logout(request: Request, env: Env): Promise<Response> {
   if (d1(env) && sessionSecret(env)) {
     try {
       const url = new URL(request.url);
-      const auth = createAuth(env, request);
+      const auth = await createAuth(env, request);
       const ba = await auth.handler(
         new Request(new URL('/api/auth/sign-out', url.origin), {
           method: 'POST',

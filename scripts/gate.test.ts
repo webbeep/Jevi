@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { carrySubject } from '../server/auth/carry.ts';
 import { signDevice } from '../server/auth/device.ts';
 import { applyGate, bumpUsage } from '../server/auth/gate.ts';
-import { safeReturnPath } from '../server/auth/facade.ts';
+import { me, safeReturnPath } from '../server/auth/facade.ts';
 import { recordEvent } from '../server/auth/events.ts';
-import type { ZoUser } from '../server/auth/session.ts';
+import { signSessionToken, type ZoUser } from '../server/auth/session.ts';
 import type { Env } from '../server/util.ts';
 
 const SECRET = 'test-session-secret-32chars!!';
@@ -23,12 +26,15 @@ function mem() {
       return {
         bind(...args: unknown[]) {
           return {
-            async run() {
-              db.prepare(sql).run(...(args as []));
-              return { success: true };
-            },
             async first() {
               return db.prepare(sql).get(...(args as [])) ?? null;
+            },
+            async all() {
+              return { results: db.prepare(sql).all(...(args as [])) };
+            },
+            async run() {
+              const result = db.prepare(sql).run(...(args as []));
+              return { success: true, meta: { changes: result.changes } };
             },
           };
         },
@@ -57,10 +63,14 @@ test('counts anonymous asks and blocks on the device limit', async () => {
   const decisions = [];
   for (let i = 0; i < 6; i++) decisions.push(await applyGate(new Request('http://127.0.0.1/api/stream', { headers }), env, new Date('2026-10-07T12:00:00Z'), nobody));
   assert.equal(decisions[4]?.ok, true);
-  if (decisions[4]?.ok) assert.equal(decisions[4].headers?.['X-ZO-Used'], '5');
+  if (decisions[4]?.ok) {
+    assert.equal(decisions[4].headers?.['X-ZO-Used'], '5');
+    assert.equal(decisions[4].headers?.['X-ZO-Limit'], '5');
+    assert.equal(decisions[4].headers?.['X-ZO-Remaining'], '0');
+  }
   assert.equal(decisions[5]?.ok, false);
   if (!decisions[5]?.ok) {
-    assert.deepEqual(decisions[5].body, { need_signin: true, used: 6, limit: 5, reason: 'device' });
+    assert.deepEqual(decisions[5].body, { need_signin: true, used: 6, limit: 5, remaining: 0, signedIn: false, reason: 'device' });
   }
 });
 
@@ -98,7 +108,11 @@ test('signed-in users use the signed-in cap', async () => {
   assert.equal(a.ok, true);
   assert.equal(b.ok, true);
   assert.equal(c.ok, false);
-  if (!c.ok) assert.equal(c.body.reason, 'signed');
+  if (!c.ok) {
+    assert.equal(c.body.reason, 'signed');
+    assert.equal(c.body.signedIn, true);
+    assert.equal(c.body.remaining, 0);
+  }
 });
 
 test('test token bypasses the daily gate', async () => {
@@ -134,7 +148,11 @@ test('IP hash is stored and the raw IP is not', async () => {
   await applyGate(new Request('http://127.0.0.1/api/stream', { headers }), env, new Date('2026-10-07T00:00:00Z'), nobody);
   const second = await applyGate(new Request('http://127.0.0.1/api/stream', { headers }), env, new Date('2026-10-07T00:00:00Z'), nobody);
   assert.equal(second.ok, false);
-  if (!second.ok) assert.equal(second.body.reason, 'ip');
+  if (!second.ok) {
+    assert.equal(second.body.reason, 'ip');
+    assert.equal(second.body.signedIn, false);
+    assert.equal(second.body.remaining, 0);
+  }
   const stored = keys(db);
   assert.equal(stored.some((k) => k.startsWith('ip:') && /^ip:[0-9a-f]{64}$/.test(k)), true);
   assert.equal(stored.some((k) => k.includes(IP)), false);
@@ -185,4 +203,111 @@ test('events allowlist drops pii and stores the rest', async () => {
   assert.match(row.subject_key, /^d:/);
   const bad = await recordEvent(new Request('http://127.0.0.1/api/events', { method: 'POST', body: JSON.stringify({ name: 'nope' }) }), env);
   assert.equal(bad.status, 400);
+});
+
+test('a signed zo_sess cookie is one session lookup and uses the signed-in cap', async () => {
+  const { db, env } = mem();
+  db.exec(`
+    CREATE TABLE user (id TEXT PRIMARY KEY, name TEXT, email TEXT, image TEXT, isAnonymous INTEGER, createdAt TEXT, updatedAt TEXT, emailVerified INTEGER);
+    CREATE TABLE session (id TEXT PRIMARY KEY, token TEXT, userId TEXT, expiresAt TEXT, createdAt TEXT, updatedAt TEXT);
+  `);
+  env.AUTH_ENABLED = 'true';
+  env.GATE_SIGNED_PER_DAY = '1';
+  const token = 'sess-token-no-dots';
+  db.prepare(`INSERT INTO user (id, name, email, isAnonymous, createdAt, updatedAt) VALUES ('user-9', 'Nine', 'n@e.x', 0, '2026-10-01', '2026-10-01')`).run();
+  db.prepare(`INSERT INTO session (id, token, userId, expiresAt, createdAt, updatedAt) VALUES ('s1', ?, 'user-9', '2026-12-01T00:00:00.000Z', '2026-10-01', '2026-10-01')`).run(token);
+  const cookieHeader = `${await cookie()}; zo_sess=${await signSessionToken(token, SECRET)}`;
+  const headers = { cookie: cookieHeader };
+  const when = new Date();
+  const first = await applyGate(new Request('http://127.0.0.1/api/stream', { headers }), env, when);
+  const second = await applyGate(new Request('http://127.0.0.1/api/stream', { headers }), env, when);
+  assert.equal(first.ok, true);
+  if (first.ok) assert.equal(first.headers?.['X-ZO-Remaining'], '0');
+  assert.equal(second.ok, false);
+  if (!second.ok) assert.equal(second.body.reason, 'signed');
+  assert.equal(keys(db).some((k) => k === 'u:user-9'), true);
+  assert.equal(keys(db).some((k) => k.startsWith('d:')), false);
+  const body = (await (await me(new Request('http://127.0.0.1/api/auth/me', { headers }), env)).json()) as {
+    used: number;
+    limit: number;
+    remaining: number;
+    signedIn: boolean;
+    day: string;
+    user: { id: string } | null;
+    auth_enabled: boolean;
+  };
+  assert.equal(body.auth_enabled, true);
+  assert.equal(body.signedIn, true);
+  assert.equal(body.user?.id, 'user-9');
+  assert.equal(body.used, 2);
+  assert.equal(body.limit, 1);
+  assert.equal(body.remaining, 0);
+  assert.equal(body.day, when.toISOString().slice(0, 10));
+});
+
+test('an anonymous session still counts as logged out', async () => {
+  const { db, env } = mem();
+  db.exec(`
+    CREATE TABLE user (id TEXT PRIMARY KEY, name TEXT, email TEXT, image TEXT, isAnonymous INTEGER, createdAt TEXT, updatedAt TEXT, emailVerified INTEGER);
+    CREATE TABLE session (id TEXT PRIMARY KEY, token TEXT, userId TEXT, expiresAt TEXT, createdAt TEXT, updatedAt TEXT);
+  `);
+  env.AUTH_ENABLED = 'true';
+  env.GATE_ANON_PER_DAY = '1';
+  const token = 'anon-token';
+  db.prepare(`INSERT INTO user (id, name, email, isAnonymous, createdAt, updatedAt) VALUES ('anon-1', 'Anon', 'a@anon', 1, '2026-10-01', '2026-10-01')`).run();
+  db.prepare(`INSERT INTO session (id, token, userId, expiresAt, createdAt, updatedAt) VALUES ('s2', ?, 'anon-1', '2026-12-01T00:00:00.000Z', '2026-10-01', '2026-10-01')`).run(token);
+  const headers = { cookie: `${await cookie()}; zo_sess=${await signSessionToken(token, SECRET)}` };
+  const when = new Date('2026-10-07T00:00:00Z');
+  const first = await applyGate(new Request('http://127.0.0.1/api/stream', { headers }), env, when);
+  const second = await applyGate(new Request('http://127.0.0.1/api/stream', { headers }), env, when);
+  assert.equal(first.ok, true);
+  assert.equal(second.ok, false);
+  if (!second.ok) assert.equal(second.body.reason, 'device');
+  assert.equal(keys(db).some((k) => k.startsWith('u:')), false);
+});
+
+test('test token never counts and never writes a session', async () => {
+  const { db, env } = mem();
+  db.exec(`
+    CREATE TABLE user (id TEXT PRIMARY KEY, name TEXT);
+    CREATE TABLE session (id TEXT PRIMARY KEY, token TEXT);
+  `);
+  env.AUTH_ENABLED = 'true';
+  env.GATE_ANON_PER_DAY = '1';
+  env.ZO_TEST_TOKEN = 'probe-token';
+  const headers = { cookie: await cookie(), 'X-Zo-Test-Token': 'probe-token' };
+  const decision = await applyGate(new Request('http://127.0.0.1/api/stream', { headers }), env, new Date('2026-10-07T00:00:00Z'));
+  assert.equal(decision.ok, true);
+  assert.equal(keys(db).length, 0);
+  const users = db.prepare('SELECT COUNT(*) AS n FROM user').get() as { n: number };
+  const sessions = db.prepare('SELECT COUNT(*) AS n FROM session').get() as { n: number };
+  assert.equal(users.n, 0);
+  assert.equal(sessions.n, 0);
+  const unset = { ...env, ZO_TEST_TOKEN: undefined };
+  const counted = await applyGate(new Request('http://127.0.0.1/api/stream', { headers }), unset, new Date('2026-10-07T00:00:00Z'), async () => null);
+  assert.equal(counted.ok, true);
+  assert.equal(keys(db).length, 1);
+});
+
+test('stream and middleware module graphs do not import better-auth', () => {
+  const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+  const starts = [resolve(root, 'functions/api/stream.ts'), resolve(root, 'functions/api/_middleware.ts')];
+  const seen = new Set<string>();
+  const fromRe = /(?:import|export)\s+(?:type\s+)?(?:[\s\S]*?\sfrom\s*)?['"]([^'"]+)['"]/g;
+  const dynRe = /import\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
+  const visit = (file: string) => {
+    if (seen.has(file)) return;
+    seen.add(file);
+    const text = readFileSync(file, 'utf8');
+    const specs = [...text.matchAll(fromRe), ...text.matchAll(dynRe)].map((m) => m[1] ?? '');
+    for (const spec of specs) {
+      assert.equal(spec.includes('better-auth'), false, `${file} reaches ${spec}`);
+      if (!spec.startsWith('.')) continue;
+      let next = resolve(dirname(file), spec);
+      if (!next.endsWith('.ts')) next += '.ts';
+      visit(next);
+    }
+  };
+  for (const start of starts) visit(start);
+  assert.equal(seen.size > 2, true);
 });
