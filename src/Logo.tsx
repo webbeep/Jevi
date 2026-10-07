@@ -21,11 +21,11 @@ export function LogoMark({ className }: { className?: string }) {
 
 /**
  * Mark + "zo" in Geist SemiBold, laid out in font units (1000/em, baseline at 0) from measured glyph ink:
- * mark ink = 1.3 × x-height, centred on the x-height; ink gap to the z = 0.56 × x-height; z–o tracking −25.
+ * mark ink = 1.3 × x-height, centred on the x-height (ink spans −614…80); ink gap to the z = 0.56 × x-height; z–o tracking −25.
  */
 export function Wordmark({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 -622 2052 640" className={cn('h-[0.64em] w-auto', className)} fill="currentColor" role="img" aria-label="zo">
+    <svg viewBox="0 -622 2052 710" className={cn('h-[0.71em] w-auto overflow-visible', className)} fill="currentColor" role="img" aria-label="zo">
       <g transform="translate(-79.2 -693.2) scale(26.39)">{MARK}</g>
       <text x="942.8" fontSize="1000" fontWeight="600" aria-hidden>z</text>
       <text x="1485.2" fontSize="1000" fontWeight="600" aria-hidden>o</text>
