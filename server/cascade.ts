@@ -435,9 +435,10 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUnt
     const started = Date.now();
     // Two planner rewrites plus this call fill the cap. Wikipedia stays off so both rewrites still run.
     if (KEYED.has(step.name) && extras.length < 2) startWiki();
-    // Deep route: the rewrites run alongside the literal search, each counted and capped like it.
+    // SPD1 (t457): every route runs its rewrites alongside the literal search, each counted and capped like it.
+    // Quick asks used to wait for the literal call before starting their one rewrite (~1.5 s serial).
     let parallel: { text: string; task: Promise<Settled>; at: number }[] | undefined;
-    if (ledger.route === 'deep' && KEYED.has(step.name) && extras.length) {
+    if (KEYED.has(step.name) && extras.length) {
       parallel = [];
       for (const text of extras) {
         if (searchCalls(ledger) >= callCap(ledger)) break;
