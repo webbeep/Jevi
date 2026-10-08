@@ -5,6 +5,7 @@ import { readChoices } from '../shared/choices';
 import { cardDigest } from '../shared/digest';
 import { MAX_AUTO_RECONNECTS, OFFLINE_MESSAGE, friendlyError, isConnectionError, reconnectDelay } from '../shared/offline';
 import { billingFromSources, settleCardPrices } from '../shared/pricing';
+import type { VendorHit } from '../shared/vendorPrice';
 import { emptyDoneState } from '../shared/sse-parse';
 import type { NoSourcesNotice, SearchResponse, SearchResult } from '../shared/types';
 import { api } from './api';
@@ -138,7 +139,12 @@ function settleBilling(node: CardNode, results: SearchResult[]): CardNode {
 export function placeNode(live: LiveCard, index: number, node: CardNode, query: string, results: SearchResult[]): LiveCard {
   const raw = [...live.raw];
   raw[index] = settleBilling(node, results);
-  return { ...live, raw, nodes: settleCardPrices(raw, query) };
+  return { ...live, raw, nodes: settleCardPrices(raw, query, vendorHits(results)) };
+}
+
+/** The results a shopping ask's vendor prices are read from (V3 reconcile). */
+export function vendorHits(results: SearchResult[]): VendorHit[] {
+  return results.map((r) => ({ domain: r.domain, url: r.url, title: r.title, snippet: r.snippet, content: r.content }));
 }
 
 /** The body to show right now: designed nodes where ready, placeholders for regions still being designed. */
@@ -247,7 +253,13 @@ export function useSession() {
             const page = e.data.find((p) => p.n === i + 1);
             return page && !r.content ? { ...r, content: page.text } : r;
           });
-          return update(target.id, { search: { ...target.search, results } });
+          return update(target.id, (t) => {
+            const search = { ...target.search!, results };
+            const live = t.live;
+            // A store page's text can carry the vendor "From" price: re-settle the card on it.
+            if (!live?.raw.some(Boolean)) return { search };
+            return { search, live: { ...live, nodes: settleCardPrices(live.raw, t.question, vendorHits(results)) } };
+          });
         }
         case 'images': {
           const target = searchOf(get(route));
