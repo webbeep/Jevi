@@ -186,7 +186,7 @@ export function isOwner(user: ZoUser | null, env: Env): boolean {
 export async function readFacingUsage(request: Request, env: Env, user: ZoUser | null, now = new Date()): Promise<UsageShape> {
   const day = DAY(now);
   const signedIn = signedInUser(user);
-  const limit = isOwner(user, env) ? intEnv(env, 'GATE_OWNER_PER_DAY', 1000) : signedIn ? intEnv(env, 'GATE_SIGNED_PER_DAY', 50) : intEnv(env, 'GATE_ANON_PER_DAY', 5);
+  const limit = isOwner(user, env) ? intEnv(env, 'GATE_OWNER_PER_DAY', 1000) : signedIn ? intEnv(env, 'GATE_SIGNED_PER_DAY', 50) : intEnv(env, 'GATE_ANON_PER_DAY', 50);
   let used = 0;
   const db = d1(env);
   if (db) {
@@ -238,7 +238,7 @@ export async function applyGate(
     const day = DAY(now);
     const secret = sessionSecret(env);
     const limits = {
-      anon: intEnv(env, 'GATE_ANON_PER_DAY', 5),
+      anon: intEnv(env, 'GATE_ANON_PER_DAY', 50),
       // Mobile carriers put many people behind one IP (CGNAT): 50/day for anonymous asks only (Ricky t449).
       ip: intEnv(env, 'GATE_IP_PER_DAY', 50),
       signed: intEnv(env, 'GATE_SIGNED_PER_DAY', 50),
