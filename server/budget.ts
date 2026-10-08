@@ -10,7 +10,7 @@ const DEAD_MS = 10 * 60 * 1000;
 /** Isolate memory: a provider that returned a credit, quota, or auth failure is skipped until this time. */
 const deadUntil = new Map<string, number>();
 
-export const SEARCH_ENGINES = ['exa', 'langsearch', 'tavily', 'firecrawl', 'serper', 'wikipedia', 'backup'] as const;
+export const SEARCH_ENGINES = ['exa', 'langsearch', 'tavily', 'firecrawl', 'serper', 'you', 'you-keyless', 'wikipedia', 'backup'] as const;
 export type SearchEngine = (typeof SEARCH_ENGINES)[number];
 
 export interface CallLedger {
@@ -50,7 +50,7 @@ export interface AskScope {
 
 export function newLedger(): CallLedger {
   return {
-    search: { exa: 0, langsearch: 0, tavily: 0, firecrawl: 0, serper: 0, wikipedia: 0, backup: 0 },
+    search: { exa: 0, langsearch: 0, tavily: 0, firecrawl: 0, serper: 0, you: 0, 'you-keyless': 0, wikipedia: 0, backup: 0 },
     pages: { jina: 0, keyless: 0, direct: 0 },
     cache: 'off',
     fellThrough: [],

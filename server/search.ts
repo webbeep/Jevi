@@ -50,6 +50,7 @@ export function keyedEngines(env: Env): string[] {
     ['JINA_API_KEY', 'jina'],
     ['LANGSEARCH_API_KEY', 'langsearch'],
     ['FIRECRAWL_API_KEY', 'firecrawl'],
+    ['YOU_API_KEY', 'you'],
   ];
   return keys.filter(([k]) => !!env[k]).map(([, name]) => name);
 }
@@ -65,7 +66,7 @@ export function normalizeUrl(url: string): string {
   }
 }
 
-const ENGINE_WEIGHT: Record<string, number> = { brave: 1.2, serper: 1.2, exa: 1.2, perplexity: 1.2, tavily: 1.1, jina: 1.1, marginalia: 0.5, wikipedia: 0.8 };
+const ENGINE_WEIGHT: Record<string, number> = { brave: 1.2, serper: 1.2, exa: 1.2, perplexity: 1.2, tavily: 1.1, jina: 1.1, you: 1.15, 'you-keyless': 1.05, marginalia: 0.5, wikipedia: 0.8 };
 
 /** Reciprocal rank fusion across engines, so results found by several engines rise. */
 const QUERY_STOP = new Set(['the', 'and', 'for', 'with', 'how', 'what', 'why', 'when', 'who', 'are', 'is', 'to', 'of', 'in', 'on', 'a', 'an', 'vs', 'best', 'my', 'do', 'does', 'can', 'i']);

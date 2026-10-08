@@ -18,6 +18,8 @@ function readCap(raw: string | undefined): number | undefined {
 const DEFAULT_CAPS: Record<string, Record<CapBucket, number>> = {
   serper: { prod: 200, eval: 50 },
   langsearch: { prod: 300, eval: 300 },
+  // You.com keyless MCP free profile (~100/day).
+  'you-keyless': { prod: 100, eval: 100 },
   // Exa is the paid last resort: a strict prod cap and none for eval traffic.
   exa: { prod: 10, eval: 0 },
 };

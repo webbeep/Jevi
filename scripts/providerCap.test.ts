@@ -92,10 +92,10 @@ describe('provider daily cap', { concurrency: 1 }, () => {
   });
 
   test('SEARCH_ORDER keeps known names and appends the rest in default order', () => {
-    assert.deepEqual(searchOrder({} as Env), ['serper', 'langsearch', 'wikipedia', 'tavily', 'firecrawl', 'exa', 'backup']);
+    assert.deepEqual(searchOrder({} as Env), ['serper', 'you', 'langsearch', 'you-keyless', 'wikipedia', 'tavily', 'firecrawl', 'exa', 'backup']);
     assert.deepEqual(
       searchOrder({ SEARCH_ORDER: ' tavily, nope, exa, tavily, ' } as Env),
-      ['tavily', 'exa', 'serper', 'langsearch', 'wikipedia', 'firecrawl', 'backup'],
+      ['tavily', 'exa', 'serper', 'you', 'langsearch', 'you-keyless', 'wikipedia', 'firecrawl', 'backup'],
     );
   });
 

@@ -37,6 +37,8 @@ const COST_USD: Record<string, number> = {
   exa: 0.005,
   tavily: 0.008,
   firecrawl: 0.0053,
+  you: 0,
+  'you-keyless': 0,
   wikipedia: 0,
   backup: 0,
   social: 0,

@@ -205,7 +205,7 @@ describe('search fallback', { concurrency: 1 }, () => {
       const hit = await cascadeWeb({ q: 'open source database', freshness: 'any', count: 8 }, env, ok);
       assert.equal(hit.engine, 'exa');
       assert.equal(ok.bonus, undefined);
-      assert.deepEqual(ok.search, { exa: 1, langsearch: 0, tavily: 0, firecrawl: 0, serper: 0, wikipedia: 1, backup: 0 });
+      assert.deepEqual(ok.search, { exa: 1, langsearch: 0, tavily: 0, firecrawl: 0, serper: 0, you: 0, 'you-keyless': 0, wikipedia: 1, backup: 0 });
 
       clearDeadEngines();
       globalThis.fetch = async (input: RequestInfo | URL) => {
@@ -218,7 +218,7 @@ describe('search fallback', { concurrency: 1 }, () => {
       const down = newLedger();
       const fallback = await cascadeWeb({ q: 'open source database', freshness: 'any', count: 8 }, env, down);
       assert.equal(fallback.engine, 'wikipedia');
-      assert.deepEqual(down.search, { exa: 1, langsearch: 0, tavily: 1, firecrawl: 0, serper: 0, wikipedia: 1, backup: 0 });
+      assert.deepEqual(down.search, { exa: 1, langsearch: 0, tavily: 1, firecrawl: 0, serper: 0, you: 0, 'you-keyless': 0, wikipedia: 1, backup: 0 });
       assert.deepEqual(down.fellThrough.filter((f) => !f.startsWith('wikipedia:')), ['exa:payment', 'tavily:unavailable']);
     } finally {
       globalThis.fetch = orig;

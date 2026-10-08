@@ -6,6 +6,7 @@ import { loadSkips, tripSkip } from './engineSkip';
 import { takeSlot, type CapBucket } from './providerCap';
 import { HttpStatusError, type Env, clip, domainOf, fetchJson } from './util';
 import { fetchWikiSearch } from './wikiSearch';
+import { youKeyedSearch, youKeylessSearch, youKeyPresent } from './youSearch';
 
 const ENGINE_TIMEOUT_MS = 6500;
 
@@ -306,12 +307,12 @@ async function serperSearch(q: Query, env: Env): Promise<{ hits: WebHit[]; image
   };
 }
 
-const KEYED = new Set<SearchEngine>(['exa', 'langsearch', 'tavily', 'firecrawl', 'serper']);
+const KEYED = new Set<SearchEngine>(['exa', 'langsearch', 'tavily', 'firecrawl', 'serper', 'you']);
 
 /** Default cascade. `SEARCH_ORDER` may move names; unknown tokens are ignored; anything left out is appended in this order. */
-// Router: Serper → LangSearch → Wikipedia; Exa only as the capped last resort.
-// Future adapters read YOU_API_KEY, BRAVE_API_KEY, TINYFISH_API_KEY, PARALLEL_API_KEY.
-const DEFAULT_ORDER: readonly SearchEngine[] = ['serper', 'langsearch', 'wikipedia', 'tavily', 'firecrawl', 'exa', 'backup'];
+// Router: Serper → You.com (keyed) → LangSearch → You.com keyless → Wikipedia; Exa last resort.
+// Future adapters: BRAVE_API_KEY, TINYFISH_API_KEY, PARALLEL_API_KEY.
+const DEFAULT_ORDER: readonly SearchEngine[] = ['serper', 'you', 'langsearch', 'you-keyless', 'wikipedia', 'tavily', 'firecrawl', 'exa', 'backup'];
 
 export function searchOrder(env: Env): SearchEngine[] {
   const known = new Set<string>(SEARCH_ENGINES);
@@ -340,8 +341,8 @@ interface WikiOutcome {
 }
 
 /**
- * Serper, LangSearch, Exa, Tavily, Firecrawl, then Wikipedia, unless SEARCH_ORDER
- * says otherwise. DuckDuckGo lite runs only when ZO_DDG_BACKUP=1, after Wikipedia.
+ * Serper, You.com (keyed), LangSearch, You.com keyless, Wikipedia, then Tavily/Firecrawl/Exa,
+ * unless SEARCH_ORDER says otherwise. DuckDuckGo lite runs only when ZO_DDG_BACKUP=1, after Wikipedia.
  * Keyed steps are skipped when their key is empty. The next engine runs only after
  * a credit, quota, auth, timeout, upstream, empty, or daily-cap failure. Dead
  * engines, and engines on the shared skip list, are skipped without a call. A
@@ -370,6 +371,8 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUnt
     ['tavily', { name: 'tavily', enabled: hasKey(env, 'TAVILY_API_KEY'), run: (text) => tavilySearch({ ...q, q: text }, env) }],
     ['firecrawl', { name: 'firecrawl', enabled: hasKey(env, 'FIRECRAWL_API_KEY'), run: (text) => firecrawlSearch({ ...q, q: text }, env) }],
     ['serper', { name: 'serper', enabled: hasKey(env, 'SERPER_API_KEY'), run: (text) => serperSearch({ ...q, q: text }, env) }],
+    ['you', { name: 'you', enabled: youKeyPresent(env), run: (text) => youKeyedSearch(text, env) }],
+    ['you-keyless', { name: 'you-keyless', enabled: true, run: (text) => youKeylessSearch(text, env) }],
     ['wikipedia', { name: 'wikipedia', enabled: true, run: async () => ({ hits: await fetchWikiSearch(q.q), images: [] }) }],
     ['backup', { name: 'backup', enabled: ddgBackupOn(env), run: async () => ({ hits: await fetchBackup(q.q, q.freshness), images: [] }) }],
   ]);

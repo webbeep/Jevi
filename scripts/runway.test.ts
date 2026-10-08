@@ -151,7 +151,7 @@ async function ask(query = 'open source database', extra: Record<string, unknown
 
 function callLine(line: string) {
   return JSON.parse(line) as {
-    search: { exa: number; langsearch: number; tavily: number; firecrawl: number; serper: number; wikipedia: number; backup: number };
+    search: { exa: number; langsearch: number; tavily: number; firecrawl: number; serper: number; you: number; 'you-keyless': number; wikipedia: number; backup: number };
     cache: string;
     pages: { jina: number; keyless: number; direct: number };
     fellThrough: string[];
