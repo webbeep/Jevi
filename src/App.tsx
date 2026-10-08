@@ -1,7 +1,7 @@
 import { type FormEvent, type RefObject, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowUp, CornerDownRight, CornerLeftUp, History, Moon, Pencil, Plus, RotateCw, Search, Shuffle, SlidersHorizontal, Sun, X } from 'lucide-react';
 import type { AnswerCard, CardNode } from '../shared/card';
-import type { SearchResponse } from '../shared/types';
+import type { SearchResponse, SearchResult } from '../shared/types';
 import { api } from './api';
 import { AnswerCardView } from './card/AnswerCardView';
 import { CardContext, type CardContextValue } from './card/context';
@@ -156,6 +156,13 @@ export default function App() {
     pushOverlay();
     setReading(e);
   };
+  const libraryRef = useRef(library);
+  libraryRef.current = library;
+  /** Opens a source a card points at in the reader, with whatever the conversation already knows about it. */
+  const readSource = useCallback((result: SearchResult, searchId: number) => {
+    pushOverlay();
+    setReading(libraryRef.current.find((e) => e.result.url === result.url) ?? { result, searchId, citedBy: [] });
+  }, []);
   const closeOverlays = () => {
     setSheet((s) => ({ ...s, open: false }));
     setReading(null);
@@ -414,7 +421,7 @@ export default function App() {
 
             <div className={cn(SHELL, GRID, 'relative pb-[50vh] pt-5 sm:pt-8')}>
               <main ref={mainRef} className="min-w-0 space-y-8 sm:space-y-10">
-                {turns.map((t, i) => <TurnView key={t.id} turn={t} first={i === 0} search={session.searchOf(t)?.search} actions={session} onSources={openSources} />)}
+                {turns.map((t, i) => <TurnView key={t.id} turn={t} first={i === 0} search={session.searchOf(t)?.search} actions={session} onSources={openSources} onRead={readSource} />)}
 
                 {last?.result && last.result.followups.length > 0 && !busy && (
                   <section className="-mt-2 px-4 animate-in fade-in sm:-mt-4 sm:px-6">
@@ -602,13 +609,14 @@ function Composer({ actions, topic, mainRef }: { actions: SessionActions; topic:
   );
 }
 
-const TurnView = memo(function TurnView({ turn, first, search, actions, onSources }: {
+const TurnView = memo(function TurnView({ turn, first, search, actions, onSources, onRead }: {
   turn: Turn;
   first: boolean;
   /** Results of the search this turn builds on. */
   search?: SearchResponse;
   actions: SessionActions;
   onSources: (scope?: number) => void;
+  onRead: (result: SearchResult, searchId: number) => void;
 }) {
   const streaming = !!turn.live?.nodes.some(Boolean);
   const card: AnswerCard = useMemo(() => {
@@ -655,7 +663,8 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
       void actions.followup(instruction, id, 'adjust');
     },
     onSources: () => onSources(id),
-  }), [search?.results, search?.images, credits, turn.filling, actions, id, onSources]);
+    onRead: (r) => onRead(r, turn.searchId),
+  }), [search?.results, search?.images, credits, turn.filling, actions, id, onSources, onRead, turn.searchId]);
 
   return (
     <section id={`turn-${turn.id}`} data-turn={turn.id} className="scroll-mt-20 space-y-3 animate-in fade-in slide-in-from-bottom-3 duration-500">
