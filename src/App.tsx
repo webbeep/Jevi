@@ -807,6 +807,13 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
       {(offlinePartial || !(turn.error && !turn.result)) && (
         <>
           {turn.fromCache && <p data-testid="cache-note" className="text-xs text-muted-foreground">Saved answer · you're offline</p>}
+          {turn.notice?.kind === 'no-sources' && (
+            <p data-testid="no-sources-note" role="note" className="text-xs text-muted-foreground">
+              {turn.notice.reason === 'unavailable'
+                ? 'No fresh sources found — web search is limited right now, so this is from general knowledge and may be out of date.'
+                : 'No fresh sources found — answered from general knowledge, may be out of date.'}
+            </p>
+          )}
           <CardContext.Provider value={context}>
             <AnswerCardView
               card={card}

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, test } from 'node:test';
 import { parseDdgLite } from '../server/backup.ts';
-import { clearDeadEngines, engineDead, moreQueries, newLedger, queriesForAsk, rememberDead, searchCalls, SEARCH_CALL_CAP } from '../server/budget.ts';
+import { callCap, clearDeadEngines, engineDead, moreQueries, newLedger, queriesForAsk, rememberDead, searchCalls, SEARCH_CALL_CAP } from '../server/budget.ts';
 import { packSearch, readSearchCache, searchCacheKey, writeSearchCache, type CacheDb } from '../server/cache.ts';
 import { cascadeWeb } from '../server/cascade.ts';
 import { search } from '../server/search.ts';
@@ -267,11 +267,33 @@ describe('runway', { concurrency: 1 }, () => {
     }
   });
 
+  test('bonus calls raise the cap only for that ledger', async () => {
+    clearDeadEngines();
+    const orig = globalThis.fetch;
+    globalThis.fetch = async () => Response.json({ results: [], organic: [], data: [] });
+    try {
+      const keys = { LANGSEARCH_API_KEY: 'l', FIRECRAWL_API_KEY: 'f', SERPER_API_KEY: 's' };
+      const plain = newLedger();
+      await cascadeWeb({ q: 'open source database', freshness: 'any', count: 8 }, env(keys), plain);
+      assert.equal(callCap(plain), SEARCH_CALL_CAP);
+      assert.equal(searchCalls(plain), SEARCH_CALL_CAP);
+
+      const extra = newLedger();
+      extra.bonus = 2;
+      await cascadeWeb({ q: 'open source database', freshness: 'any', count: 8 }, env(keys), extra);
+      assert.equal(callCap(extra), SEARCH_CALL_CAP + 2);
+      assert.equal(searchCalls(extra), SEARCH_CALL_CAP + 2);
+    } finally {
+      globalThis.fetch = orig;
+      clearDeadEngines();
+    }
+  });
+
   test('search cap stops further calls', async () => {
     clearDeadEngines();
     const net = install({ exa: 500, tavily: 500, wikipedia: 500, backup: 500 });
     try {
-      await assert.rejects(() => ask(), /No results/);
+      await assert.rejects(() => ask(), /Search is unavailable right now/);
       const ledger = newLedger();
       ledger.search.exa = SEARCH_CALL_CAP;
       const out = await cascadeWeb({ q: 'open source database', freshness: 'any', count: 8 }, env(), ledger);

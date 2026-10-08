@@ -106,3 +106,8 @@ export interface HealthResponse {
   llm: string[];
   keyedEngines: string[];
 }
+
+/** Stream event when a search returned nothing usable and the card is general knowledge. */
+export type NoSourcesNotice = { kind: 'no-sources'; reason: 'empty' | 'unavailable' };
+
+export type NoticeStreamEvent = { event: 'notice'; data: NoSourcesNotice };

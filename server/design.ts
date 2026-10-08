@@ -192,6 +192,7 @@ function taskBlock(req: DesignRequest): string {
     req.intent ? `- What the person wants: ${req.intent} Answer that; sources that only match their words but not this are background at most.` : '',
     req.simple ? '- Write for a 10-year-old: plain words and a friendly analogy.' : '',
     followupRules(req.followup, req.search.query).trim().replace(/^/, '- '),
+    req.search.results.length ? '' : '- No web sources were found for this; answer from general knowledge, say it may be out of date, and do not cite sources.',
     req.context ? `- Conversation so far (use it to resolve references like "it" or "the cheaper one"; don't repeat it):\n${req.context}` : '',
   ]
     .filter((l) => l && l !== '- ')
@@ -214,6 +215,38 @@ type Parsed = { kind: 'head'; head: Omit<AnswerCard, 'body'> } | { kind: 'node';
 /** Parses one streamed output line into a sanitized, grounded piece of the card. */
 function priceSources(req: DesignRequest): PriceSource[] {
   return req.search.results.slice(0, 30).map((r) => ({ url: r.url, date: r.date }));
+}
+
+/** Drops citation markers and citation nodes when there is nothing to cite. */
+function uncite(node: CardNode): CardNode | undefined {
+  if (node.type === 'citations' || node.type === 'code') return node.type === 'code' ? node : undefined;
+  const strip = (value: unknown): unknown => {
+    if (typeof value === 'string') return value.replace(/\s*\[\d+\]/g, '').replace(/ {2,}/g, ' ').trim();
+    if (Array.isArray(value)) return value.map(strip).filter((item) => item !== undefined);
+    if (value && typeof value === 'object') {
+      const src = value as Record<string, unknown>;
+      if (src.type === 'code') return src;
+      if (src.type === 'citations') return undefined;
+      const out: Record<string, unknown> = {};
+      for (const [key, item] of Object.entries(src)) {
+        const next = strip(item);
+        if (next !== undefined) out[key] = next;
+      }
+      return out;
+    }
+    return value;
+  };
+  const next = strip(node);
+  if (!next || typeof next !== 'object') return undefined;
+  const card = next as CardNode;
+  if (card.type === 'text' && !card.text) return undefined;
+  if ('children' in card && card.children.length === 0) return undefined;
+  return card;
+}
+
+function emitReady(node: CardNode | undefined, bare: boolean): CardNode | undefined {
+  if (!node) return undefined;
+  return bare ? uncite(node) : node;
 }
 
 function parseLine(line: string, g: Grounding, imageCount: number, query: string, sources?: PriceSource[], seatQuery?: string): Parsed | undefined {
@@ -289,7 +322,7 @@ export async function designStream(req: DesignRequest, env: Env, on: DesignEvent
           headSent = true;
           return on.head(parsed.head);
         case 'node': {
-          const node = polish.apply(parsed.node);
+          const node = emitReady(polish.apply(parsed.node), req.search.results.length === 0);
           if (!node) return;
           if (isContent(node)) {
             if (contentNodes >= MAX_CONTENT_NODES) return;
@@ -377,7 +410,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
       const parsed = parseLine(line, g, imageCount, req.query, sources, req.followup?.question ?? req.query);
       if (parsed?.kind === 'node') {
         done = true;
-        const node = polish.apply(parsed.node);
+        const node = emitReady(polish.apply(parsed.node), req.search.results.length === 0);
         if (!node) return;
         contentNodes++;
         pictures.emit(node, i, on.node);
@@ -400,11 +433,15 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
           return on.followups(parsed.items);
         case 'node': {
           if (parsed.node.type === 'heading' && !headSentAny) {
+            const heading = emitReady(parsed.node, req.search.results.length === 0);
+            if (heading?.type !== 'heading' || !heading.text) return;
             headSentAny = true;
-            return on.head({ title: parsed.node.text, subtitle: parsed.node.eyebrow });
+            return on.head({ title: heading.text, subtitle: heading.eyebrow });
           }
-          const order = FINISH_ORDER[parsed.node.type];
-          return pictures.emit(parsed.node, order === undefined ? regions.length + FINISH_SLOTS + extra++ : regions.length + order, on.node);
+          const node = emitReady(parsed.node, req.search.results.length === 0);
+          if (!node) return;
+          const order = FINISH_ORDER[node.type];
+          return pictures.emit(node, order === undefined ? regions.length + FINISH_SLOTS + extra++ : regions.length + order, on.node);
         }
         case 'dropped':
           removed++;
@@ -445,7 +482,8 @@ function extractive(req: DesignRequest, on: DesignEvents): DesignSummary {
   if (timeline.length >= 3) body.push({ type: 'timeline', items: timeline.map((t) => ({ when: t.when, title: t.text })) });
   if (search.images.length >= 3 && ['visual', 'profile', 'spotlight'].includes(patternId)) body.push({ type: 'gallery', refs: [0, 1, 2, 3, 4, 5].filter((i) => i < search.images.length) });
   if (cands.length > 1) body.push({ type: 'section', title: 'Key points', icon: 'pin', children: [{ type: 'list', style: 'check', items: cands.slice(1, 6).map((c) => ({ text: c.text, meta: c.domain })) }] });
-  body.push({ type: 'citations', refs: [1, 2, 3, 4].filter((i) => i <= search.results.length) });
+  const refs = [1, 2, 3, 4].filter((i) => i <= search.results.length);
+  if (refs.length) body.push({ type: 'citations', refs });
 
   on.head({ title: onTopic && k ? k.title : query, subtitle: patternById(patternId).label });
   body.forEach((node, i) => on.node(node, i));

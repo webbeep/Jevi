@@ -5,7 +5,7 @@ import { cardDigest } from '../shared/digest';
 import { MAX_AUTO_RECONNECTS, OFFLINE_MESSAGE, friendlyError, isConnectionError, reconnectDelay } from '../shared/offline';
 import { billingFromSources, settleCardPrices } from '../shared/pricing';
 import { emptyDoneState } from '../shared/sse-parse';
-import type { SearchResponse, SearchResult } from '../shared/types';
+import type { NoSourcesNotice, SearchResponse, SearchResult } from '../shared/types';
 import { api } from './api';
 import { withBrowserFallback } from './fallback';
 import { reportNeedSignin } from './auth/gatebus';
@@ -57,6 +57,8 @@ export interface Turn {
   simple: boolean;
   pins: CardNode[];
   error?: string;
+  /** Set when the card was answered without web sources. */
+  notice?: NoSourcesNotice;
   /** The failure can be tried again from the same turn. */
   retryable?: boolean;
   /** The failure was a dropped connection; auto-reconnect is pending and the partial stays up. */
@@ -235,6 +237,8 @@ export function useSession() {
           return update(route, { intent: e.data });
         case 'search':
           return update(route, { search: e.data });
+        case 'notice':
+          return update(route, { notice: e.data });
         case 'pages': {
           const target = searchOf(get(route));
           if (!target?.search) return;
@@ -295,6 +299,7 @@ export function useSession() {
     try {
       let attempt = 0;
       for (;;) {
+        update(id, { notice: undefined });
         try {
           await stream(body, onEvent, controller.signal, opts?.retry || attempt > 0 ? { retry: true } : undefined);
           break;

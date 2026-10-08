@@ -1,13 +1,15 @@
 import type { AnswerCard, FollowupContext, FollowupIntent, LayoutPlan } from '../shared/card';
-import type { Freshness, ImageResult, SearchResponse } from '../shared/types';
+import type { EngineStatus, Freshness, ImageResult, SearchResponse } from '../shared/types';
 import { rewriteQuery } from './ai';
 import { designParallel, designStream } from './design';
 import { permitted } from './images';
+import { hasLlm } from './llm';
 import { collectPages } from './pages';
 import { MADE_PATTERNS } from './patterns';
 import { planLayout } from './plan';
 import type { AskScope } from './budget';
 import { logAsk, moreQueries, newLedger, queriesForAsk } from './budget';
+import { entityQuery, relaxQuery } from './queryClean';
 import { type LateExtras, searchWithLate } from './search';
 import type { Send } from './sse';
 import { extraQueries, understand } from './understand';
@@ -122,12 +124,83 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   const more = moreQueries(query, extras);
   const fresh = freshness === 'any' && u ? u.freshness : freshness;
   const found = await searchWithLate({ q, more, freshness: fresh, count: 20 }, env, scope);
-  const results = { ...found.response, query };
+  let results = { ...found.response, query };
+  let late: Promise<LateExtras> | undefined = found.late;
+
+  if (!results.results.length) {
+    const firstEngines = results.engines;
+    const reason = noSourceReason(firstEngines);
+    scope.ledger.bonus = 2;
+    scope.ledger.empty = reason;
+    const relaxed = relaxQuery(query);
+    const tryRelaxed = relaxed.length > 0 && relaxed.toLowerCase() !== query.trim().toLowerCase();
+    let triedEntity = false;
+    let recovered: 'relaxed' | 'entity' | 'knowledge' | 'none' = 'none';
+    if (tryRelaxed) {
+      const again = await searchWithLate({ q: relaxed, freshness: 'any', count: 20 }, env, scope);
+      if (again.response.results.length) {
+        results = { ...again.response, query };
+        late = again.late;
+        recovered = 'relaxed';
+      }
+    }
+    if (!results.results.length) {
+      const entity = entityQuery(query);
+      const lower = entity.toLowerCase();
+      if (entity && lower !== query.trim().toLowerCase() && lower !== relaxed.toLowerCase()) {
+        triedEntity = true;
+        const again = await searchWithLate({ q: entity, freshness: 'any', count: 20 }, env, scope);
+        if (again.response.results.length) {
+          results = { ...again.response, query };
+          late = again.late;
+          recovered = 'entity';
+        }
+      }
+    }
+    if (!results.results.length && hasLlm(env)) recovered = 'knowledge';
+    console.log(JSON.stringify({ zo: 'empty-recovery', reason, providers: engineErrors(firstEngines), relaxed: tryRelaxed, entity: triedEntity, recovered }));
+    if (!results.results.length) {
+      if (!hasLlm(env)) {
+        throw new Error(reason === 'unavailable'
+          ? 'Search is unavailable right now. Try again in a few minutes.'
+          : 'No results for this search. Try rephrasing.');
+      }
+      send('search', results);
+      send('notice', { kind: 'no-sources', reason });
+      const plan = await planned;
+      await design(send, env, {
+        query,
+        pattern: plan.pattern,
+        depth: plan.depth,
+        readPages: plan.readPages,
+        search: results,
+        context,
+        intent: u?.intent,
+        followup: { mode: 'chat', question: query },
+      }, started, scope, late);
+      return;
+    }
+  }
 
   send('search', results);
-  if (!results.results.length) throw new Error('No results from any engine. Try rephrasing.');
   const plan = await planned;
-  await design(send, env, { query, pattern: plan.pattern, depth: plan.depth, readPages: plan.readPages, search: results, context, intent: u?.intent }, started, scope, found.late);
+  await design(send, env, { query, pattern: plan.pattern, depth: plan.depth, readPages: plan.readPages, search: results, context, intent: u?.intent }, started, scope, late);
+}
+
+/**
+ * Payment, quota, rate, auth, and transport failures on every keyed provider mean search itself is down,
+ * even when keyless Wikipedia answered empty. Only a provider that really searched and found nothing is "empty".
+ */
+function noSourceReason(engines: EngineStatus[]): 'empty' | 'unavailable' {
+  const keyed = engines.filter((engine) => engine.name !== 'wikipedia' && engine.name !== 'backup');
+  const pool = keyed.length ? keyed : engines;
+  if (pool.length > 0 && pool.every((engine) => !!engine.error && engine.error !== 'empty')) return 'unavailable';
+  return 'empty';
+}
+
+/** Engine name and error only (no query text), e.g. "exa:payment". */
+function engineErrors(engines: EngineStatus[]): string[] {
+  return engines.filter((engine) => engine.error).map((engine) => `${engine.name}:${engine.error}`);
 }
 
 async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind: 'followup' }>, started: number, scope: AskScope) {

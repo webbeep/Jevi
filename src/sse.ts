@@ -1,6 +1,6 @@
 import type { AnswerCard, CardNode, FollowupContext, FollowupIntent, ImageCredit, LayoutPlan } from '../shared/card';
 import { parseSseFrames, StreamError } from '../shared/sse-parse';
-import type { Freshness, ImageResult, SearchResponse } from '../shared/types';
+import type { Freshness, ImageResult, NoSourcesNotice, SearchResponse } from '../shared/types';
 
 export { StreamError, shouldAutoRetry } from '../shared/sse-parse';
 export type { StreamErrorReason } from '../shared/sse-parse';
@@ -26,6 +26,7 @@ export type StreamEvent =
   | { event: 'node'; data: { index: number; node: CardNode } }
   | { event: 'followups'; data: string[] }
   | { event: 'done'; data: { engine: 'composed' | 'reasoning' | 'extractive'; removed: number; pagesRead: number; ms: number; via?: string } }
+  | { event: 'notice'; data: NoSourcesNotice }
   | { event: 'error'; data: { message: string; retryable?: boolean } };
 
 function httpError(status: number, message: string): StreamError {

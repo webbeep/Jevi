@@ -16,6 +16,10 @@ export interface CallLedger {
   pages: { jina: number; keyless: number; direct: number };
   cache: 'hit' | 'miss' | 'bypass' | 'off';
   fellThrough: string[];
+  /** Extra calls allowed after an empty result, for relaxed and entity retries. Unset on the normal path. */
+  bonus?: number;
+  /** Why the first search was empty, when recovery ran. */
+  empty?: string;
 }
 
 export interface AskScope {
@@ -35,6 +39,11 @@ export function newLedger(): CallLedger {
 
 export function searchCalls(ledger: CallLedger): number {
   return SEARCH_ENGINES.reduce((n, name) => n + ledger.search[name], 0);
+}
+
+/** Normal asks stay at SEARCH_CALL_CAP. Empty recovery may add `ledger.bonus`. */
+export function callCap(ledger: CallLedger): number {
+  return SEARCH_CALL_CAP + (ledger.bonus ?? 0);
 }
 
 export function rememberDead(engine: string, now = Date.now()): void {
@@ -118,5 +127,6 @@ export function logAsk(ledger: CallLedger): void {
     cache: ledger.cache,
     pages: ledger.pages,
     fellThrough: ledger.fellThrough,
+    ...(ledger.empty ? { empty: ledger.empty } : {}),
   }));
 }

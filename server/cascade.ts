@@ -1,7 +1,7 @@
 import { cleanMarkdown } from '../shared/text';
 import type { EngineStatus, Freshness, ImageResult } from '../shared/types';
 import { ddgBackupOn, fetchBackup } from './backup';
-import { SEARCH_CALL_CAP, type CallLedger, type SearchEngine, engineDead, failureOf, rememberDead, searchCalls } from './budget';
+import { callCap, type CallLedger, type SearchEngine, engineDead, failureOf, rememberDead, searchCalls } from './budget';
 import { HttpStatusError, type Env, clip, domainOf, fetchJson } from './util';
 import { fetchWikiSearch } from './wikiSearch';
 
@@ -238,8 +238,8 @@ interface WikiOutcome {
  * timeout, upstream, or empty failure. Dead engines are skipped without a call.
  * A keyed success also takes the planner rewrites on that same engine. Wikipedia
  * runs in parallel only when fewer than two rewrites are queued, so the ask
- * stays inside SEARCH_CALL_CAP. Wikipedia is returned separately so it ranks
- * after the engine. At most SEARCH_CALL_CAP calls.
+ * stays inside callCap(ledger). Wikipedia is returned separately so it ranks
+ * after the engine. At most callCap(ledger) calls.
  */
 export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger): Promise<CascadeResult> {
   const statuses: EngineStatus[] = [];
@@ -257,7 +257,7 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger): Promis
   let wikiReported = false;
 
   const startWiki = () => {
-    if (wikiTask || engineDead('wikipedia') || searchCalls(ledger) >= SEARCH_CALL_CAP) return;
+    if (wikiTask || engineDead('wikipedia') || searchCalls(ledger) >= callCap(ledger)) return;
     ledger.search.wikipedia += 1;
     const started = Date.now();
     wikiTask = fetchWikiSearch(q.q).then(
@@ -297,7 +297,7 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger): Promis
       statuses.push({ name: step.name, ok: false, count: 0, ms: 0, error: 'skipped' });
       continue;
     }
-    if (searchCalls(ledger) >= SEARCH_CALL_CAP) {
+    if (searchCalls(ledger) >= callCap(ledger)) {
       ledger.fellThrough.push(`${step.name}:cap`);
       break;
     }
@@ -317,7 +317,7 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger): Promis
       const more: { query: string; hits: WebHit[] }[] = [];
       if (KEYED.has(step.name)) {
         for (const text of extras) {
-          if (searchCalls(ledger) >= SEARCH_CALL_CAP || engineDead(step.name)) break;
+          if (searchCalls(ledger) >= callCap(ledger) || engineDead(step.name)) break;
           ledger.search[step.name] += 1;
           const againAt = Date.now();
           try {
