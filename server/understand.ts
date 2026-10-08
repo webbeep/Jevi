@@ -1,4 +1,5 @@
 import type { Freshness, SearchResponse } from '../shared/types';
+import { diversify } from './diversify';
 import { hasLlm, llmJson } from './llm';
 import { type LateExtras, normalizeUrl } from './search';
 import type { Env } from './util';
@@ -42,7 +43,8 @@ export const extraQueries = (query: string, u: Understanding | undefined) => (u?
 
 /**
  * Merges the intended searches with the literal one: results interleaved by rank across the intended
- * searches come first; the literal search leads only when Jev kept it as a query.
+ * searches come first; the literal search leads only when Jev kept it as a query. The merged list is
+ * then diversified (see diversify.ts): a site the person named first, at most 2 places per other domain.
  */
 export function mergeSearches(query: string, literal: SearchResponse, intended: SearchResponse[], keepLiteral: boolean, max = 20): SearchResponse {
   const lead = keepLiteral ? [literal, ...intended] : intended;
@@ -63,7 +65,7 @@ export function mergeSearches(query: string, literal: SearchResponse, intended: 
   return {
     query,
     freshness: literal.freshness,
-    results: [...byUrl.values()].slice(0, max),
+    results: diversify(query, [...byUrl.values()]).slice(0, max),
     images: all.flatMap((s) => s.images).filter((i) => !thumbs.has(i.thumb) && thumbs.add(i.thumb)).slice(0, 24),
     knowledge: all.find((s) => s.knowledge)?.knowledge,
     discussions: all.flatMap((s) => s.discussions).filter((d) => !discussions.has(d.url) && discussions.add(d.url)).slice(0, 8),
