@@ -12,7 +12,7 @@ import { newLedger } from './budget';
 import { cacheDb, packSearch, readSearchCache, searchCacheKey, writeSearchCache } from './cache';
 import { cascadeWeb } from './cascade';
 import { searchDegraded } from './degraded';
-import { diversify } from './diversify';
+import { diversify, namedSite } from './diversify';
 import { gateResults } from './relevanceGate';
 import { commons, openverse, permitted } from './images';
 import { maybeBluesky, socialSources } from './social';
@@ -22,6 +22,8 @@ interface Query {
   q: string;
   /** Planner rewrites. Each is one extra call on the engine that answered, still inside the cap. */
   more?: string[];
+  /** Official-store domains of a shopping ask, so their pages rank first as price evidence. */
+  vendorDomains?: string[];
   freshness: Freshness;
   count: number;
   /**
@@ -100,6 +102,15 @@ function interleaveResults(lists: SearchResult[][]): SearchResult[] {
   return out;
 }
 
+/**
+ * A `site:`-restricted lookup names where to look, not what the page is about, so its
+ * results are trusted on the domain alone: the engine was already told whose pages to return.
+ */
+function coverOf(query: string, hit: Hit): number {
+  if (/\bsite:[\w.-]+/i.test(query)) return 1;
+  return coverage(query, hit);
+}
+
 function fuse(outputs: { engine: string; hits: Hit[] }[], count: number, query: string): SearchResult[] {
   const merged = new Map<string, SearchResult & { score: number }>();
   for (const { engine, hits } of outputs) {
@@ -121,7 +132,7 @@ function fuse(outputs: { engine: string; hits: Hit[] }[], count: number, query: 
     });
   }
   return [...merged.values()]
-    .map((r) => ({ r, cover: coverage(query, r) }))
+    .map((r) => ({ r, cover: coverOf(query, r) }))
     .filter(({ r, cover }) => cover >= 0.5 || r.engines.length > 1)
     .map(({ r, cover }) => ({ ...r, score: r.score * (0.3 + cover) }))
     .sort((a, b) => b.score - a.score)
@@ -272,7 +283,10 @@ export async function searchWithLate(q: Query, env: Env, scope?: AskScope): Prom
   const primary = interleaveResults(fused);
   const taken = new Set(primary.map((r) => normalizeUrl(r.url)));
   const wikiExtra = fuse([{ engine: 'wikipedia', hits: web.wikiHits }], q.count, q.q).filter((r) => !taken.has(normalizeUrl(r.url)));
-  const web12 = diversify(q.q, [...primary, ...wikiExtra]);
+  // Lift store domains the question doesn't already name (apple.com, amazon.com). A domain
+  // the person typed (kobo.com, workspace.google.com) is already first via namedSite.
+  const prefer = (q.vendorDomains ?? []).filter((d) => !namedSite(q.q)(d));
+  const web12 = diversify(q.q, [...primary, ...wikiExtra], 2, 3, prefer);
   const webUrls = new Set(web12.map((r) => normalizeUrl(r.url)));
   const extra = socialSources(social.posts).filter((r) => !webUrls.has(normalizeUrl(r.url))).slice(0, 5);
   // Lead with posts so a time-sensitive card can cite them inside the same result cap.

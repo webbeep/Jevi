@@ -1,6 +1,7 @@
 import { estimateCost } from './router';
 import { clearSkipCache } from './engineSkip';
 import { HttpStatusError } from './util';
+import { isProductShopAsk, officialDomains, vendorSiteQuery } from '../shared/vendorPrice';
 
 /** Hard cap on paid and backup search HTTP calls for one ask, including sub-queries and retries. */
 export const SEARCH_CALL_CAP = 3;
@@ -139,6 +140,30 @@ export function moreQueries(literal: string, extras: string[]): string[] {
     if (out.length === 2) break;
   }
   return out;
+}
+
+export interface SearchPlan {
+  /** Searches to run after the literal question. Same budget as before, vendor lookup first. */
+  more: string[];
+  /** Official-store domains for this question, when it is a shopping ask. */
+  vendorDomains?: string[];
+}
+
+/**
+ * A shopping ask (Kindle vs Kobo, iPad Air vs Pro) puts one of its remaining calls
+ * on the manufacturer's own pages: the query becomes `site:<store> <product>`, so a
+ * store page is in the results without spending a fourth call or an extra engine.
+ * The planner rewrites that got squeezed out are not needed: the store page is the
+ * evidence this ask was missing.
+ */
+export function searchPlan(literal: string, more: string[]): SearchPlan {
+  if (!isProductShopAsk(literal)) return { more };
+  const vendorQuery = vendorSiteQuery(literal, more);
+  const domains = officialDomains(literal, more);
+  if (!vendorQuery || !domains.length) return { more };
+  const rest = more.filter((q) => cleanQuery(q).toLowerCase() !== vendorQuery.toLowerCase());
+  const budget = Math.max(1, more.length);
+  return { more: [vendorQuery, ...rest].slice(0, budget), vendorDomains: domains };
 }
 
 /** One line per ask. No keys, headers, query text, or URLs. `served` is the engine name only. */

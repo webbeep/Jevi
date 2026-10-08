@@ -32,8 +32,8 @@ export type CardNode =
   | { type: 'heading'; text: string; eyebrow?: string; level?: 1 | 2 | 3 }
   | { type: 'text'; text: string; tone?: Tone; size?: 'sm' | 'md' | 'lg' }
   | { type: 'stat'; label: string; value: string; unit?: string; icon?: string; delta?: string; trend?: 'up' | 'down' | 'flat'; /** https picture of what the stat is about (e.g. a player); optional. */ image?: string }
-  /** `source` (a source number) makes the tile open that page. */
-  | { type: 'tile'; label: string; value?: string; sub?: string; icon?: string; imageRef?: number; imageQuery?: string; imageSrc?: string; active?: boolean; source?: number }
+  /** `source` (a source number) makes the tile open that page. `vendorTrue` marks a price taken from the manufacturer's own store. */
+  | { type: 'tile'; label: string; value?: string; sub?: string; icon?: string; imageRef?: number; imageQuery?: string; imageSrc?: string; active?: boolean; source?: number; vendorTrue?: boolean }
   | { type: 'keyvalue'; items: { label: string; value: string; icon?: string }[] }
   | { type: 'list'; style?: 'bullet' | 'check' | 'number' | 'icon' | 'media'; items: { text: string; icon?: string; meta?: string; imageRef?: number; imageQuery?: string; imageSrc?: string; source?: number }[] }
   /** Pages, videos or sites to open, by source number — links only ever point at real search results. */
@@ -43,7 +43,8 @@ export type CardNode =
   | { type: 'chart'; kind: 'bar' | 'hbar' | 'line' | 'area' | 'pie'; title?: string; unit?: string; data: { label: string; value: number }[] }
   | { type: 'progress'; label: string; value: number; caption?: string }
   | { type: 'rating'; value: number; max?: number; label?: string }
-  | { type: 'table'; columns: string[]; rows: string[][]; highlight?: number }
+  /** `priceRows` lines up with `rows`: the store domain, whether that price is the vendor's, and a disagreement note. */
+  | { type: 'table'; columns: string[]; rows: string[][]; highlight?: number; priceRows?: { domain: string; vendorTrue: boolean; note?: string }[] }
   | { type: 'timeline'; items: { when: string; title: string; text?: string; source?: number }[] }
   | { type: 'steps'; items: { title: string; detail?: string }[] }
   | { type: 'proscons'; pros: string[]; cons: string[] }

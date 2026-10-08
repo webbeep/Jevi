@@ -5,22 +5,24 @@ import { entityContextLine, entityHintFor, priorEntity, resolveEntity } from './
 import { type EntityHint, mentionsAny } from './imageGate';
 import type { RowImagePlan } from './pictures';
 import type { AnswerCard, FollowupContext, FollowupIntent, LayoutPlan } from '../shared/card';
-import type { EngineStatus, Freshness, ImageResult, SearchResponse } from '../shared/types';
+import { type EngineStatus, type Freshness, type ImageResult, type SearchResponse, type SearchResult } from '../shared/types';
 import { rewriteQuery } from './ai';
 import { designParallel, designStream } from './design';
 import { permitted } from './images';
 import { hasLlm } from './llm';
-import { collectPages, ogImageOf } from './pages';
+import { collectPages, ogImageOf, type PageText, storePageText } from './pages';
 import { MADE_PATTERNS } from './patterns';
 import { planLayout } from './plan';
 import type { AskScope, CallLedger } from './budget';
-import { logAsk, moreQueries, newLedger, queriesForAsk } from './budget';
+import { logAsk, moreQueries, newLedger, queriesForAsk, searchPlan } from './budget';
 import { gateResults } from './relevanceGate';
 import { entityQuery, relaxQuery } from './queryClean';
 import { type LateExtras, searchWithLate } from './search';
 import type { Send } from './sse';
 import { extraQueries, understand } from './understand';
 import { cacheBypass, testForce, validTestToken } from './token';
+import { firstOfficial } from '../shared/vendorPrice';
+import { isStoreProductAsk } from '../shared/pricing';
 import type { Env } from './util';
 
 export interface CardOnScreen {
@@ -111,6 +113,23 @@ function imageBoost(pattern: string, search: SearchResponse, env: Env, scope: As
 /** How many pages to read and how long to wait for them before designing. At most five pages per ask. */
 const pageBudget = (readPages: boolean) => (readPages ? { count: 5, need: 3, budgetMs: 2200 } : { count: 3, need: 2, budgetMs: 1000 });
 
+/**
+ * A shopping ask reads the manufacturer's own product page even when the page budget
+ * skipped it: the price on that page is the one the card shows, and it is the citation
+ * a price claim needs. Direct fetch, one page, so the extra wait is bounded.
+ */
+async function storePage(req: DesignArgs, pages: PageText[], scope: AskScope): Promise<{ page: PageText; content: SearchResult[] } | undefined> {
+  if (req.followup || !isStoreProductAsk(req.query)) return undefined;
+  const store = firstOfficial(req.search.results, req.query);
+  if (!store) return undefined;
+  const n = req.search.results.indexOf(store);
+  if (n < 0 || n > 11 || pages.some((p) => p.n === n + 1)) return undefined;
+  const text = await storePageText(store.url, scope).catch(() => undefined);
+  if (!text) return undefined;
+  const content = req.search.results.map((r, i) => (i === n && !r.content ? { ...r, content: text } : r));
+  return { page: { n: n + 1, url: store.url, text }, content };
+}
+
 /** The model is scored against the person's question, including hits a looser retry brought back. */
 function applyRelevance(query: string, response: SearchResponse, ledger: CallLedger): SearchResponse {
   const gated = gateResults(query, response.results);
@@ -129,13 +148,17 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   const chat = req.followup?.mode === 'chat';
   const budget = chat ? { count: 3, need: 0, budgetMs: 0 } : req.deep ? DEEP_PAGES : pageBudget(req.readPages);
   const pages = await collectPages(req.search.results, env, budget, late, scope);
-  const fresh = pages.filter((p) => !req.search.results[p.n - 1]?.content);
+  // The store page of a shopping ask, read on its own when the page budget skipped it.
+  const store = await storePage(req, pages, scope);
+  if (store) req = { ...req, search: { ...req.search, results: store.content } };
+  const read = store ? [...pages, store.page] : pages;
+  const fresh = read.filter((p) => !pages.some((q) => q.n === p.n) || !req.search.results[p.n - 1]?.content);
   if (fresh.length) send('pages', fresh.map(({ n, url, text }) => ({ n, url, text })));
 
   // Page preview images and images from engines that answered late are often the most relevant ones.
   const lateImages = late ? await Promise.race([late.then((l) => l.images), new Promise<ImageResult[]>((r) => setTimeout(() => r([]), 150))]) : [];
   const boosted = req.boost ? await Promise.race([req.boost, new Promise<ImageResult[]>((r) => setTimeout(() => r([]), 1500))]) : [];
-  const pageImgs = pages.filter((p) => p.image).map((p) => {
+  const pageImgs = read.filter((p) => p.image).map((p) => {
     const source = req.search.results[p.n - 1]?.domain ?? '';
     return { url: p.url, thumb: p.image!, title: req.search.results[p.n - 1]?.title ?? '', source, license: 'source' as const, credit: source };
   });
@@ -147,11 +170,11 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     send('images', req.search.images);
   }
 
-  send('designing', { pagesRead: pages.length, ms: Date.now() - started });
+  send('designing', { pagesRead: read.length, ms: Date.now() - started });
   // Follow-ups (small answers and redesigns) stay coherent in one call; full search cards are designed region by region in parallel.
   const designer = req.followup ? designStream : designParallel;
   const rowImages = chat ? undefined : rowImagePlan(req, env, scope);
-  const summary = await designer({ ...req, pages, context: req.context?.slice(0, 4000), rowImages }, env, {
+  const summary = await designer({ ...req, pages: read, context: req.context?.slice(0, 4000), rowImages }, env, {
     thinking: () => send('thinking', {}),
     layout: (regions) => send('layout', regions),
     head: (head) => send('head', head),
@@ -159,7 +182,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     followups: (items) => send('followups', items),
     credit: (credit) => send('credit', credit),
   });
-  send('done', { ...summary, pagesRead: pages.length, ms: Date.now() - started });
+  send('done', { ...summary, pagesRead: read.length, ms: Date.now() - started });
 }
 
 /**
@@ -182,9 +205,11 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   const route = routeOf(query);
   scope.ledger.route = route;
   const deep = route === 'deep';
-  const more = routeExtras(route, moreQueries(query, extras));
+  // A shopping ask spends one of its calls on the manufacturer's own pages.
+  const searches = searchPlan(query, moreQueries(query, extras));
+  const more = routeExtras(route, searches.more);
   const fresh = freshness === 'any' && u ? u.freshness : freshness;
-  const found = await searchWithLate({ q, more, freshness: fresh, count: 20 }, env, scope);
+  const found = await searchWithLate({ q, more, vendorDomains: searches.vendorDomains, freshness: fresh, count: 20 }, env, scope);
   let results = applyRelevance(query, { ...found.response, query }, scope.ledger);
   let late: Promise<LateExtras> | undefined = found.late;
 
