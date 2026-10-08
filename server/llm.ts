@@ -308,7 +308,9 @@ export async function llmLines(
     try {
       await streamFrom(p, system, user, maxTokens, !!opts.think, (t) => {
         text += t;
-        flush(false);
+        // `text` holds no newline between flushes, so a delta without one cannot finish a line.
+        // Skipping the split here keeps a long line from being re-split on every token (quadratic CPU).
+        if (t.includes('\n')) flush(false);
       }, () => {
         if (thinking) return;
         thinking = true;
