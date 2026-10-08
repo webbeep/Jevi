@@ -25,26 +25,7 @@ export function namedSite(query: string): (domain: string) => boolean {
   return (domain) => domain.toLowerCase().split(/[.-]/).some((p) => p.length > 2 && !GENERIC.has(p) && words.has(p));
 }
 
-/**
- * `prefer` lifts store domains the question does not already name: apple.com and
- * amazon.com only come up in a shopping ask through the brand map, and their pages
- * are the evidence a price needs. A domain the person typed
- * (kobo.com, workspace.google.com) is already first via `namedSite`.
- */
-export function diversify<T extends { domain: string }>(query: string, rows: readonly T[], perDomain = 2, named = 3, prefer: readonly string[] = []): T[] {
-  const wanted = prefer.filter((d) => rows.some((r) => r.domain === d || r.domain.endsWith(`.${d}`)));
-  if (!wanted.length) return diversifyCore(query, rows, perDomain, named);
-  const front: T[] = [];
-  const rest: T[] = [];
-  for (const r of rows) {
-    const hit = wanted.some((d) => r.domain === d || r.domain.endsWith(`.${d}`));
-    if (hit && front.length < named) front.push(r);
-    else rest.push(r);
-  }
-  return [...front, ...diversifyCore(query, rest, perDomain, named)];
-}
-
-function diversifyCore<T extends { domain: string }>(query: string, rows: readonly T[], perDomain: number, named: number): T[] {
+export function diversify<T extends { domain: string }>(query: string, rows: readonly T[], perDomain = 2, named = 3): T[] {
   const isNamed = namedSite(query);
   const front: T[] = [];
   const head: T[] = [];

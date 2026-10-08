@@ -191,18 +191,19 @@ test('P05 recorded: prices show while streaming and settle once the pricing tabl
   assert.equal(replay(rec)[0].children[0].value, '$7');
 });
 
-test('P10 recorded: a product ask with no known store keeps its prices; P06 drops roundup prices until the store page is in hand', () => {
-  const p10 = recorded('p10');
-  const raw10: any[] = [];
-  for (const { index, node } of p10.nodes) raw10[index] = node;
-  assert.equal(raw10.some((n) => n?.type === 'pricing'), false);
-  assert.deepEqual(settleCardPrices(raw10, p10.query), raw10);
-  const p06 = recorded('p06');
-  const raw6: any[] = [];
-  for (const { index, node } of p06.nodes) raw6[index] = node;
-  const shown = settleCardPrices(raw6, p06.query);
-  assert.equal(dollars(shown).length, 0);
-  assert.match(JSON.stringify(shown), /Check store/);
+test('P06 / P10 recorded: product questions with no pricing table keep every price', () => {
+  for (const name of ['p06', 'p10']) {
+    const rec = recorded(name);
+    assert.equal(isPlanQuery(rec.query), true, `${name} reads as a plan question`);
+    const raw: any[] = [];
+    for (const { index, node } of rec.nodes) raw[index] = node;
+    assert.equal(raw.some((n) => n?.type === 'pricing'), false);
+    const shown = settleCardPrices(raw, rec.query);
+    assert.deepEqual(shown, raw, `${name} prices were stripped with no pricing table to hold them`);
+    assert.ok(dollars(shown).length > 0);
+  }
+  const p06 = settleCardPrices(recorded('p06').nodes.map((n) => n.node), recorded('p06').query) as any[];
+  assert.match(JSON.stringify(p06), /Same 16GB price of \$159\.99/);
 });
 
 test('an unsourced pricing row does not license prices elsewhere', () => {

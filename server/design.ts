@@ -9,7 +9,6 @@ import { Polisher } from './polish';
 import type { PageText } from './pages';
 import { patternById } from './patterns';
 import { sanitizeCard, sanitizeNodes, type PriceSource } from './sanitize';
-import { stampOfficialPriceCite } from '../shared/vendorPrice';
 import { clip, type Env } from './util';
 
 const GRAMMAR = `Each node is a JSON object with a "type" field.
@@ -325,9 +324,7 @@ export async function designStream(req: DesignRequest, env: Env, on: DesignEvent
           headSent = true;
           return on.head(parsed.head);
         case 'node': {
-          const polished = polish.apply(parsed.node);
-          // A price on the store's own page cites that page, not a roundup.
-          const node = polished && emitReady(stampOfficialPriceCite(polished, req.query, req.search.results), req.search.results.length === 0);
+          const node = emitReady(polish.apply(parsed.node), req.search.results.length === 0);
           if (!node) return;
           if (isContent(node)) {
             if (contentNodes >= MAX_CONTENT_NODES) return;
@@ -415,8 +412,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
       const parsed = parseLine(line, g, imageCount, req.query, sources, req.followup?.question ?? req.query);
       if (parsed?.kind === 'node') {
         done = true;
-        const polished = polish.apply(parsed.node);
-        const node = polished && emitReady(stampOfficialPriceCite(polished, req.query, req.search.results), req.search.results.length === 0);
+        const node = emitReady(polish.apply(parsed.node), req.search.results.length === 0);
         if (!node) return;
         contentNodes++;
         pictures.emit(node, i, on.node);
@@ -444,7 +440,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
             headSentAny = true;
             return on.head({ title: heading.text, subtitle: heading.eyebrow });
           }
-          const node = emitReady(stampOfficialPriceCite(parsed.node, req.query, req.search.results), req.search.results.length === 0);
+          const node = emitReady(parsed.node, req.search.results.length === 0);
           if (!node) return;
           const order = FINISH_ORDER[node.type];
           return pictures.emit(node, order === undefined ? regions.length + FINISH_SLOTS + extra++ : regions.length + order, on.node);

@@ -5,7 +5,6 @@ import { readChoices } from '../shared/choices';
 import { cardDigest } from '../shared/digest';
 import { MAX_AUTO_RECONNECTS, OFFLINE_MESSAGE, friendlyError, isConnectionError, reconnectDelay } from '../shared/offline';
 import { billingFromSources, settleCardPrices } from '../shared/pricing';
-import type { VendorHit } from '../shared/vendorPrice';
 import { emptyDoneState } from '../shared/sse-parse';
 import type { NoSourcesNotice, SearchResponse, SearchResult } from '../shared/types';
 import { api } from './api';
@@ -132,20 +131,14 @@ function settleBilling(node: CardNode, results: SearchResult[]): CardNode {
   return fix(node);
 }
 
-/** The store pages a shopping ask was grounded on, as the price reconciliation reads them. */
-function vendorHits(results: SearchResult[]): VendorHit[] {
-  return results.map((r) => ({ domain: r.domain, url: r.url, title: r.title, snippet: r.snippet, content: r.content }));
-}
-
 /**
  * Puts one streamed node into the live card. Prices are re-settled over every node each time,
- * because the pricing table usually streams in after the hero that repeats its price, and a
- * shopping ask is re-settled again once the store page's text arrives.
+ * because the pricing table usually streams in after the hero that repeats its price.
  */
 export function placeNode(live: LiveCard, index: number, node: CardNode, query: string, results: SearchResult[]): LiveCard {
   const raw = [...live.raw];
   raw[index] = settleBilling(node, results);
-  return { ...live, raw, nodes: settleCardPrices(raw, query, vendorHits(results)) };
+  return { ...live, raw, nodes: settleCardPrices(raw, query) };
 }
 
 /** The body to show right now: designed nodes where ready, placeholders for regions still being designed. */
@@ -254,13 +247,7 @@ export function useSession() {
             const page = e.data.find((p) => p.n === i + 1);
             return page && !r.content ? { ...r, content: page.text } : r;
           });
-          return update(target.id, (t) => {
-            const search = { ...target.search!, results };
-            const live = t.live;
-            // The store page's text is the price evidence for a shopping ask: settle the card on it.
-            if (!live?.raw.some(Boolean)) return { search };
-            return { search, live: { ...live, nodes: settleCardPrices(live.raw, t.question, vendorHits(results)) } };
-          });
+          return update(target.id, { search: { ...target.search, results } });
         }
         case 'images': {
           const target = searchOf(get(route));
