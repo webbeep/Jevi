@@ -3,7 +3,8 @@ import type { Env } from './util';
 
 export type CapBucket = 'eval' | 'prod';
 
-const SLOT_SQL = `INSERT INTO provider_usage (day, provider, bucket, count) VALUES (?1, ?2, ?3, 1) ON CONFLICT(day, provider, bucket) DO UPDATE SET count = count + 1 RETURNING count`;
+const SLOT_SQL = `INSERT INTO provider_usage (day, provider, bucket, count) VALUES (?1, ?2, ?3, 1) ON CONFLICT(day, provider, bucket) DO UPDATE SET count = count + 1 WHERE count < ?4 RETURNING count`;
+// At the cap the update is a no-op and returns no row, so refused calls never push `used` past `cap`.
 
 /** A set numeric cap, or undefined when the variable is absent. */
 function readCap(raw: string | undefined): number | undefined {
@@ -56,7 +57,7 @@ export async function takeSlot(env: Env, provider: string, bucket: CapBucket, no
   }
   const day = new Date(now).toISOString().slice(0, 10);
   try {
-    const row = await db.prepare(SLOT_SQL).bind(day, provider, bucket).first<{ count: number }>();
+    const row = await db.prepare(SLOT_SQL).bind(day, provider, bucket, cap).first<{ count: number }>();
     const count = Number(row?.count);
     if (Number.isFinite(count) && count <= cap) return true;
     logRefusal(provider, bucket);

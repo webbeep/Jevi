@@ -73,6 +73,8 @@ const PICTURE_PATTERNS = new Set(['visual', 'profile', 'spotlight', 'ranked', 'b
 function imageBoost(pattern: string, search: SearchResponse, env: Env, scope: AskScope, query: string): Promise<ImageResult[]> | undefined {
   if (!PICTURE_PATTERNS.has(pattern) || scope.ledger.force) return undefined;
   if (search.images.some((i) => i.license === 'source') || !search.results.length) return undefined;
+  // Only when Serper served this search. Cap reached (or Serper skipped/dead): no /images call and no other image provider; og:image or nothing.
+  if (!search.engines.some((e) => e.name === 'serper' && e.ok)) return undefined;
   return serperImages(query, env, scope.eval ? 'eval' : 'prod', () => { scope.ledger.imageCalls = 1; });
 }
 

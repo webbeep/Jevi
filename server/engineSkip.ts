@@ -64,10 +64,10 @@ export async function loadSkips(env: Env, now = Date.now()): Promise<Record<stri
  * The module cache updates immediately. The KV put is handed to waitUntil when
  * the caller has one; otherwise it is awaited. Never throws.
  */
-export async function tripSkip(env: Env, engine: string, reason: string, waitUntil?: (promise: Promise<unknown>) => void): Promise<void> {
+export async function tripSkip(env: Env, engine: string, reason: string, waitUntil?: (promise: Promise<unknown>) => void, skipMs = SKIP_MS): Promise<void> {
   if (!TRIP_REASONS.has(reason)) return;
   const now = Date.now();
-  const until = now + SKIP_MS;
+  const until = now + skipMs;
   const raw = { ...liveEntries(cache?.raw, now), [engine]: { until, reason } };
   cache = { at: cache?.at ?? now, raw };
   const task = writeSkip(env, raw);
@@ -100,7 +100,9 @@ async function writeSkip(env: Env, raw: Record<string, SkipEntry>): Promise<void
     }
     const now = Date.now();
     const merged = { ...liveEntries(current, now), ...liveEntries(raw, now) };
-    await kv.put(KEY, JSON.stringify(merged), { expirationTtl: TTL_SEC });
+    // The key lives as long as its longest skip (Jina trips for hours), never less than TTL_SEC.
+    const longest = Math.max(0, ...Object.values(merged).map((e) => e.until - now));
+    await kv.put(KEY, JSON.stringify(merged), { expirationTtl: Math.max(TTL_SEC, Math.ceil(longest / 1000)) });
   } catch {
     /* never throw */
   }

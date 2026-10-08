@@ -223,7 +223,10 @@ describe('runway', { concurrency: 1 }, () => {
       assert.equal(wikiHeaders['User-Agent'], WIKI_UA);
       assert.ok(searchCalls(parsed) <= SEARCH_CALL_CAP);
       assert.ok(parsed.pages.jina >= 1);
-      assert.ok(parsed.pages.keyless >= 1);
+      // Jina 402 trips the shared skip and the page goes straight to direct fetch (no keyless try).
+      assert.equal(parsed.pages.keyless, 0);
+      assert.ok(parsed.pages.direct >= 1);
+      assert.ok(parsed.fellThrough.includes('jina:payment'));
       assert.equal(events.includes('done'), true);
       assert.equal(events.includes('error'), false);
       assert.equal(net.counts().tavily, 0);

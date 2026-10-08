@@ -2,12 +2,16 @@ import { cleanMarkdown } from '../shared/text';
 import type { SearchResult } from '../shared/types';
 import type { AskScope } from './budget';
 import { engineDead, failureOf, rememberDead } from './budget';
+import { loadSkips, tripSkip } from './engineSkip';
 import { readPage } from './htmlcap';
 import { type LateExtras, normalizeUrl } from './search';
 import { HttpStatusError, type Env, stripHtml } from './util';
 
 const BROWSER_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36';
 const MIN_TEXT = 300;
+/** Jina payment/quota failures skip that reader for ~6h (shared KV ENGINE_SKIP), so asks go straight to direct fetch. */
+const JINA_TRIP = new Set(['payment', 'quota', 'credit']);
+const JINA_SKIP_MS = 6 * 60 * 60 * 1000;
 
 export interface PageText {
   n: number;
@@ -95,25 +99,34 @@ async function readReadable(url: string, env: Env, signal: AbortSignal, images: 
     return text;
   };
   const key = env.JINA_API_KEY;
-  if (key && !engineDead('jina')) {
+  const skips = await loadSkips(env);
+  const skipped = (name: string) => engineDead(name) || (skips[name] ?? 0) > Date.now();
+  let straightToDirect = false;
+  if (key && !skipped('jina')) {
     bump(scope, 'jina');
     try {
       return enough(await jinaRead(url, signal, key));
     } catch (err) {
       const failure = failureOf(err);
       if (failure.dead) rememberDead('jina');
+      // Out of credit: skip Jina everywhere for ~6h and read this page directly.
+      if (JINA_TRIP.has(failure.reason)) {
+        await tripSkip(env, 'jina', failure.reason, scope?.waitUntil, JINA_SKIP_MS);
+        straightToDirect = true;
+      }
       if (failure.fall || (err instanceof Error && err.message === 'not enough text')) {
         scope?.ledger.fellThrough.push(`jina:${err instanceof Error && err.message === 'not enough text' ? 'short' : failure.reason}`);
       } else throw err;
     }
   }
-  if (!engineDead('jina-keyless')) {
+  if (!straightToDirect && !skipped('jina-keyless')) {
     bump(scope, 'keyless');
     try {
       return enough(await jinaRead(url, signal));
     } catch (err) {
       const failure = failureOf(err);
       if (failure.dead) rememberDead('jina-keyless');
+      if (JINA_TRIP.has(failure.reason)) await tripSkip(env, 'jina-keyless', failure.reason, scope?.waitUntil, JINA_SKIP_MS);
       scope?.ledger.fellThrough.push(`jina-keyless:${err instanceof Error && err.message === 'not enough text' ? 'short' : failure.reason}`);
     }
   }
