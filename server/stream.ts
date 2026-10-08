@@ -12,8 +12,9 @@ import { hasLlm } from './llm';
 import { collectPages, ogImageOf } from './pages';
 import { MADE_PATTERNS } from './patterns';
 import { planLayout } from './plan';
-import type { AskScope } from './budget';
+import type { AskScope, CallLedger } from './budget';
 import { logAsk, moreQueries, newLedger, queriesForAsk } from './budget';
+import { gateResults } from './relevanceGate';
 import { entityQuery, relaxQuery } from './queryClean';
 import { type LateExtras, searchWithLate } from './search';
 import type { Send } from './sse';
@@ -105,7 +106,16 @@ function imageBoost(pattern: string, search: SearchResponse, env: Env, scope: As
 /** How many pages to read and how long to wait for them before designing. At most five pages per ask. */
 const pageBudget = (readPages: boolean) => (readPages ? { count: 5, need: 3, budgetMs: 2200 } : { count: 3, need: 2, budgetMs: 1000 });
 
+/** The model is scored against the person's question, including hits a looser retry brought back. */
+function applyRelevance(query: string, response: SearchResponse, ledger: CallLedger): SearchResponse {
+  const gated = gateResults(query, response.results);
+  ledger.relevanceDropped = (ledger.relevanceDropped ?? 0) + gated.dropped;
+  return gated.dropped ? { ...response, results: gated.kept } : response;
+}
+
 async function design(send: Send, env: Env, req: DesignArgs, started: number, scope: AskScope, late?: Promise<LateExtras>) {
+  // Follow-ups keep the sources already gated for the original question.
+  if (!req.followup) req = { ...req, search: applyRelevance(req.query, req.search, scope.ledger) };
   // Cards already on screen point into this search's image list by index, so only a new search may reorder it.
   const newSearch = !req.followup;
   // Writing and code are made for the person, not looked up, so they are composed like a conversation turn.
@@ -170,7 +180,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   const more = routeExtras(route, moreQueries(query, extras));
   const fresh = freshness === 'any' && u ? u.freshness : freshness;
   const found = await searchWithLate({ q, more, freshness: fresh, count: 20 }, env, scope);
-  let results = { ...found.response, query };
+  let results = applyRelevance(query, { ...found.response, query }, scope.ledger);
   let late: Promise<LateExtras> | undefined = found.late;
 
   if (!results.results.length) {
@@ -184,8 +194,9 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     let recovered: 'relaxed' | 'entity' | 'knowledge' | 'none' = 'none';
     if (tryRelaxed) {
       const again = await searchWithLate({ q: relaxed, freshness: 'any', count: 20 }, env, scope);
-      if (again.response.results.length) {
-        results = { ...again.response, query };
+      const gated = applyRelevance(query, { ...again.response, query }, scope.ledger);
+      if (gated.results.length) {
+        results = gated;
         late = again.late;
         recovered = 'relaxed';
       }
@@ -196,8 +207,9 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
       if (entity && lower !== query.trim().toLowerCase() && lower !== relaxed.toLowerCase()) {
         triedEntity = true;
         const again = await searchWithLate({ q: entity, freshness: 'any', count: 20 }, env, scope);
-        if (again.response.results.length) {
-          results = { ...again.response, query };
+        const gated = applyRelevance(query, { ...again.response, query }, scope.ledger);
+        if (gated.results.length) {
+          results = gated;
           late = again.late;
           recovered = 'entity';
         }

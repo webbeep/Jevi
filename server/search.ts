@@ -13,6 +13,7 @@ import { cacheDb, packSearch, readSearchCache, searchCacheKey, writeSearchCache 
 import { cascadeWeb } from './cascade';
 import { searchDegraded } from './degraded';
 import { diversify } from './diversify';
+import { gateResults } from './relevanceGate';
 import { commons, openverse, permitted } from './images';
 import { maybeBluesky, socialSources } from './social';
 import { UA, domainOf, fetchJson, hedge, type Env } from './util';
@@ -236,7 +237,10 @@ export async function searchWithLate(q: Query, env: Env, scope?: AskScope): Prom
     // T424: a degraded cached search (0 sources / Wikipedia-only / provider errors) is a miss.
     if (cached.kind === 'hit' && !searchDegraded(cached.response)) {
       ask.ledger.cache = 'hit';
-      return { response: { ...cached.response, query: q.q, freshness: q.freshness }, late: Promise.resolve(emptyLate()) };
+      const hit = gateResults(q.q, cached.response.results);
+      ask.ledger.relevanceDropped = (ask.ledger.relevanceDropped ?? 0) + hit.dropped;
+      const response = hit.dropped ? { ...cached.response, results: hit.kept } : cached.response;
+      return { response: { ...response, query: q.q, freshness: q.freshness }, late: Promise.resolve(emptyLate()) };
     }
     ask.ledger.cache = cached.kind === 'off' ? 'off' : 'miss';
   }
@@ -272,7 +276,10 @@ export async function searchWithLate(q: Query, env: Env, scope?: AskScope): Prom
   const webUrls = new Set(web12.map((r) => normalizeUrl(r.url)));
   const extra = socialSources(social.posts).filter((r) => !webUrls.has(normalizeUrl(r.url))).slice(0, 5);
   // Lead with posts so a time-sensitive card can cite them inside the same result cap.
-  const results = [...extra, ...web12].slice(0, q.count);
+  // Relevance runs after diversify and before the cap, so a junk hit cannot take a slot the model will read.
+  const pooled = gateResults(q.q, [...extra, ...web12]);
+  ask.ledger.relevanceDropped = (ask.ledger.relevanceDropped ?? 0) + pooled.dropped;
+  const results = pooled.kept.slice(0, q.count);
   const knowledge = (instant && knowledgeMatches(q.q, instant.title, instant.description) ? instant : undefined)
     ?? (wiki && knowledgeMatches(q.q, wiki.title, wiki.description) ? wiki : undefined);
   const content = new Map<string, string>();

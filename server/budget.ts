@@ -32,6 +32,8 @@ export interface CallLedger {
   rowPics?: { filled: number; og: number };
   /** Model that wrote the card (server log only). */
   via?: string;
+  /** Hits removed by the relevance gate before the answer model saw them. */
+  relevanceDropped?: number;
 }
 
 export interface AskScope {
@@ -153,5 +155,6 @@ export function logAsk(ledger: CallLedger, served?: string): void {
     ...(ledger.via ? { via: ledger.via } : {}),
     ...estimateCost(ledger),
     ...(ledger.empty ? { empty: ledger.empty } : {}),
+    ...(ledger.relevanceDropped != null ? { relevanceDropped: ledger.relevanceDropped } : {}),
   }));
 }
