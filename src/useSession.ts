@@ -251,10 +251,7 @@ export function useSession() {
           if (!target?.search) return;
           const results = target.search.results.map((r, i) => {
             const page = e.data.find((p) => p.n === i + 1);
-            if (!page) return r;
-            let domain = r.domain;
-            try { if (page.url) domain = new URL(page.url).hostname.replace(/^www\./, ''); } catch { /* keep */ }
-            return { ...r, content: r.content || page.text, url: page.url || r.url, domain };
+            return page && !r.content ? { ...r, content: page.text } : r;
           });
           return update(target.id, (t) => {
             const search = { ...target.search!, results };

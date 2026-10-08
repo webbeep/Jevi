@@ -199,28 +199,13 @@ export function listPriceFor(text: string, re: RegExp): { amount: number; from: 
     if (NOT_LIST_PRE.test(pre) || NOT_LIST_POST.test(post)) continue;
     const before = mentions.filter((m) => m <= a.at);
     if (!before.length) continue;
-    const from = FROM_PRE.test(pre);
     const gap = a.at - before[before.length - 1];
-    // "From $X" on modern Apple pages sits far below the product heading — allow a longer window.
-    if (gap > (from ? NEAR * 4 : NEAR)) continue;
-    candidates.push({ amount: a.amount, from, gap });
+    if (gap > NEAR) continue;
+    candidates.push({ amount: a.amount, from: FROM_PRE.test(pre), gap });
   }
   if (!candidates.length) return undefined;
   candidates.sort((x, y) => (x.from === y.from ? x.gap - y.gap : x.from ? -1 : 1));
   return { amount: candidates[0].amount, from: candidates[0].from };
-}
-
-
-/** True when the URL path is this product's own page (not a sibling named on it). */
-function urlOwnsBrand(url: string, id: string): boolean {
-  const path = url.toLowerCase();
-  if (id === 'ipad-pro') return /ipad[_-]?pro/.test(path);
-  if (id === 'ipad-air') return /ipad[_-]?air/.test(path);
-  if (id === 'airpods') return /airpods/.test(path);
-  if (id === 'sony') return /wf-?1000xm|sony/.test(path);
-  if (id === 'bose') return /quietcomfort|bose/.test(path);
-  const b = BRANDS.find((x) => x.id === id);
-  return !!b && b.re.test(path.replace(/[-_/]/g, ' '));
 }
 
 /** The price each product's own store page states, with the result to cite. */
@@ -231,23 +216,10 @@ export function vendorPrices(query: string, hits: readonly VendorHit[]): VendorP
     let best: VendorPrice | undefined;
     hits.forEach((hit, i) => {
       if (!b.domains.some((d) => sameHost(hit.domain, d))) return;
-      // A sibling product's own page ( /ipad-pro/ while asking for Air) must not donate its From price.
-      const ownedBy = BRANDS.find((x) => urlOwnsBrand(hit.url ?? '', x.id));
-      if (ownedBy && ownedBy.id !== b.id) return;
       // A page that never names the product is not that product's page: the iPad Air
       // page's "From $599" is not the iPad Pro price.
       const text = `${hit.title ?? ''}\n${hit.snippet ?? ''}\n${hit.content ?? ''}`;
-      let found = listPriceFor(text, b.re);
-      // Dedicated product URL (/ipad-pro/, /airpods-pro/) — treat the page as that product even
-      // when the "From $X" line sits far from the name heading.
-      if (!found || !found.from) {
-        if (urlOwnsBrand(hit.url ?? '', b.id)) {
-          const prefixed = `${b.name}\n${text}`;
-          const again = listPriceFor(prefixed, b.re);
-          if (again && (!found || (again.from && !found.from) || again.amount === found.amount)) found = again;
-          else if (again && again.from) found = again;
-        }
-      }
+      const found = listPriceFor(text, b.re);
       if (!found) return;
       const next: VendorPrice = { id: b.id, name: b.name, amount: found.amount, domain: hit.domain.replace(/^www\./, ''), source: i + 1, from: found.from };
       // A "From" price on a later vendor result beats a bare amount on an earlier one.
@@ -533,58 +505,6 @@ export function vendorSiteQuery(query: string, extras: readonly string[] = []): 
 }
 
 /** The first result that sits on one of this question's official domains. */
-
-/** Canonical product URLs when the SERP has no official page (keyless Jina can still read them). */
-const CANONICAL: { id: string; url: string }[] = [
-  { id: 'ipad-pro', url: 'https://www.apple.com/ipad-pro/' },
-  { id: 'ipad-air', url: 'https://www.apple.com/shop/buy-ipad/ipad-air' },
-  { id: 'airpods', url: 'https://www.apple.com/airpods-pro/' },
-  { id: 'iphone', url: 'https://www.apple.com/iphone/' },
-  { id: 'macbook', url: 'https://www.apple.com/macbook-pro/' },
-  { id: 'sony', url: 'https://electronics.sony.com/audio/headphones/all-headphones/p/wf1000xm5' },
-  { id: 'bose', url: 'https://www.bose.com/p/earbuds/quietcomfort-ultra-earbuds/QCEB-US.html' },
-  { id: 'kindle', url: 'https://www.amazon.com/kindle-paperwhite' },
-  { id: 'kobo', url: 'https://www.kobo.com/us/en/ereaders' },
-  { id: 'workspace', url: 'https://workspace.google.com/pricing' },
-];
-
-/** Official product page URLs to read for this shopping ask (SERP hits first, then canonical). */
-export function vendorPageTargets(query: string, hits: readonly { domain: string; url: string }[]): { url: string; domain: string }[] {
-  const brands = brandsIn(query);
-  const out: { url: string; domain: string }[] = [];
-  const seen = new Set<string>();
-  const add = (url: string, domain: string) => {
-    const key = url.toLowerCase().replace(/\/$/, '');
-    if (seen.has(key)) return;
-    seen.add(key);
-    out.push({ url, domain });
-  };
-  for (const b of brands) {
-    // Prefer the canonical store URL for Apple tablets (SERP /ipad-air/ marketing pages often lack From).
-    // Otherwise a SERP hit whose path owns this product; never a generic apple.com/ipad/ sibling mix.
-    const canon = CANONICAL.find((c) => c.id === b.id);
-    if (canon && (b.id === 'ipad-air' || b.id === 'ipad-pro' || b.id === 'airpods')) {
-      try {
-        add(canon.url, new URL(canon.url).hostname.replace(/^www\./, ''));
-        continue;
-      } catch { /* fall through */ }
-    }
-    const pathHit = hits.find((h) => b.domains.some((d) => sameHost(h.domain, d)) && urlOwnsBrand(h.url, b.id));
-    if (pathHit) {
-      add(pathHit.url, pathHit.domain.replace(/^www\./, ''));
-      continue;
-    }
-    if (canon) {
-      try {
-        add(canon.url, new URL(canon.url).hostname.replace(/^www\./, ''));
-      } catch {
-        /* ignore */
-      }
-    }
-  }
-  return out.slice(0, MAX_SITES);
-}
-
 export function firstOfficial<T extends { domain: string; url: string }>(results: readonly T[], query: string): T | undefined {
   const domains = officialDomains(query);
   if (!domains.length) return undefined;

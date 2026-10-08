@@ -22,7 +22,7 @@ import type { Send } from './sse';
 import { extraQueries, understand } from './understand';
 import { cacheBypass, testForce, validTestToken } from './token';
 import type { Env } from './util';
-import { vendorPageTargets } from '../shared/vendorPrice';
+import { firstOfficial } from '../shared/vendorPrice';
 import { isStoreProductAsk } from '../shared/pricing';
 
 export interface CardOnScreen {
@@ -121,50 +121,20 @@ function applyRelevance(query: string, response: SearchResponse, ledger: CallLed
 }
 
 /**
- * A shopping ask reads manufacturer product pages (keyless Jina — Apple/Sony HTML is a JS
- * shell with no price). Covers every brand in the ask (up to 3), injecting a canonical URL
- * when the SERP missed the store page so "From $X" still reaches reconcile.
+ * A shopping ask reads the manufacturer's own product page even when the page budget
+ * skipped it: the "From" price on that page is the one the card shows, and it is the
+ * citation a vendor price needs. Direct fetch, one page, 2.5s bound.
  */
-async function storePage(req: DesignArgs, env: Env, pages: PageText[], scope: AskScope): Promise<{ pages: PageText[]; content: SearchResult[] } | undefined> {
+async function storePage(req: DesignArgs, pages: PageText[], scope: AskScope): Promise<{ page: PageText; content: SearchResult[] } | undefined> {
   if (req.followup || !isStoreProductAsk(req.query)) return undefined;
-  const targets = vendorPageTargets(req.query, req.search.results);
-  if (!targets.length) return undefined;
-  const results = [...req.search.results];
-  const slots: { target: { url: string; domain: string }; n: number }[] = [];
-  for (const target of targets) {
-    let n = results.findIndex((r) => {
-      try {
-        const a = new URL(r.url); const b = new URL(target.url);
-        return a.hostname.replace(/^www\./, '') === b.hostname.replace(/^www\./, '')
-          && (a.pathname === b.pathname
-            || a.pathname.startsWith(b.pathname.replace(/\/$/, ''))
-            || b.pathname.startsWith(a.pathname.replace(/\/$/, '')));
-      } catch { return false; }
-    });
-    if (n < 0) {
-      const row = { title: target.domain, url: target.url, snippet: '', domain: target.domain, engines: ['web'] as string[] };
-      if (results.length < 12) { results.push(row); n = results.length - 1; }
-      else {
-        // Distinct slots near the end so Air + Pro (or AirPods + Sony) do not overwrite each other.
-        n = 11 - slots.length;
-        if (n < 0) n = 11;
-        results[n] = row;
-      }
-    }
-    if (n >= 0 && n <= 11) slots.push({ target, n });
-  }
-  const added: PageText[] = [];
-  await Promise.all(slots.map(async ({ target, n }) => {
-    if (results[n]!.content && /\$[\d,]/.test(results[n]!.content!)) return;
-    if (pages.some((p) => p.n === n + 1 && /\$[\d,]/.test(p.text))) return;
-    const text = await storePageText(target.url, env, scope).catch(() => undefined);
-    if (!text || !/\$[\d,]/.test(text)) return;
-    results[n] = { ...results[n]!, content: text, url: target.url, domain: target.domain };
-    added.push({ n: n + 1, url: results[n]!.url, text });
-    console.log(JSON.stringify({ zo: 'vendor', page: target.url, chars: text.length, hasFrom: /from\s*\$/i.test(text) }));
-  }));
-  if (!added.length) return undefined;
-  return { pages: added, content: results };
+  const store = firstOfficial(req.search.results, req.query);
+  if (!store) return undefined;
+  const n = req.search.results.indexOf(store);
+  if (n < 0 || n > 11 || store.content || pages.some((p) => p.n === n + 1)) return undefined;
+  const text = await storePageText(store.url, scope).catch(() => undefined);
+  if (!text) return undefined;
+  const content = req.search.results.map((r, i) => (i === n ? { ...r, content: text } : r));
+  return { page: { n: n + 1, url: store.url, text }, content };
 }
 
 async function design(send: Send, env: Env, req: DesignArgs, started: number, scope: AskScope, late?: Promise<LateExtras>) {
@@ -177,12 +147,13 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   // Conversation turns reason from what is already known; everything else reads pages first.
   const chat = req.followup?.mode === 'chat';
   const budget = chat ? { count: 3, need: 0, budgetMs: 0 } : req.deep ? DEEP_PAGES : pageBudget(req.readPages);
-  // V3: read vendor pages first (keyless Jina) so "From $X" is on the hit before design/reconcile.
-  const before = req.search.results;
-  const store = await storePage(req, env, [], scope);
-  if (store) req = { ...req, search: { ...req.search, results: store.content } };
   const collected = await collectPages(req.search.results, env, budget, late, scope);
-  const pages = store ? [...store.pages, ...collected.filter((p) => !store.pages.some((s) => s.n === p.n))] : collected;
+  // V3: the store page of a shopping ask is read on its own when the page budget skipped it,
+  // so its "From $X" reaches the card (client reconcile reads result content).
+  const store = await storePage(req, collected, scope);
+  const before = req.search.results;
+  if (store) req = { ...req, search: { ...req.search, results: store.content } };
+  const pages = store ? [...collected, store.page] : collected;
   const fresh = pages.filter((p) => !before[p.n - 1]?.content);
   if (fresh.length) send('pages', fresh.map(({ n, url, text }) => ({ n, url, text })));
 
@@ -303,11 +274,8 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
 
   // T444: before building a profile/person card, pick ONE entity from the top
   // results. Ambiguous names return choices instead of a mixed card.
-  // Store-product shopping asks are not people — never cluster/drop retailer rows (P07 live).
   const plan = await planned;
-  const decision = isStoreProductAsk(query)
-    ? { kind: 'skip' as const }
-    : resolveEntity(query, results.results, { pattern: plan.pattern, prior: priorEntity(context) });
+  const decision = resolveEntity(query, results.results, { pattern: plan.pattern, prior: priorEntity(context) });
   if (decision.kind === 'choices') {
     scope.ledger.entity = { kind: 'choices', choices: decision.choices.length };
     console.log(JSON.stringify({ zo: 'entity', kind: 'choices', choices: decision.choices.length }));
@@ -326,14 +294,6 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     designContext = [entityContextLine(decision.entity), context].filter(Boolean).join('\n');
     entityHint = entityHintFor(decision.entity);
     boostQuery = decision.entity.name;
-  }
-  // V3: enrich store pages before the search event so vendor content indices exist on the client.
-  if (isStoreProductAsk(query)) {
-    const store = await storePage({ query, search: results, followup: undefined, pattern: plan.pattern, depth: plan.depth, readPages: false } as DesignArgs, env, [], scope);
-    if (store) {
-      results = { ...results, results: store.content };
-      send('pages', store.pages.map(({ n, url, text }) => ({ n, url, text })));
-    }
   }
   send('search', results);
   const boost = imageBoost(plan.pattern, results, env, scope, boostQuery);
@@ -362,7 +322,7 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
 
   // A search button on a card: always resolve it against the conversation ("apple varieties" → "best apples for apple pie").
   if (req.intent === 'search') {
-    const query = req.question.trim();
+    const query = await rewriteQuery(req.original, req.question, env, context, from?.title).catch(() => req.question);
     send('rewrite', { query });
     await searchAndDesign(send, env, query, 'any', context, started, scope, true);
     return;
