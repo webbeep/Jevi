@@ -84,18 +84,14 @@ export function personSubject(query: string): string {
     } else break;
   }
   if (run.length) {
-    // "Ray Lee BlueFlame AI" / "Ray Lee Raycon Founder" → person "Ray Lee";
-    // keep "Barack Hussein Obama" (exactly 3 name tokens, no org/role tail).
+    // "Ray Lee BlueFlame AI" → person "Ray Lee"; keep "Barack Hussein Obama" (no org-like token).
     let cut = run.length;
     for (let i = 2; i < run.length; i++) {
-      const w = run[i]!;
-      if (looksLikeOrgToken(w) || /^(founder|co-founder|coach|player|writer|singer|actor|ceo|cto|cfo|coo|director|engineer|dentist|pianist|mayor|president|author)$/i.test(w)) {
+      if (looksLikeOrgToken(run[i]!)) {
         cut = i;
         break;
       }
     }
-    // Choice-query shape "Name Name Org Role" (≥4 Cap tokens): never treat Org as a middle name.
-    if (run.length >= 4 && cut > 2) cut = 2;
     return run.slice(0, Math.min(cut, 3)).join(' ');
   }
   // Lowercase person asks only after who/about: "who is barack obama" (not "open source database" or "zxqv").
@@ -119,9 +115,7 @@ export function contextTerms(query: string, name = personSubject(query)): string
     // Sports leagues (NBA) are season context, not identity — requiring them dropped the
     // Nique Clifford Wikipedia bio from a preseason ask.
     if (SPORTS_LEAGUE.test(w)) continue;
-    // Cap tokens after the person name count as context (Raycon, USATF, Stripe) — not only CamelCase/ALLCAPS.
-    const capCtx = /^[A-Z]/.test(w) && w.length >= 3 && !/^(Who|What|When|Where|Why|How)$/i.test(w);
-    if (looksLikeOrgToken(w) || ORG_TAIL.test(w) || capCtx) {
+    if (looksLikeOrgToken(w) || ORG_TAIL.test(w)) {
       if (!out.includes(t)) out.push(t);
     }
   }
@@ -135,44 +129,17 @@ export function contextTerms(query: string, name = personSubject(query)): string
 export function hasFullPersonName(name: string, row: EntityRow): boolean {
   const nameToks = tokens(name).filter((t) => t.length >= 2);
   if (nameToks.length < 2) return false;
-  const segments = [row.title ?? '', row.snippet ?? ''].filter((s) => s.trim());
-  if (!segments.length) return false;
-  const escRe = /[.*+?^${}()|[\]\\]/g;
-  const esc = nameToks.map((t) => t.replace(escRe, '\\$&')).join('\\s+');
-  const re = new RegExp(`\\b${esc}\\b`, 'i');
-  const mid =
-    nameToks.length === 2
-      ? new RegExp(
-          `\\b${nameToks[0]!.replace(escRe, '\\$&')}\\s+[A-Za-z]\\.?\\s+${nameToks[1]!.replace(escRe, '\\$&')}\\b`,
-          'i',
-        )
-      : null;
-  // Match on title/snippet separately so "Ray Lee" + "Ray Lee, …" does not look like "Ray Lee Ray".
-  if (!segments.some((s) => re.test(s) || (mid && mid.test(s)))) return false;
-  const AFTER_OK = new Set([
-    'is', 'was', 'as', 'the', 'a', 'an', 'of', 'at', 'in', 'on', 'for', 'and', 'or', 'who', 'whose',
-    'from', 'with', 'to', 'by', 'ceo', 'cto', 'cfo', 'coo', 'vp', 'co-founder', 'founder', 'director',
-    'mayor', 'dr', 'mr', 'ms', 'mrs', 'jr', 'sr', 'ii', 'iii', 'phd', 'md', 'esq',
-    // Institutional / title continuations — not a longer personal name ("… Presidential Center").
-    'presidential', 'center', 'centre', 'foundation', 'library', 'institute', 'university', 'college',
-    'hospital', 'school', 'museum', 'park', 'bridge', 'administration', 'biography', 'official',
-    'former', 'family', 'memorial', 'museum', 'stadium', 'airport', 'boulevard', 'avenue', 'street',
-  ]);
-  const longer = new RegExp(`\\b${esc}\\s+([A-Za-z][A-Za-z'’\\-]{1,})`, 'gi');
-  const prefix = new RegExp(`\\b([A-Za-z][A-Za-z'’\\-]*)\\s+${esc}\\b`, 'gi');
-  for (const seg of segments) {
-    for (const m of seg.matchAll(longer)) {
-      if (!/^[A-Z]/.test(m[1] ?? '')) continue;
-      const nxt = (m[1] ?? '').toLowerCase().replace(/[’']/g, '');
-      if (!nxt || AFTER_OK.has(nxt)) continue;
-      if (!ORG_TAIL.test(m[1]!) && !/^(Inc|LLC|Ltd|Corp|Co|AI|ML)$/i.test(m[1]!)) return false;
-    }
-    // Only a repeated first name ("Ray Ray Lee") is a longer-name prefix — not "Description Ray Lee".
-    for (const m of seg.matchAll(prefix)) {
-      if ((m[1] ?? '').toLowerCase() === nameToks[0]) return false;
-    }
+  const body = normText(`${row.title ?? ''} ${row.snippet ?? ''}`);
+  if (!body) return false;
+  const phrase = nameToks.join(' ');
+  if (body.includes(phrase)) return true;
+  // Allow one middle initial between the first and last name tokens: "ray j lee".
+  if (nameToks.length === 2) {
+    const [a, b] = nameToks;
+    const mid = new RegExp(`\\b${a}\\s+[a-z]\\.?\\s+${b}\\b`);
+    if (mid.test(body)) return true;
   }
-  return true;
+  return false;
 }
 
 /** Source is about this person ask: full name + (>=1 context token when the query gives one). */
@@ -683,15 +650,12 @@ export function resolveEntity(
   }
 
   // Compare strong clusters only (weak inflated the winner live and blocked choices).
-  // Bare common names (no org/role in the query): allow singleton clusters as choices so a
-  // LinkedIn CEO and an IMDb director each surface (live Ray Lee / David Kim). Famous names
-  // with context, or a dominant cluster vs a singleton, still stay single (Obama dog article).
+  // Threshold loosened: 2nd cluster ≥2 and ≥40% of 1st (was 60%). Famous names stay single
+  // when the runner-up is a singleton (Obama dog article).
   if (strong.length >= 2) {
     const [first, second] = [strong[0]!, strong[1]!];
-    const bare = contextTerms(query, name).length === 0;
-    const minSize = bare ? 1 : 2;
-    if (second.length >= minSize && first.length >= minSize && (bare || second.length >= 0.4 * first.length)) {
-      const choices = strong.filter((c) => c.length >= minSize).slice(0, 4).map((c) => toChoice(name, c, rows));
+    if (second.length >= 2 && second.length >= 0.4 * first.length && first.length >= 2) {
+      const choices = strong.filter((c) => c.length >= 2).slice(0, 4).map((c) => toChoice(name, c, rows));
       if (choices.length >= 2) return { kind: 'choices', choices };
     }
   }
