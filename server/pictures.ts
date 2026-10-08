@@ -2,11 +2,15 @@ import type { CardNode, ImageCredit } from '../shared/card';
 import { fileWords, fitsEntity, isComposite, namesSibling, rankForEntity, splitEntities } from '../shared/imagematch';
 import type { ImageResult } from '../shared/types';
 import { findImages } from './images';
+import { fillRowImages, hasBlankPictures, type RowImageDeps } from './rowImages';
 import type { Env } from './util';
 
 type Emit = (node: CardNode, index: number) => void;
 type Pic = { src: string; link: string; title: string };
 type FindImages = (query: string, env: Env, n?: number, allowGeneric?: boolean) => Promise<ImageResult[]>;
+
+/** T442 inputs from the stream: the card's single picture search, og:image reader, and a call counter. */
+export type RowImagePlan = Omit<RowImageDeps, 'results' | 'pool'> & { onFilled?: (stats: { imageCalls: number; og: number; filled: number }) => void };
 
 /** List-item label: drop markdown and [n] citations, keep the first few words. */
 function itemEntity(text: string): string {
@@ -40,11 +44,16 @@ export class PictureResolver {
   private readonly onCredit: (credit: ImageCredit) => void;
   private readonly find: FindImages;
 
-  constructor(env: Env, pool: ImageResult[], onCredit: (credit: ImageCredit) => void, query?: string, find: FindImages = findImages) {
+  /** T442: latest version of every emitted node, so blank tiles/rows can be filled once the card is complete. */
+  private readonly latest = new Map<number, { node: CardNode; emit: Emit }>();
+  private readonly rows?: RowImagePlan & { results: RowImageDeps['results'] };
+
+  constructor(env: Env, pool: ImageResult[], onCredit: (credit: ImageCredit) => void, query?: string, find: FindImages = findImages, rows?: RowImagePlan & { results: RowImageDeps['results'] }) {
     this.env = env;
     this.pool = pool;
     this.onCredit = onCredit;
     this.find = find;
+    this.rows = rows;
     for (const name of splitEntities(query ?? '')) this.note(name);
   }
 
@@ -222,17 +231,37 @@ export class PictureResolver {
   emit(node: CardNode, index: number, emit: Emit): void {
     this.collect(node);
     const vetted = this.vet(node);
-    emit(vetted, index);
+    const track = (n: CardNode) => {
+      if (this.rows) this.latest.set(index, { node: n, emit });
+      emit(n, index);
+    };
+    track(vetted);
+    // Start the card's one picture search early so it is ready when the card completes.
+    if (this.rows?.cardImages && hasBlankPictures(vetted)) void this.rows.cardImages();
     if (!PictureResolver.needs(vetted)) return;
     this.pending.push(
       this.resolve(vetted)
-        .then((patched) => emit(patched, index))
+        .then((patched) => track(patched))
         .catch((err) => console.error('picture lookup failed', err)),
     );
   }
 
-  /** Waits for outstanding lookups so the card is complete before it is marked done. */
+  /** Waits for outstanding lookups so the card is complete before it is marked done; then fills blank tiles and rows (T442). */
   async flush(): Promise<void> {
     await Promise.allSettled(this.pending);
+    if (!this.rows || !this.latest.size) return;
+    try {
+      const entries = [...this.latest.entries()];
+      const filled = await fillRowImages(entries.map(([, e]) => e.node), { ...this.rows, pool: this.pool }, this.used);
+      let count = 0;
+      entries.forEach(([index, e], i) => {
+        if (!filled.changed[i]) return;
+        count += 1;
+        e.emit(filled.nodes[i], index);
+      });
+      this.rows.onFilled?.({ imageCalls: filled.imageCalls, og: filled.og, filled: count });
+    } catch (err) {
+      console.error('row pictures failed', err);
+    }
   }
 }

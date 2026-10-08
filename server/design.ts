@@ -4,7 +4,7 @@ import type { SearchResponse } from '../shared/types';
 import { hasLlm, llmLines } from './llm';
 import { candidates, extractStats, extractTimeline } from './extract';
 import { Grounding, groundNodes } from './ground';
-import { PictureResolver } from './pictures';
+import { PictureResolver, type RowImagePlan } from './pictures';
 import { Polisher } from './polish';
 import type { PageText } from './pages';
 import { patternById } from './patterns';
@@ -89,6 +89,8 @@ export interface DesignRequest {
   think?: boolean;
   /** What the person actually wants, read from the query before searching. */
   intent?: string;
+  /** T442: fill pictures on tiles and media rows the designer left blank. */
+  rowImages?: RowImagePlan;
 }
 
 export interface DesignEvents {
@@ -293,7 +295,7 @@ export async function designStream(req: DesignRequest, env: Env, on: DesignEvent
   const chat = req.followup?.mode === 'chat';
   const g = new Grounding(corpusOf(req), chat);
   const polish = new Polisher(textCap(req));
-  const pictures = new PictureResolver(env, req.search.images, on.credit, req.query);
+  const pictures = new PictureResolver(env, req.search.images, on.credit, req.query, undefined, req.rowImages && { ...req.rowImages, results: req.search.results });
   const base = req.followup?.mode === 'refine' && req.followup.baseCard ? `CURRENT CARD\n${JSON.stringify(req.followup.baseCard).slice(0, 12000)}\n\n` : '';
   const user = `${sourcesBlock(req.search, req.pages)}\n\n${base}SKELETON\n${JSON.stringify(patternById(req.pattern).skeleton)}\n\nTASK\n${taskBlock(req)}\n\nQUERY: ${req.followup?.question ?? req.query}`;
 
@@ -393,7 +395,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
   on.layout(regions);
   const sources = priceSources(req);
   const g = new Grounding(corpusOf(req));
-  const pictures = new PictureResolver(env, req.search.images, on.credit, req.query);
+  const pictures = new PictureResolver(env, req.search.images, on.credit, req.query, undefined, req.rowImages && { ...req.rowImages, results: req.search.results });
   const polish = new Polisher(textCap(req));
   const shared = `${sourcesBlock(req.search, req.pages, 2800)}\n\nTASK\n${taskBlock(req)}\n- Card regions, top to bottom:\n${regions.map((r, i) => `  R${i + 1}: ${regionPurpose(r)}`).join('\n')}\n  FINISH: header, interactive control, actions, citations, follow-ups`;
   const query = req.followup?.question ?? req.query;

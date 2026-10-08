@@ -1,12 +1,13 @@
 import { DEEP_PAGES, routeExtras, routeOf } from './router';
 import { serperImages } from './cascade';
+import type { RowImagePlan } from './pictures';
 import type { AnswerCard, FollowupContext, FollowupIntent, LayoutPlan } from '../shared/card';
 import type { EngineStatus, Freshness, ImageResult, SearchResponse } from '../shared/types';
 import { rewriteQuery } from './ai';
 import { designParallel, designStream } from './design';
 import { permitted } from './images';
 import { hasLlm } from './llm';
-import { collectPages } from './pages';
+import { collectPages, ogImageOf } from './pages';
 import { MADE_PATTERNS } from './patterns';
 import { planLayout } from './plan';
 import type { AskScope } from './budget';
@@ -67,6 +68,26 @@ interface DesignArgs {
   boost?: Promise<ImageResult[]>;
 }
 
+/**
+ * T442: pictures for tiles and media rows the designer left blank. The card's one picture search is the
+ * T436 boost when it already ran, else one Serper /images call on the card subject — only when Serper
+ * served this search (a capped day means og:image or nothing). og:image reads take ~2s at most.
+ */
+function rowImagePlan(req: DesignArgs, env: Env, scope: AskScope): RowImagePlan {
+  let once: Promise<ImageResult[]> | undefined;
+  const serperServed = req.search.engines.some((e) => e.name === 'serper' && e.ok);
+  return {
+    cardImages: () =>
+      (once ??= req.boost
+        ? req.boost
+        : serperServed && !scope.ledger.force
+          ? serperImages(req.query, env, scope.eval ? 'eval' : 'prod', () => { scope.ledger.imageCalls = 1; })
+          : Promise.resolve([])),
+    og: (url) => ogImageOf(url, 2000),
+    onFilled: ({ filled, og }) => { if (filled || og) scope.ledger.rowPics = { filled, og }; },
+  };
+}
+
 /** Card types that show pictures. Only these may spend the extra Serper /images call. */
 const PICTURE_PATTERNS = new Set(['visual', 'profile', 'spotlight', 'ranked', 'briefing']);
 
@@ -111,7 +132,8 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   send('designing', { pagesRead: pages.length, ms: Date.now() - started });
   // Follow-ups (small answers and redesigns) stay coherent in one call; full search cards are designed region by region in parallel.
   const designer = req.followup ? designStream : designParallel;
-  const summary = await designer({ ...req, pages, context: req.context?.slice(0, 4000) }, env, {
+  const rowImages = chat ? undefined : rowImagePlan(req, env, scope);
+  const summary = await designer({ ...req, pages, context: req.context?.slice(0, 4000), rowImages }, env, {
     thinking: () => send('thinking', {}),
     layout: (regions) => send('layout', regions),
     head: (head) => send('head', head),

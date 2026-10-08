@@ -28,6 +28,8 @@ export interface CallLedger {
   force?: 'serper-off' | 'degraded';
   /** Extra Serper /images calls for this card (0 or 1). */
   imageCalls?: number;
+  /** T442: tiles/rows that got a picture after design, and og:image fetches spent. */
+  rowPics?: { filled: number; og: number };
 }
 
 export interface AskScope {
@@ -145,6 +147,7 @@ export function logAsk(ledger: CallLedger, served?: string): void {
     ...(ledger.route ? { route: ledger.route } : {}),
     ...(ledger.force ? { force: ledger.force } : {}),
     ...(ledger.imageCalls ? { imageCalls: ledger.imageCalls } : {}),
+    ...(ledger.rowPics ? { rowPics: ledger.rowPics } : {}),
     ...estimateCost(ledger),
     ...(ledger.empty ? { empty: ledger.empty } : {}),
   }));

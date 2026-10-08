@@ -47,6 +47,23 @@ function htmlToText(html: string): string {
   return stripHtml(main.replace(/<(script|style|noscript|svg|nav|footer|header|form|iframe|aside)[\s\S]*?<\/\1>/gi, ' '));
 }
 
+/**
+ * The page's own preview picture (og:image / twitter:image), https only, for row and tile thumbnails.
+ * Direct fetch with a short timeout; undefined on any failure.
+ */
+export async function ogImageOf(url: string, timeoutMs = 2000): Promise<string | undefined> {
+  if (!isFetchable(url)) return undefined;
+  try {
+    const res = await fetch(url, { headers: { 'User-Agent': BROWSER_UA, Accept: 'text/html' }, signal: AbortSignal.timeout(timeoutMs), redirect: 'follow' });
+    if (!res.ok || !res.headers.get('content-type')?.includes('html')) return undefined;
+    const { head, body } = await readPage(res);
+    const image = ogImage(head || body.slice(0, 20_000), res.url || url);
+    return image && /^https:\/\//i.test(image) ? image : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Public web pages only: no other schemes or ports, IP literals, or local and internal hostnames. */
 export function isFetchable(raw: string): boolean {
   try {

@@ -31,7 +31,7 @@ export type CardNode =
   | { type: 'hero'; value: string; unit?: string; label?: string; caption?: string; icon?: string; tone?: Tone }
   | { type: 'heading'; text: string; eyebrow?: string; level?: 1 | 2 | 3 }
   | { type: 'text'; text: string; tone?: Tone; size?: 'sm' | 'md' | 'lg' }
-  | { type: 'stat'; label: string; value: string; unit?: string; icon?: string; delta?: string; trend?: 'up' | 'down' | 'flat' }
+  | { type: 'stat'; label: string; value: string; unit?: string; icon?: string; delta?: string; trend?: 'up' | 'down' | 'flat'; /** https picture of what the stat is about (e.g. a player); optional. */ image?: string }
   /** `source` (a source number) makes the tile open that page. */
   | { type: 'tile'; label: string; value?: string; sub?: string; icon?: string; imageRef?: number; imageQuery?: string; imageSrc?: string; active?: boolean; source?: number }
   | { type: 'keyvalue'; items: { label: string; value: string; icon?: string }[] }
