@@ -152,3 +152,15 @@ test('P11 explicit never-said: label is No (matches the verdict), not a hard cla
   assert.equal(node.type === 'hero' && node.value, 'No');
   assert.equal(node.type === 'hero' && node.label, 'No');
 });
+
+test('T450: a long or server-clipped label is cut at a clause break, never mid-clause with " —…"', () => {
+  const label = 'Bananas emit copious amounts of ethylene, so they nudge avocados — and each other — toward ripeness much faster than either would on its own counter';
+  const session = new VerdictSession({ query: 'Do bananas ripen faster next to avocados?', results: [] });
+  const out = hero(session.offer({ type: 'hero', value: 'Yes', label, tone: 'positive' }, 0).node);
+  assert.ok(out?.label);
+  assert.ok(out!.label!.length <= 121, out!.label);
+  assert.equal(/[—,]\s*…$/.test(out!.label!), false, out!.label);
+  assert.equal(out!.value, 'Yes');
+  const short = hero(new VerdictSession({ query: 'q', results: [] }).offer({ type: 'hero', value: 'No', label: 'Red wine does not protect your heart', tone: 'negative' }, 0).node);
+  assert.equal(short?.label, 'Red wine does not protect your heart');
+});

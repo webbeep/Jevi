@@ -110,7 +110,11 @@ function scan(hits: { domain: string; text: string }[], query: string): Flags {
 function clip(s: string, max: number): string {
   const t = s.replace(/\s*\[\d+\]/g, '').replace(/\s+/g, ' ').trim();
   if (t.length <= max) return t;
-  return `${t.slice(0, max - 1).replace(/\s+\S*$/, '')}…`;
+  // Prefer a clause break (em/en dash, colon, semicolon) so the card never ends on ' —…'.
+  const window = t.slice(0, max);
+  const at = Math.max(window.lastIndexOf(' — '), window.lastIndexOf(' – '), window.lastIndexOf(': '), window.lastIndexOf('; '), window.lastIndexOf('. '), window.lastIndexOf(', '));
+  if (at >= Math.floor(max * 0.4)) return `${window.slice(0, at).trim()}…`;
+  return `${window.replace(/\s+\S*$/, '').trim()}…`;
 }
 
 /** ≤ ~4 words so the hero label is not truncated on the card (Lead: bananas label). */
@@ -165,6 +169,8 @@ function fixFace(node: Face, flags: Flags, body: string): CardNode {
     const s = mutualSentence(body, node.label ?? '', 'no');
     if (s) return paint(node, 'No', 'negative', claimLabel(s));
   }
+  // Unchanged tiles can still carry a long designer label (live bananas when no rewrite fires). Cap at ~120 on a clause break so the FE 2-line wrap never shows a mid-word '…'.
+  if (node.label && (node.label.length > 120 || /…$/.test(node.label))) return { ...node, label: clip(node.label, 120) };
   return node;
 }
 
