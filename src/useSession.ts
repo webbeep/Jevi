@@ -7,11 +7,14 @@ import { cardDigest } from '../shared/digest';
 import { MAX_AUTO_RECONNECTS, OFFLINE_MESSAGE, friendlyError, isConnectionError, reconnectDelay } from '../shared/offline';
 import { billingFromSources, settleCardPrices } from '../shared/pricing';
 import { emptyDoneState } from '../shared/sse-parse';
+import { liveBody } from '../shared/liveBody';
 import type { NoSourcesNotice, SearchResponse, SearchResult } from '../shared/types';
 import { api } from './api';
 import { withBrowserFallback } from './fallback';
 import { reportNeedSignin } from './auth/gatebus';
 import { NeedSigninError, StreamError, type StreamBody, type StreamEvent, shouldAutoRetry, stream } from './sse';
+
+export { liveBody } from '../shared/liveBody';
 
 export type TurnKind = 'search' | 'answer' | 'digest';
 
@@ -142,12 +145,6 @@ export function placeNode(live: LiveCard, index: number, node: CardNode, query: 
   const raw = [...live.raw];
   raw[index] = settleBilling(node, results);
   return { ...live, raw, nodes: settleCardPrices(raw, query) };
-}
-
-/** The body to show right now: designed nodes where ready, placeholders for regions still being designed. */
-export function liveBody(live: LiveCard, stillDesigning: boolean): CardNode[] {
-  const length = Math.max(live.nodes.length, stillDesigning ? live.regions.length : 0);
-  return Array.from({ length }, (_, i) => live.nodes[i] ?? (stillDesigning ? live.regions[i] : undefined)).filter((n): n is CardNode => !!n);
 }
 
 export function scrollToTurn(id: number) {
