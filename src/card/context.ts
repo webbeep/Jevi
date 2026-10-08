@@ -13,6 +13,8 @@ export interface CardContextValue {
   onRefine: (instruction: string) => void;
   /** Opens the source list narrowed to what this card cites. */
   onSources: () => void;
+  /** Puts text in the follow-up box and focuses it, without sending. */
+  onDraft: (text: string) => void;
 }
 
 export const CardContext = createContext<CardContextValue>({
@@ -24,6 +26,7 @@ export const CardContext = createContext<CardContextValue>({
   onAsk: () => undefined,
   onRefine: () => undefined,
   onSources: () => undefined,
+  onDraft: () => undefined,
 });
 
 export const useCard = () => useContext(CardContext);

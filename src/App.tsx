@@ -597,6 +597,7 @@ function Composer({ actions, topic, mainRef }: { actions: SessionActions; topic:
   const [message, setMessage] = useState('');
   const [quote, setQuote] = useState<Quote | null>(null);
   const [quoteMode, setQuoteMode] = useState<QuoteMode>('explain');
+  const inputRef = useRef<HTMLInputElement>(null);
 
   // Highlighting text inside a card turns it into a quote for the composer; it stays until sent or dismissed.
   useEffect(() => {
@@ -606,6 +607,23 @@ function Composer({ actions, topic, mainRef }: { actions: SessionActions; topic:
     };
     window.addEventListener('zo-draft', onDraft);
     return () => window.removeEventListener('zo-draft', onDraft);
+  }, []);
+
+  // Tapping an item in a card drafts "Ask about X" here and focuses the box; it is never sent for you.
+  useEffect(() => {
+    const onPrefill = (event: Event) => {
+      const text = (event as CustomEvent<string>).detail;
+      if (typeof text !== 'string') return;
+      setQuote(null);
+      setMessage(text);
+      const input = inputRef.current;
+      if (!input) return;
+      // Focus inside the tap so phones open the keyboard; the box is fixed to the bottom, so it is already in view.
+      input.focus({ preventScroll: true });
+      requestAnimationFrame(() => input.setSelectionRange(text.length, text.length));
+    };
+    window.addEventListener('zo-prefill', onPrefill);
+    return () => window.removeEventListener('zo-prefill', onPrefill);
   }, []);
 
   useEffect(() => {
@@ -701,6 +719,7 @@ function Composer({ actions, topic, mainRef }: { actions: SessionActions; topic:
           )}
           <div className="flex items-center gap-2 p-2 pl-4">
             <input
+              ref={inputRef}
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               placeholder={quote ? (quoteMode === 'save' ? 'Press send to pin it' : 'Add a note (optional)') : 'Ask a follow-up'}
@@ -798,6 +817,7 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
       void actions.followup(instruction, id, 'adjust');
     },
     onSources: () => onSources(id),
+    onDraft: (text) => window.dispatchEvent(new CustomEvent('zo-prefill', { detail: text })),
   }), [search?.results, search?.images, credits, turn.filling, offlinePartial, actions, id, onSources]);
 
   const degraded = turn.kind === 'search' ? turnDegraded(turn) ?? undefined : undefined;

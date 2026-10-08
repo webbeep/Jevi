@@ -36,6 +36,9 @@ function pictureSources(body: CardNode[], images: { thumb: string }[]): string[]
       case 'profile':
         out.push(n.imageSrc ?? ref(n.imageRef) ?? '');
         break;
+      case 'stat':
+        out.push(n.image ?? '');
+        break;
       case 'list':
         n.items.forEach((i) => out.push(i.imageSrc ?? ref(i.imageRef) ?? ''));
         break;

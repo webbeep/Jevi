@@ -1,5 +1,5 @@
-import { type ReactNode, useEffect, useState } from 'react';
-import { ArrowUpRight, Check, ChevronLeft, ChevronRight, Copy, MessageCircle, Minus, Play, Star, ThumbsDown, ThumbsUp, TrendingDown, TrendingUp } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Check, ChevronLeft, ChevronRight, Copy, Minus, Play, Star, ThumbsDown, ThumbsUp, TrendingDown, TrendingUp } from 'lucide-react';
 import type { CardNode, Tone } from '../../shared/card';
 import type { SearchResult } from '../../shared/types';
 import { cn } from '@/lib/utils';
@@ -7,14 +7,6 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -101,27 +93,39 @@ export function Text({ node }: { node: Of<'text'> }) {
 }
 
 export function StatView({ node }: { node: Of<'stat'> }) {
+  const { onDraft } = useCard();
   const Trend = node.trend === 'up' ? TrendingUp : node.trend === 'down' ? TrendingDown : Minus;
+  const [img, onImgError] = useLoadable(httpsOnly(node.image));
+  const ask = askAbout(plain(node.label));
   return (
-    <div className="rounded-xl border bg-card p-3 sm:p-4">
-      <div className="flex items-center gap-1.5 text-[12.5px] text-muted-foreground"><Icon name={node.icon} className="size-3.5" />{node.label}</div>
-      <div className="mt-1 flex items-baseline gap-1 sm:mt-1.5">
-        <span className="text-[22px] font-semibold tabular-nums tracking-[-0.03em] sm:text-[26px]">{plain(node.value)}</span>
-        {node.unit && <span className="text-sm text-muted-foreground">{node.unit}</span>}
-      </div>
-      {node.delta && (
-        <div className={cn('mt-1 inline-flex items-center gap-1 text-xs', node.trend === 'up' ? 'text-positive' : node.trend === 'down' ? 'text-negative' : 'text-muted-foreground')}>
-          <Trend className="size-3" />{node.delta}
+    <div className="relative rounded-xl border bg-card p-3 transition-colors has-[>button:hover]:border-foreground/20 sm:p-4">
+      <button type="button" aria-label={ask} onClick={() => onDraft(ask)} className={cn('absolute inset-0 rounded-[inherit] cursor-pointer', ITEM_FOCUS)} />
+      <div className="pointer-events-none relative flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5 text-[12.5px] text-muted-foreground"><Icon name={node.icon} className="size-3.5" />{node.label}</div>
+          <div className="mt-1 flex items-baseline gap-1 sm:mt-1.5">
+            <span className="text-[22px] font-semibold tabular-nums tracking-[-0.03em] sm:text-[26px]">{plain(node.value)}</span>
+            {node.unit && <span className="text-sm text-muted-foreground">{node.unit}</span>}
+          </div>
+          {node.delta && (
+            <div className={cn('mt-1 inline-flex items-center gap-1 text-xs', node.trend === 'up' ? 'text-positive' : node.trend === 'down' ? 'text-negative' : 'text-muted-foreground')}>
+              <Trend className="size-3" />{node.delta}
+            </div>
+          )}
         </div>
-      )}
+        {img && <img src={img} alt={plain(node.label)} loading="lazy" decoding="async" width={36} height={36} className="size-9 shrink-0 rounded-full bg-muted object-cover" onError={onImgError} />}
+      </div>
     </div>
   );
 }
 
+/** Only https pictures may be shown; anything else (or a missing one) is dropped. */
+const httpsOnly = (u?: string) => (u && /^https:\/\//i.test(u) ? u : undefined);
+
 /** A picture found for the item, or one referenced from the search images. */
 function usePicture(src: string | undefined, ref: number | undefined): string | undefined {
   const { images } = useCard();
-  return src ?? (ref !== undefined ? images[ref]?.thumb : undefined);
+  return httpsOnly(src ?? (ref !== undefined ? images[ref]?.thumb : undefined));
 }
 
 /** Drops a src that failed to load; a different src is tried again. */
@@ -139,44 +143,39 @@ function useSource(n: number | undefined) {
 /** The thing an item is about: "**Golden Delicious** — holds shape" → "Golden Delicious". */
 const subjectOf = (text: string) => plain(text).replace(/\*\*/g, '').split(/\s[—–-]\s|:\s/)[0].trim().slice(0, 80);
 
-/**
- * What to do with a source an item points at: ask about it in the conversation, or open the site in a new tab.
- * `children` is the trigger (a whole row or tile); without it, a small button is shown.
- */
-function SourceMenu({ result: r, subject, children, className }: { result: SearchResult; subject: string; children?: ReactNode; className?: string }) {
-  const { onAsk } = useCard();
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        {children ?? (
-          <button type="button" title={`${r.title} — ${r.domain}`} aria-label={`Options for ${subject || r.domain}`} className={cn("relative flex size-7 shrink-0 items-center justify-center self-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground after:absolute after:-inset-2 after:content-['']", className)}>
-            <ChevronRight className="size-4" />
-          </button>
-        )}
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-60">
-        <DropdownMenuLabel className="flex items-center gap-2 text-xs font-normal text-muted-foreground">
-          <img src={`https://icons.duckduckgo.com/ip3/${r.domain}.ico`} alt="" className="size-3.5 rounded-sm" />
-          <span className="truncate">{domainLabel(r.domain)}</span>
-        </DropdownMenuLabel>
-        <DropdownMenuItem className="min-h-11" onSelect={() => onAsk(`Tell me more about ${subject || r.title}, based on ${domainLabel(r.domain)}`)}>
-          <MessageCircle /><span className="truncate">Ask about {subject || 'this'}</span>
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem asChild className="min-h-11">
-          <a href={r.url} target="_blank" rel="noopener noreferrer">
-            <ArrowUpRight />Open site
-          </a>
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
+/** "Ask about …" text for an item: whitespace collapsed, cut at a word near 60 characters. */
+function askAbout(subject: string): string {
+  const s = subject.replace(/\s+/g, ' ').trim();
+  const cut = s.length > 60 ? `${s.slice(0, 60).replace(/\s+\S*$/, '')}…` : s;
+  return `Ask about ${cut || 'this'}`;
 }
 
-/** Small menu button for an item that links to one of the sources. */
-function SourceLink({ n, subject, className }: { n?: number; subject: string; className?: string }) {
-  const r = useSource(n);
-  return r ? <SourceMenu result={r} subject={subject} className={className} /> : null;
+/** Container classes shared by tappable items: visible keyboard focus ring with the theme ring token. */
+const ITEM_FOCUS = 'outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring/50';
+
+/**
+ * Round chip that opens an item's source in a new tab. 18px visual, 44×44 hit area via ::after.
+ * It sits next to (never inside) the item's button, and stops propagation so it never drafts a question.
+ */
+function SourceChip({ result: r, n, className }: { result: SearchResult; n: number; className?: string }) {
+  const [iconFailed, setIconFailed] = useState(false);
+  const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
+  return (
+    <a
+      href={r.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={`${r.title} — ${domainLabel(r.domain)}`}
+      aria-label={`Open source: ${domainLabel(r.domain) || r.title}`}
+      data-source-chip=""
+      onClick={stop}
+      onKeyDown={stop}
+      onPointerDown={stop}
+      className={cn('pointer-events-auto relative z-[1] inline-flex size-[18px] shrink-0 items-center justify-center rounded-full border bg-background align-middle text-[10px] font-medium text-muted-foreground transition-colors after:absolute after:left-1/2 after:top-1/2 after:size-11 after:-translate-x-1/2 after:-translate-y-1/2 after:content-[\'\'] hover:border-foreground/30 hover:text-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50', className)}
+    >
+      {iconFailed ? n : <img src={`https://icons.duckduckgo.com/ip3/${r.domain}.ico`} alt="" className="size-3 rounded-full" loading="lazy" onError={() => setIconFailed(true)} />}
+    </a>
+  );
 }
 
 const domainLabel = (d: string) => d.replace(/^(www|en|m)\./, '');
@@ -248,28 +247,28 @@ export function VideoView({ node }: { node: Of<'video'> }) {
 }
 
 export function Links({ node }: { node: Of<'links'> }) {
-  const { results } = useCard();
+  const { onDraft, results } = useCard();
   const items = node.items.flatMap((i) => (results[i.source - 1] ? [{ ...i, r: results[i.source - 1] }] : []));
   if (!items.length) return null;
   return (
     <ul className="divide-y rounded-xl border bg-card">
-      {items.map(({ r, label, note }) => {
+      {items.map(({ source, r, label, note }) => {
         const video = !!videoEmbed(r.url);
+        const ask = askAbout(subjectOf(label ?? r.title));
         return (
-          <li key={r.url}>
-            <SourceMenu result={r} subject={subjectOf(label ?? r.title)}>
-              <button type="button" className="flex w-full items-center gap-3 p-2.5 text-left transition-colors hover:bg-foreground/[0.03] data-[state=open]:bg-foreground/[0.04] sm:p-3">
-                <span className="relative flex size-9 shrink-0 items-center justify-center rounded-lg border bg-background">
-                  <img src={`https://icons.duckduckgo.com/ip3/${r.domain}.ico`} alt="" className="size-[18px] rounded-sm" loading="lazy" />
-                  {video && <Play className="absolute -bottom-1 -right-1 size-3.5 rounded-full bg-foreground fill-background p-0.5 text-background" />}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-medium leading-snug">{label ?? r.title}</span>
-                  <span className="block text-xs leading-snug text-muted-foreground">{note ? `${note} · ` : ''}{domainLabel(r.domain)}</span>
-                </span>
-                <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
-              </button>
-            </SourceMenu>
+          <li key={r.url} className="relative">
+            <button type="button" aria-label={ask} onClick={() => onDraft(ask)} className={cn('absolute inset-0 cursor-pointer transition-colors hover:bg-foreground/[0.03] [li:first-child>&]:rounded-t-xl [li:last-child>&]:rounded-b-xl', ITEM_FOCUS)} />
+            <div className="pointer-events-none relative flex w-full items-center gap-3 p-2.5 text-left sm:p-3">
+              <span className="relative flex size-9 shrink-0 items-center justify-center rounded-lg border bg-background">
+                <img src={`https://icons.duckduckgo.com/ip3/${r.domain}.ico`} alt="" className="size-[18px] rounded-sm" loading="lazy" />
+                {video && <Play className="absolute -bottom-1 -right-1 size-3.5 rounded-full bg-foreground fill-background p-0.5 text-background" />}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-medium leading-snug">{label ?? r.title} <SourceChip result={r} n={source} className="-my-[3px]" /></span>
+                <span className="block text-xs leading-snug text-muted-foreground">{note ? `${note} · ` : ''}{domainLabel(r.domain)}</span>
+              </span>
+              <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+            </div>
           </li>
         );
       })}
@@ -278,33 +277,35 @@ export function Links({ node }: { node: Of<'links'> }) {
 }
 
 export function Tile({ node }: { node: Of<'tile'> }) {
-  const { onAsk, busy } = useCard();
+  const { onDraft, busy } = useCard();
   const [img, onImgError] = useLoadable(usePicture(node.imageSrc, node.imageRef));
   const credit = useCredit(img);
   const pending = !img && !!node.imageQuery && busy;
   const link = useSource(node.source);
-  const tile = (
-    <button
-      type="button"
-      title={link ? `${link.title} — ${link.domain}` : undefined}
-      onClick={link ? undefined : () => onAsk(`Tell me more about ${plain(node.label)}${node.value ? ` (${plain(node.value)})` : ''}`)}
+  const ask = askAbout(plain(node.label));
+  return (
+    <div
+      data-item=""
       className={cn(
-        'flex min-w-[72px] flex-col items-center gap-0.5 rounded-xl border px-2 py-2.5 text-center transition-colors hover:border-foreground/20 sm:min-w-[84px] sm:gap-1 sm:px-3 sm:py-3',
+        'relative flex min-w-[72px] flex-col items-center gap-0.5 rounded-xl border px-2 py-2.5 text-center transition-colors has-[>button:hover]:border-foreground/20 sm:min-w-[84px] sm:gap-1 sm:px-3 sm:py-3',
         node.active ? 'border-foreground/25 bg-muted ring-1 ring-foreground/10' : 'bg-card',
       )}
     >
+      <button type="button" aria-label={ask} onClick={() => onDraft(ask)} className={cn('absolute inset-0 rounded-[inherit] cursor-pointer', ITEM_FOCUS)} />
       {img ? (
-        <img src={img} alt={node.label} title={credit} loading="lazy" className="mb-1 aspect-square w-full max-w-24 rounded-lg bg-muted object-cover animate-in fade-in" onError={onImgError} />
+        <img src={img} alt={node.label} title={credit} loading="lazy" className="pointer-events-none relative mb-1 aspect-square w-full max-w-24 rounded-lg bg-muted object-cover animate-in fade-in" onError={onImgError} />
       ) : pending ? (
-        <Skeleton className="mb-1 aspect-square w-full max-w-24 rounded-lg" />
+        <Skeleton className="pointer-events-none relative mb-1 aspect-square w-full max-w-24 rounded-lg" />
       ) : null}
-      <span className="text-[11px] font-medium text-muted-foreground">{plain(node.label)}</span>
-      {!img && !pending && <Icon name={node.icon} className="size-[18px] text-foreground/70 sm:size-5" />}
-      {node.value && <span className="text-[15px] font-semibold tracking-tight sm:text-base">{plain(node.value)}</span>}
-      {node.sub && <span className="text-[11px] leading-tight text-muted-foreground"><RichText text={node.sub} inline noLinks /></span>}
-    </button>
+      <span className="pointer-events-none relative inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
+        {plain(node.label)}
+        {link && <span className="-my-[3px]"><SourceChip result={link} n={node.source!} /></span>}
+      </span>
+      {!img && !pending && <Icon name={node.icon} className="pointer-events-none relative size-[18px] text-foreground/70 sm:size-5" />}
+      {node.value && <span className="pointer-events-none relative text-[15px] font-semibold tracking-tight sm:text-base">{plain(node.value)}</span>}
+      {node.sub && <span className="pointer-events-none relative text-[11px] leading-tight text-muted-foreground"><RichText text={node.sub} inline noLinks /></span>}
+    </div>
   );
-  return link ? <SourceMenu result={link} subject={plain(node.label)}>{tile}</SourceMenu> : tile;
 }
 
 export function KeyValue({ node }: { node: Of<'keyvalue'> }) {
@@ -325,7 +326,7 @@ function MediaThumb({ item, index }: { item: Of<'list'>['items'][number]; index:
   const { busy } = useCard();
   const [img, onImgError] = useLoadable(usePicture(item.imageSrc, item.imageRef));
   const credit = useCredit(img);
-  if (img) return <img src={img} alt="" title={credit} loading="lazy" className="size-12 shrink-0 rounded-lg bg-muted object-cover animate-in fade-in sm:size-14" onError={onImgError} />;
+  if (img) return <img src={img} alt={subjectOf(item.text)} title={credit} loading="lazy" className="size-12 shrink-0 rounded-lg bg-muted object-cover animate-in fade-in sm:size-14" onError={onImgError} />;
   if (item.imageQuery && busy) return <Skeleton className="size-12 shrink-0 rounded-lg sm:size-14" />;
   return (
     <span className="flex size-12 shrink-0 items-center justify-center rounded-lg bg-muted text-sm font-semibold text-muted-foreground sm:size-14">
@@ -336,21 +337,20 @@ function MediaThumb({ item, index }: { item: Of<'list'>['items'][number]; index:
 
 function MediaRow({ item, index }: { item: Of<'list'>['items'][number]; index: number }) {
   const r = useSource(item.source);
-  const { onAsk } = useCard();
-  const button = (
-    <button type="button" onClick={r ? undefined : () => onAsk(`Tell me more about ${subjectOf(item.text)}`)} className="flex w-full items-center gap-3 p-2.5 text-left transition-colors hover:bg-foreground/[0.03] data-[state=open]:bg-foreground/[0.04] sm:p-3">
-      <MediaThumb item={item} index={index} />
-      <span className="flex min-w-0 flex-1 flex-col items-start gap-1 text-sm leading-snug">
-        <RichText text={item.text} inline noLinks />
-        {item.meta && <span className="rounded-md bg-muted px-2 py-0.5 text-xs font-medium leading-snug tabular-nums sm:hidden">{item.meta}</span>}
-      </span>
-      {item.meta && <span className="hidden max-w-[40%] shrink-0 rounded-md bg-muted px-2 py-0.5 text-right text-xs font-medium leading-snug tabular-nums sm:inline">{item.meta}</span>}
-      <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
-    </button>
-  );
+  const { onDraft } = useCard();
+  const ask = askAbout(subjectOf(item.text));
   return (
-    <li>
-      {r ? <SourceMenu result={r} subject={subjectOf(item.text)}>{button}</SourceMenu> : button}
+    <li className="relative">
+      <button type="button" aria-label={ask} onClick={() => onDraft(ask)} className={cn('absolute inset-0 cursor-pointer transition-colors hover:bg-foreground/[0.03] [li:first-child>&]:rounded-t-xl [li:last-child>&]:rounded-b-xl', ITEM_FOCUS)} />
+      <div className="pointer-events-none relative flex w-full items-center gap-3 p-2.5 text-left sm:p-3">
+        <MediaThumb item={item} index={index} />
+        <span className="flex min-w-0 flex-1 flex-col items-start gap-1 text-sm leading-snug">
+          <span className="min-w-0"><RichText text={item.text} inline noLinks />{r && <>{' '}<SourceChip result={r} n={item.source!} className="-my-[3px]" /></>}</span>
+          {item.meta && <span className="rounded-md bg-muted px-2 py-0.5 text-xs font-medium leading-snug tabular-nums sm:hidden">{item.meta}</span>}
+        </span>
+        {item.meta && <span className="hidden max-w-[40%] shrink-0 rounded-md bg-muted px-2 py-0.5 text-right text-xs font-medium leading-snug tabular-nums sm:inline">{item.meta}</span>}
+        <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+      </div>
     </li>
   );
 }
@@ -366,24 +366,28 @@ function MediaList({ node }: { node: Of<'list'> }) {
 }
 
 export function List({ node }: { node: Of<'list'> }) {
+  const { results } = useCard();
   const style = node.style ?? 'bullet';
   if (style === 'media') return <MediaList node={node} />;
   return (
     <ul className="space-y-2 sm:space-y-2.5">
-      {node.items.map((item, i) => (
-        <li key={i} className="flex items-start gap-2 text-sm leading-relaxed sm:gap-3">
-          <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center">
-            {style === 'number' ? <span className="text-xs font-semibold text-muted-foreground">{i + 1}</span>
-              : style === 'check' ? <Check className="size-4 text-positive" />
-              : style === 'icon' && item.icon ? <Icon name={item.icon} className="text-muted-foreground" />
-              : <span className="size-1.5 rounded-full bg-foreground/40" />}
-          </span>
-          <span className="flex-1 text-foreground/85"><RichText text={item.text} /></span>
-          {item.meta && <span className="shrink-0 text-xs text-muted-foreground">{item.meta}</span>}
-          {/* List rows sit 8–10px apart: tap area 44 wide × 36 tall so neighbours never overlap (list-row rule: ≥44w, ≥30h). */}
-          <SourceLink n={item.source} subject={subjectOf(item.text)} className="after:-inset-y-1" />
-        </li>
-      ))}
+      {node.items.map((item, i) => {
+        const r = item.source ? results[item.source - 1] : undefined;
+        return (
+          <li key={i} className="flex items-start gap-2 text-sm leading-relaxed sm:gap-3">
+            <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center">
+              {style === 'number' ? <span className="text-xs font-semibold text-muted-foreground">{i + 1}</span>
+                : style === 'check' ? <Check className="size-4 text-positive" />
+                : style === 'icon' && item.icon ? <Icon name={item.icon} className="text-muted-foreground" />
+                : <span className="size-1.5 rounded-full bg-foreground/40" />}
+            </span>
+            <span className="flex-1 text-foreground/85"><RichText text={item.text} /></span>
+            {item.meta && <span className="shrink-0 text-xs text-muted-foreground">{item.meta}</span>}
+            {/* Rows sit 8–10px apart, so the chip's tap area is clipped to stay clear of neighbours (list-row rule: ≥44w, ≥30h). */}
+            {r && <span className="mt-[3px] flex shrink-0"><SourceChip result={r} n={item.source!} className="after:h-[30px]" /></span>}
+          </li>
+        );
+      })}
     </ul>
   );
 }
@@ -449,19 +453,23 @@ export function TableView({ node }: { node: Of<'table'> }) {
 }
 
 export function Timeline({ node }: { node: Of<'timeline'> }) {
+  const { results } = useCard();
   return (
     <ol className="relative space-y-4 pl-6 before:absolute before:inset-y-1.5 before:left-[5px] before:w-px before:bg-border">
-      {node.items.map((t, i) => (
-        <li key={i} className="relative flex gap-2">
-          <span className="absolute -left-6 top-1 size-[11px] rounded-full border-2 border-background bg-foreground ring-1 ring-border" />
-          <div className="min-w-0 flex-1">
-            <div className="text-xs font-semibold tabular-nums text-muted-foreground">{t.when}</div>
-            <div className="text-sm font-medium"><RichText text={t.title} inline /></div>
-            {t.text && <div className="mt-0.5 text-sm text-muted-foreground"><RichText text={t.text} inline /></div>}
-          </div>
-          <SourceLink n={t.source} subject={subjectOf(t.title)} />
-        </li>
-      ))}
+      {node.items.map((t, i) => {
+        const r = t.source ? results[t.source - 1] : undefined;
+        return (
+          <li key={i} className="relative flex gap-2">
+            <span className="absolute -left-6 top-1 size-[11px] rounded-full border-2 border-background bg-foreground ring-1 ring-border" />
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-semibold tabular-nums text-muted-foreground">{t.when}</div>
+              <div className="text-sm font-medium"><RichText text={t.title} inline /></div>
+              {t.text && <div className="mt-0.5 text-sm text-muted-foreground"><RichText text={t.text} inline /></div>}
+            </div>
+            {r && <span className="mt-0.5 flex shrink-0"><SourceChip result={r} n={t.source!} /></span>}
+          </li>
+        );
+      })}
     </ol>
   );
 }
