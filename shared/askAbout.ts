@@ -72,7 +72,8 @@ assist goal yard win loss record rank rating age height weight population area c
 chip processor engine power fuel mileage salary worth follower subscriber view download language genre award title feature benefit risk pro con use
 case integration partner investor competitor rival headquarters hq website app api license owner parent subsidiary brand origin hobby favorite
 favourite nickname known specialty skill strength weakness availability support security privacy policy ticker symbol exchange dividend margin debt
-cash net gross total average median minimum maximum duration time date year season game match round pick draft contract deal`.split(/\s+/));
+cash net gross total average median minimum maximum duration time date year season game match round pick draft contract deal
+raised raise acquired acquisition valued backed employees users customers`.split(/\s+/));
 
 /** A label that names a kind of fact ("Agent", "Revenue growth", "Team FG%") rather than a person or thing ("Steph"). */
 function isGenericLabel(label: string): boolean {
@@ -184,6 +185,15 @@ export function askQuestion(box: Box): string {
   if ((box.kind === 'verdict' || isVerdict(value)) && label && value) return out(verdictQuestion(label, value, E));
   // An entity the value already names adds nothing ("Company: BlueFlame AI" on a BlueFlame AI card).
   if (E && value && mentions(value, E)) E = undefined;
+  // Game tiles ("vs Trail Blazers" / "L 118-123"): ask about the game, keep the opponent's own casing.
+  const game = label?.match(/^(vs\.?|v\.?|@|at)\s+(.+)$/i);
+  if (game && (box.kind === 'tile' || box.kind === 'stat' || box.kind === 'row')) {
+    const side = /^(@|at)$/i.test(game[1]) ? 'at' : 'vs';
+    const opp = cut(game[2], 60);
+    const who = E ? `${possessive(E)} game` : 'the game';
+    if (!value || /^(upcoming|scheduled|tbd|preview|next)\b|\d{1,2}:\d{2}/i.test(value)) return out(`What should I know about ${who} ${side} ${opp}?`);
+    return out(`What happened in ${who} ${side} ${opp} (${cut(value, 30)})?`);
+  }
   // A sentence-long label reads badly inside the question; ask about the value.
   if (label && value && label.split(' ').length <= 6) return out(labelValue(label, value, unit, E));
   if (value) {

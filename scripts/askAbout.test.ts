@@ -50,6 +50,11 @@ const cases: [Box, string][] = [
   [{ kind: 'list', label: 'Clifford scored 18 off the bench in every preseason game so far [3]' }, 'Explain "Clifford scored 18 off the bench in every preseason game so far"'],
   [{ kind: 'link', label: 'ESPN preseason tracker' }, 'What is ESPN preseason tracker?'],
   [{ kind: 'timeline', label: 'Series A', when: '2024' }, 'What happened in 2024: Series A?'],
+  // T453 ship: game tiles on sports cards
+  [{ kind: 'tile', label: 'vs Trail Blazers', value: 'L 118-123' }, 'What happened in the game vs Trail Blazers (L 118-123)?'],
+  [{ kind: 'tile', label: 'vs LA Clippers', value: 'Upcoming' }, 'What should I know about the game vs LA Clippers?'],
+  [{ kind: 'tile', label: 'Raised', value: '$5M', entity: 'Blueflame AI' }, "What is behind Blueflame AI's $5M raised?"],
+  [{ kind: 'tile', label: '@ Lakers', value: 'W 112-104', entity: 'Golden State Warriors' }, "What happened in Golden State Warriors' game at Lakers (W 112-104)?"],
   [{ kind: 'timeline', label: 'Series A' }, 'What is Series A?'],
   // nothing usable
   [{ kind: 'tile' }, 'What is this?'],
