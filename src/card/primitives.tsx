@@ -124,6 +124,12 @@ function usePicture(src: string | undefined, ref: number | undefined): string | 
   return src ?? (ref !== undefined ? images[ref]?.thumb : undefined);
 }
 
+/** Drops a src that failed to load; a different src is tried again. */
+function useLoadable(src: string | undefined): [string | undefined, () => void] {
+  const [failed, setFailed] = useState<string | undefined>(undefined);
+  return [src === failed ? undefined : src, () => setFailed(src)];
+}
+
 /** The search result a source number points at, if it exists. */
 function useSource(n: number | undefined) {
   const { results } = useCard();
@@ -276,7 +282,7 @@ export function Links({ node }: { node: Of<'links'> }) {
 
 export function Tile({ node }: { node: Of<'tile'> }) {
   const { onAsk, busy } = useCard();
-  const img = usePicture(node.imageSrc, node.imageRef);
+  const [img, onImgError] = useLoadable(usePicture(node.imageSrc, node.imageRef));
   const credit = useCredit(img);
   const pending = !img && !!node.imageQuery && busy;
   const link = useSource(node.source);
@@ -291,7 +297,7 @@ export function Tile({ node }: { node: Of<'tile'> }) {
       )}
     >
       {img ? (
-        <img src={img} alt={node.label} title={credit} loading="lazy" className="mb-1 aspect-square w-full max-w-24 rounded-lg bg-muted object-cover animate-in fade-in" onError={(e) => ((e.target as HTMLElement).style.display = 'none')} />
+        <img src={img} alt={node.label} title={credit} loading="lazy" className="mb-1 aspect-square w-full max-w-24 rounded-lg bg-muted object-cover animate-in fade-in" onError={onImgError} />
       ) : pending ? (
         <Skeleton className="mb-1 aspect-square w-full max-w-24 rounded-lg" />
       ) : null}
@@ -320,9 +326,9 @@ export function KeyValue({ node }: { node: Of<'keyvalue'> }) {
 
 function MediaThumb({ item, index }: { item: Of<'list'>['items'][number]; index: number }) {
   const { busy } = useCard();
-  const img = usePicture(item.imageSrc, item.imageRef);
+  const [img, onImgError] = useLoadable(usePicture(item.imageSrc, item.imageRef));
   const credit = useCredit(img);
-  if (img) return <img src={img} alt="" title={credit} loading="lazy" className="size-12 shrink-0 rounded-lg bg-muted object-cover animate-in fade-in sm:size-14" onError={(e) => ((e.target as HTMLElement).style.visibility = 'hidden')} />;
+  if (img) return <img src={img} alt="" title={credit} loading="lazy" className="size-12 shrink-0 rounded-lg bg-muted object-cover animate-in fade-in sm:size-14" onError={onImgError} />;
   if (item.imageQuery && busy) return <Skeleton className="size-12 shrink-0 rounded-lg sm:size-14" />;
   return (
     <span className="flex size-12 shrink-0 items-center justify-center rounded-lg bg-muted text-sm font-semibold text-muted-foreground sm:size-14">
