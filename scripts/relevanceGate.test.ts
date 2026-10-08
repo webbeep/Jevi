@@ -35,3 +35,24 @@ test('a health ask keeps blood-pressure pages and drops an unrelated sports page
   assert.deepEqual(gated.kept.map((r) => r.title), [mayo.title, nhs.title]);
   assert.equal(gated.dropped, 1);
 });
+
+test('a nonsense ask that shares one of five words with a hit gets no sources', () => {
+  const q = 'zxqv blorptastic quonkle frabjous r3uk0';
+  const tiktok = hit('ZXQV (@gstopcat)', 'ZXQV (@gstopcat) on TikTok | 403K Likes. 2235 Followers.', 'https://www.tiktok.com/@gstopcat');
+  assert.deepEqual(gateResults(q, [tiktok]), { kept: [], dropped: 1 });
+});
+
+test('a coffee and heart ask keeps the heart page and the caffeine page', () => {
+  const q = 'is coffee bad for your heart';
+  const heart = hit('Coffee and cardiovascular health', 'What the research says about coffee and your heart.', 'https://www.heart.org/en/healthy-living/healthy-eating/eat-smart/nutrition-basics/coffee-and-your-heart');
+  const mayo = hit('Caffeine: How Much Is Too Much?', 'Caffeine is a common stimulant found in tea, soda and energy drinks.', 'https://www.mayoclinic.org/healthy-lifestyle/nutrition-and-healthy-eating/in-depth/caffeine/art-20045678');
+  const gated = gateResults(q, [heart, mayo]);
+  assert.deepEqual(gated.kept.map((r) => r.title), [heart.title, mayo.title]);
+  assert.equal(gated.dropped, 0);
+});
+
+test('a one-word ask about an odd name keeps the single hit that carries it', () => {
+  const q = 'zxqv';
+  const tiktok = hit('ZXQV (@gstopcat)', 'ZXQV (@gstopcat) on TikTok | 403K Likes. 2235 Followers.', 'https://www.tiktok.com/@gstopcat');
+  assert.deepEqual(gateResults(q, [tiktok]), { kept: [tiktok], dropped: 0 });
+});

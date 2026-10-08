@@ -7,7 +7,8 @@
  * A year or season the question names (2026, 2025-26) drops a hit whose title or snippet
  * only names a clearly different year (1995), unless the name is there and the title itself
  * does not carry the conflicting year.
- * If nothing passes, the best remaining hits are kept only when they clear a low floor.
+ * If nothing passes, the best remaining hits are kept only when they clear a low floor and, for a
+ * question carrying three or more key terms, repeat at least two of them.
  * Otherwise the list is empty so the no-fresh-sources path can run.
  * Hits that merely score low stay when they are most of the list: many real titles never repeat the question.
  */
@@ -136,18 +137,29 @@ function hasTerm(hay: string, token: string): boolean {
   return false;
 }
 
-function judge(profile: Profile, row: GateHit): { pass: boolean; hard: boolean; score: number } {
+/** A question carrying several key terms needs two of them in one hit: one word alone is noise. */
+function sharesTerms(profile: Profile, hits: number): boolean {
+  return profile.weights.length < 3 || hits >= 2;
+}
+
+function judge(profile: Profile, row: GateHit): { pass: boolean; hard: boolean; score: number; hits: number } {
   const title = norm(row.title);
   const hay = `${title} ${norm(row.snippet ?? '')} ${norm(row.url)}`;
   const has = (token: string) => hasTerm(hay, token);
   const fullName = profile.phrases.some((phrase) => phrase.every(has));
   const nameTouch = profile.phrases.some((phrase) => phrase.some((token) => token.length >= 4 && has(token)));
-  const lone = profile.phrases.length === 0 && profile.singles.some(has);
+  let matched = 0;
+  let hits = 0;
+  for (const [token, w] of profile.weights) {
+    if (!has(token)) continue;
+    matched += w;
+    hits += 1;
+  }
+  const score = profile.total ? matched / profile.total : 1;
+  const lone = profile.phrases.length === 0 && profile.singles.some(has) && sharesTerms(profile, hits);
   const bodyYears = yearsOf(`${row.title} ${row.snippet ?? ''}`);
   const hard = conflicts(profile.years, bodyYears) && !(fullName && !conflicts(profile.years, yearsOf(row.title)));
-  const matched = profile.weights.reduce((sum, [token, w]) => sum + (has(token) ? w : 0), 0);
-  const score = profile.total ? matched / profile.total : 1;
-  return { pass: !hard && (fullName || nameTouch || lone || score >= MAIN), hard, score };
+  return { pass: !hard && (fullName || nameTouch || lone || score >= MAIN), hard, score, hits };
 }
 
 export function gateResults<T extends GateHit>(query: string, rows: readonly T[]): { kept: T[]; dropped: number } {
@@ -166,7 +178,7 @@ export function gateResults<T extends GateHit>(query: string, rows: readonly T[]
       return !dropSoft;
     });
   } else {
-    kept = rows.filter((_, i) => !judged[i].hard && judged[i].score >= FLOOR);
+    kept = rows.filter((_, i) => !judged[i].hard && judged[i].score >= FLOOR && sharesTerms(profile, judged[i].hits));
   }
   return { kept, dropped: rows.length - kept.length };
 }
