@@ -1,3 +1,4 @@
+import { estimateCost } from './router';
 import { clearSkipCache } from './engineSkip';
 import { HttpStatusError } from './util';
 
@@ -21,6 +22,8 @@ export interface CallLedger {
   bonus?: number;
   /** Why the first search was empty, when recovery ran. */
   empty?: string;
+  /** Intent route for this ask (server log only). */
+  route?: 'quick' | 'deep';
 }
 
 export interface AskScope {
@@ -135,6 +138,8 @@ export function logAsk(ledger: CallLedger, served?: string): void {
     pages: ledger.pages,
     fellThrough: ledger.fellThrough,
     ...(served ? { served } : {}),
+    ...(ledger.route ? { route: ledger.route } : {}),
+    ...estimateCost(ledger),
     ...(ledger.empty ? { empty: ledger.empty } : {}),
   }));
 }

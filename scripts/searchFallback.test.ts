@@ -142,7 +142,7 @@ describe('search fallback', { concurrency: 1 }, () => {
     };
     try {
       const ledger = newLedger();
-      const env = { EXA_API_KEY: 'e', LANGSEARCH_API_KEY: 'l', SEARCH_ORDER: 'exa,langsearch', ENGINE_SKIP: store.kv } as Env;
+      const env = { EXA_DAILY_CAP: 'off', EXA_API_KEY: 'e', LANGSEARCH_API_KEY: 'l', SEARCH_ORDER: 'exa,langsearch', ENGINE_SKIP: store.kv } as Env;
       const out = await cascadeWeb({ q: 'open source database', freshness: 'any', count: 8 }, env, ledger, (p) => { queued.push(p); });
       assert.equal(out.engine, 'langsearch');
       assert.equal(out.hits[0]?.url, 'https://www.postgresql.org/');
@@ -162,7 +162,7 @@ describe('search fallback', { concurrency: 1 }, () => {
       const again = kvStore();
       const extraQueued: Promise<unknown>[] = [];
       const extraLedger = newLedger();
-      const extraEnv = { EXA_API_KEY: 'e', ENGINE_SKIP: again.kv } as Env;
+      const extraEnv = { SEARCH_ORDER: 'serper,langsearch,exa,tavily,firecrawl,wikipedia,backup', EXA_DAILY_CAP: 'off', EXA_API_KEY: 'e', ENGINE_SKIP: again.kv } as Env;
       const kept = await cascadeWeb(
         { q: 'open source database', more: ['extra query'], freshness: 'any', count: 8 },
         extraEnv,
@@ -194,7 +194,7 @@ describe('search fallback', { concurrency: 1 }, () => {
       return new Response('no', { status: 500 });
     };
     try {
-      const env = { EXA_API_KEY: 'e', TAVILY_API_KEY: 't' } as Env;
+      const env = { SEARCH_ORDER: 'serper,langsearch,exa,tavily,firecrawl,wikipedia,backup', EXA_DAILY_CAP: 'off', EXA_API_KEY: 'e', TAVILY_API_KEY: 't' } as Env;
       assert.equal(keyedEngines(env).includes('langsearch'), false);
       assert.equal(keyedEngines(env).includes('firecrawl'), false);
       assert.deepEqual(
@@ -244,7 +244,7 @@ describe('search fallback', { concurrency: 1 }, () => {
       return Response.json({ results: [{ title: 'Tavily', url: 'https://example.com/t', content: 'An open source database.' }] });
     };
     try {
-      const env = { EXA_API_KEY: 'e', LANGSEARCH_API_KEY: 'l', TAVILY_API_KEY: 't', SEARCH_ORDER: 'exa,langsearch,tavily', ENGINE_SKIP: store.kv } as Env;
+      const env = { EXA_DAILY_CAP: 'off', EXA_API_KEY: 'e', LANGSEARCH_API_KEY: 'l', TAVILY_API_KEY: 't', SEARCH_ORDER: 'exa,langsearch,tavily', ENGINE_SKIP: store.kv } as Env;
       const skips = await loadSkips(env);
       assert.equal(skips.exa, until);
       assert.equal(skips.tavily, undefined);

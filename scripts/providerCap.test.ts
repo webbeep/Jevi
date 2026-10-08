@@ -75,13 +75,16 @@ describe('provider daily cap', { concurrency: 1 }, () => {
       assert.equal(await takeSlot({ DB: broken } as Env, 'serper', 'prod'), false);
       assert.equal(await takeSlot({} as Env, 'serper', 'eval'), false);
       const before = broken.prepares;
-      assert.equal(await takeSlot({ DB: broken } as Env, 'exa', 'prod'), true);
+      assert.equal(await takeSlot({ DB: broken } as Env, 'exa', 'prod'), false);
+      assert.equal(await takeSlot({ DB: broken } as Env, 'tavily', 'prod'), true);
       assert.equal(await takeSlot({} as Env, 'tavily', 'prod'), true);
-      assert.equal(broken.prepares, before);
+      assert.equal(broken.prepares, before + 1);
       assert.equal(capFor({} as Env, 'serper', 'prod'), 80);
       assert.equal(capFor({} as Env, 'serper', 'eval'), 300);
-      assert.equal(capFor({} as Env, 'exa', 'prod'), undefined);
-      assert.equal(logs.length, 2);
+      assert.equal(capFor({} as Env, 'exa', 'prod'), 10);
+      assert.equal(capFor({} as Env, 'exa', 'eval'), 0);
+      assert.equal(capFor({ EXA_DAILY_CAP: 'off' } as Env, 'exa', 'prod'), undefined);
+      assert.equal(logs.length, 3);
       assert.deepEqual(JSON.parse(logs[0]!), { zo: 'provider-cap', provider: 'serper', bucket: 'prod', over: true });
     } finally {
       console.log = orig;
@@ -89,10 +92,10 @@ describe('provider daily cap', { concurrency: 1 }, () => {
   });
 
   test('SEARCH_ORDER keeps known names and appends the rest in default order', () => {
-    assert.deepEqual(searchOrder({} as Env), ['serper', 'langsearch', 'exa', 'tavily', 'firecrawl', 'wikipedia', 'backup']);
+    assert.deepEqual(searchOrder({} as Env), ['serper', 'langsearch', 'wikipedia', 'tavily', 'firecrawl', 'exa', 'backup']);
     assert.deepEqual(
       searchOrder({ SEARCH_ORDER: ' tavily, nope, exa, tavily, ' } as Env),
-      ['tavily', 'exa', 'serper', 'langsearch', 'firecrawl', 'wikipedia', 'backup'],
+      ['tavily', 'exa', 'serper', 'langsearch', 'wikipedia', 'firecrawl', 'backup'],
     );
   });
 
@@ -110,7 +113,7 @@ describe('provider daily cap', { concurrency: 1 }, () => {
     };
     try {
       const db = openUsageDb();
-      const env = { DB: db, SERPER_API_KEY: 's', SERPER_DAILY_CAP: '0', EXA_API_KEY: 'e' } as Env;
+      const env = { DB: db, SERPER_API_KEY: 's', SERPER_DAILY_CAP: '0', EXA_DAILY_CAP: 'off', EXA_API_KEY: 'e' } as Env;
       const ledger = newLedger();
       const out = await cascadeWeb({ q: 'open source database', freshness: 'any', count: 8 }, env, ledger);
       assert.equal(out.engine, 'exa');

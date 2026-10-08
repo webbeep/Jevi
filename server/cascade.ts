@@ -265,7 +265,9 @@ async function serperSearch(q: Query, env: Env): Promise<{ hits: WebHit[]; image
 const KEYED = new Set<SearchEngine>(['exa', 'langsearch', 'tavily', 'firecrawl', 'serper']);
 
 /** Default cascade. `SEARCH_ORDER` may move names; unknown tokens are ignored; anything left out is appended in this order. */
-const DEFAULT_ORDER: readonly SearchEngine[] = ['serper', 'langsearch', 'exa', 'tavily', 'firecrawl', 'wikipedia', 'backup'];
+// Router: Serper → LangSearch → Wikipedia; Exa only as the capped last resort.
+// Future adapters read YOU_API_KEY, BRAVE_API_KEY, TINYFISH_API_KEY, PARALLEL_API_KEY.
+const DEFAULT_ORDER: readonly SearchEngine[] = ['serper', 'langsearch', 'wikipedia', 'tavily', 'firecrawl', 'exa', 'backup'];
 
 export function searchOrder(env: Env): SearchEngine[] {
   const known = new Set<string>(SEARCH_ENGINES);
@@ -282,6 +284,10 @@ export function searchOrder(env: Env): SearchEngine[] {
   }
   return listed;
 }
+
+type Settled = { ok: true; value: { hits: WebHit[]; images: ImageResult[] } } | { ok: false; error: unknown };
+const settled = (task: Promise<{ hits: WebHit[]; images: ImageResult[] }>): Promise<Settled> =>
+  task.then((value) => ({ ok: true as const, value }), (error: unknown) => ({ ok: false as const, error }));
 
 interface WikiOutcome {
   hits: WebHit[];
@@ -381,6 +387,17 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUnt
     const started = Date.now();
     // Two planner rewrites plus this call fill the cap. Wikipedia stays off so both rewrites still run.
     if (KEYED.has(step.name) && extras.length < 2) startWiki();
+    // Deep route: the rewrites run alongside the literal search, each counted and capped like it.
+    let parallel: { text: string; task: Promise<Settled>; at: number }[] | undefined;
+    if (ledger.route === 'deep' && KEYED.has(step.name) && extras.length) {
+      parallel = [];
+      for (const text of extras) {
+        if (searchCalls(ledger) >= callCap(ledger)) break;
+        if (!(await takeSlot(env, step.name, bucket))) break;
+        ledger.search[step.name] += 1;
+        parallel.push({ text, task: settled(step.run(text)), at: Date.now() });
+      }
+    }
     try {
       const out = await step.run(q.q);
       let hits = out.hits.filter((h) => h.url && h.title);
@@ -391,27 +408,32 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUnt
         continue;
       }
       const more: { query: string; hits: WebHit[] }[] = [];
-      if (KEYED.has(step.name)) {
+      /** Records one rewrite's outcome; true when the engine is dead and later rewrites should stop. */
+      const settle = async (text: string, task: Promise<Settled>, againAt: number): Promise<boolean> => {
+        const done = await task;
+        if (done.ok) {
+          const extra = done.value.hits.filter((h) => h.url && h.title);
+          if (!extra.length) ledger.fellThrough.push(`${step.name}:also-empty`);
+          else {
+            more.push({ query: text, hits: extra });
+            images = [...images, ...done.value.images];
+          }
+          return false;
+        }
+        const failure = failureOf(done.error);
+        await noteFailure(step.name, failure, false);
+        ledger.fellThrough.push(`${step.name}:also-${failure.reason}`);
+        statuses.push({ name: step.name, ok: false, count: 0, ms: Date.now() - againAt, error: failure.reason });
+        return failure.dead;
+      };
+      if (parallel) {
+        for (const p of parallel) await settle(p.text, p.task, p.at);
+      } else if (KEYED.has(step.name)) {
         for (const text of extras) {
           if (searchCalls(ledger) >= callCap(ledger) || engineDead(step.name)) break;
           if (!(await takeSlot(env, step.name, bucket))) break;
           ledger.search[step.name] += 1;
-          const againAt = Date.now();
-          try {
-            const again = await step.run(text);
-            const extra = again.hits.filter((h) => h.url && h.title);
-            if (!extra.length) ledger.fellThrough.push(`${step.name}:also-empty`);
-            else {
-              more.push({ query: text, hits: extra });
-              images = [...images, ...again.images];
-            }
-          } catch (err) {
-            const failure = failureOf(err);
-            await noteFailure(step.name, failure, false);
-            ledger.fellThrough.push(`${step.name}:also-${failure.reason}`);
-            statuses.push({ name: step.name, ok: false, count: 0, ms: Date.now() - againAt, error: failure.reason });
-            if (failure.dead) break;
-          }
+          if (await settle(text, settled(step.run(text)), Date.now())) break;
         }
       }
       statuses.push({ name: step.name, ok: true, count: hits.length + more.reduce((n, list) => n + list.hits.length, 0), ms: Date.now() - started });

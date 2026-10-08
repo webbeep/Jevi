@@ -133,7 +133,7 @@ function install(script: {
   };
 }
 
-const env = (extra: Record<string, unknown> = {}): Env => ({ EXA_API_KEY: KEY, TAVILY_API_KEY: 'tv', JINA_API_KEY: 'jk', ...extra }) as Env;
+const env = (extra: Record<string, unknown> = {}): Env => ({ SEARCH_ORDER: 'serper,langsearch,exa,tavily,firecrawl,wikipedia,backup', EXA_DAILY_CAP: 'off', EXA_EVAL_DAILY_CAP: 'off', EXA_API_KEY: KEY, TAVILY_API_KEY: 'tv', JINA_API_KEY: 'jk', ...extra }) as Env;
 
 async function ask(query = 'open source database', extra: Record<string, unknown> = {}, request?: Request) {
   const events: string[] = [];

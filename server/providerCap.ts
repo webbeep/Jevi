@@ -17,6 +17,8 @@ function readCap(raw: string | undefined): number | undefined {
 const DEFAULT_CAPS: Record<string, Record<CapBucket, number>> = {
   serper: { prod: 80, eval: 300 },
   langsearch: { prod: 300, eval: 300 },
+  // Exa is the paid last resort: a strict prod cap and none for eval traffic.
+  exa: { prod: 10, eval: 0 },
 };
 
 /**
@@ -25,6 +27,8 @@ const DEFAULT_CAPS: Record<string, Record<CapBucket, number>> = {
  */
 export function capFor(env: Env, provider: string, bucket: CapBucket): number | undefined {
   const name = `${provider.toUpperCase()}_${bucket === 'eval' ? 'EVAL_' : ''}DAILY_CAP`;
+  // 'off' removes even a built-in cap (tests and emergencies).
+  if (env[name]?.trim().toLowerCase() === 'off') return undefined;
   return readCap(env[name]) ?? DEFAULT_CAPS[provider]?.[bucket];
 }
 
@@ -40,8 +44,12 @@ function logRefusal(provider: string, bucket: CapBucket): void {
 export async function takeSlot(env: Env, provider: string, bucket: CapBucket, now = Date.now()): Promise<boolean> {
   const cap = capFor(env, provider, bucket);
   if (cap === undefined) return true;
+  if (cap === 0) {
+    logRefusal(provider, bucket);
+    return false;
+  }
   const db = d1(env);
-  const failClosed = provider === 'serper';
+  const failClosed = provider === 'serper' || provider === 'exa';
   if (!db) {
     if (failClosed) logRefusal(provider, bucket);
     return !failClosed;

@@ -1,3 +1,4 @@
+import { DEEP_PAGES, routeExtras, routeOf } from './router';
 import type { AnswerCard, FollowupContext, FollowupIntent, LayoutPlan } from '../shared/card';
 import type { EngineStatus, Freshness, ImageResult, SearchResponse } from '../shared/types';
 import { rewriteQuery } from './ai';
@@ -59,6 +60,8 @@ interface DesignArgs {
   context?: string;
   think?: boolean;
   intent?: string;
+  /** Deep route: read 3–5 pages (~4s each) and ground on them. */
+  deep?: boolean;
 }
 
 /** How many pages to read and how long to wait for them before designing. At most five pages per ask. */
@@ -71,7 +74,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   if (!req.followup && MADE_PATTERNS.has(req.pattern)) req = { ...req, followup: { mode: 'chat', question: req.query } };
   // Conversation turns reason from what is already known; everything else reads pages first.
   const chat = req.followup?.mode === 'chat';
-  const budget = chat ? { count: 3, need: 0, budgetMs: 0 } : pageBudget(req.readPages);
+  const budget = chat ? { count: 3, need: 0, budgetMs: 0 } : req.deep ? DEEP_PAGES : pageBudget(req.readPages);
   const pages = await collectPages(req.search.results, env, budget, late, scope);
   const fresh = pages.filter((p) => !req.search.results[p.n - 1]?.content);
   if (fresh.length) send('pages', fresh.map(({ n, url, text }) => ({ n, url, text })));
@@ -121,7 +124,10 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   if (u) send('intent', { intent: u.intent, queries: u.queries });
   // Literal question first. Planner rewrites are the later calls, still inside the cap.
   const q = queriesForAsk(query, extras);
-  const more = moreQueries(query, extras);
+  const route = routeOf(query);
+  scope.ledger.route = route;
+  const deep = route === 'deep';
+  const more = routeExtras(route, moreQueries(query, extras));
   const fresh = freshness === 'any' && u ? u.freshness : freshness;
   const found = await searchWithLate({ q, more, freshness: fresh, count: 20 }, env, scope);
   let results = { ...found.response, query };
@@ -184,7 +190,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
 
   send('search', results);
   const plan = await planned;
-  await design(send, env, { query, pattern: plan.pattern, depth: plan.depth, readPages: plan.readPages, search: results, context, intent: u?.intent }, started, scope, late);
+  await design(send, env, { query, pattern: plan.pattern, depth: plan.depth, readPages: plan.readPages || deep, search: results, context, intent: u?.intent, deep }, started, scope, late);
 }
 
 /**
