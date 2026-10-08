@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { personalizedStarters } from '../shared/personal';
 import {
   canShuffle,
   pickShown,
@@ -7,18 +8,30 @@ import {
 
 export type { Suggestion };
 
+function load(width: number): { items: Suggestion[]; personalized: boolean } {
+  try {
+    if (typeof localStorage === 'undefined') return { items: pickShown(width), personalized: false };
+    return personalizedStarters(localStorage, width);
+  } catch {
+    return { items: pickShown(width), personalized: false };
+  }
+}
+
 /**
- * Home starters from the curated passing pool. No LLM refresh, no network call
- * on shuffle. Count: 3 on phones (≤640px), 4 on desktop. Shuffle stays off
- * until the pool rule is met (≥9 S1 and ≥6 broad).
+ * Home starters. Cold start is the curated Strategy set. Once this device has
+ * ask history, the list is the on-device ranking (no network). Shuffle stays
+ * off until the pool rule is met.
  */
 export function useSuggestions(): {
   items: Suggestion[];
   shuffle: () => void;
   shuffleEnabled: boolean;
+  personalized: boolean;
+  refresh: () => void;
 } {
   const [width, setWidth] = useState(() => (typeof window !== 'undefined' ? window.innerWidth : 1280));
-  const [items, setItems] = useState<Suggestion[]>(() => pickShown(typeof window !== 'undefined' ? window.innerWidth : 1280));
+  const [rev, setRev] = useState(0);
+  const [state, setState] = useState(() => load(typeof window !== 'undefined' ? window.innerWidth : 1280));
 
   useEffect(() => {
     const onResize = () => setWidth(window.innerWidth);
@@ -27,25 +40,20 @@ export function useSuggestions(): {
   }, []);
 
   useEffect(() => {
-    setItems((prev) => {
-      const next = pickShown(width);
-      // Keep current ids when only the count changes and they still fit.
-      if (prev.length === next.length && prev.every((p) => next.some((n) => n.id === p.id))) return prev;
-      return next;
-    });
-  }, [width]);
+    setState(load(width));
+  }, [width, rev]);
 
-  const shuffleEnabled = canShuffle();
+  const refresh = useCallback(() => setRev((n) => n + 1), []);
+  const shuffleEnabled = canShuffle() && !state.personalized;
 
   const shuffle = useCallback(() => {
     if (!shuffleEnabled) return;
-    setItems((prev) => {
-      const exclude = new Set(prev.map((p) => p.id));
+    setState((prev) => {
+      const exclude = new Set(prev.items.map((p) => p.id));
       const next = pickShown(width, Math.random, exclude);
-      // If exclusion emptied a group, fall back to a fresh draw.
-      return next.length ? next : pickShown(width);
+      return { items: next.length ? next : pickShown(width), personalized: false };
     });
   }, [shuffleEnabled, width]);
 
-  return { items, shuffle, shuffleEnabled };
+  return { items: state.items, shuffle, shuffleEnabled, personalized: state.personalized, refresh };
 }

@@ -1,5 +1,5 @@
 import { type FormEvent, type RefObject, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowUp, CornerDownRight, CornerLeftUp, Moon, Pencil, Plus, RotateCw, Search, Shuffle, SlidersHorizontal, Sun, X } from 'lucide-react';
+import { ArrowUp, CornerDownRight, CornerLeftUp, History, Moon, Pencil, Plus, RotateCw, Search, Shuffle, SlidersHorizontal, Sun, X } from 'lucide-react';
 import type { AnswerCard, CardNode } from '../shared/card';
 import type { SearchResponse, SearchResult } from '../shared/types';
 import { api } from './api';
@@ -10,9 +10,11 @@ import { LogoMark, Wordmark } from './Logo';
 import { type LibraryEntry, buildLibrary } from './library';
 import { FaviconStack, Reader, SourcesRail, SourcesSheet } from './Sources';
 import { type SessionActions, type Turn, liveBody, scrollToTurn, useSession } from './useSession';
-import { useSuggestions } from './useSuggestions';
 import { loadSnapshot, normalizeAnswerQuery, saveSnapshot } from '../shared/answerKey';
+import { RECENT_KEY, clearHistory, readHistory, recordAsk } from '../shared/personal';
 import { placeholderExamples } from '../shared/starters';
+import { useSuggestions } from './useSuggestions';
+import { clearTypeaheadClientCache, useTypeahead } from './useTypeahead';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -35,7 +37,6 @@ interface Quote {
 }
 
 
-const RECENTS_KEY = 'zo:recent';
 const TAGLINE = 'Ask anything. Get answers you can compare, tweak and keep.';
 
 function readAnswerCache(query: string): Turn[] | undefined {
@@ -56,7 +57,7 @@ function writeAnswerCache(query: string, turns: Turn[]) {
 
 function readRecents(): string[] {
   try {
-    const parsed = JSON.parse(localStorage.getItem(RECENTS_KEY) ?? '[]') as unknown;
+    const parsed = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]') as unknown;
     return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string' && x.trim().length > 0) : [];
   } catch {
     return [];
@@ -66,7 +67,7 @@ function readRecents(): string[] {
 function pushRecent(q: string): string[] {
   const next = [q, ...readRecents().filter((r) => r.toLowerCase() !== q.toLowerCase())].slice(0, 3);
   try {
-    localStorage.setItem(RECENTS_KEY, JSON.stringify(next));
+    localStorage.setItem(RECENT_KEY, JSON.stringify(next));
   } catch {
     /* ignore quota */
   }
@@ -107,8 +108,10 @@ export default function App() {
   const initial = useMemo(() => new URLSearchParams(location.search), []);
   const [dark, setDark] = useTheme();
   const { turns, actions: session } = useSession();
-  const { items: suggestions, shuffle, shuffleEnabled } = useSuggestions();
+  const { items: suggestions, shuffle, shuffleEnabled, personalized, refresh } = useSuggestions();
   const [recents, setRecents] = useState<string[]>(() => (typeof window !== 'undefined' ? readRecents() : []));
+  const [histRev, setHistRev] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
   const [phExamples] = useState(() => placeholderExamples());
   const [phIndex, setPhIndex] = useState(0);
   useEffect(() => {
@@ -119,6 +122,19 @@ export default function App() {
   const [chat, setChat] = useState(0);
   const mainRef = useRef<HTMLDivElement>(null);
   const home = turns.length === 0;
+  const fillFromTypeahead = useCallback((text: string) => {
+    setInput(text);
+    inputRef.current?.focus();
+  }, []);
+  const typeahead = useTypeahead(home ? input : '', fillFromTypeahead, histRev);
+  const historyCount = useMemo(() => {
+    try {
+      return readHistory(localStorage).length;
+    } catch {
+      return 0;
+    }
+  }, [histRev]);
+  const hasHistory = recents.length > 0 || historyCount > 0;
   const root = turns[0];
   const last = [...turns].reverse().find((t) => t.result);
   const busy = turns.some((t) => t.filling);
@@ -162,6 +178,10 @@ export default function App() {
     if (!query) return;
     shown.current = query;
     setRecents(pushRecent(query));
+    recordAsk(localStorage, query);
+    setHistRev((n) => n + 1);
+    refresh();
+    typeahead.close();
     history.pushState(null, '', `?${new URLSearchParams({ q: query })}`);
     session.search(query, { reset: true });
   };
@@ -214,7 +234,17 @@ export default function App() {
 
   const onSearchSubmit = (e: FormEvent) => {
     e.preventDefault();
+    typeahead.close();
     startSearch(input);
+  };
+
+  const wipeHistory = () => {
+    clearHistory(localStorage);
+    clearTypeaheadClientCache();
+    setRecents([]);
+    setHistRev((n) => n + 1);
+    refresh();
+    typeahead.close();
   };
 
   return (
@@ -235,35 +265,65 @@ export default function App() {
               <p className="mx-auto mt-3 max-w-[22rem] text-center text-[14px] leading-snug text-muted-foreground sm:mt-4 sm:max-w-none sm:text-[15px]">
                 {TAGLINE}
               </p>
-              <form onSubmit={onSearchSubmit} className="group relative mt-6 sm:mt-8">
+              <form onSubmit={onSearchSubmit} className={cn('group relative mt-6 sm:mt-8', typeahead.open && 'z-20')}>
                 <Search className="pointer-events-none absolute left-5 top-1/2 size-[18px] -translate-y-1/2 text-muted-foreground" />
                 <Input
+                  ref={inputRef}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={typeahead.onKeyDown}
+                  onFocus={typeahead.onFocus}
+                  onBlur={typeahead.onBlur}
                   placeholder={phExamples[phIndex]}
                   aria-label="Ask anything"
+                  aria-autocomplete="list"
+                  aria-expanded={typeahead.open}
+                  aria-controls={typeahead.listId}
+                  aria-activedescendant={typeahead.activeId}
+                  role="combobox"
                   enterKeyHint="send"
+                  autoComplete="off"
                   autoFocus
                   className="h-14 rounded-2xl border-input bg-card pl-12 pr-14 text-base shadow-card transition-shadow focus-visible:shadow-float focus-visible:ring-0 md:text-base"
                 />
                 <Button type="submit" size="icon" className="absolute right-2 top-1/2 size-10 -translate-y-1/2 rounded-xl" disabled={!input.trim()} aria-label="Send">
                   <ArrowUp className="size-4" />
                 </Button>
+                {typeahead.open && (
+                  <ul id={typeahead.listId} role="listbox" className="absolute left-0 right-0 top-full z-20 mt-2 max-w-full overflow-hidden rounded-2xl border bg-card shadow-float">
+                    {typeahead.rows.map((row, i) => (
+                      <li key={`${row.source}-${row.text}`} id={`${typeahead.listId}-opt-${i}`} role="option" aria-selected={i === typeahead.active}>
+                        <button
+                          type="button"
+                          tabIndex={-1}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => typeahead.pick(row.text)}
+                          className={cn(
+                            'flex min-h-11 w-full min-w-0 items-center gap-3 px-4 text-left text-[14px] leading-snug text-foreground/80 hover:bg-foreground/[0.04] hover:text-foreground',
+                            i === typeahead.active && 'bg-foreground/[0.04] text-foreground',
+                          )}
+                        >
+                          {row.source === 'history' ? <History className="size-4 shrink-0 text-muted-foreground" /> : <Search className="size-4 shrink-0 text-muted-foreground" />}
+                          <span className="min-w-0 flex-1 break-words">{row.text}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </form>
               {recents.length > 0 && (
                 <div className="mt-5 sm:mt-6">
-                  <div className="mb-1.5 flex items-center justify-between px-1">
+                  <div className="mb-1.5 flex items-center justify-between gap-2 px-1">
                     <h2 className="zo-label">Recent</h2>
-                    <button
-                      type="button"
-                      className="text-[12px] text-muted-foreground hover:text-foreground"
-                      onClick={() => {
-                        localStorage.removeItem(RECENTS_KEY);
-                        setRecents([]);
-                      }}
-                    >
-                      Clear
-                    </button>
+                    {hasHistory && (
+                      <button
+                        type="button"
+                        onClick={wipeHistory}
+                        className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl px-3 text-[13px] text-muted-foreground transition-colors hover:bg-foreground/[0.04] hover:text-foreground"
+                      >
+                        Clear history
+                      </button>
+                    )}
                   </div>
                   <ul className="flex flex-col gap-1">
                     {recents.slice(0, 3).map((r, i) => (
@@ -282,19 +342,33 @@ export default function App() {
                 </div>
               )}
               <div className="mt-5 sm:mt-6">
-                <div className="mb-1.5 flex items-center justify-between px-1">
-                  <h2 className="zo-label">Try one</h2>
-                  {shuffleEnabled && (
-                    <button
-                      type="button"
-                      onClick={shuffle}
-                      aria-label="Shuffle suggestions"
-                      className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-xl px-2 text-[12px] text-muted-foreground transition-colors hover:bg-foreground/[0.04] hover:text-foreground"
-                    >
-                      <Shuffle className="size-3.5" />
-                      Shuffle
-                    </button>
-                  )}
+                <div className="mb-1.5 flex items-center justify-between gap-2 px-1">
+                  <div className="min-w-0">
+                    <h2 className="zo-label">Try one</h2>
+                    {personalized && <p className="text-[11px] leading-snug text-muted-foreground">Personalized from this device</p>}
+                  </div>
+                  <div className="flex shrink-0 items-center">
+                    {hasHistory && recents.length === 0 && (
+                      <button
+                        type="button"
+                        onClick={wipeHistory}
+                        className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl px-3 text-[13px] text-muted-foreground transition-colors hover:bg-foreground/[0.04] hover:text-foreground"
+                      >
+                        Clear history
+                      </button>
+                    )}
+                    {shuffleEnabled && (
+                      <button
+                        type="button"
+                        onClick={shuffle}
+                        aria-label="Shuffle suggestions"
+                        className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-xl px-2 text-[12px] text-muted-foreground transition-colors hover:bg-foreground/[0.04] hover:text-foreground"
+                      >
+                        <Shuffle className="size-3.5" />
+                        Shuffle
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <ul className="flex flex-col gap-1 sm:grid sm:grid-cols-2 sm:gap-x-3 sm:gap-y-1">
                   {suggestions.map((s, i) => (

@@ -11,6 +11,7 @@
     "skipLibCheck": true,
     "noUnusedLocals": true,
     "isolatedModules": true,
+    "allowImportingTsExtensions": true,
     "baseUrl": ".",
     "paths": { "@/*": ["./src/*"] }
   },
