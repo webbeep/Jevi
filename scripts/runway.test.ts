@@ -408,6 +408,36 @@ describe('runway', { concurrency: 1 }, () => {
     }
   });
 
+  test('call-cut merged list is diversified after the engine and Wikipedia are de-duplicated', async () => {
+    clearDeadEngines();
+    const orig = globalThis.fetch;
+    const page = (host: string, n: number) => ({ title: `compare database engines ${n}`, url: `https://${host}/${n}`, text: 'compare database engines' });
+    globalThis.fetch = async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('api.exa.ai')) {
+        return Response.json({
+          results: [page('reviews.example.com', 1), page('reviews.example.com', 2), page('reviews.example.com', 3), page('reviews.example.com', 4), page('notes.other.test', 1)],
+        });
+      }
+      if (url.includes('en.wikipedia.org/w/api.php') && url.includes('srlimit=5')) {
+        const row = (title: string) => ({ ns: 0, title, snippet: 'compare database engines' });
+        return Response.json({ query: { search: [row('Alpha compare'), row('Beta compare'), row('Gamma compare')] } });
+      }
+      return Response.json({});
+    };
+    try {
+      const found = await search({ q: 'compare database engines', freshness: 'any', count: 8 }, env(), { ledger: newLedger(), bypass: true });
+      assert.deepEqual(found.results.map((r) => r.domain), [
+        'reviews.example.com', 'reviews.example.com', 'notes.other.test',
+        'en.wikipedia.org', 'en.wikipedia.org',
+        'reviews.example.com', 'reviews.example.com', 'en.wikipedia.org',
+      ]);
+    } finally {
+      globalThis.fetch = orig;
+      clearDeadEngines();
+    }
+  });
+
   test('cpu bench for cache and backup parse', async () => {
     const n = 40;
     const t0 = performance.now();

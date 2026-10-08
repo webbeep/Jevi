@@ -11,6 +11,7 @@ import type { AskScope } from './budget';
 import { newLedger } from './budget';
 import { cacheDb, packSearch, readSearchCache, searchCacheKey, writeSearchCache } from './cache';
 import { cascadeWeb } from './cascade';
+import { diversify } from './diversify';
 import { commons, openverse, permitted } from './images';
 import { UA, domainOf, fetchJson, hedge, type Env } from './util';
 
@@ -237,7 +238,7 @@ export async function searchWithLate(q: Query, env: Env, scope?: AskScope): Prom
   const primary = fuse([{ engine: web.engine, hits: web.hits }], q.count, q.q);
   const taken = new Set(primary.map((r) => normalizeUrl(r.url)));
   const wikiExtra = fuse([{ engine: 'wikipedia', hits: web.wikiHits }], q.count, q.q).filter((r) => !taken.has(normalizeUrl(r.url)));
-  const results = [...primary, ...wikiExtra].slice(0, q.count);
+  const results = diversify(q.q, [...primary, ...wikiExtra]).slice(0, q.count);
   const knowledge = (instant && knowledgeMatches(q.q, instant.title, instant.description) ? instant : undefined)
     ?? (wiki && knowledgeMatches(q.q, wiki.title, wiki.description) ? wiki : undefined);
   const content = new Map<string, string>();
