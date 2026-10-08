@@ -1,5 +1,5 @@
 import { type FormEvent, type RefObject, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowUp, CornerDownRight, CornerLeftUp, Moon, Plus, RotateCw, Search, SlidersHorizontal, Sun, X } from 'lucide-react';
+import { ArrowUp, CornerDownRight, CornerLeftUp, Moon, Pencil, Plus, RotateCw, Search, Shuffle, SlidersHorizontal, Sun, X } from 'lucide-react';
 import type { AnswerCard, CardNode } from '../shared/card';
 import type { SearchResponse, SearchResult } from '../shared/types';
 import { api } from './api';
@@ -11,6 +11,7 @@ import { type LibraryEntry, buildLibrary } from './library';
 import { FaviconStack, Reader, SourcesRail, SourcesSheet } from './Sources';
 import { type SessionActions, type Turn, liveBody, scrollToTurn, useSession } from './useSession';
 import { useSuggestions } from './useSuggestions';
+import { placeholderExamples } from '../shared/starters';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -30,6 +31,29 @@ type QuoteMode = (typeof QUOTE_MODES)[number]['id'];
 interface Quote {
   text: string;
   turnId: number;
+}
+
+
+const RECENTS_KEY = 'zo:recent';
+const TAGLINE = 'Ask anything. Get answers you can compare, tweak and keep.';
+
+function readRecents(): string[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(RECENTS_KEY) ?? '[]') as unknown;
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string' && x.trim().length > 0) : [];
+  } catch {
+    return [];
+  }
+}
+
+function pushRecent(q: string): string[] {
+  const next = [q, ...readRecents().filter((r) => r.toLowerCase() !== q.toLowerCase())].slice(0, 3);
+  try {
+    localStorage.setItem(RECENTS_KEY, JSON.stringify(next));
+  } catch {
+    /* ignore quota */
+  }
+  return next;
 }
 
 function useTheme() {
@@ -66,7 +90,14 @@ export default function App() {
   const initial = useMemo(() => new URLSearchParams(location.search), []);
   const [dark, setDark] = useTheme();
   const { turns, actions: session } = useSession();
-  const suggestions = useSuggestions();
+  const { items: suggestions, shuffle, shuffleEnabled } = useSuggestions();
+  const [recents, setRecents] = useState<string[]>(() => (typeof window !== 'undefined' ? readRecents() : []));
+  const [phExamples] = useState(() => placeholderExamples());
+  const [phIndex, setPhIndex] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => setPhIndex((i) => (i + 1) % phExamples.length), 4000);
+    return () => window.clearInterval(id);
+  }, [phExamples.length]);
   const [input, setInput] = useState(initial.get('q') ?? '');
   const [chat, setChat] = useState(0);
   const mainRef = useRef<HTMLDivElement>(null);
@@ -113,8 +144,13 @@ export default function App() {
     const query = q.trim();
     if (!query) return;
     shown.current = query;
+    setRecents(pushRecent(query));
     history.pushState(null, '', `?${new URLSearchParams({ q: query })}`);
     session.search(query, { reset: true });
+  };
+
+  const editStarter = (text: string) => {
+    setInput(text);
   };
 
   const newChat = () => {
@@ -158,17 +194,20 @@ export default function App() {
             <header className="flex h-14 items-center justify-end px-3 sm:px-5">
               <ThemeToggle dark={dark} onToggle={() => setDark(!dark)} />
             </header>
-            <main className="relative mx-auto flex w-full max-w-[640px] flex-col px-4 pb-16 pt-[12dvh] sm:pt-[18dvh]">
+            <main className="relative mx-auto flex w-full max-w-[640px] flex-col px-4 pb-16 pt-[10dvh] sm:pt-[16dvh]">
               <h1 className="flex justify-center">
                 <Wordmark className="text-[40px] sm:text-[48px]" />
                 <span className="sr-only">ZO</span>
               </h1>
-              <form onSubmit={onSearchSubmit} className="group relative mt-8 sm:mt-10">
+              <p className="mx-auto mt-3 max-w-[22rem] text-center text-[14px] leading-snug text-muted-foreground sm:mt-4 sm:max-w-none sm:text-[15px]">
+                {TAGLINE}
+              </p>
+              <form onSubmit={onSearchSubmit} className="group relative mt-6 sm:mt-8">
                 <Search className="pointer-events-none absolute left-5 top-1/2 size-[18px] -translate-y-1/2 text-muted-foreground" />
                 <Input
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  placeholder="Ask anything"
+                  placeholder={phExamples[phIndex]}
                   aria-label="Ask anything"
                   enterKeyHint="send"
                   autoFocus
@@ -178,16 +217,77 @@ export default function App() {
                   <ArrowUp className="size-4" />
                 </Button>
               </form>
-              <ul className="mt-6 grid gap-0.5 sm:mt-8 sm:grid-cols-2 sm:gap-x-4">
-                {suggestions.slice(0, 6).map((s, i) => (
-                  <li key={s.text} className={cn('animate-in fade-in fill-mode-backwards duration-500', i >= 4 && 'hidden sm:block')} style={{ animationDelay: `${i * 40}ms` }}>
-                    <button onClick={() => startSearch(s.text)} className="flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left text-[14px] leading-snug text-foreground/75 transition-colors hover:bg-foreground/[0.04] hover:text-foreground">
-                      <Icon name={s.icon} fallback="sparkles" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-                      <span className="line-clamp-2">{s.text}</span>
+              {recents.length > 0 && (
+                <div className="mt-5 sm:mt-6">
+                  <div className="mb-1.5 flex items-center justify-between px-1">
+                    <h2 className="zo-label">Recent</h2>
+                    <button
+                      type="button"
+                      className="text-[12px] text-muted-foreground hover:text-foreground"
+                      onClick={() => {
+                        localStorage.removeItem(RECENTS_KEY);
+                        setRecents([]);
+                      }}
+                    >
+                      Clear
                     </button>
-                  </li>
-                ))}
-              </ul>
+                  </div>
+                  <ul className="flex flex-col gap-1">
+                    {recents.slice(0, 3).map((r, i) => (
+                      <li key={r} className={cn(i >= 2 && 'hidden sm:block')}>
+                        <button
+                          type="button"
+                          onClick={() => startSearch(r)}
+                          className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[14px] leading-snug text-foreground/70 transition-colors hover:bg-foreground/[0.04] hover:text-foreground"
+                        >
+                          <RotateCw className="size-4 shrink-0 text-muted-foreground" />
+                          <span className="min-w-0 flex-1 break-words">{r}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <div className="mt-5 sm:mt-6">
+                <div className="mb-1.5 flex items-center justify-between px-1">
+                  <h2 className="zo-label">Try one</h2>
+                  {shuffleEnabled && (
+                    <button
+                      type="button"
+                      onClick={shuffle}
+                      aria-label="Shuffle suggestions"
+                      className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-xl px-2 text-[12px] text-muted-foreground transition-colors hover:bg-foreground/[0.04] hover:text-foreground"
+                    >
+                      <Shuffle className="size-3.5" />
+                      Shuffle
+                    </button>
+                  )}
+                </div>
+                <ul className="flex flex-col gap-1 sm:grid sm:grid-cols-2 sm:gap-x-3 sm:gap-y-1">
+                  {suggestions.map((s, i) => (
+                    <li key={s.id} className="animate-in fade-in fill-mode-backwards duration-500" style={{ animationDelay: `${i * 40}ms` }}>
+                      <div className="flex min-h-11 items-stretch gap-0.5 rounded-xl hover:bg-foreground/[0.04]">
+                        <button
+                          type="button"
+                          onClick={() => startSearch(s.text)}
+                          className="flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[14px] leading-snug text-foreground/80 transition-colors hover:text-foreground"
+                        >
+                          <Icon name={s.icon} fallback="sparkles" className="size-4 shrink-0 text-muted-foreground" />
+                          <span className="min-w-0 flex-1 break-words">{s.text}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => editStarter(s.text)}
+                          aria-label={`Edit: ${s.text}`}
+                          className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:text-foreground"
+                        >
+                          <Pencil className="size-3.5" />
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             </main>
           </>
         ) : (
