@@ -1,7 +1,7 @@
 import { DEEP_PAGES, routeExtras, routeOf } from './router';
 import { serperImages } from './cascade';
 import { publicEvent } from './publicPayload';
-import { contextTerms, entityContextLine, entityHintFor, isDisambiguationPage, isPersonAsk, personSubject, priorEntity, resolveEntity } from './entity';
+import { contextTerms, distinguishingTerms, entityContextLine, entityHintFor, isDisambiguationPage, isPersonAsk, personSourceOk, personSubject, priorEntity, resolveEntity } from './entity';
 import { fetchWikiDisambiguation, fetchWikiLeadImage } from './wikiSearch';
 import { type EntityHint, mentionsAny } from './imageGate';
 import type { RowImagePlan } from './pictures';
@@ -127,6 +127,19 @@ function applyRelevance(query: string, response: SearchResponse, ledger: CallLed
   return gated.dropped ? { ...response, results: gated.kept } : response;
 }
 
+/**
+ * EN4 pick gate: an ask that names an org/role ("Ray Lee BlueFlame AI", "David Kim C2 founder")
+ * keeps only rows about that very person, so a namesake's page can never seed the card or a
+ * choice label. When everything drops, the empty-results recovery runs instead.
+ */
+function applyPickGate(query: string, response: SearchResponse): SearchResponse {
+  if (!isPersonAsk(query) || !distinguishingTerms(query).length) return response;
+  const kept = response.results.filter((row) => personSourceOk(query, row));
+  if (kept.length === response.results.length) return response;
+  console.log(JSON.stringify({ zo: 'entity', pickGate: true, kept: kept.length, dropped: response.results.length - kept.length }));
+  return { ...response, results: kept };
+}
+
 async function design(send: Send, env: Env, req: DesignArgs, started: number, scope: AskScope, late?: Promise<LateExtras>) {
   // Follow-ups keep the sources already gated for the original question.
   if (!req.followup) req = { ...req, search: applyRelevance(req.query, req.search, scope.ledger) };
@@ -210,7 +223,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     const fresh = freshness === 'any' && u ? u.freshness : freshness;
     found = await searchWithLate({ q, more, freshness: fresh, count: 20 }, env, scope);
   }
-  let results = applyRelevance(query, { ...found.response, query }, scope.ledger);
+  let results = applyPickGate(query, applyRelevance(query, { ...found.response, query }, scope.ledger));
   const scholar = await scholarly;
   if (scholar.length) results = { ...results, results: withScholarly(scholar, results.results) };
   let late: Promise<LateExtras> | undefined = found.late;
@@ -226,7 +239,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     let recovered: 'relaxed' | 'entity' | 'knowledge' | 'none' = 'none';
     if (tryRelaxed) {
       const again = await searchWithLate({ q: relaxed, freshness: 'any', count: 20 }, env, scope);
-      const gated = applyRelevance(query, { ...again.response, query }, scope.ledger);
+      const gated = applyPickGate(query, applyRelevance(query, { ...again.response, query }, scope.ledger));
       if (gated.results.length) {
         results = gated;
         late = again.late;
@@ -244,12 +257,28 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
         const again = await searchWithLate({ q: entity, freshness: 'any', count: 20 }, env, scope);
         const gateQ = person || query;
         const gated = applyRelevance(gateQ, { ...again.response, query: gateQ }, scope.ledger);
-        if (gated.results.length) {
-          results = gated;
+        // The bare-name SERP is other people's pages about half the time: keep only rows about
+        // the person the ask named (live "Ray Lee Raycon Founder" built from a funeral home).
+        const pickPerson = !!person && distinguishingTerms(query).length > 0;
+        const picked = pickPerson ? gated.results.filter((row) => personSourceOk(query, row)) : gated.results;
+        const gatedOut = gated.results.length - picked.length;
+        if (picked.length) {
+          results = { ...gated, results: picked };
           late = again.late;
           recovered = 'entity';
-          if (person) console.log(JSON.stringify({ zo: 'entity', nameFallback: true, kept: gated.results.length }));
+        } else if (pickPerson) {
+          // Nothing about the asker's person: re-ask on the bare name and let them pick.
+          const decision = resolveEntity(`Who is ${person}`, again.response.results, { pattern: 'profile' });
+          if (decision.kind === 'choices') {
+            scope.ledger.entity = { kind: 'choices', choices: decision.choices.length };
+            send('search', { ...again.response, query });
+            // Choices ride on the done event (FE readChoices() in shared/choices.ts); never cached.
+            send('done', { engine: 'extractive', removed: 0, pagesRead: 0, ms: Date.now() - started, choices: decision.choices });
+            console.log(JSON.stringify({ zo: 'entity', pickNoMatch: true, rechoices: decision.choices.length }));
+            return;
+          }
         }
+        if (person) console.log(JSON.stringify({ zo: 'entity', nameFallback: true, kept: picked.length, gatedOut }));
       }
     }
     if (!results.results.length && hasLlm(env)) recovered = 'knowledge';

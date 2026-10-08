@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import fs from 'node:fs';
 import {
   entityContextLine,
   entityHintFor,
@@ -9,10 +10,12 @@ import {
   resolveEntity,
   disambiguationEntries,
   contextTerms,
+  distinguishingTerms,
   hasFullPersonName,
   personSourceOk,
   personSubject,
   type Entity,
+  type EntityRow,
 } from '../server/entity.ts';
 import { gateResults } from '../server/relevanceGate.ts';
 import { isBlockedHost } from '../server/spamHosts.ts';
@@ -346,7 +349,7 @@ test('choice descriptors stay short and natural; query is searchable', () => {
   assert.match(eng!.query, /Stripe/i);
 });
 
-test('picked-choice follow-up keeps name matches when context would clear the pool', () => {
+test('picked-choice follow-up never falls back to name-only pages', () => {
   const rows = [
     row('Ray Lee - USATF coach profile', 'Ray Lee is a coach with USATF in California.', 'https://www.usatf.org/ray-lee'),
     row('Ray Lee LinkedIn', 'Ray Lee works in tech.', 'https://www.linkedin.com/in/ray-lee'),
@@ -356,13 +359,13 @@ test('picked-choice follow-up keeps name matches when context would clear the po
   const gated = gateResults('Ray Lee USATF coach', rows);
   assert.ok(gated.kept.length >= 1);
   assert.ok(gated.kept.some((r) => /usatf/i.test(r.url)));
-  // When NO row has the context token, fall back to full-name matches instead of empty.
+  // When NO row has the context token the gate keeps nothing (stream.ts then retries / re-offers choices).
   const loose = [
     row('Ray Lee - coach bio', 'Ray Lee has coached track for twenty years.', 'https://www.example.com/ray-lee-coach'),
     row('Ray Lee actor', 'Ray Lee is an actor.', 'https://en.wikipedia.org/wiki/Ray_Lee_(actor)'),
   ];
   const fallback = gateResults('Ray Lee USATF coach', loose);
-  assert.equal(fallback.kept.length, 2, 'name matches kept when context matches none');
+  assert.equal(fallback.kept.length, 0, 'never wrong > none: namesake name-only pages are not a fallback');
 });
 
 test('prior entity with no matching cluster falls back to name hits (not empty)', () => {
@@ -426,5 +429,121 @@ describe('entity3 clean choice labels (GATE-c234daf)', () => {
     const row = { title: 'David Kim', url: 'https://en.wikipedia.org/wiki/David_Kim', snippet: 'David Kim may refer to: David Kim (violinist), American violinist; David Kim (restaurateur), American businessman and CEO of Baja Fresh.' };
     const labels = disambiguationEntries(row, 'David Kim').map((e) => e.label);
     assert.deepEqual(labels.slice(0, 2), ['Violinist', 'Restaurateur']);
+  });
+});
+
+/** Recorded LangSearch (ls-*) + Serper (serper-*) SERPs, replayed exactly like scripts/en4-replay.mjs. */
+interface SerpFixture { query: string; rows: EntityRow[] }
+const SERPS: Record<string, SerpFixture> = JSON.parse(
+  fs.readFileSync(new URL('./fixtures/en4/serps.json', import.meta.url), 'utf8'),
+);
+const run = (key: string) => {
+  const fx = SERPS[key];
+  assert.ok(fx, `missing fixture ${key}`);
+  return resolveEntity(fx.query, fx.rows, { pattern: 'profile' });
+};
+const descriptorsOf = (key: string) => {
+  const d = run(key);
+  return d.kind === 'choices' ? d.choices.map((c) => c.descriptor) : [];
+};
+
+describe('EN4 recorded SERPs (scripts/fixtures/en4/serps.json)', () => {
+  test('a famous name with a dominant Wikipedia identity is a single, never choices', () => {
+    for (const key of ['ls-obama', 'serper-obama', 'ls-swift']) {
+      assert.equal(run(key).kind, 'single', key);
+    }
+  });
+
+  test('every choice descriptor is short, factual and never a pronoun tail', () => {
+    for (const [key, fx] of Object.entries(SERPS)) {
+      const d = resolveEntity(fx.query, fx.rows, { pattern: 'profile' });
+      if (d.kind !== 'choices') continue;
+      assert.ok(d.choices.length <= 3, `${key}: ${d.choices.length} choices`);
+      for (const c of d.choices) {
+        assert.ok(c.descriptor.length > 0, `${key}: empty descriptor`);
+        assert.ok(c.descriptor.length <= 40, `${key}: ${c.descriptor}`);
+        assert.doesNotMatch(
+          c.descriptor,
+          /\.\s|wiki|^Linked to (It|May|He|She)$|\b(It|He|She|May)$/i,
+          `${key}: ${c.descriptor}`,
+        );
+      }
+    }
+  });
+
+  test('ls-js: no site chrome, no Wiktionary, no regnal org as a descriptor', () => {
+    const labels = descriptorsOf('ls-js');
+    assert.ok(labels.length >= 2, labels.join(' | '));
+    for (const l of labels) {
+      assert.notEqual(l, 'Wikipedia article', l);
+      assert.ok(!l.includes('Wiktionary'), l);
+      assert.ok(!l.startsWith('Linked to George') && !l.startsWith('Linked to Charles'), l);
+    }
+  });
+
+  test('ls-dk is choices with a C2 choice', () => {
+    const d = run('ls-dk');
+    assert.equal(d.kind, 'choices');
+    assert.ok(descriptorsOf('ls-dk').some((l) => l.includes('C2')), descriptorsOf('ls-dk').join(' | '));
+  });
+
+  test('serper-ray offers the Raycon founder and the Arsenal footballer', () => {
+    const labels = descriptorsOf('serper-ray');
+    assert.ok(labels.includes('Founder of Raycon'), labels.join(' | '));
+    assert.ok(labels.includes('Linked to Arsenal'), labels.join(' | '));
+  });
+
+  test('serper-dk keeps C2 Education; serper-bf and serper-dkpick resolve to one person', () => {
+    assert.ok(descriptorsOf('serper-dk').some((l) => l.includes('C2 Education')), descriptorsOf('serper-dk').join(' | '));
+    assert.equal(run('serper-bf').kind, 'single');
+    assert.equal(run('serper-dkpick').kind, 'single');
+  });
+
+  test('personSourceOk wants the named org, not a namesake church or a teacher', () => {
+    assert.equal(
+      personSourceOk('Ray Lee Raycon Founder', {
+        title: 'Ray Lee obituary',
+        url: 'https://funeralhome.example/ray-lee',
+        snippet: 'Ray Lee, founder of a local church, passed away',
+      }),
+      false,
+    );
+    assert.equal(
+      personSourceOk('Ray Lee Raycon Founder', {
+        title: 'Ray Lee obituary',
+        url: 'https://funeralhome.example/ray-lee',
+        snippet: 'Ray Lee, co-founder of Raycon, passed away',
+      }),
+      true,
+    );
+    assert.equal(
+      personSourceOk('David Kim C2 Education Centers Founder', {
+        title: 'David Kim',
+        url: 'https://uca.edu/x',
+        snippet: 'David Kim teaches education at UCA',
+      }),
+      false,
+    );
+  });
+
+  test('distinguishingTerms keeps only the org core of "C2 Education Centers"', () => {
+    assert.deepEqual(distinguishingTerms('David Kim C2 Education Centers Founder'), ['c2']);
+  });
+
+  test('a run-on snippet never leaks "China. He" into a descriptor', () => {
+    const d = resolveEntity(
+      'Who is Ray Lee',
+      [
+        { title: 'Ray Lee', url: 'https://a.example/1', snippet: 'Ray Lee is a writer based in China. He wrote novels.' },
+        { title: 'Ray Lee - CEO at Raycon', url: 'https://linkedin.com/in/x', snippet: 'Ray Lee, CEO at Raycon Inc.' },
+      ],
+      { pattern: 'profile' },
+    );
+    const labels = d.kind === 'choices' ? d.choices.map((c) => c.descriptor) : [];
+    assert.ok(labels.length >= 2, labels.join(' | '));
+    for (const l of labels) {
+      assert.ok(!l.includes('China. He'), l);
+      assert.ok(!l.endsWith(' He'), l);
+    }
   });
 });

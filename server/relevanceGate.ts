@@ -33,7 +33,7 @@ const TASK = new Set([
 const TOKEN = /[A-Za-z0-9]+(?:['’.-][A-Za-z0-9]+)*/g;
 
 import { isBlockedHost } from './spamHosts';
-import { contextTerms, hasFullPersonName, isPersonAsk, personSubject } from './entity';
+import { contextTerms, distinguishingTerms, hasFullPersonName, isPersonAsk, personSubject, personSourceOk } from './entity';
 
 export interface GateHit {
   title: string;
@@ -179,14 +179,23 @@ export function gateResults<T extends GateHit>(query: string, rows: readonly T[]
     const nameToks = name ? name.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length >= 2) : [];
     // Multi-word person names only: a single token is never enough to force the person gate.
     if (name && nameToks.length >= 2) {
-      const ctx = contextTerms(query, name);
-      const withCtx = clean.filter((row) => hasFullPersonName(name, row) && (
-        ctx.length === 0 ||
-        ctx.some((t) => hasTerm(norm(`${row.title} ${row.snippet ?? ''} ${row.url}`), t))
-      ));
-      // Picked-choice follow-up (e.g. "Ray Lee USATF coach"): if context is too strict
-      // and every hit is dropped, keep full-name matches rather than no_sources.
-      const ok = withCtx.length ? withCtx : clean.filter((row) => hasFullPersonName(name, row));
+      let ok: T[];
+      if (distinguishingTerms(query, name).length) {
+        // The ask names an org/role: a row is about this person only with the full name AND
+        // that term on the page. No name-only fallback — an empty pool hands the ask to
+        // stream.ts, whose pick gate re-searches the bare name and re-asks with choices.
+        ok = clean.filter((row) => hasFullPersonName(name, row) && personSourceOk(query, row, name));
+        if (!ok.length) return { kept: [], dropped: rows.length };
+      } else {
+        const ctx = contextTerms(query, name);
+        const withCtx = clean.filter((row) => hasFullPersonName(name, row) && (
+          ctx.length === 0 ||
+          ctx.some((t) => hasTerm(norm(`${row.title} ${row.snippet ?? ''} ${row.url}`), t))
+        ));
+        // Picked-choice follow-up (e.g. "Ray Lee USATF coach"): if context is too strict
+        // and every hit is dropped, keep full-name matches rather than no_sources.
+        ok = withCtx.length ? withCtx : clean.filter((row) => hasFullPersonName(name, row));
+      }
       personDropped = clean.length - ok.length;
       pool = ok;
     }

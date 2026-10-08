@@ -122,8 +122,10 @@ export function contextTerms(query: string, name = personSubject(query)): string
     // Nique Clifford Wikipedia bio from a preseason ask.
     if (SPORTS_LEAGUE.test(w)) continue;
     // Cap tokens after the person name count as context (Raycon, USATF, Stripe) — not only CamelCase/ALLCAPS.
+    // Alphanumeric org tokens carry a digit and a letter ("C2") — too short for capCtx, still identity.
     const capCtx = /^[A-Z]/.test(w) && w.length >= 3 && !/^(Who|What|When|Where|Why|How)$/i.test(w);
-    if (looksLikeOrgToken(w) || ORG_TAIL.test(w) || capCtx) {
+    const alnumCtx = /^[A-Za-z0-9]{2,}$/.test(w) && /[0-9]/.test(w) && /[A-Za-z]/.test(w);
+    if (looksLikeOrgToken(w) || ORG_TAIL.test(w) || capCtx || alnumCtx) {
       if (!out.includes(t)) out.push(t);
     }
   }
@@ -182,9 +184,8 @@ export function personSourceOk(query: string, row: EntityRow, name = personSubje
   if (!name || !hasFullPersonName(name, row)) return false;
   const ctx = contextTerms(query, name);
   if (!ctx.length) return true;
-  // A specific org word (BlueFlame) outranks tails (AI, Inc): "Humantic AI … Ray Lee, VP at Salient" must not pass on "ai".
-  const specific = ctx.filter((t) => !ORG_TAIL.test(t));
-  const need = specific.length ? specific : ctx;
+  // Only a distinguishing term counts: a picked "Ray Lee Raycon Founder" must name Raycon, not the role.
+  const need = distinguishingTerms(query, name);
   const body = new Set(tokens(`${row.title ?? ''} ${row.snippet ?? ''} ${row.url ?? ''}`));
   return need.some((t) => body.has(t) || (t.length >= 5 && [...body].some((w) => w.includes(t))));
 }
@@ -231,6 +232,26 @@ function canonRole(matched: string): { display: string; core: string } {
   return { display, core };
 }
 
+/** Generic org words that name no specific organisation ("C2 Education Centers" → "C2"). */
+const GENERIC_ORG = /^(education|centers?|centre|group|global|international|services|solutions|company|holdings|partners|capital|media|studios?|foundation|institute|university|college|school|academy|club|team|labs?|technologies|technology|systems)$/i;
+
+const isRoleWord = (t: string) => ROLE1.has(t) || ROLE2.some((r) => r.split(' ').includes(t));
+
+/**
+ * Context words that actually tell one person from the next: role words, org tails
+ * and generic org words drop out ("C2 Education Centers Founder" → ["c2"]), and a
+ * role-only ask keeps its role ("David Kim Violinist" → ["violinist"]).
+ */
+export function distinguishingTerms(query: string, name = personSubject(query)): string[] {
+  const ctx = contextTerms(query, name);
+  if (!ctx.length) return [];
+  const specific = ctx.filter((t) => !isRoleWord(t) && !ORG_TAIL.test(t) && !GENERIC_ORG.test(t));
+  if (specific.length) return specific;
+  const noTails = ctx.filter((t) => !isRoleWord(t) && !ORG_TAIL.test(t));
+  if (noTails.length) return noTails;
+  return ctx.filter(isRoleWord);
+}
+
 const title = (s: string) => s.trim().replace(/\s+/g, ' ').replace(/[.,;:!?]+$/, '');
 const low = (s: string) => s.toLowerCase();
 
@@ -240,6 +261,58 @@ const normText = (s: string) => norm(s).replace(/[^a-z0-9]+/g, ' ').replace(/\s+
 /** Generic words that carry no disambiguating signal inside org/location phrases. */
 const GENERIC = new Set(['the', 'of', 'and', 'for', 'at', 'in', 'a', 'an', 'inc', 'llc', 'ltd', 'co', 'corp', 'company', 'group', 'official']);
 const coreWords = (s: string) => normText(s).split(' ').filter((t) => t.length >= 2 && !GENERIC.has(t));
+
+/** Site names that never belong inside a capture ("Wikipedia article", "Gaana"). */
+const SITE_WORDS = new Set([
+  'wikipedia', 'wiktionary', 'wikimedia', 'wikidata', 'wikiquote', 'wikisource',
+  'imdb', 'linkedin', 'facebook', 'instagram', 'twitter', 'youtube', 'tiktok',
+  'fandom', 'reddit', 'google', 'amazon', 'spotify', 'gaana', 'zoominfo',
+  'crunchbase', 'quora', 'pinterest', 'bibliocommons', 'baidu', 'baike',
+]);
+
+/** Whole values that are only a filler word (pronoun, month, wiki chrome) say nothing. */
+const JUNK_VALUE = new Set([
+  'it', 'he', 'she', 'they', 'his', 'her', 'its', 'their', 'this', 'that', 'these', 'those', 'there', 'here',
+  'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'of', 'for', 'with', 'by', 'from', 'to', 'as', 'also',
+  'other', 'others', 'more', 'new', 'first', 'one', 'two', 'all', 'some', 'many',
+  'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december',
+  'jan', 'feb', 'mar', 'apr', 'jun', 'jul', 'aug', 'sep', 'sept', 'oct', 'nov', 'dec',
+  'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
+  'today', 'yesterday', 'page', 'article', 'list', 'see', 'category', 'help', 'edit',
+]);
+
+/** Sentence enders that must not cut a capture: "J." initials, "U.S", "St", "Inc". */
+const ABBREV_TAIL = /^(u\.s|st|jr|sr|dr|mr|mrs|ms|inc|co)$/i;
+
+/**
+ * A regnal/monarch name ("George II", "Charles IX") is a person, never an org or a place:
+ * captured as an org it produced the choice label "Linked to George II" (live: ls-js).
+ */
+const REGNAL_NAME = /^[A-Z][a-z]+\s+(?:I|II|III|IV|V|VI|VII|VIII|IX|X)$/;
+
+/** True when any word of the value is a site name. */
+const hasSiteWord = (v: string) => v.split(/[^A-Za-z0-9]+/).some((w) => SITE_WORDS.has(w.toLowerCase()));
+
+/**
+ * Normalise a captured org/location: cut run-on sentences ("China. He" → "China"),
+ * drop trailing punctuation, site names and filler words. '' when nothing is left.
+ */
+export function cleanCapture(v: string): string {
+  let s = title(v).replace(/\s+/g, ' ').trim();
+  if (!s) return '';
+  // Cut at the first sentence end, keeping "J." initials and "U.S"/"St"-style abbreviations.
+  for (const m of s.matchAll(/[.!?]\s+(?=[A-Z])/g)) {
+    const before = s.slice(0, m.index!);
+    const tail = (before.split(/\s+/).pop() ?? '').replace(/[^A-Za-z.]/g, '').replace(/\.+$/, '');
+    if (/^[A-Z]$/.test(tail) || ABBREV_TAIL.test(tail)) continue;
+    s = before;
+    break;
+  }
+  s = s.replace(/[\s.,;:!?…“”"'’)\]}–—-]+$/, '').trim();
+  if (!s || REGNAL_NAME.test(s) || hasSiteWord(s)) return '';
+  if (s.length < 2 || JUNK_VALUE.has(s.toLowerCase())) return '';
+  return s;
+}
 
 const CAP_PHRASE = '([A-Z][\\w&.\'-]*(?:\\s+[A-Z][\\w&.\'-]*){0,2})';
 const ORG_RES = [
@@ -352,7 +425,7 @@ function extractSignals(row: EntityRow, name: string): RowSignals {
     for (const re of LOC_RES) {
       const m = re.exec(seg);
       if (m) {
-        const v = title(m[m.length - 1] ?? '');
+        const v = cleanCapture(m[m.length - 1] ?? '');
         if (v && !locs.some((l) => low(l) === low(v))) locs.push(v);
       }
     }
@@ -365,7 +438,7 @@ function extractSignals(row: EntityRow, name: string): RowSignals {
       let m: RegExpExecArray | null;
       const g = new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`);
       while ((m = g.exec(seg))) {
-        const v = title((m[m.length - 1] ?? '').replace(/^(the|a|an)\s+/i, ''));
+        const v = cleanCapture((m[m.length - 1] ?? '').replace(/^(the|a|an)\s+/i, ''));
         if (v && v.length >= 2 && !locSet.has(low(v)) && !orgs.some((o) => low(o) === low(v))) orgs.push(v);
         if (m[0].length === 0) break;
       }
@@ -505,13 +578,6 @@ function buildEntity(name: string, cluster: number[], rows: EntityRow[]): Entity
   };
 }
 
-const CLASS_LABEL: Record<string, string> = {
-  linkedin: 'LinkedIn profile',
-  wikipedia: 'Wikipedia article',
-  imdb: 'IMDb page',
-  edu: 'University page',
-};
-
 /** Short natural "Role at Org" / "CEO of Max"; never mashed; ≤ ~40 chars; tokens deduped. */
 function cleanPhrase(s: string, max = 28): string {
   const words = title(s).split(/\s+/).filter(Boolean);
@@ -539,40 +605,41 @@ function cleanPhrase(s: string, max = 28): string {
 function describe(top: { role?: string; org?: string; location?: string; label?: string }, rows: EntityRow[], name: string): string {
   // Wikipedia disambiguation gloss is usually the cleanest one-liner.
   const wikiLabel = (top.label ?? '').trim().replace(/\s+/g, ' ');
+  let raw = '';
   if (wikiLabel && wikiLabel.length >= 3 && wikiLabel.length <= 40) {
     // Reject mashed labels ("Coach at USATF CEO Max").
     if (!/\b(CEO|Founder|Coach|Player|Director|Author)\b.*\b(CEO|Founder|Coach|Player|Director|Author)\b/i.test(wikiLabel)) {
-      return title(wikiLabel).slice(0, 40);
+      raw = title(wikiLabel).slice(0, 40);
     }
   }
-  const role = top.role ? title(top.role) : '';
-  let org = top.org ? cleanPhrase(top.org) : '';
-  let loc = top.location ? cleanPhrase(top.location, 20) : '';
-  // A bare city captured as org → location ("Actor in Los Angeles").
-  if (org && !loc && /^(Los Angeles|New York|London|Chicago|Paris|Tokyo|Kuala Lumpur|San Francisco|Austin|Boston|Seattle|Portland|Philadelphia)$/i.test(org)) {
-    loc = org;
-    org = '';
-  }
-  let raw = '';
-  // Drop trailing clause after ". " ("Sweeney Todd. Other Broadway" → "Sweeney Todd"), but keep "U.S. Bank".
-  if (org && /\.\s+/.test(org) && !/^U\.S\.\b/i.test(org)) org = org.split(/\.\s+/)[0]!.trim();
-  org = org.replace(/[.,;:]+$/g, '').trim();
-  loc = loc.replace(/[.,;:]+$/g, '').trim();
-  // Creative roles: prefer "Actor in Los Angeles" over "Actor at Show-Name".
-  if (role && org && loc && /^(actor|actress|director|writer|author|producer|professor)$/i.test(role)) {
-    raw = `${role} in ${loc}`;
-  } else if (role && org) raw = /^(ceo|cto|cfo|coo|founder|president|chairman)$/i.test(role) ? `${role} of ${org}` : `${role} at ${org}`;
-  else if (role && loc) raw = `${role} in ${loc}`;
-  else if (role) raw = role;
-  else if (org) {
-    raw = `Linked to ${org}`;
-    if (raw.length > 40) raw = org;
-  } else if (loc) {
-    raw = `Based in ${loc}`;
-    if (raw.length > 40) raw = loc;
-  } else {
-    const cls = extractSignals(rows[0]!, name).domainClass;
-    raw = CLASS_LABEL[cls] ?? hostOf(rows[0]!.url);
+  if (!raw) {
+    const role = top.role ? title(top.role) : '';
+    let org = top.org ? cleanPhrase(cleanCapture(top.org)) : '';
+    let loc = top.location ? cleanPhrase(cleanCapture(top.location), 20) : '';
+    // A bare city captured as org → location ("Actor in Los Angeles").
+    if (org && !loc && /^(Los Angeles|New York|London|Chicago|Paris|Tokyo|Kuala Lumpur|San Francisco|Austin|Boston|Seattle|Portland|Philadelphia)$/i.test(org)) {
+      loc = org;
+      org = '';
+    }
+    // Drop trailing clause after ". " ("Sweeney Todd. Other Broadway" → "Sweeney Todd"), but keep "U.S. Bank".
+    if (org && /\.\s+/.test(org) && !/^U\.S\.\b/i.test(org)) org = org.split(/\.\s+/)[0]!.trim();
+    org = org.replace(/[.,;:]+$/g, '').trim();
+    loc = loc.replace(/[.,;:]+$/g, '').trim();
+    // Creative roles: prefer "Actor in Los Angeles" over "Actor at Show-Name".
+    if (role && org && loc && /^(actor|actress|director|writer|author|producer|professor)$/i.test(role)) {
+      raw = `${role} in ${loc}`;
+    } else if (role && org) raw = /^(ceo|cto|cfo|coo|founder|president|chairman)$/i.test(role) ? `${role} of ${org}` : `${role} at ${org}`;
+    else if (role && loc) raw = `${role} in ${loc}`;
+    else if (role) raw = role;
+    else if (org) {
+      raw = `Linked to ${org}`;
+      if (raw.length > 40) raw = org;
+    } else if (loc) {
+      raw = `Based in ${loc}`;
+      if (raw.length > 40) raw = loc;
+    }
+    // No role/org/location/label: never fall back to a host or domain class.
+    else raw = '';
   }
   const parts = raw.split(/\s+/).filter(Boolean);
   const seen = new Set<string>();
@@ -584,7 +651,9 @@ function describe(top: { role?: string; org?: string; location?: string; label?:
     kept.push(w);
   }
   const out = kept.join(' ');
-  return out.length > 40 ? `${out.slice(0, 39).trim()}…` : out;
+  const short = out.length > 40 ? `${out.slice(0, 39).trim()}…` : out;
+  // A site name in the descriptor describes the source, not the person.
+  return hasSiteWord(short) ? '' : short;
 }
 
 /** Searchable follow-up: "Ray Lee USATF coach" — name + org/role words, no "at/of". */
@@ -596,10 +665,30 @@ function choiceQuery(name: string, top: { role?: string; org?: string; location?
   return title(bits.filter(Boolean).join(' ')).slice(0, 120);
 }
 
+/** "John Smith (explorer)" → "Explorer" — the en.wikipedia head-title qualifier, title-cased. */
+function wikiQualifier(rows: EntityRow[], name: string): string | undefined {
+  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`^${esc}\\s*\\(([^()]{1,40})\\)$`);
+  for (const r of rows) {
+    if (!/^https?:\/\/([a-z0-9-]+\.)*en\.wikipedia\.org\//i.test(r.url ?? '')) continue;
+    const m = re.exec(title(r.title ?? ''));
+    if (!m) continue;
+    const q = (m[1] ?? '').trim();
+    if (!q || /^disambiguation$/i.test(q) || q.length > 30 || hasSiteWord(q)) continue;
+    return q.replace(/[A-Za-z][A-Za-z.'-]*/g, (w) => w[0]!.toUpperCase() + w.slice(1));
+  }
+  return undefined;
+}
+
 function toChoice(name: string, cluster: number[], rows: EntityRow[]): EntityChoice {
   const top = topOf(cluster, rows, name);
-  const descriptor = describe(top, cluster.map((i) => rows[i]!), name);
-  return { name, descriptor, query: choiceQuery(name, top), id: slugOf(name, top.role, top.org, top.location) || slugOf(name) };
+  const rowsIn = cluster.map((i) => rows[i]!);
+  const label = wikiQualifier(rowsIn, name);
+  const descriptor = describe({ ...top, label }, rowsIn, name);
+  // A Wikipedia qualifier IS the identity ("John Smith (explorer)"): re-ask name + qualifier,
+  // never the cluster's org/role words ("John Smith New England Author").
+  const query = label ? title(`${name} ${label}`) : choiceQuery(name, top);
+  return { name, descriptor, query, id: slugOf(name, top.role, top.org, top.location) || slugOf(name) };
 }
 
 /** Wikipedia disambiguation page: title/url "(disambiguation)" or snippet "may refer to". */
@@ -612,22 +701,80 @@ export function isDisambiguationPage(row: EntityRow): boolean {
   return false;
 }
 
+/** "/wiki/Ray_Lee" → "Ray Lee" for en.wikipedia.org rows; '' for any other host. */
+function wikiTitleOf(row: EntityRow): string {
+  if (hostOf(row.url) !== 'en.wikipedia.org') return '';
+  try {
+    return decodeURIComponent(new URL(row.url).pathname)
+      .replace(/^\/wiki\//, '')
+      .replace(/_/g, ' ')
+      .trim();
+  } catch {
+    return '';
+  }
+}
+
+/** The row is the en.wikipedia.org article for this exact name (never a disambiguation page). */
+function exactWikiArticle(row: EntityRow, name: string): boolean {
+  if (isDisambiguationPage(row)) return false;
+  const t = wikiTitleOf(row);
+  return !!t && low(t) === low(name.trim());
+}
+
+/** Title form "<name> (<qualifier>)" — a different, disambiguated person. */
+function qualifiedTitle(t: string, name: string): boolean {
+  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`^${esc}\\s*\\([^()]{1,60}\\)$`, 'i').test(t);
+}
+
+/** A different person with the same name: the SERP title is "John Smith (explorer)". */
+const qualifiedNamesake = (row: EntityRow, name: string) => qualifiedTitle(title(row.title ?? ''), name);
+
+/** The Wikipedia article title itself is disambiguated ("John Smith (explorer)"). */
+const wikiNamesake = (row: EntityRow, name: string) => qualifiedTitle(wikiTitleOf(row), name);
+
+/** Any en.wikipedia.org page about the name: the article, a list/family page or a namesake. */
+function wikiNamePage(row: EntityRow, name: string): boolean {
+  if (isDisambiguationPage(row)) return false;
+  if (hostOf(row.url) !== 'en.wikipedia.org') return false;
+  return low(title(row.title ?? '')).includes(low(name.trim()));
+}
+
+/**
+ * Cluster weight: the exact Wikipedia article for the name is the strongest signal (2),
+ * any other en.wikipedia.org page about the name is next (1.5), everything else counts once.
+ * A namesake article ("David Kim (pianist)") is a DIFFERENT person: it never boosts a cluster.
+ */
+function rowWeight(row: EntityRow, name: string): number {
+  if (exactWikiArticle(row, name)) return 2;
+  if (wikiNamePage(row, name) && !wikiNamesake(row, name)) return 1.5;
+  return 1;
+}
+
 /**
  * Seed choice descriptors from a disambiguation page's snippet/title entries
  * ("Ray Lee (coach)", "Ray Lee, American CEO", …).
  */
 export function disambiguationEntries(row: EntityRow, name: string): { role?: string; org?: string; location?: string; label: string }[] {
   const text = `${row.title ?? ''}. ${row.snippet ?? ''}`;
-  const out: { role?: string; org?: string; location?: string; label: string }[] = [];
+  const found: ({ role?: string; org?: string; location?: string; label: string } & { at: number })[] = [];
   const seen = new Set<string>();
-  const push = (label: string, role?: string, org?: string, location?: string) => {
+  const push = (at: number, label: string, role?: string, org?: string, location?: string) => {
     const k = low(label);
     if (!k || seen.has(k) || k === low(name)) return;
+    // Wiki chrome is a page, not a person ("may refer to", "List of", "look up in Wiktionary").
+    if (/wiktionary|wikipedia|all pages|see also|may refer to|topics referred|surname|given name|disambiguation|look up|list of/i.test(label)) return;
     seen.add(k);
-    out.push({ label: title(label).slice(0, 40), role, org, location });
+    found.push({ label: title(label).slice(0, 40), role, org, location, at });
   };
+  // A two-token name may carry a middle initial in both forms ("David J. Kim").
+  const namePat = (() => {
+    const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const toks = name.split(/\s+/).filter(Boolean).map(esc);
+    return toks.length === 2 ? `${toks[0]}(?:\\s+[A-Z]\\.)?\\s+${toks[1]}` : toks.join('\\s+');
+  })();
   // "Name (role)" / "Name (role, org)"
-  const paren = new RegExp(`${name.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\s*\\(([^)]{2,40})\\)`, 'gi');
+  const paren = new RegExp(`${namePat}\\s*\\(([^)]{2,40})\\)`, 'gi');
   for (const m of text.matchAll(paren)) {
     const inside = title(m[1] ?? '');
     if (/^disambiguation$/i.test(inside)) continue;
@@ -641,31 +788,45 @@ export function disambiguationEntries(row: EntityRow, name: string): { role?: st
         role = canonRole(pl).display;
       } else if (!org && !ROLE1.has(pl)) org = p;
     }
+    if (org) org = cleanCapture(org) || undefined;
     // Prefer clean wiki gloss as label when we have role (or short inside).
-    push(role && !org ? role : inside, role, org);
+    push(m.index!, role && !org ? role : inside, role, org);
   }
+  // Run-on snippets list the next namesake: stop before the first name repeats.
+  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const firstTok = name.split(/\s+/)[0] ?? '';
+  const firstStop = firstTok ? new RegExp(`\\s${esc(firstTok[0]!.toUpperCase() + firstTok.slice(1))}\\s`) : null;
   // "Name, role at Org" / "Name – role"
-  const dash = new RegExp(`${name.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\s*[,–—-]\\s*([^.;\\n]{3,50})`, 'gi');
+  const dash = new RegExp(`${namePat}\\s*[,–—-]\\s*([^.;\\n]{3,50})`, 'gi');
   for (const m of text.matchAll(dash)) {
-    const rest = title(m[1] ?? '');
+    let rest = title(m[1] ?? '');
+    if (firstStop) {
+      const stop = firstStop.exec(rest);
+      if (stop && stop.index > 0) rest = title(rest.slice(0, stop.index));
+    }
     if (/\bmay refer to\b/i.test(rest)) continue;
     const at = /\b(.+?)\s+(?:at|of|for)\s+(.+)$/i.exec(rest);
     if (at) {
       const rPart = title(at[1]!);
-      const oPart = title(at[2]!);
+      const oPart = cleanCapture(title(at[2]!)) || undefined;
       // Drop leading nationality adjectives from role ("American Businessman" → Businessman).
       const rToks = rPart.split(/\s+/);
       const rCore = rToks.filter((w) => !/^(american|british|english|canadian|australian|french|german|chinese|japanese|korean|indian)$/i.test(w));
       const roleGuess = rCore.find((w) => ROLE1.has(low(w)));
-      push(roleGuess ? `${canonRole(roleGuess).display}${oPart ? ' of ' + cleanPhrase(oPart, 18) : ''}`.slice(0, 40) : rest.slice(0, 40),
+      push(m.index!, roleGuess ? `${canonRole(roleGuess).display}${oPart ? ' of ' + cleanPhrase(oPart, 30) : ''}`.slice(0, 40) : rest.slice(0, 40),
         roleGuess ? canonRole(roleGuess).display : undefined, oPart);
     } else {
       const toks = rest.split(/\s+/);
       const roleTok = toks.find((w) => ROLE1.has(low(w)) || ROLE2.some((r) => low(w).includes(r.split(' ')[0]!)));
-      push(roleTok ? canonRole(roleTok).display : rest.slice(0, 40), roleTok ? canonRole(roleTok).display : undefined, undefined);
+      push(m.index!, roleTok ? canonRole(roleTok).display : rest.slice(0, 40), roleTok ? canonRole(roleTok).display : undefined, undefined);
     }
   }
-  return out.slice(0, 6);
+  // Source order: the snippet lists the most relevant namesake first, so a match further
+  // down ("David J. Kim, CEO and founder of C2 Education Centers") stays among the first 3.
+  return found
+    .sort((a, b) => a.at - b.at)
+    .slice(0, 6)
+    .map((e) => ({ label: e.label, role: e.role, org: e.org, location: e.location }));
 }
 
 export function resolveEntity(
@@ -726,18 +887,45 @@ export function resolveEntity(
     }
   }
 
+  // Famous name: the exact Wikipedia article plus other en.wikipedia.org pages about the same
+  // name is ONE dominant identity — never split it into choices (live: Obama, Taylor Swift).
+  if (!opts?.prior) {
+    const exactHit = eligible.find((e) => exactWikiArticle(e.row, name));
+    if (exactHit) {
+      const exact = exactHit.i;
+      // A namesake article ("John Smith (explorer)") proves ambiguity, not fame.
+      const support = rows.filter((r, i) => i !== exact && wikiNamePage(r, name) && !qualifiedNamesake(r, name)).length;
+      if (support >= 2) {
+        const win = [...new Set([...(strong.find((c) => c.includes(exact)) ?? [exact]), ...weak])];
+        // Another, disambiguated person is a different person: never credited to this one.
+        const kept = eligible.map((e) => e.i).filter((i) => !qualifiedNamesake(rows[i]!, name));
+        const keptSet = new Set(kept);
+        return {
+          kind: 'single',
+          entity: buildEntity(name, win, rows),
+          kept,
+          dropped: rows.map((_, i) => i).filter((i) => !keptSet.has(i)),
+        };
+      }
+    }
+  }
+
   // Seed choices from a disambiguation page when clustering is thin.
   if (disambig.length) {
     const entries = disambiguationEntries(rows[disambig[0]!]!, name);
     if (entries.length >= 2) {
-      const choices: EntityChoice[] = entries.slice(0, 4).map((e) => ({
-        name,
-        descriptor: describe({ role: e.role, org: e.org, location: e.location, label: e.label }, [rows[disambig[0]!]!], name) || e.label.slice(0, 40),
-        query: choiceQuery(name, { role: e.role, org: e.org, location: e.location }),
-        id: slugOf(name, e.role, e.org, e.location) || slugOf(name, e.label),
-      }));
+      const choices: EntityChoice[] = entries
+        .map((e) => ({
+          name,
+          descriptor: describe({ role: e.role, org: e.org, location: e.location, label: e.label }, [rows[disambig[0]!]!], name),
+          query: choiceQuery(name, { role: e.role, org: e.org, location: e.location }),
+          id: slugOf(name, e.role, e.org, e.location) || slugOf(name, e.label),
+        }))
+        // A choice with no descriptor says nothing about the person — never offer it.
+        .filter((c) => c.descriptor !== '')
+        .slice(0, 3);
       // Prefer real clusters when they already give ≥2 choices.
-      const clustered = strong.filter((c) => c.length >= 1).slice(0, 4).map((c) => toChoice(name, c, rows));
+      const clustered = strong.filter((c) => c.length >= 1).map((c) => toChoice(name, c, rows)).filter((c) => c.descriptor !== '').slice(0, 3);
       const merged = clustered.length >= 2 ? clustered : choices;
       if (merged.length >= 2) return { kind: 'choices', choices: merged };
     }
@@ -745,19 +933,40 @@ export function resolveEntity(
 
   // Compare strong clusters only (weak inflated the winner live and blocked choices).
   // Bare common names (no org/role in the query): allow singleton clusters as choices so a
-  // LinkedIn CEO and an IMDb director each surface (live Ray Lee / David Kim). Famous names
-  // with context, or a dominant cluster vs a singleton, still stay single (Obama dog article).
+  // LinkedIn CEO and an IMDb director each surface (live Ray Lee / David Kim). They are
+  // ranked by weight (rowWeight): the exact Wikipedia article and other en.wikipedia.org
+  // pages about the name outrank one aggregator hit, so a dominant identity is never offered
+  // as one of two choices.
+  const bare = contextTerms(query, name).length === 0;
+  const ranked = strong
+    .map((c) => ({ cluster: c, score: c.reduce((s, i) => s + rowWeight(rows[i]!, name), 0) }))
+    .sort((a, b) => b.score - a.score || b.cluster.length - a.cluster.length || a.cluster[0]! - b.cluster[0]!);
+
   if (strong.length >= 2) {
-    const [first, second] = [strong[0]!, strong[1]!];
-    const bare = contextTerms(query, name).length === 0;
-    const minSize = bare ? 1 : 2;
-    if (second.length >= minSize && first.length >= minSize && (bare || second.length >= 0.4 * first.length)) {
-      const choices = strong.filter((c) => c.length >= minSize).slice(0, 4).map((c) => toChoice(name, c, rows));
-      if (choices.length >= 2) return { kind: 'choices', choices };
+    if (bare) {
+      const top = ranked[0]!.score;
+      // Only offer a split when the runner-up is a real competitor (≥ half the top score).
+      if (ranked[1]!.score >= 0.5 * top) {
+        const choices = ranked
+          .filter((r) => r.score >= 0.5 * top)
+          .slice(0, 3)
+          .map((r) => toChoice(name, r.cluster, rows))
+          .filter((c) => c.descriptor !== '');
+        if (choices.length >= 2) return { kind: 'choices', choices };
+      }
+    } else {
+      // Asks with context terms keep the size rule.
+      const [first, second] = [strong[0]!, strong[1]!];
+      if (first.length >= 2 && second.length >= 2 && second.length >= 0.4 * first.length) {
+        const choices = strong.filter((c) => c.length >= 2).map((c) => toChoice(name, c, rows)).filter((c) => c.descriptor !== '').slice(0, 3);
+        if (choices.length >= 2) return { kind: 'choices', choices };
+      }
     }
   }
 
-  const clusters = attachWeak(strong.length ? strong : (weak.length ? [weak] : []), strong.length ? weak : []);
+  // Single: the top-ranked cluster for a bare ask (else the biggest), weak rows attached to it.
+  const pool = bare && strong.length ? [ranked[0]!.cluster] : strong;
+  const clusters = attachWeak(pool.length ? pool : (weak.length ? [weak] : []), pool.length ? weak : []);
   if (!clusters.length) return { kind: 'skip' };
   const win = clusters[0]!;
   const kept = new Set(win);
