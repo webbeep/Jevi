@@ -4,7 +4,7 @@ import { searchPlan, SEARCH_CALL_CAP } from '../server/budget.ts';
 import { diversify } from '../server/diversify.ts';
 import { isStoreProductAsk, settleCardPrices } from '../shared/pricing.ts';
 import {
-  differsFromVendor, firstOfficial, isProductShopAsk, listPriceFor, officialDomains, priceFlag, productWords,
+  differsFromVendor, firstOfficial, isProductShopAsk, listPriceFor, officialDomains, plausibleRetail, priceFlag, productWords,
   stampOfficialPriceCite, vendorPrices, vendorSiteQuery, type VendorHit,
 } from '../shared/vendorPrice.ts';
 
@@ -169,4 +169,12 @@ test('flag math', () => {
 test('not a shopping ask: the card is untouched', () => {
   const nodes: Node[] = [{ type: 'text', text: 'Costs about $5.' }];
   assert.deepEqual(settle(nodes, 'WHO physical activity guidelines', P08_HITS), nodes);
+});
+
+test('retailer price >35% off vendor is a different item: no flag, not shown', () => {
+  assert.equal(priceFlag(349, 749), undefined);
+  assert.equal(priceFlag(400, 1199), undefined);
+  assert.equal(plausibleRetail(349, 749), false);
+  assert.ok(priceFlag(999, 1199));
+  assert.equal(priceFlag(999, 1199)?.pct, 17);
 });
