@@ -166,20 +166,6 @@ export async function pageText(url: string, env: Env, timeoutMs = 9000, maxChars
  * `need` are available, the rest are fetched in parallel and the call returns
  * as soon as `need` pages are in hand or the budget runs out.
  */
-/**
- * Reads the manufacturer's own product page for a shopping ask. Direct fetch, no Jina:
- * a store page is HTML we can parse in one request, and the price on it is the one the
- * card shows, so it is worth reading even when the page budget skipped it.
- */
-export async function storePageText(url: string, scope?: AskScope, timeoutMs = 2500, maxChars = 6000): Promise<string> {
-  if (!isFetchable(url)) throw new Error('URL not allowed');
-  bump(scope, 'direct');
-  const text = await direct(url, AbortSignal.timeout(timeoutMs));
-  if (text.length < MIN_TEXT) throw new Error('not enough text');
-  return text.length > maxChars ? `${text.slice(0, maxChars)}…` : text;
-}
-
-
 export async function collectPages(
   results: SearchResult[],
   env: Env,

@@ -5,16 +5,16 @@ import { entityContextLine, entityHintFor, priorEntity, resolveEntity } from './
 import { type EntityHint, mentionsAny } from './imageGate';
 import type { RowImagePlan } from './pictures';
 import type { AnswerCard, FollowupContext, FollowupIntent, LayoutPlan } from '../shared/card';
-import type { EngineStatus, Freshness, ImageResult, SearchResponse, SearchResult } from '../shared/types';
+import type { EngineStatus, Freshness, ImageResult, SearchResponse } from '../shared/types';
 import { rewriteQuery } from './ai';
 import { designParallel, designStream } from './design';
 import { permitted } from './images';
 import { hasLlm } from './llm';
-import { collectPages, ogImageOf, type PageText, storePageText } from './pages';
+import { collectPages, ogImageOf } from './pages';
 import { MADE_PATTERNS } from './patterns';
 import { planLayout } from './plan';
 import type { AskScope, CallLedger } from './budget';
-import { logAsk, moreQueries, newLedger, queriesForAsk, searchPlan } from './budget';
+import { logAsk, moreQueries, newLedger, queriesForAsk } from './budget';
 import { gateResults } from './relevanceGate';
 import { entityQuery, relaxQuery } from './queryClean';
 import { type LateExtras, searchWithLate } from './search';
@@ -22,8 +22,6 @@ import type { Send } from './sse';
 import { extraQueries, understand } from './understand';
 import { cacheBypass, testForce, validTestToken } from './token';
 import type { Env } from './util';
-import { firstOfficial } from '../shared/vendorPrice';
-import { isStoreProductAsk } from '../shared/pricing';
 
 export interface CardOnScreen {
   id: number;
@@ -120,23 +118,6 @@ function applyRelevance(query: string, response: SearchResponse, ledger: CallLed
   return gated.dropped ? { ...response, results: gated.kept } : response;
 }
 
-/**
- * A shopping ask reads the manufacturer's own product page even when the page budget
- * skipped it: the "From" price on that page is the one the card shows, and it is the
- * citation a vendor price needs. Direct fetch, one page, 2.5s bound.
- */
-async function storePage(req: DesignArgs, pages: PageText[], scope: AskScope): Promise<{ page: PageText; content: SearchResult[] } | undefined> {
-  if (req.followup || !isStoreProductAsk(req.query)) return undefined;
-  const store = firstOfficial(req.search.results, req.query);
-  if (!store) return undefined;
-  const n = req.search.results.indexOf(store);
-  if (n < 0 || n > 11 || store.content || pages.some((p) => p.n === n + 1)) return undefined;
-  const text = await storePageText(store.url, scope).catch(() => undefined);
-  if (!text) return undefined;
-  const content = req.search.results.map((r, i) => (i === n ? { ...r, content: text } : r));
-  return { page: { n: n + 1, url: store.url, text }, content };
-}
-
 async function design(send: Send, env: Env, req: DesignArgs, started: number, scope: AskScope, late?: Promise<LateExtras>) {
   // Follow-ups keep the sources already gated for the original question.
   if (!req.followup) req = { ...req, search: applyRelevance(req.query, req.search, scope.ledger) };
@@ -147,14 +128,8 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   // Conversation turns reason from what is already known; everything else reads pages first.
   const chat = req.followup?.mode === 'chat';
   const budget = chat ? { count: 3, need: 0, budgetMs: 0 } : req.deep ? DEEP_PAGES : pageBudget(req.readPages);
-  const collected = await collectPages(req.search.results, env, budget, late, scope);
-  // V3: the store page of a shopping ask is read on its own when the page budget skipped it,
-  // so its "From $X" reaches the card (client reconcile reads result content).
-  const store = await storePage(req, collected, scope);
-  const before = req.search.results;
-  if (store) req = { ...req, search: { ...req.search, results: store.content } };
-  const pages = store ? [...collected, store.page] : collected;
-  const fresh = pages.filter((p) => !before[p.n - 1]?.content);
+  const pages = await collectPages(req.search.results, env, budget, late, scope);
+  const fresh = pages.filter((p) => !req.search.results[p.n - 1]?.content);
   if (fresh.length) send('pages', fresh.map(({ n, url, text }) => ({ n, url, text })));
 
   // Page preview images and images from engines that answered late are often the most relevant ones.
@@ -207,11 +182,9 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   const route = routeOf(query);
   scope.ledger.route = route;
   const deep = route === 'deep';
-  // V3: a shopping ask spends one of its calls on the manufacturer's own pages (literal search still first).
-  const searches = searchPlan(query, moreQueries(query, extras));
-  const more = routeExtras(route, searches.more);
+  const more = routeExtras(route, moreQueries(query, extras));
   const fresh = freshness === 'any' && u ? u.freshness : freshness;
-  const found = await searchWithLate({ q, more, vendorDomains: searches.vendorDomains, freshness: fresh, count: 20 }, env, scope);
+  const found = await searchWithLate({ q, more, freshness: fresh, count: 20 }, env, scope);
   let results = applyRelevance(query, { ...found.response, query }, scope.ledger);
   let late: Promise<LateExtras> | undefined = found.late;
 

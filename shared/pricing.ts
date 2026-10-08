@@ -3,8 +3,6 @@
  * Totals are a pure function of the price and a seat count — never a model estimate.
  */
 
-import { isProductShopAsk, reconcileProductPrices, type VendorHit } from './vendorPrice';
-
 export type PriceUnit = 'seat' | 'flat';
 export type PricePeriod = 'month' | 'year';
 export type BillingBasis = 'monthly' | 'annual';
@@ -229,12 +227,6 @@ export function pricingTableAmounts(nodes: readonly unknown[]): number[] {
   return [...found];
 }
 
-/** A hardware store question. Plan catalogs (Workspace, per-seat) keep the pricing-table path. */
-export function isStoreProductAsk(query: string): boolean {
-  if (!isProductShopAsk(query) || inferSeats(query) != null) return false;
-  return !/\b(google workspace|g suite|workspace|per seat|per user|business starter)\b/i.test(query);
-}
-
 /**
  * Prices on a plan question's card, settled across every node (they stream in any order).
  * Once the card has a pricing table with sourced prices, a dollar amount outside the table
@@ -242,9 +234,7 @@ export function isStoreProductAsk(query: string): boolean {
  * stray and is removed. Until a sourced table exists there is nothing to move prices to,
  * so nothing is removed (product questions like "X vs Y, what do they cost?" keep their prices).
  */
-export function settleCardPrices<T>(nodes: readonly (T | undefined)[], query: string, hits?: readonly VendorHit[]): (T | undefined)[] {
-  // V3: a store-product ask shows the vendor's "From" price (cited) next to retailer prices, flags >5% gaps, never drops a product.
-  if (isStoreProductAsk(query)) return reconcileProductPrices(nodes, query, hits ?? []);
+export function settleCardPrices<T>(nodes: readonly (T | undefined)[], query: string): (T | undefined)[] {
   if (!isPlanQuery(query)) return [...nodes];
   const keep = pricingTableAmounts(nodes);
   if (!keep.length) return [...nodes];
