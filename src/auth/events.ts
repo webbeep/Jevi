@@ -3,7 +3,7 @@ import { ssGet, ssSet } from './storage';
 import { readFirstTouch } from './utm';
 
 export type AskFrom = 'typed' | 'suggestion' | 'q_link';
-export type SignInTrigger = 'value' | 'soft' | 'wall' | 'welcome' | 'header' | 'onetap';
+export type SignInTrigger = 'value' | 'soft' | 'wall' | 'welcome' | 'header' | 'onetap' | 'save';
 
 const SID = 'zo_sid';
 const FIRST = 'zo_first_ask';
@@ -39,9 +39,10 @@ function baseProps(extra: Record<string, unknown>): Record<string, unknown> {
   return props;
 }
 
-/** POST /api/events. Never throws. */
-export function track(name: string, extra: Record<string, unknown> = {}) {
+/** POST /api/events. Never throws. Skipped unless sign-in is enabled, unless `force` (a 401 already proved the gate is on). */
+export function track(name: string, extra: Record<string, unknown> = {}, force = false) {
   try {
+    if (!force && !getAuth().enabled) return;
     const body = JSON.stringify({ name, props: baseProps(extra) });
     const blob = new Blob([body], { type: 'application/json' });
     const queued = typeof navigator.sendBeacon === 'function' && navigator.sendBeacon('/api/events', blob);

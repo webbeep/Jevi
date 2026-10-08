@@ -8,7 +8,8 @@ import { emptyDoneState } from '../shared/sse-parse';
 import type { SearchResponse, SearchResult } from '../shared/types';
 import { api } from './api';
 import { withBrowserFallback } from './fallback';
-import { StreamError, type StreamBody, type StreamEvent, shouldAutoRetry, stream } from './sse';
+import { reportNeedSignin } from './auth/gatebus';
+import { NeedSigninError, StreamError, type StreamBody, type StreamEvent, shouldAutoRetry, stream } from './sse';
 
 export type TurnKind = 'search' | 'answer' | 'digest';
 
@@ -308,6 +309,25 @@ export function useSession() {
         }
       }
     } catch (err) {
+      if (err instanceof NeedSigninError) {
+        if (alive()) {
+          const turn = get(route);
+          const question = turn?.question ?? (body.kind === 'followup' ? body.question : body.query);
+          const dropped = !turn || !turn.result;
+          if (turn && !turn.result) commit((all) => all.filter((t) => t.id !== route));
+          else if (turn) update(route, { filling: false, status: undefined, live: undefined, thinking: false, error: undefined, retryable: undefined });
+          const pending = dropped && question
+            ? {
+                q: question,
+                kind: body.kind === 'followup' ? 'followup' as const : 'search' as const,
+                fromId: body.kind === 'followup' ? body.from : undefined,
+                intent: body.kind === 'followup' ? body.intent : undefined,
+              }
+            : null;
+          reportNeedSignin(err, pending ? question : '', pending);
+        }
+        return;
+      }
       let restored = false;
       if (alive() && connectionLost(err, controller.signal.aborted)) {
         const turn = get(route);

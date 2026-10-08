@@ -151,6 +151,19 @@ test('signed-out and anonymous saves are 401 and a huge card is 413', async () =
   assert.equal((db.prepare('SELECT COUNT(*) AS n FROM user').get() as { n: number }).n, 2);
 });
 
+test('auth off or no database is 404 and writes nothing', async () => {
+  const { db, env } = mem();
+  const user = await signIn(db, 'user-off');
+  const off = { ...env, AUTH_ENABLED: 'false' };
+  const res = await handleSaveCollection(post(user, { query: 'x', title: 't', card: { ok: true } }), off);
+  assert.equal(res.status, 404);
+  assert.deepEqual(await res.json(), { error: 'Sign-in is disabled' });
+  const noDb = { AUTH_ENABLED: 'true', SESSION_SECRET: SECRET } as Env;
+  const missing = await handleSaveItem(new Request('http://127.0.0.1/api/saves/abc', { headers: { cookie: user } }), noDb, 'abc');
+  assert.equal(missing.status, 404);
+  assert.equal((db.prepare('SELECT COUNT(*) AS n FROM saved_items').get() as { n: number }).n, 0);
+});
+
 test('test token does not create a user or a save', async () => {
   const { db, env } = mem();
   env.ZO_TEST_TOKEN = 'probe-token';

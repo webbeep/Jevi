@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import { ChevronRight, Image as ImageIcon, Loader2, MoreHorizontal, RefreshCw } from 'lucide-react';
 import type { AnswerCard, CardNode, CardPattern } from '../../shared/card';
 import { cn } from '@/lib/utils';
@@ -56,7 +56,7 @@ function pictureSources(body: CardNode[], images: { thumb: string }[]): string[]
   return [...new Set(out.filter(Boolean))];
 }
 
-export function AnswerCardView({ card, version, filling, streaming, status, pattern, alternatives, engine, onPattern, simple, onSimple, onRegenerate }: {
+export function AnswerCardView({ card, version, filling, streaming, status, pattern, alternatives, engine, onPattern, simple, onSimple, onRegenerate, toolbar }: {
   card: AnswerCard;
   /** Changes whenever a fresh design starts, replaying the entrance animation. */
   version: string;
@@ -72,6 +72,7 @@ export function AnswerCardView({ card, version, filling, streaming, status, patt
   simple: boolean;
   onSimple: (v: boolean) => void;
   onRegenerate: () => void;
+  toolbar?: ReactNode;
 }) {
   const { images, credits, results, onSources } = useCard();
   const credited = useMemo(
@@ -91,6 +92,8 @@ export function AnswerCardView({ card, version, filling, streaming, status, patt
           <h2 className="text-balance text-[16.5px] font-semibold leading-[1.3] tracking-[-0.02em] sm:text-[17px]">{card.title}</h2>
           {filling && !card.subtitle ? <Skeleton className="mt-1 h-3 w-32" /> : card.subtitle && <p className="mt-0.5 text-pretty text-[13px] leading-snug text-muted-foreground">{card.subtitle}</p>}
         </div>
+        <div className="flex shrink-0 items-center">
+          {toolbar}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" className="size-8 shrink-0 text-muted-foreground" aria-label="Card options">
@@ -134,6 +137,7 @@ export function AnswerCardView({ card, version, filling, streaming, status, patt
             )}
           </DropdownMenuContent>
         </DropdownMenu>
+        </div>
       </div>
 
       {status && (

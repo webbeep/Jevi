@@ -26,6 +26,16 @@ export async function sessionToken(cookieHeader: string | null, secret: string):
   return (await hmacVerifyB64(secret, token, sig)) ? token : null;
 }
 
+/** Delete the Better Auth session row for this cookie. One statement, no Better Auth import. */
+export async function deleteSession(request: Request, env: Env): Promise<void> {
+  const secret = sessionSecret(env);
+  const db = d1(env);
+  if (!secret || !db) return;
+  const token = await sessionToken(request.headers.get('cookie'), secret);
+  if (!token) return;
+  await db.prepare(`DELETE FROM session WHERE token = ?1`).bind(token).run();
+}
+
 /** Sign a session token the same way Better Auth's setSignedCookie does. Tests and local fixtures only. */
 export async function signSessionToken(token: string, secret: string): Promise<string> {
   const sig = await crypto.subtle.sign('HMAC', await hmacKey(secret), new TextEncoder().encode(token));

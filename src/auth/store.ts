@@ -84,7 +84,16 @@ function asUser(value: unknown): AuthUser | null {
 }
 
 export function applyUsage(partial: Partial<Pick<AuthState, 'used' | 'limit' | 'remaining' | 'signedIn'>>) {
-  setState({ ...state, ...partial });
+  const next = { ...state };
+  if (partial.used != null) next.used = partial.used;
+  if (partial.limit != null) next.limit = partial.limit;
+  if (partial.remaining != null) next.remaining = partial.remaining;
+  if (partial.signedIn != null) next.signedIn = partial.signedIn;
+  setState(next);
+}
+
+export function markSignedOut() {
+  setState({ ...state, user: null, signedIn: false, ready: true });
 }
 
 export function setEmailOptIn(value: boolean) {

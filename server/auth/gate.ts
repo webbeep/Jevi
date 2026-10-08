@@ -121,11 +121,13 @@ export async function readFacingUsage(request: Request, env: Env, user: ZoUser |
       used = 0;
     }
   }
+  used = Math.min(used, limit);
   return { used, limit, remaining: Math.max(0, limit - used), signedIn, day };
 }
 
-function deny(used: number, limit: number, signedIn: boolean, reason: GateReason): GateDecision {
-  return { ok: false, body: { need_signin: true, used, limit, remaining: 0, signedIn, reason } };
+/** Reported `used` is min(stored count, limit). The row can be one past the cap; the 401 never says limit+1. */
+function deny(count: number, limit: number, signedIn: boolean, reason: GateReason): GateDecision {
+  return { ok: false, body: { need_signin: true, used: Math.min(count, limit), limit, remaining: 0, signedIn, reason } };
 }
 
 /**

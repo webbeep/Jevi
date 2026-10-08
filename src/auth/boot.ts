@@ -1,51 +1,62 @@
 import { peekSnapshot, snapshotQuery } from './bridge';
+import { parseAuthReturn, type AuthReturnStatus } from './logic';
+import { peekPending } from './pending';
+import { ssGet } from './storage';
 import { captureFirstTouch } from './utm';
-import { ssGet, ssSet } from './storage';
 
 export interface AuthQuery {
-  status: 'ok' | 'cancelled' | 'error' | null;
+  status: AuthReturnStatus;
   isNew: boolean;
+  errorCode: string | null;
   trigger: string | null;
   q: string | null;
-  firstPageLoad: boolean;
 }
 
 let query: AuthQuery | null = null;
 
-function replaceSearch(params: URLSearchParams) {
-  const qs = params.toString();
-  history.replaceState(history.state, '', `${location.pathname}${qs ? `?${qs}` : ''}${location.hash}`);
+function remember(next: AuthQuery) {
+  query = next;
 }
 
-/** UTM first, then read ?auth= or /error and strip them. Keeps q. Run once before render. */
+/** UTM first, then read ?auth= and strip it. Keeps q. Run once before render. */
 export function bootCapture() {
   if (query) return;
   captureFirstTouch();
-  const params = new URLSearchParams(location.search);
   const trigger = ssGet('zo_signin_trigger');
-  const firstPageLoad = ssGet('zo_visit') !== '1';
-  ssSet('zo_visit', '1');
 
   if (location.pathname === '/error') {
+    const params = new URLSearchParams(location.search);
     const code = params.get('error') || '';
     const status = code === 'access_denied' ? 'cancelled' : 'error';
     const q = snapshotQuery(peekSnapshot());
     history.replaceState(history.state, '', q ? `/?q=${encodeURIComponent(q)}` : '/');
-    query = { status, isNew: false, trigger, q, firstPageLoad };
+    remember({ status, isNew: false, errorCode: code || null, trigger, q });
     return;
   }
 
-  const raw = params.get('auth');
-  const status = raw === 'ok' || raw === 'cancelled' || raw === 'error' ? raw : null;
-  const isNew = params.get('new') === '1';
-  if (params.has('auth') || params.has('new')) {
-    params.delete('auth');
-    params.delete('new');
-    replaceSearch(params);
+  const parsed = parseAuthReturn(location.search);
+  if (parsed.changed) {
+    const qs = parsed.search;
+    history.replaceState(history.state, '', `${location.pathname}${qs ? `?${qs}` : ''}${location.hash}`);
   }
-  query = { status, isNew, trigger, q: params.get('q'), firstPageLoad };
+  const kept = new URLSearchParams(parsed.search);
+  remember({
+    status: parsed.status,
+    isNew: parsed.isNew,
+    errorCode: parsed.errorCode,
+    trigger,
+    q: kept.get('q'),
+  });
 }
 
 export function getAuthQuery(): AuthQuery {
-  return query ?? { status: null, isNew: false, trigger: null, q: null, firstPageLoad: true };
+  return query ?? { status: null, isNew: false, errorCode: null, trigger: null, q: null };
+}
+
+/** Skip the address-bar search when a sign-in return will restore or replay it. */
+export function skipInitialQuery(): boolean {
+  const current = getAuthQuery();
+  if (current.status === 'cancelled' || current.status === 'error') return true;
+  if (current.status === 'ok' && (peekPending() || peekSnapshot())) return true;
+  return false;
 }

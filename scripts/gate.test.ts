@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { carrySubject } from '../server/auth/carry.ts';
 import { signDevice } from '../server/auth/device.ts';
 import { applyGate, bumpUsage } from '../server/auth/gate.ts';
-import { me, safeReturnPath } from '../server/auth/facade.ts';
+import { logout, me, returnTarget, safeReturnPath, signInCallbackUrls } from '../server/auth/facade.ts';
 import { recordEvent } from '../server/auth/events.ts';
 import { signSessionToken, type ZoUser } from '../server/auth/session.ts';
 import type { Env } from '../server/util.ts';
@@ -70,7 +70,7 @@ test('counts anonymous asks and blocks on the device limit', async () => {
   }
   assert.equal(decisions[5]?.ok, false);
   if (!decisions[5]?.ok) {
-    assert.deepEqual(decisions[5].body, { need_signin: true, used: 6, limit: 5, remaining: 0, signedIn: false, reason: 'device' });
+    assert.deepEqual(decisions[5].body, { need_signin: true, used: 5, limit: 5, remaining: 0, signedIn: false, reason: 'device' });
   }
 });
 
@@ -110,13 +110,13 @@ test('x-zo-retry does not increment device, IP, or signed counts', async () => {
 
   const manual = await applyGate(new Request('http://127.0.0.1/api/stream', { headers: { ...headers, 'x-zo-retry': '0' } }), env, when, nobody);
   assert.equal(manual.ok, false);
-  if (!manual.ok) assert.deepEqual(manual.body, { need_signin: true, used: 6, limit: 5, remaining: 0, signedIn: false, reason: 'device' });
+  if (!manual.ok) assert.deepEqual(manual.body, { need_signin: true, used: 5, limit: 5, remaining: 0, signedIn: false, reason: 'device' });
   const over = usageRows(db);
   assert.equal(over.find((r) => r.subject_key.startsWith('d:'))?.count, 6);
   assert.equal(over.find((r) => r.subject_key.startsWith('ip:'))?.count, 6);
   const stillOver = await applyGate(new Request('http://127.0.0.1/api/stream', { headers: { ...headers, 'x-zo-retry': '1' } }), env, when, nobody);
   assert.equal(stillOver.ok, false);
-  if (!stillOver.ok) assert.equal(stillOver.body.used, 6);
+  if (!stillOver.ok) assert.equal(stillOver.body.used, 5);
   assert.deepEqual(usageRows(db), over);
 
   env.GATE_SIGNED_PER_DAY = '1';
@@ -175,6 +175,8 @@ test('signed-in users use the signed-in cap', async () => {
     assert.equal(c.body.reason, 'signed');
     assert.equal(c.body.signedIn, true);
     assert.equal(c.body.remaining, 0);
+    assert.equal(c.body.used, 2);
+    assert.equal(c.body.limit, 2);
   }
 });
 
@@ -215,6 +217,8 @@ test('IP hash is stored and the raw IP is not', async () => {
     assert.equal(second.body.reason, 'ip');
     assert.equal(second.body.signedIn, false);
     assert.equal(second.body.remaining, 0);
+    assert.equal(second.body.used, 1);
+    assert.equal(second.body.limit, 1);
   }
   const stored = keys(db);
   assert.equal(stored.some((k) => k.startsWith('ip:') && /^ip:[0-9a-f]{64}$/.test(k)), true);
@@ -247,6 +251,23 @@ test('return path stays on this origin', () => {
   assert.equal(safeReturnPath('//evil.example'), '/');
 });
 
+test('sign-in callback urls keep the return query and mark the outcome', () => {
+  const urls = signInCallbackUrls('/answers?q=trains#card');
+  assert.deepEqual(urls, {
+    callbackURL: '/answers?q=trains&auth=ok#card',
+    newUserCallbackURL: '/answers?q=trains&auth=ok&new_user=1#card',
+    errorCallbackURL: '/answers?q=trains&auth=error#card',
+  });
+  assert.equal(signInCallbackUrls('/welcome').callbackURL, '/welcome?auth=ok');
+  assert.equal(signInCallbackUrls('https://evil.example/phish').errorCallbackURL, '/?auth=error');
+  assert.equal(signInCallbackUrls(null).newUserCallbackURL, '/?auth=ok&new_user=1');
+  const both = new URL('http://127.0.0.1/api/auth/start?return=/from-return&return_to=/from-alias');
+  assert.equal(returnTarget(both), '/from-return');
+  const alias = new URL('http://127.0.0.1/api/auth/google?return_to=/kept');
+  assert.equal(returnTarget(alias), '/kept');
+  assert.equal(signInCallbackUrls(returnTarget(alias)).callbackURL, '/kept?auth=ok');
+});
+
 test('events allowlist drops pii and stores the rest', async () => {
   const { db, env } = mem();
   const res = await recordEvent(
@@ -265,7 +286,8 @@ test('events allowlist drops pii and stores the rest', async () => {
   assert.equal(row.props_json.includes('sheet'), true);
   assert.match(row.subject_key, /^d:/);
   const bad = await recordEvent(new Request('http://127.0.0.1/api/events', { method: 'POST', body: JSON.stringify({ name: 'nope' }) }), env);
-  assert.equal(bad.status, 400);
+  assert.equal(bad.status, 204);
+  assert.equal((db.prepare('SELECT COUNT(*) AS n FROM events').get() as { n: number }).n, 1);
 });
 
 test('a signed zo_sess cookie is one session lookup and uses the signed-in cap', async () => {
@@ -302,7 +324,7 @@ test('a signed zo_sess cookie is one session lookup and uses the signed-in cap',
   assert.equal(body.auth_enabled, true);
   assert.equal(body.signedIn, true);
   assert.equal(body.user?.id, 'user-9');
-  assert.equal(body.used, 2);
+  assert.equal(body.used, 1); // /me clamps used to limit (stored row is 2)
   assert.equal(body.limit, 1);
   assert.equal(body.remaining, 0);
   assert.equal(body.day, when.toISOString().slice(0, 10));
@@ -350,6 +372,20 @@ test('test token never counts and never writes a session', async () => {
   const counted = await applyGate(new Request('http://127.0.0.1/api/stream', { headers }), unset, new Date('2026-10-07T00:00:00Z'), async () => null);
   assert.equal(counted.ok, true);
   assert.equal(keys(db).length, 1);
+});
+
+test('logout deletes the session row and clears the cookie', async () => {
+  const { db, env } = mem();
+  db.exec(`CREATE TABLE session (id TEXT PRIMARY KEY, token TEXT, userId TEXT, expiresAt TEXT, createdAt TEXT, updatedAt TEXT);`);
+  const token = 'logout-token';
+  db.prepare(`INSERT INTO session (id, token, userId, expiresAt, createdAt, updatedAt) VALUES ('s-out', ?, 'user-1', '2099-01-01T00:00:00.000Z', '2026-10-01', '2026-10-01')`).run(token);
+  const res = await logout(
+    new Request('http://127.0.0.1/api/auth/logout', { method: 'POST', headers: { cookie: `zo_sess=${await signSessionToken(token, SECRET)}` } }),
+    env,
+  );
+  assert.equal(res.status, 204);
+  assert.match(res.headers.get('set-cookie') || '', /zo_sess=/);
+  assert.equal((db.prepare('SELECT COUNT(*) AS n FROM session').get() as { n: number }).n, 0);
 });
 
 test('stream and middleware module graphs do not import better-auth', () => {

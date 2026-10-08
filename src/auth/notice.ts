@@ -1,6 +1,10 @@
 import { useSyncExternalStore } from 'react';
 
-export type AuthNotice = { kind: 'cancelled' } | { kind: 'error'; outOfFree: boolean } | { kind: 'cap' };
+export type AuthNotice =
+  | { kind: 'cancelled' }
+  | { kind: 'error' }
+  | { kind: 'signed'; limit: number }
+  | { kind: 'ip'; limit: number };
 
 let notice: AuthNotice | null = null;
 const listeners = new Set<() => void>();

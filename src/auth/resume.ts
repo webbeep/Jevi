@@ -1,22 +1,29 @@
-import { sendAttribution, retryAttribution } from './attribution';
 import { getAuthQuery } from './boot';
 import { track } from './events';
+import { type PendingQ, takePending } from './pending';
 import { setAuthNotice } from './notice';
-import { takePending, type PendingQ } from './pending';
-import { ssDel, lsGet } from './storage';
-import { getAuth } from './store';
+import { ssDel } from './storage';
+import { getAuth, refresh } from './store';
 import { takeSnapshot } from './bridge';
+import { loadPrefsAndMaybeMerge } from './sync';
 
 export interface BootPlan {
   snapshot: unknown;
-  /** Run the address-bar question only when nothing was restored from the sign-in snapshot. */
-  runQ: string | null;
   pendingRun: PendingQ | null;
   pendingRestore: PendingQ | null;
-  showOptIn: boolean;
+  flushSave: boolean;
 }
 
 let applied = false;
+let bootPromise: Promise<BootPlan | null> | null = null;
+let bootClaimed = false;
+
+/** First caller after paint wins, so a strict-mode remount does not replay the plan. */
+export function claimBoot() {
+  if (bootClaimed) return false;
+  bootClaimed = true;
+  return true;
+}
 
 /** After /api/auth/me. Safe to call twice; the second call is a no-op. */
 export function finishBoot(): BootPlan | null {
@@ -26,42 +33,41 @@ export function finishBoot(): BootPlan | null {
   const q = getAuthQuery();
   const auth = getAuth();
   const signedIn = auth.enabled && auth.signedIn;
+  const success = q.status === 'ok' && signedIn;
   const failed = q.status === 'cancelled' || q.status === 'error';
-  const success = q.status === 'ok' || (!!q.trigger && signedIn && !failed);
-  let newUser: boolean | undefined;
-  if (q.isNew || auth.user?.new_user === true) newUser = true;
-  else if (auth.user?.new_user === false) newUser = false;
+
+  if (q.trigger) ssDel('zo_signin_trigger');
 
   if (success) {
     const props: Record<string, unknown> = { trigger: q.trigger || 'header' };
-    if (newUser !== undefined) props.new_user = newUser;
+    if (q.isNew) props.new_user = true;
     track('signin_ok', props);
-    ssDel('zo_signin_trigger');
-    // Unknown new_user still posts once; the server writes src_utm only when it is null.
-    if (newUser !== false) sendAttribution();
-    else retryAttribution();
   } else if (q.status === 'cancelled') {
-    ssDel('zo_signin_trigger');
+    track('signin_error', { code: 'access_denied' });
     setAuthNotice({ kind: 'cancelled' });
-  } else if (q.status === 'error') {
-    ssDel('zo_signin_trigger');
-    setAuthNotice({ kind: 'error', outOfFree: auth.remaining === 0 && auth.limit > 0 });
-  } else if (signedIn) retryAttribution();
+  } else if (q.status === 'error' || q.status === 'ok') {
+    track('signin_error', { code: q.errorCode || 'error' });
+    setAuthNotice({ kind: 'error' });
+  }
 
-  const snapshot = takeSnapshot();
+  const snapshot = q.status ? takeSnapshot() : null;
   let pendingRun: PendingQ | null = null;
   let pendingRestore: PendingQ | null = null;
+  if (success) pendingRun = takePending();
+  else if (failed || q.status === 'ok') pendingRestore = takePending();
 
-  if (failed) pendingRestore = takePending();
-  else if (signedIn && success) pendingRun = takePending();
+  return { snapshot, pendingRun, pendingRestore, flushSave: success };
+}
 
-  const runQ = !failed && snapshot == null && !pendingRun ? q.q : null;
-  const asked = lsGet('zo_optin_asked') === '1' || auth.optinAsked;
-  return {
-    snapshot,
-    runQ,
-    pendingRun,
-    pendingRestore,
-    showOptIn: success && signedIn && !asked,
-  };
+/** One /api/auth/me per page, then prefs. Does not block first paint. */
+export function bootAuthOnce(): Promise<BootPlan | null> {
+  if (!bootPromise) {
+    bootPromise = (async () => {
+      await refresh();
+      const plan = finishBoot();
+      await loadPrefsAndMaybeMerge();
+      return plan;
+    })();
+  }
+  return bootPromise;
 }

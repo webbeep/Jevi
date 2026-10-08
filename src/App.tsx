@@ -1,4 +1,12 @@
 import { type FormEvent, type RefObject, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { skipInitialQuery } from './auth/boot';
+import { registerSnapshot } from './auth/bridge';
+import { AuthHeader, AuthRoot } from './auth/chrome';
+import { SaveButton } from './auth/SaveButton';
+import { UsageLine } from './auth/UsageLine';
+import { bootAuthOnce, claimBoot } from './auth/resume';
+import { flushPendingSave } from './auth/saves';
+import { clearSyncedHistory, noteDeviceAsk } from './auth/sync';
 import { ArrowUp, CornerDownRight, CornerLeftUp, History, Moon, Pencil, Plus, RotateCw, Search, Shuffle, SlidersHorizontal, Sun, WifiOff, X } from 'lucide-react';
 import type { AnswerCard, CardNode } from '../shared/card';
 import type { SearchResponse } from '../shared/types';
@@ -180,6 +188,7 @@ export default function App() {
     savePending(localStorage, query);
     setRecents(pushRecent(query));
     recordAsk(localStorage, query);
+    noteDeviceAsk();
     setHistRev((n) => n + 1);
     refresh();
     typeahead.close();
@@ -200,22 +209,56 @@ export default function App() {
     history.pushState(null, '', '/');
   };
 
+  const turnsRef = useRef(turns);
+  turnsRef.current = turns;
+  useEffect(() => {
+    registerSnapshot(() => (turnsRef.current.length ? turnsRef.current : null));
+    return () => registerSnapshot(null);
+  }, []);
+  useEffect(() => {
+    const onHistory = () => {
+      setHistRev((n) => n + 1);
+      refresh();
+    };
+    window.addEventListener('zo-history', onHistory);
+    return () => window.removeEventListener('zo-history', onHistory);
+  }, [refresh]);
+
   useEffect(() => {
     const openQuery = (q: string) => {
       const cached = readAnswerCache(q);
       if (cached) session.restore(cached);
       else session.search(q, { reset: true });
     };
-    const q = initial.get('q');
-    if (q) openQuery(q);
-    else {
-      const pending = loadPending(localStorage);
-      if (pending) {
-        shown.current = pending;
-        history.pushState(null, '', `?${new URLSearchParams({ q: pending })}`);
-        openQuery(pending);
+    if (!skipInitialQuery()) {
+      const q = initial.get('q');
+      if (q) openQuery(q);
+      else {
+        const pending = loadPending(localStorage);
+        if (pending) {
+          shown.current = pending;
+          history.pushState(null, '', `?${new URLSearchParams({ q: pending })}`);
+          openQuery(pending);
+        }
       }
     }
+    let live = true;
+    void bootAuthOnce().then((plan) => {
+      if (!live || !claimBoot() || !plan) return;
+      if (plan.pendingRun?.kind === 'search') {
+        shown.current = plan.pendingRun.q;
+        session.search(plan.pendingRun.q, { reset: true });
+      } else if (isTurnList(plan.snapshot)) {
+        session.restore(plan.snapshot);
+        shown.current = plan.snapshot[0].question;
+      }
+      if (plan.pendingRestore) {
+        setInput(plan.pendingRestore.q);
+        window.dispatchEvent(new CustomEvent('zo-draft', { detail: plan.pendingRestore.q }));
+      }
+      if (plan.pendingRun?.kind === 'followup') void session.followup(plan.pendingRun.q, plan.pendingRun.fromId, plan.pendingRun.intent);
+      if (plan.flushSave) void flushPendingSave();
+    });
     const onPop = () => {
       if (overlay.current) return closeOverlays();
       const next = new URLSearchParams(location.search).get('q') ?? '';
@@ -227,7 +270,10 @@ export default function App() {
       else session.clear();
     };
     window.addEventListener('popstate', onPop);
-    return () => window.removeEventListener('popstate', onPop);
+    return () => {
+      live = false;
+      window.removeEventListener('popstate', onPop);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -252,6 +298,7 @@ export default function App() {
   const wipeHistory = () => {
     clearHistory(localStorage);
     clearTypeaheadClientCache();
+    void clearSyncedHistory();
     setRecents([]);
     setHistRev((n) => n + 1);
     refresh();
@@ -265,7 +312,8 @@ export default function App() {
 
         {home ? (
           <>
-            <header className="flex h-14 items-center justify-end px-3 sm:px-5">
+            <header className="flex h-14 items-center justify-end gap-1 px-3 sm:px-5">
+              <AuthHeader />
               <ThemeToggle dark={dark} onToggle={() => setDark(!dark)} />
             </header>
             <main className="relative mx-auto flex w-full max-w-[640px] flex-col px-4 pb-16 pt-[10dvh] sm:pt-[16dvh]">
@@ -276,7 +324,9 @@ export default function App() {
               <p className="mx-auto mt-3 max-w-[22rem] text-center text-[14px] leading-snug text-muted-foreground sm:mt-4 sm:max-w-none sm:text-[15px]">
                 {TAGLINE}
               </p>
-              <form onSubmit={onSearchSubmit} className={cn('group relative mt-6 sm:mt-8', typeahead.open && 'z-20')}>
+              <div className="mt-6 sm:mt-8">
+              <UsageLine />
+              <form onSubmit={onSearchSubmit} className={cn('group relative', typeahead.open && 'z-20')}>
                 <Search className="pointer-events-none absolute left-5 top-1/2 size-[18px] -translate-y-1/2 text-muted-foreground" />
                 <Input
                   ref={inputRef}
@@ -322,6 +372,7 @@ export default function App() {
                   </ul>
                 )}
               </form>
+              </div>
               {recents.length > 0 && (
                 <div className="mt-5 sm:mt-6">
                   <div className="mb-1.5 flex items-center justify-between gap-2 px-1">
@@ -426,6 +477,7 @@ export default function App() {
                   <Plus className="size-4" />
                   <span className="hidden sm:inline">New chat</span>
                 </Button>
+                <AuthHeader />
                 <ThemeToggle dark={dark} onToggle={() => setDark(!dark)} />
               </div>
             </header>
@@ -476,9 +528,41 @@ export default function App() {
         )}
 
         {!home && <Composer key={chat} actions={session} topic={root?.question ?? ''} mainRef={mainRef} />}
+        <AuthRoot
+          onDraft={(q) => {
+            setInput(q);
+            window.dispatchEvent(new CustomEvent('zo-draft', { detail: q }));
+          }}
+          onOpenSaved={(saved) => {
+            const id = 1;
+            session.restore([{
+              id,
+              kind: 'search',
+              question: saved.query,
+              searchId: id,
+              result: { card: saved.card, followups: [], engine: 'composed', pagesRead: 0, removed: 0, ms: 0 },
+              variants: {},
+              version: 1,
+              filling: false,
+              simple: false,
+              pins: [],
+            }]);
+            shown.current = saved.query;
+            history.pushState(null, '', `?${new URLSearchParams({ q: saved.query })}`);
+            window.scrollTo({ top: 0 });
+          }}
+        />
       </div>
     </>
   );
+}
+
+function isTurnList(data: unknown): data is Turn[] {
+  return Array.isArray(data) && data.length > 0 && data.every((item) => {
+    if (!item || typeof item !== 'object') return false;
+    const row = item as Turn;
+    return typeof row.id === 'number' && typeof row.question === 'string' && typeof row.kind === 'string' && Array.isArray(row.pins);
+  });
 }
 
 /** Shared page frame so header, feed, rail and composer line up on the same edges. */
@@ -501,6 +585,15 @@ function Composer({ actions, topic, mainRef }: { actions: SessionActions; topic:
   const [quoteMode, setQuoteMode] = useState<QuoteMode>('explain');
 
   // Highlighting text inside a card turns it into a quote for the composer; it stays until sent or dismissed.
+  useEffect(() => {
+    const onDraft = (event: Event) => {
+      const text = (event as CustomEvent<string>).detail;
+      if (typeof text === 'string') setMessage(text);
+    };
+    window.addEventListener('zo-draft', onDraft);
+    return () => window.removeEventListener('zo-draft', onDraft);
+  }, []);
+
   useEffect(() => {
     const onSelect = () => {
       const sel = window.getSelection();
@@ -571,6 +664,7 @@ function Composer({ actions, topic, mainRef }: { actions: SessionActions; topic:
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 bg-gradient-to-t from-background via-background/85 to-transparent pb-[calc(env(safe-area-inset-bottom)+12px)] pt-10">
       <div className={cn(SHELL, GRID)}>
+        <UsageLine />
         <form onSubmit={send} className="pointer-events-auto overflow-hidden rounded-2xl border border-input bg-popover shadow-float">
           {quote && (
             <div className="space-y-2 border-b px-3 pb-2.5 pt-3 animate-in fade-in slide-in-from-bottom-1">
@@ -727,6 +821,7 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
               simple={turn.simple}
               onSimple={(v) => actions.setSimple(id, v)}
               onRegenerate={() => actions.redesign(id)}
+              toolbar={!turn.filling && !offlinePartial && turn.result ? <SaveButton query={turn.question} title={card.title} card={card} /> : undefined}
             />
           </CardContext.Provider>
         </>

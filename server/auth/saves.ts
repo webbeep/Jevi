@@ -1,5 +1,5 @@
 import { randomId } from './crypto.ts';
-import { d1 } from './env.ts';
+import { authEnabled, d1 } from './env.ts';
 import { readFacingUsage } from './gate.ts';
 import { currentUser, type ZoUser } from './session.ts';
 import type { Env } from '../util.ts';
@@ -33,11 +33,18 @@ function isResponse(value: ZoUser | Response): value is Response {
   return value instanceof Response;
 }
 
+function signInOff(env: Env): Response | null {
+  if (!authEnabled(env) || !d1(env)) return json({ error: 'Sign-in is disabled' }, 404);
+  return null;
+}
+
 export async function handleSaveCollection(request: Request, env: Env): Promise<Response> {
+  const off = signInOff(env);
+  if (off) return off;
   const user = await requireUser(request, env);
   if (isResponse(user)) return user;
   const db = d1(env);
-  if (!db) return json({ error: 'Saves are unavailable' }, 503);
+  if (!db) return json({ error: 'Sign-in is disabled' }, 404);
 
   if (request.method === 'GET') return listSaves(request, db, user.id);
   if (request.method === 'POST') return createSave(request, db, user.id);
@@ -45,10 +52,12 @@ export async function handleSaveCollection(request: Request, env: Env): Promise<
 }
 
 export async function handleSaveItem(request: Request, env: Env, id: string): Promise<Response> {
+  const off = signInOff(env);
+  if (off) return off;
   const user = await requireUser(request, env);
   if (isResponse(user)) return user;
   const db = d1(env);
-  if (!db) return json({ error: 'Saves are unavailable' }, 503);
+  if (!db) return json({ error: 'Sign-in is disabled' }, 404);
   if (!id) return json({ error: 'Not found' }, 404);
 
   if (request.method === 'GET') return getSave(db, user.id, id);

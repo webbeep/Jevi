@@ -16,7 +16,7 @@ export function isLeaving() {
 /** Fire signin_start, snapshot the chat, then leave for Google. */
 export function startSignIn(trigger: SignInTrigger) {
   if (leaving) return;
-  track('signin_start', { trigger });
+  track('signin_start', { trigger }, true);
   ssSet('zo_signin_trigger', trigger);
   captureSnapshot();
   markLeaving();

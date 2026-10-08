@@ -3,7 +3,7 @@ import { json } from '../util.ts';
 import { createAuth } from './better.ts';
 import { authEnabled, d1, sessionSecret } from './env.ts';
 import { readFacingUsage } from './gate.ts';
-import { currentUser } from './session.ts';
+import { currentUser, deleteSession } from './session.ts';
 
 function originOf(request: Request): string {
   const url = new URL(request.url);
@@ -14,6 +14,38 @@ function originOf(request: Request): string {
 export function safeReturnPath(value: string | null): string {
   if (!value || !value.startsWith('/') || value.startsWith('//') || value.includes('\\') || value.includes('://')) return '/';
   return value;
+}
+
+/** `return` wins when both are present. Missing both is null (caller applies safeReturnPath). */
+export function returnTarget(url: URL): string | null {
+  return url.searchParams.get('return') ?? url.searchParams.get('return_to');
+}
+
+function appendQuery(path: string, extra: string): string {
+  const hashAt = path.indexOf('#');
+  const hash = hashAt >= 0 ? path.slice(hashAt) : '';
+  const base = hashAt >= 0 ? path.slice(0, hashAt) : path;
+  const joiner = base.includes('?') ? (base.endsWith('?') || base.endsWith('&') ? '' : '&') : '?';
+  return `${base}${joiner}${extra}${hash}`;
+}
+
+export type SignInCallbackUrls = {
+  callbackURL: string;
+  newUserCallbackURL: string;
+  errorCallbackURL: string;
+};
+
+/**
+ * Paths passed to Better Auth signIn.social. Existing query is kept.
+ * Better Auth appends `error=<code>` onto errorCallbackURL (`access_denied` = cancelled).
+ */
+export function signInCallbackUrls(returnPath: string | null): SignInCallbackUrls {
+  const path = safeReturnPath(returnPath);
+  return {
+    callbackURL: appendQuery(path, 'auth=ok'),
+    newUserCallbackURL: appendQuery(path, 'auth=ok&new_user=1'),
+    errorCallbackURL: appendQuery(path, 'auth=error'),
+  };
 }
 
 function utmValue(url: URL): string | null {
@@ -61,13 +93,19 @@ export async function start(request: Request, env: Env): Promise<Response> {
   if (!d1(env) || !sessionSecret(env)) return json({ error: 'Sign-in is unavailable' }, 503);
   if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) return json({ error: 'Sign-in is unavailable' }, 503);
   const url = new URL(request.url);
-  const callbackURL = `${originOf(request)}${safeReturnPath(url.searchParams.get('return'))}`;
+  const callbacks = signInCallbackUrls(returnTarget(url));
+  const origin = originOf(request);
   const auth = await createAuth(env, request);
   const ba = await auth.handler(
     new Request(new URL('/api/auth/sign-in/social', url.origin), {
       method: 'POST',
       headers: { cookie: request.headers.get('cookie') || '', 'content-type': 'application/json', origin: url.origin },
-      body: JSON.stringify({ provider: 'google', callbackURL }),
+      body: JSON.stringify({
+        provider: 'google',
+        callbackURL: `${origin}${callbacks.callbackURL}`,
+        newUserCallbackURL: `${origin}${callbacks.newUserCallbackURL}`,
+        errorCallbackURL: `${origin}${callbacks.errorCallbackURL}`,
+      }),
     }),
   );
   const loc = ba.headers.get('location') || ((await ba.clone().json().catch(() => null)) as { url?: string } | null)?.url;
@@ -112,6 +150,11 @@ export async function onetap(request: Request, env: Env): Promise<Response> {
 
 export async function logout(request: Request, env: Env): Promise<Response> {
   const headers = new Headers();
+  try {
+    await deleteSession(request, env);
+  } catch {
+    /* still clear the cookie below */
+  }
   if (d1(env) && sessionSecret(env)) {
     try {
       const url = new URL(request.url);
