@@ -87,7 +87,8 @@ function numHeader(res, name) {
 
 async function req(jar, path, { method = 'GET', body, headers = {}, redirect = 'manual' } = {}) {
   const h = { ...headers };
-  if (jar?.ip) h['CF-Connecting-IP'] = jar.ip;
+  // Cloudflare rejects a client-sent CF-Connecting-IP (403), so only fake IPs against local wrangler.
+  if (jar?.ip && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(new URL(BASE).hostname)) h['CF-Connecting-IP'] = jar.ip;
   if (jar && jar.cookies.size) h.cookie = jar.header();
   if (body !== undefined) h['content-type'] = 'application/json';
   let res = await fetch(BASE + path, {
