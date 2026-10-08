@@ -283,3 +283,15 @@ test('SPD3: product comparisons are never a person ask (live P06 got Kindle choi
   assert.equal(isPersonAsk('iPad Air vs iPad Pro for drawing, which one and how much?', 'profile'), false);
   assert.equal(isPersonAsk('Who is Jensen Huang'), true);
 });
+
+test('SPD-C1: a capitalised topic inside a longer question is not a person ask', () => {
+  assert.equal(isPersonAsk('Fact-check: Gmail lets you attach files up to 50 MB'), false);
+  assert.equal(isPersonAsk('Fact-check: Henry Ford said "If I had asked people what they wanted, they would have said faster horses."'), false);
+  assert.equal(isPersonAsk('Fact-check: PostgreSQL MERGE has supported RETURNING since version 15'), false);
+  assert.equal(isPersonAsk('Does AirPods Pro 3 have a heart rate sensor?'), false);
+  assert.equal(isPersonAsk('Recommend 3 books on the history of the printing press, with author and publication year'), false);
+  assert.equal(isPersonAsk('Ray Lee BlueFlame AI'), true);
+  assert.equal(isPersonAsk('Taylor Swift latest album'), true);
+  assert.equal(isPersonAsk('Barack Obama'), true);
+  assert.equal(isPersonAsk('Who is Jensen Huang'), true);
+});

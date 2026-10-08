@@ -48,6 +48,8 @@ const COMMON = new Set([
   'is', 'are', 'was', 'were', 'be', 'do', 'does', 'did', 'can', 'could', 'should', 'would', 'will',
   'best', 'top', 'fastest', 'tallest', 'cheapest', 'newest', 'latest', 'most', 'least', 'first',
   'tell', 'show', 'find', 'give', 'list', 'compare', 'vs', 'versus', 'it', 'this', 'that',
+  // SPD-C1 (t457): task verbs that open a request ("Fact-check: Gmail…", "Summarize…", "Recommend 3 books…").
+  'fact-check', 'factcheck', 'check', 'verify', 'summarize', 'summarise', 'recommend', 'explain', 'define', 'describe',
 ]);
 
 const WHO_IS = /^(who\s+is|who\s+was)\b\s*/i;
@@ -149,11 +151,18 @@ export function personSourceOk(query: string, row: EntityRow, name = personSubje
 /** SPD3 (t457): "A vs B" / "compare A and B" names two things, so it is never one person to disambiguate. */
 const COMPARE_ASK = /\b(?:vs\.?|versus|compare[sd]?|comparison)\b/i;
 
+/** Words in a query, as personSubject splits them. */
+const wordCount = (s: string) => s.trim().split(/\s+/).filter(Boolean).length;
+
 export function isPersonAsk(query: string, pattern?: string): boolean {
   if (COMPARE_ASK.test(query) && !WHO_IS.test(query.trim())) return false;
   const subject = personSubject(query);
   if (pattern === 'profile') return subject !== '';
-  if (WHO_IS.test(query.trim())) return subject !== '';
+  if (WHO_IS.test(query.trim()) || ABOUT.test(query.trim())) return subject !== '';
+  // SPD-C1 (t457): a capitalised phrase inside a longer sentence is the topic, not a person lookup
+  // ("Fact-check: Gmail lets you attach files up to 50 MB", "Does AirPods Pro 3 have a heart rate sensor?").
+  // Treating it as a person dropped every source without that exact name (live H2H P11/P12/P13: 0–1 sources).
+  if (subject && wordCount(query) - wordCount(subject) > 3) return false;
   return subject !== '' && nameLike(subject);
 }
 
