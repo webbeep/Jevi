@@ -2,12 +2,11 @@ import { COPY } from './copy';
 import { GoogleMark } from './GoogleMark';
 import { cn } from '@/lib/utils';
 
-export function GoogleButton({ onClick, className, testId }: { onClick: () => void; className?: string; testId?: string }) {
+export function GoogleButton({ onClick, className }: { onClick: () => void; className?: string }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      data-testid={testId}
       className={cn(
         'inline-flex h-11 shrink-0 items-center justify-center gap-3 rounded-md border px-4 text-sm font-medium',
         'border-[#747775] bg-white text-[#1f1f1f] hover:bg-neutral-50',
