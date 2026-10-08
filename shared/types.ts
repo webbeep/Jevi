@@ -63,6 +63,9 @@ export interface SearchResponse {
   knowledge?: Knowledge;
   discussions: Discussion[];
   engines: EngineStatus[];
+  /** Set when the server marked this search degraded (T418). */
+  degraded?: boolean;
+  degradedReason?: string;
 }
 
 export interface KeyPoint {

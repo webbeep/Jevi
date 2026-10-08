@@ -1,3 +1,5 @@
+import { turnsDegraded } from './degraded';
+
 export const ANSWER_CACHE_VERSION = 'v1';
 export const ANSWER_TTL_S = 86400;
 
@@ -61,6 +63,14 @@ export function snapshotKey(query: string, freshness = 'any'): string {
 }
 
 export function saveSnapshot(store: AnswerStore, query: string, turns: unknown, now = Date.now()): boolean {
+  if (turnsDegraded(turns)) {
+    try {
+      store.removeItem(snapshotKey(query));
+    } catch {
+      /* ignore */
+    }
+    return false;
+  }
   try {
     store.setItem(snapshotKey(query), JSON.stringify({ v: 1, savedAt: now, turns }));
     return true;
@@ -95,5 +105,56 @@ export function loadSnapshot<T>(store: AnswerStore, query: string, now = Date.no
     }
     return undefined;
   }
+  if (turnsDegraded(saved.turns)) {
+    try {
+      store.removeItem(key);
+    } catch {
+      /* ignore */
+    }
+    return undefined;
+  }
   return saved.turns;
+}
+
+/** Drop degraded (and unreadable) answer snapshots. Returns how many keys were removed. */
+export function purgeDegradedSnapshots(store: AnswerStore & { length: number; key(i: number): string | null }): number {
+  const keys: string[] = [];
+  try {
+    for (let i = 0; i < store.length; i++) {
+      let key: string | null = null;
+      try {
+        key = store.key(i);
+      } catch {
+        key = null;
+      }
+      if (key && key.startsWith('zo:answer:')) keys.push(key);
+    }
+  } catch {
+    return 0;
+  }
+  let removed = 0;
+  for (const key of keys) {
+    let raw: string | null;
+    try {
+      raw = store.getItem(key);
+    } catch {
+      continue;
+    }
+    if (raw == null) continue;
+    let drop = false;
+    try {
+      const parsed = JSON.parse(raw) as { turns?: unknown } | null;
+      drop = !!parsed && typeof parsed === 'object' && turnsDegraded(parsed.turns) !== null;
+    } catch {
+      drop = true;
+    }
+    if (!drop) continue;
+    try {
+      store.removeItem(key);
+      removed += 1;
+    } catch {
+      /* ignore */
+    }
+  }
+  return removed;
 }

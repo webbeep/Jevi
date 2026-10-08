@@ -284,6 +284,7 @@ export function useSession() {
               removed: e.data.removed,
               ms: e.data.ms,
               via: e.data.via,
+              ...(e.data.degraded ? { degraded: true as const, degradedReason: e.data.degradedReason } : {}),
             };
             return { result, variants: { ...t.variants, [variantKey(t.pattern, t.simple)]: result }, live: undefined, filling: false, status: undefined, thinking: false, error: undefined, retryable: undefined, offline: undefined, reconnects: undefined };
           });

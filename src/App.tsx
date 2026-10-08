@@ -18,7 +18,8 @@ import { LogoMark, Wordmark } from './Logo';
 import { buildLibrary } from './library';
 import { FaviconStack, SourcesRail, SourcesSheet } from './Sources';
 import { type SessionActions, type Turn, liveBody, scrollToTurn, useSession } from './useSession';
-import { loadSnapshot, normalizeAnswerQuery, saveSnapshot } from '../shared/answerKey';
+import { loadSnapshot, normalizeAnswerQuery, purgeDegradedSnapshots, saveSnapshot } from '../shared/answerKey';
+import { turnDegraded, turnsDegraded } from '../shared/degraded';
 import { MANUAL_RETRY_AFTER, OFFLINE_MESSAGE, clearPending, loadPending, savePending } from '../shared/offline';
 import { RECENT_KEY, clearHistory, readHistory, recordAsk } from '../shared/personal';
 import { placeholderExamples } from '../shared/starters';
@@ -47,6 +48,16 @@ interface Quote {
 
 
 const TAGLINE = 'Ask anything. Get answers you can compare, tweak and keep.';
+
+/** One automatic regenerate per normalized query for this page load. */
+const regenerated = new Set<string>();
+
+function regenOnce(q: string): boolean {
+  const key = normalizeAnswerQuery(q);
+  if (regenerated.has(key)) return false;
+  regenerated.add(key);
+  return true;
+}
 
 function readAnswerCache(query: string): Turn[] | undefined {
   try {
@@ -212,7 +223,18 @@ export default function App() {
   }, [refresh]);
 
   useEffect(() => {
+    try {
+      purgeDegradedSnapshots(localStorage);
+    } catch {
+      /* private mode */
+    }
+    try {
+      purgeDegradedSnapshots(sessionStorage);
+    } catch {
+      /* private mode */
+    }
     const openQuery = (q: string) => {
+      // Degraded snapshots are removed by loadSnapshot, so a miss here is a normal search (one regenerate).
       const cached = readAnswerCache(q);
       if (cached) session.restore(cached);
       else session.search(q, { reset: true });
@@ -236,8 +258,14 @@ export default function App() {
         shown.current = plan.pendingRun.q;
         session.search(plan.pendingRun.q, { reset: true });
       } else if (isTurnList(plan.snapshot)) {
-        session.restore(plan.snapshot);
-        shown.current = plan.snapshot[0].question;
+        const q = plan.snapshot[0].question;
+        if (turnsDegraded(plan.snapshot) && navigator.onLine !== false && regenOnce(q)) {
+          shown.current = q;
+          session.search(q, { reset: true });
+        } else {
+          session.restore(plan.snapshot);
+          shown.current = q;
+        }
       }
       if (plan.pendingRestore) {
         setInput(plan.pendingRestore.q);
@@ -772,8 +800,10 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
     onSources: () => onSources(id),
   }), [search?.results, search?.images, credits, turn.filling, offlinePartial, actions, id, onSources]);
 
+  const degraded = turn.kind === 'search' ? turnDegraded(turn) ?? undefined : undefined;
+
   return (
-    <section id={`turn-${turn.id}`} data-turn={turn.id} className="scroll-mt-20 space-y-3 animate-in fade-in slide-in-from-bottom-3 duration-500">
+    <section id={`turn-${turn.id}`} data-turn={turn.id} data-degraded={degraded} className="scroll-mt-20 space-y-3 animate-in fade-in slide-in-from-bottom-3 duration-500">
       {!first && (
         <div className="flex flex-col items-end gap-1.5">
           {turn.base && (

@@ -133,4 +133,7 @@ export interface CardResponse {
   ms: number;
   /** The language model provider that wrote the card. */
   via?: string;
+  /** Set when the server marked this answer degraded (T418). */
+  degraded?: boolean;
+  degradedReason?: string;
 }
