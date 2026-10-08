@@ -45,7 +45,7 @@ LINKS: anything the person will want to open (an article, video, product page, b
 - image {query | ref, caption, aspect:"wide"|"square"|"tall"}
 - gallery {query | refs}  (several real photos of one subject)
 - profile {name, subtitle, imageQuery | imageRef, facts:[{label, value}]}
-PICTURES: imageQuery / query is the exact name of what the picture must show ("Nike Downshifter 13", "Eiffel Tower at night", "Taylor Swift"); a real photo of that exact item is found for it. imageRef / ref is an IMAGES index — use it only when that image's description clearly shows the same item.
+PICTURES: imageQuery / query is the exact name of what the picture must show ("Nike Downshifter 13", "Eiffel Tower at night", "Taylor Swift"); a real photo of that exact item is found for it. imageRef / ref is an IMAGES index — use it only when that image's description clearly shows the same item. Never use an IMAGES index for an item when the image's description names another item or says vs/compare; give each item its own imageQuery instead.
 - actions {items:[{label, icon, query, kind:"search"|"ask"|"refine"}]}  (next-step buttons, each opens a NEW card below: "refine" = this card with a change, query is the instruction; "ask" = answers a follow-up question; "search" = new web search, query is a complete search query. Every query must stand alone and name the subject: "Gluten-free apple pie crust", never "gluten-free" or "apples")
 - citations {refs:[source numbers]}
 INTERACTIVE (make the card something to play with, not just read)
@@ -138,7 +138,7 @@ STYLE — visual first, minimal text
 - Text budget: labels 1-4 words; tile and stat values as short as possible; subtitles under 10 words; a text node is 1-2 short sentences. Never repeat the same fact in two places. No filler ("Here is", "In summary", "It is important to note").
 - When the person wants to understand something (why/how/what is, or an explainer layout), explanation is the content: use clear, plain sentences in short paragraphs or an accordion, keep every step of the reasoning (don't skip what a newcomer needs), and add a one-line analogy. Still concise.
 - Predict what they will want next: offer the 1-3 most likely adjustments as controls (choices, slider, scaler) or "refine" actions — e.g. a different budget, size, date range, audience or level of detail — so they never have to type a clarification.
-- Pictures: every picture must show the specific item it sits next to — each product, place, dish or person gets its own imageQuery with its exact name. Use pictures where seeing the item helps (products, places, food, people, animals, landmarks, designs); skip them for abstract topics. Never reuse one picture for several items and never use a general stock-style photo.
+- Pictures: every picture must show the specific item it sits next to — each product, place, dish or person gets its own imageQuery with its exact name. Use pictures where seeing the item helps (products, places, food, people, animals, landmarks, designs); skip them for abstract topics. Never reuse one picture for several items and never use a general stock-style photo. Never use an IMAGES index for an item when the image's description names another item or says vs/compare; give each item its own imageQuery instead.
 - Charts and tables only when they add understanding: a chart needs 3+ comparable numbers from the sources (a trend, a ranking, shares of a whole); a table needs 2+ items compared across 3+ attributes. Never chart two numbers or non-numeric facts; a stat or tile is better there.
 
 FIT THE KIND OF REQUEST
@@ -260,7 +260,7 @@ export async function designStream(req: DesignRequest, env: Env, on: DesignEvent
   const chat = req.followup?.mode === 'chat';
   const g = new Grounding(corpusOf(req), chat);
   const polish = new Polisher(textCap(req));
-  const pictures = new PictureResolver(env, req.search.images, on.credit);
+  const pictures = new PictureResolver(env, req.search.images, on.credit, req.query);
   const base = req.followup?.mode === 'refine' && req.followup.baseCard ? `CURRENT CARD\n${JSON.stringify(req.followup.baseCard).slice(0, 12000)}\n\n` : '';
   const user = `${sourcesBlock(req.search, req.pages)}\n\n${base}SKELETON\n${JSON.stringify(patternById(req.pattern).skeleton)}\n\nTASK\n${taskBlock(req)}\n\nQUERY: ${req.followup?.question ?? req.query}`;
 
@@ -360,7 +360,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
   on.layout(regions);
   const sources = priceSources(req);
   const g = new Grounding(corpusOf(req));
-  const pictures = new PictureResolver(env, req.search.images, on.credit);
+  const pictures = new PictureResolver(env, req.search.images, on.credit, req.query);
   const polish = new Polisher(textCap(req));
   const shared = `${sourcesBlock(req.search, req.pages, 2000)}\n\nTASK\n${taskBlock(req)}\n- Card regions, top to bottom:\n${regions.map((r, i) => `  R${i + 1}: ${regionPurpose(r)}`).join('\n')}\n  FINISH: header, interactive control, actions, citations, follow-ups`;
   const query = req.followup?.question ?? req.query;
