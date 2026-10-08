@@ -33,10 +33,10 @@ const LOADING: CardNode[] = [{ type: 'slot', hint: 'answer', shape: 'hero' }, { 
 
 /** What to do with highlighted text. */
 const QUOTE_MODES = [
-  { id: 'explain', label: 'Explain', icon: 'lightbulb', hint: 'Explain it in plain words' },
-  { id: 'expand', label: 'Expand', icon: 'list-plus', hint: 'Go deeper on it' },
-  { id: 'search', label: 'Search', icon: 'search', hint: 'Search the web for it' },
-  { id: 'save', label: 'Save', icon: 'pin', hint: 'Pin it to the card' },
+  { id: 'explain', label: 'Explain', icon: 'lightbulb' },
+  { id: 'expand', label: 'Expand', icon: 'list-plus' },
+  { id: 'search', label: 'Search', icon: 'search' },
+  { id: 'save', label: 'Save', icon: 'pin' },
 ] as const;
 type QuoteMode = (typeof QUOTE_MODES)[number]['id'];
 
@@ -104,18 +104,6 @@ function useTheme() {
   return [dark, setDark] as const;
 }
 
-function engineLabel(t: Turn): string | undefined {
-  const r = t.result;
-  if (r) {
-    const source = r.engine === 'reasoning' ? 'Reasoned answer — not from live sources' : r.engine === 'composed' ? 'Composed from sources' : 'Quoted from sources';
-    const line = [source, r.pagesRead ? `${r.pagesRead} pages read` : '', r.removed ? `${r.removed} unverified removed` : '', r.ms ? `${(r.ms / 1000).toFixed(1)}s` : '', r.via ?? ''].filter(Boolean).join(' · ');
-    return t.intent ? `${line}\nSearched: ${t.intent.queries.join(' · ')}` : line;
-  }
-  if (t.live?.nodes.length) return 'Composing…';
-  if (t.search) return `${t.search.results.length} sources · reading`;
-  return t.plan ? 'Planning the layout…' : undefined;
-}
-
 /** The sources sheet gets a history entry so the back button closes it instead of leaving the chat. */
 const overlayOpen = () => (history.state as { overlay?: boolean } | null)?.overlay === true;
 const pushOverlay = () => {
@@ -129,7 +117,7 @@ export default function App() {
   const initial = useMemo(() => new URLSearchParams(location.search), []);
   const [dark, setDark] = useTheme();
   const { turns, actions: session } = useSession();
-  const { items: suggestions, shuffle, shuffleEnabled, personalized, refresh } = useSuggestions();
+  const { items: suggestions, shuffle, shuffleEnabled, refresh } = useSuggestions();
   const [recents, setRecents] = useState<string[]>(() => (typeof window !== 'undefined' ? readRecents() : []));
   const [histRev, setHistRev] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -160,7 +148,6 @@ export default function App() {
   const last = [...turns].reverse().find((t) => t.result);
   const busy = turns.some((t) => t.filling);
   const title = root?.result?.card.title ?? root?.question ?? '';
-  const railTurn = [...turns].reverse().find((t) => t.kind === 'search' && t.search?.results.length);
   const library = useMemo(() => buildLibrary(turns), [turns]);
   const [sheet, setSheet] = useState<{ open: boolean; scope?: number }>({ open: false });
   const scopeTurn = turns.find((t) => t.id === sheet.scope);
@@ -407,7 +394,6 @@ export default function App() {
                 <div className="mb-1.5 flex items-center justify-between gap-2 px-1">
                   <div className="min-w-0">
                     <h2 className="zo-label">Try one</h2>
-                    {personalized && <p className="text-[11px] leading-snug text-muted-foreground">Personalized from this device</p>}
                   </div>
                   <div className="flex shrink-0 items-center">
                     {hasHistory && recents.length === 0 && (
@@ -507,7 +493,7 @@ export default function App() {
               <aside className="hidden lg:block">
                 {library.length > 0 && (
                   <div className="sticky top-[calc(5.5rem-10px)] -mt-2.5 pt-2.5 max-h-[calc(100dvh-7rem+10px)] overflow-y-auto no-scrollbar">
-                    <SourcesRail entries={library} engines={railTurn?.search?.engines ?? []} onAll={() => openSources()} />
+                    <SourcesRail entries={library} onAll={() => openSources()} />
                   </div>
                 )}
               </aside>
@@ -677,7 +663,7 @@ function Composer({ actions, topic, mainRef }: { actions: SessionActions; topic:
               </div>
               <ToggleGroup type="single" size="sm" value={quoteMode} onValueChange={(v) => v && setQuoteMode(v as QuoteMode)} className="no-scrollbar w-full justify-start overflow-x-auto overscroll-x-contain">
                 {QUOTE_MODES.map((m) => (
-                  <ToggleGroupItem key={m.id} value={m.id} title={m.hint} className="h-7 shrink-0 rounded-lg px-2.5 text-xs data-[state=on]:bg-foreground/[0.08] data-[state=on]:text-foreground">
+                  <ToggleGroupItem key={m.id} value={m.id} className="h-7 shrink-0 rounded-lg px-2.5 text-xs data-[state=on]:bg-foreground/[0.08] data-[state=on]:text-foreground">
                     <Icon name={m.icon} className="size-3.5" />
                     {m.label}
                   </ToggleGroupItem>
@@ -823,7 +809,6 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
               status={offlinePartial ? undefined : (turn.status ?? (turn.thinking && !streaming ? 'Thinking it through…' : undefined))}
               pattern={turn.pattern}
               alternatives={turn.kind === 'digest' ? [] : turn.plan?.alternatives ?? []}
-              engine={engineLabel(turn)}
               onPattern={(p) => actions.setPattern(id, p)}
               simple={turn.simple}
               onSimple={(v) => actions.setSimple(id, v)}

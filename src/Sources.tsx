@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { FileText, X } from 'lucide-react';
-import type { EngineStatus } from '../shared/types';
 import type { LibraryEntry } from './library';
 import { cn } from '@/lib/utils';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
@@ -62,7 +61,7 @@ function SourceRow({ entry, detail = false }: { entry: LibraryEntry; detail?: bo
 }
 
 /** Desktop side rail: the conversation's sources, cited ones first. */
-export function SourcesRail({ entries, engines, onAll }: { entries: LibraryEntry[]; engines: EngineStatus[]; onAll: () => void }) {
+export function SourcesRail({ entries, onAll }: { entries: LibraryEntry[]; onAll: () => void }) {
   const cited = entries.filter((e) => e.citedBy.length);
   const [filter, setFilter] = useState<SourceFilter>('all');
   const [touched, setTouched] = useState(false);
@@ -74,17 +73,6 @@ export function SourcesRail({ entries, engines, onAll }: { entries: LibraryEntry
     <section className="space-y-2">
       <div className="flex h-7 items-center gap-2">
         <h3 className="zo-label text-foreground">Sources</h3>
-        <div className="flex items-center gap-1">
-          {engines.map((e) => (
-            <span
-              key={e.name}
-              role="img"
-              title={`${e.name}: ${e.ok ? `${e.count} results · ${e.ms}ms` : e.error}`}
-              aria-label={`${e.name}: ${e.ok ? `${e.count} results` : 'unavailable'}`}
-              className={cn('size-1.5 rounded-full', e.ok && e.count ? 'bg-positive' : 'bg-muted-foreground/30')}
-            />
-          ))}
-        </div>
         <div className="ml-auto">
           <FilterToggle value={active} onChange={(v) => { setTouched(true); setFilter(v); }} cited={cited.length} all={entries.length} />
         </div>

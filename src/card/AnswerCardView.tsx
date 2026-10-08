@@ -56,7 +56,7 @@ function pictureSources(body: CardNode[], images: { thumb: string }[]): string[]
   return [...new Set(out.filter(Boolean))];
 }
 
-export function AnswerCardView({ card, version, filling, streaming, status, pattern, alternatives, engine, onPattern, simple, onSimple, onRegenerate, toolbar }: {
+export function AnswerCardView({ card, version, filling, streaming, status, pattern, alternatives, onPattern, simple, onSimple, onRegenerate, toolbar }: {
   card: AnswerCard;
   /** Changes whenever a fresh design starts, replaying the entrance animation. */
   version: string;
@@ -67,7 +67,6 @@ export function AnswerCardView({ card, version, filling, streaming, status, patt
   status?: string;
   pattern?: string;
   alternatives: CardPattern[];
-  engine?: string;
   onPattern: (id: string) => void;
   simple: boolean;
   onSimple: (v: boolean) => void;
@@ -128,12 +127,6 @@ export function AnswerCardView({ card, version, filling, streaming, status, patt
                   ))}
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
-            )}
-            {engine && (
-              <>
-                <DropdownMenuSeparator />
-                <p className="whitespace-pre-line px-2 py-1.5 text-[11px] leading-snug text-muted-foreground">{engine}</p>
-              </>
             )}
           </DropdownMenuContent>
         </DropdownMenu>
