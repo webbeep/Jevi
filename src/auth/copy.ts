@@ -1,3 +1,4 @@
+import { resetLabel } from './reset';
 /** Anonymous value-row line. GTM can swap this without hunting through the UI. */
 export const VALUE_ROW_TEXT = 'Sign in to save this answer';
 
@@ -21,14 +22,14 @@ export const COPY = {
   fine: 'By continuing you agree to the Terms and Privacy Policy.',
   terms: 'Terms',
   privacy: 'Privacy Policy',
-  cancelled: 'Sign-in was cancelled.',
-  failed: "Sign-in didn't work.",
+  cancelled: 'Sign-in cancelled. Your question is still here.',
+  failed: "Couldn't sign you in. Please try again.",
   tryAgain: 'Try again',
-  signedCap: (limit: number) => `You've used today's ${limit} questions. More at midnight UTC.`,
+  signedCap: (_limit: number) => `You've reached today's limit. It resets at ${resetLabel()} your time.`,
   ipCap: (limit: number) => `This network has hit today's limit of ${limit}. More at midnight UTC.`,
-  e1: 'Sign-in was cancelled.',
-  e2: "Sign-in didn't work.",
-  e4: (limit: number) => `You've used today's ${limit} questions. More at midnight UTC.`,
+  e1: 'Sign-in cancelled. Your question is still here.',
+  e2: "Couldn't sign you in. Please try again.",
+  e4: (_limit: number) => `You've reached today's limit. It resets at ${resetLabel()} your time.`,
   saveFail: "Couldn't save. Try again.",
   o1: "You're signed in",
   o2: 'Email me ZO launch updates',
