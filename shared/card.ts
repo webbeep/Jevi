@@ -82,6 +82,12 @@ export interface ImageCredit {
   license: ImageLicense;
 }
 
+/**
+ * PROVISIONAL — Backend entity patch, shape not final. "Which one?" options when a name is ambiguous.
+ * Read ONLY through readChoices() in shared/choices.ts, so field names change in one place.
+ */
+export interface Disambiguation { prompt?: string; options: { name: string; descriptor?: string; query?: string }[] }
+
 export interface AnswerCard {
   title: string;
   subtitle?: string;
@@ -90,6 +96,8 @@ export interface AnswerCard {
   body: CardNode[];
   /** Attribution for pictures the server found for this card. */
   credits?: ImageCredit[];
+  /** "Which one?" options, when the answer hangs on an ambiguous name. */
+  choices?: Disambiguation;
 }
 
 export interface CardPattern {
@@ -136,4 +144,6 @@ export interface CardResponse {
   /** Set when the server marked this answer degraded (T418). */
   degraded?: boolean;
   degradedReason?: string;
+  /** "Which one?" options the answer came with, when a name was ambiguous. */
+  choices?: Disambiguation;
 }

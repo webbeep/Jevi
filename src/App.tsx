@@ -15,10 +15,12 @@ import { api } from './api';
 import { AnswerCardView } from './card/AnswerCardView';
 import { CardContext, type CardContextValue } from './card/context';
 import { Icon } from './card/Icon';
+import { WhichOne } from './card/WhichOne';
 import { LogoMark, Wordmark } from './Logo';
 import { buildLibrary } from './library';
 import { FaviconStack, SourcesRail, SourcesSheet } from './Sources';
 import { type SessionActions, type Turn, liveBody, scrollToTurn, useSession } from './useSession';
+import { readChoices } from '../shared/choices';
 import { loadSnapshot, normalizeAnswerQuery, purgeDegradedSnapshots, saveSnapshot } from '../shared/answerKey';
 import { turnDegraded, turnsDegraded } from '../shared/degraded';
 import { MANUAL_RETRY_AFTER, OFFLINE_MESSAGE, clearPending, loadPending, savePending } from '../shared/offline';
@@ -860,6 +862,7 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
   }), [search?.results, search?.images, credits, turn.filling, offlinePartial, actions, id, onSources, threadBusy]);
 
   const degraded = turn.kind === 'search' ? turnDegraded(turn) ?? undefined : undefined;
+  const choices = turn.result ? readChoices(turn.result, turn.result.card) : undefined;
 
   return (
     <section id={`turn-${turn.id}`} data-turn={turn.id} data-degraded={degraded} className="scroll-mt-20 space-y-3 animate-in fade-in slide-in-from-bottom-3 duration-500">
@@ -906,6 +909,7 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
               toolbar={!turn.filling && !offlinePartial && turn.result ? <SaveButton query={turn.question} title={card.title} card={card} /> : undefined}
             />
           </CardContext.Provider>
+          {choices && !turn.filling && <WhichOne choices={choices} onPick={(text) => void actions.followup(text, id, 'search')} />}
         </>
       )}
       {turn.offline ? (

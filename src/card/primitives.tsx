@@ -196,6 +196,24 @@ function hostOf(url?: string): string {
   }
 }
 
+/**
+ * Small "nba.com" link on a picture to the page it came from; nothing when the source page is unknown.
+ * Never drafts a question.
+ */
+function PhotoCredit({ src, className }: { src: string | undefined; className?: string }) {
+  const { credits } = useCard();
+  const link = src ? credits[src]?.link : undefined;
+  const domain = domainLabel(hostOf(link));
+  if (!link || !domain || !/^https?:\/\//i.test(link)) return null;
+  const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
+  return (
+    <a href={link} target="_blank" rel="noopener noreferrer" aria-label={`Image source: ${domain}`} data-photo-credit="" onClick={stop} onKeyDown={stop} onPointerDown={stop}
+      className={cn("pointer-events-auto absolute z-[1] flex max-w-[calc(100%-8px)] rounded bg-black/55 px-1 py-px text-[9px] font-medium leading-tight text-white/90 outline-none after:absolute after:left-1/2 after:top-1/2 after:h-11 after:w-11 after:-translate-x-1/2 after:-translate-y-1/2 after:content-[''] hover:bg-black/70 focus-visible:ring-2 focus-visible:ring-ring", className)}>
+      <span className="truncate">{domain}</span>
+    </a>
+  );
+}
+
 /** Video id and embeddable player for YouTube and Vimeo watch pages; undefined for channels and other pages. */
 export function videoEmbed(url: string): { id: string; player: string; thumb?: string } | undefined {
   try {
@@ -321,7 +339,6 @@ export function Tile({ node }: { node: Of<'tile'> }) {
   const kind = tileKind(node);
   const noPhoto = !!kind && NO_PHOTO.has(kind);
   const [img, onImgError] = useLoadable(usePicture(noPhoto ? undefined : node.imageSrc, noPhoto ? undefined : node.imageRef));
-  const credit = useCredit(img);
   const pending = !noPhoto && !img && !!node.imageQuery && busy;
   const link = useSource(node.source);
   const ask = askAbout(plain(node.label));
@@ -336,9 +353,10 @@ export function Tile({ node }: { node: Of<'tile'> }) {
     >
       <button type="button" aria-label={ask} onClick={() => onItem(ask)} className={cn('absolute inset-0 rounded-[inherit] cursor-pointer', ITEM_FOCUS)} />
       {slot && (
-        <span data-picture-slot="" className="pointer-events-none relative mb-1 flex aspect-square w-full max-w-24 items-center justify-center overflow-hidden rounded-lg bg-muted">
+        <span data-picture-slot="" className="pointer-events-none relative mb-1 flex aspect-square w-full max-w-24 items-center justify-center rounded-lg bg-muted">
           {pending ? <Skeleton className="absolute inset-0 rounded-lg" /> : <Icon name={icon} fallback="layout-grid" className="size-7 text-muted-foreground/70 sm:size-8" />}
-          {img && <img src={img} alt={plain(node.label)} title={credit} loading="lazy" className="absolute inset-0 size-full object-cover animate-in fade-in" onError={onImgError} />}
+          {img && <img src={img} alt={plain(node.label)} loading="lazy" className="absolute inset-0 size-full rounded-[inherit] object-cover animate-in fade-in" onError={onImgError} />}
+          {img && <PhotoCredit src={img} className="right-1 top-1" />}
         </span>
       )}
       <span className="pointer-events-none relative inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
@@ -369,8 +387,14 @@ export function KeyValue({ node }: { node: Of<'keyvalue'> }) {
 function MediaThumb({ item, index }: { item: Of<'list'>['items'][number]; index: number }) {
   const { busy } = useCard();
   const [img, onImgError] = useLoadable(usePicture(item.imageSrc, item.imageRef));
-  const credit = useCredit(img);
-  if (img) return <img src={img} alt={subjectOf(item.text)} title={credit} loading="lazy" className="size-12 shrink-0 rounded-lg bg-muted object-cover animate-in fade-in sm:size-14" onError={onImgError} />;
+  if (img) {
+    return (
+      <span className="relative size-12 shrink-0 sm:size-14">
+        <img src={img} alt={subjectOf(item.text)} loading="lazy" className="size-12 shrink-0 rounded-lg bg-muted object-cover animate-in fade-in sm:size-14" onError={onImgError} />
+        <PhotoCredit src={img} className="bottom-0.5 left-1/2 -translate-x-1/2 after:h-6 after:w-[calc(100%+8px)]" />
+      </span>
+    );
+  }
   if (item.imageQuery && busy) return <Skeleton className="size-12 shrink-0 rounded-lg sm:size-14" />;
   return (
     <span className="flex size-12 shrink-0 items-center justify-center rounded-lg bg-muted text-sm font-semibold text-muted-foreground sm:size-14">
@@ -683,13 +707,15 @@ export function Gallery({ node }: { node: Of<'gallery'> }) {
 
 export function Profile({ node }: { node: Of<'profile'> }) {
   const img = usePicture(node.imageSrc, node.imageRef);
-  const credit = useCredit(img);
   return (
     <div className="flex items-center gap-3 sm:gap-4">
-      <Avatar className="size-16 rounded-2xl border sm:size-20">
-        {img && <AvatarImage src={img} alt={node.name} title={credit} className="object-cover" />}
-        <AvatarFallback className="rounded-2xl text-xl">{node.name.slice(0, 2).toUpperCase()}</AvatarFallback>
-      </Avatar>
+      <span className="relative shrink-0">
+        <Avatar className="size-16 rounded-2xl border sm:size-20">
+          {img && <AvatarImage src={img} alt={node.name} className="object-cover" />}
+          <AvatarFallback className="rounded-2xl text-xl">{node.name.slice(0, 2).toUpperCase()}</AvatarFallback>
+        </Avatar>
+        {img && <PhotoCredit src={img} className="bottom-1 left-1/2 -translate-x-1/2" />}
+      </span>
       <div className="min-w-0 flex-1">
         <div className="text-xl font-semibold tracking-tight">{node.name}</div>
         {node.subtitle && <div className="text-sm text-muted-foreground">{node.subtitle}</div>}
