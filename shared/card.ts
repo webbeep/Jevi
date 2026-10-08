@@ -19,6 +19,14 @@ export type FollowupIntent = 'adjust' | 'ask' | 'search';
 export type Tone = 'default' | 'muted' | 'primary' | 'positive' | 'negative' | 'warning';
 export type Gap = 'sm' | 'md' | 'lg';
 
+/** V3: a retailer price more than 5% off the vendor's own price (shared/vendorPrice.ts). */
+export interface PriceFlag {
+  vendor: number;
+  other: number;
+  pct: number;
+  dir: 'below' | 'above';
+}
+
 export type CardNode =
   // Layout
   | { type: 'stack'; direction?: 'row' | 'col'; gap?: Gap; align?: 'start' | 'center' | 'end' | 'between'; wrap?: boolean; children: CardNode[] }
@@ -28,13 +36,19 @@ export type CardNode =
   | { type: 'scroller'; children: CardNode[] }
   | { type: 'divider' }
   // Display
-  | { type: 'hero'; value: string; unit?: string; label?: string; caption?: string; icon?: string; tone?: Tone }
+  /** `vendorTrue` / `priceFlag`: V3 vendor price (see `tile`). */
+  | { type: 'hero'; value: string; unit?: string; label?: string; caption?: string; icon?: string; tone?: Tone; vendorTrue?: boolean; priceFlag?: PriceFlag }
   | { type: 'heading'; text: string; eyebrow?: string; level?: 1 | 2 | 3 }
   | { type: 'text'; text: string; tone?: Tone; size?: 'sm' | 'md' | 'lg' }
   | { type: 'stat'; label: string; value: string; unit?: string; icon?: string; delta?: string; trend?: 'up' | 'down' | 'flat'; /** https picture of what the stat is about (e.g. a player); optional. */ image?: string }
-  /** `source` (a source number) makes the tile open that page. */
-  | { type: 'tile'; label: string; value?: string; sub?: string; icon?: string; imageRef?: number; imageQuery?: string; imageSrc?: string; active?: boolean; source?: number }
-  | { type: 'keyvalue'; items: { label: string; value: string; icon?: string }[] }
+  /**
+   * `source` (a source number) makes the tile open that page. V3 shopping asks: `vendorTrue` marks the vendor's own
+   * "From" price (value) cited by `source`; the retailer price and any >5% flag are in `sub` (rendered), and
+   * `priceFlag` carries the same flag as data.
+   */
+  | { type: 'tile'; label: string; value?: string; sub?: string; icon?: string; imageRef?: number; imageQuery?: string; imageSrc?: string; active?: boolean; source?: number; vendorTrue?: boolean; priceFlag?: PriceFlag }
+  /** `vendorPrices`: V3 "Store prices" block for vendor prices the card did not already show. */
+  | { type: 'keyvalue'; items: { label: string; value: string; icon?: string }[]; vendorPrices?: boolean }
   | { type: 'list'; style?: 'bullet' | 'check' | 'number' | 'icon' | 'media'; items: { text: string; icon?: string; meta?: string; imageRef?: number; imageQuery?: string; imageSrc?: string; source?: number }[] }
   /** Pages, videos or sites to open, by source number — links only ever point at real search results. */
   | { type: 'links'; items: { source: number; label?: string; note?: string }[] }
@@ -43,7 +57,8 @@ export type CardNode =
   | { type: 'chart'; kind: 'bar' | 'hbar' | 'line' | 'area' | 'pie'; title?: string; unit?: string; data: { label: string; value: number }[] }
   | { type: 'progress'; label: string; value: number; caption?: string }
   | { type: 'rating'; value: number; max?: number; label?: string }
-  | { type: 'table'; columns: string[]; rows: string[][]; highlight?: number }
+  /** `priceRows` lines up with `rows` on V3 shopping asks: vendor domain, whether the row shows the vendor price, and a >5% flag (also written into the cell text). */
+  | { type: 'table'; columns: string[]; rows: string[][]; highlight?: number; priceRows?: { domain: string; vendorTrue: boolean; note?: string; flag?: PriceFlag }[] }
   | { type: 'timeline'; items: { when: string; title: string; text?: string; source?: number }[] }
   | { type: 'steps'; items: { title: string; detail?: string }[] }
   | { type: 'proscons'; pros: string[]; cons: string[] }
