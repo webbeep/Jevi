@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { register } from 'node:module';
 import { test } from 'node:test';
 import { ANSWER_TTL_S, answerCacheUrl, fnv1a, loadSnapshot, normalizeAnswerQuery, saveSnapshot, snapshotKey, storableAnswer, type AnswerStore } from '../shared/answerKey.ts';
+import type { AskRef } from '../shared/askAbout.ts';
 import { cacheBypass } from '../server/token.ts';
 import type { StreamRequest } from '../server/stream.ts';
 import type { Send } from '../server/sse.ts';
@@ -57,6 +58,15 @@ function memoryCache() {
 }
 
 const search = (query: string, context?: string): StreamRequest => ({ kind: 'search', query, freshness: 'any', context });
+
+const followup = (ref?: AskRef): StreamRequest => ({
+  kind: 'followup',
+  question: 'What is behind BlueFlame AI\'s 42% revenue growth?',
+  original: 'BlueFlame AI',
+  search: { query: 'BlueFlame AI', freshness: 'any', results: [], images: [], discussions: [], engines: [] },
+  cards: [],
+  ref,
+});
 
 async function finish(res: Response, pending: Promise<unknown>[]) {
   const text = await res.text();
@@ -301,6 +311,27 @@ test('design streams are never cached', async () => {
     run: async (send) => {
       calls += 1;
       send('node', { index: 0, node: { type: 'text', text: 'd' } });
+      send('done', { engine: 'composed' });
+    },
+    waitUntil: mem.waitUntil,
+    cache: mem.cache,
+  });
+  assert.equal(res.headers.get('X-ZO-Cache'), 'SKIP');
+  await finish(res, mem.pending);
+  assert.equal(calls, 1);
+  assert.equal(mem.entries.size, 0);
+});
+
+test('follow-up streams carrying a ref are never cached', async () => {
+  const mem = memoryCache();
+  let calls = 0;
+  const res = await serveStream({
+    request: new Request('https://zo.page/api/stream', { method: 'POST' }),
+    env: {},
+    req: followup({ label: 'Revenue growth', value: '42%', entity: 'BlueFlame AI' }),
+    run: async (send) => {
+      calls += 1;
+      send('node', { index: 0, node: { type: 'text', text: 'f' } });
       send('done', { engine: 'composed' });
     },
     waitUntil: mem.waitUntil,

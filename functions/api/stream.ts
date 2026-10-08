@@ -1,5 +1,6 @@
 import { applyGate } from '../../server/auth/gate';
 import { recordAsk } from '../../server/auth/history';
+import { cleanRef } from '../../shared/askAbout';
 import type { Freshness, SearchResponse } from '../../shared/types';
 import { bindAiWaitUntil } from '../../server/aiBudget';
 import { serveStream } from '../../server/answerCache';
@@ -39,7 +40,8 @@ function clean(body: StreamRequest | null): StreamRequest | undefined {
       const search = clampSearch(body.search);
       const question = text(body.question, 600);
       const cards = Array.isArray(body.cards) ? body.cards.slice(-8).map((c) => ({ ...c, title: text(c.title, 120) })) : [];
-      return search && question ? { ...body, question, original: text(body.original, 300), search, cards, context } : undefined;
+      const ref = cleanRef(body.ref);
+      return search && question ? { ...body, question, original: text(body.original, 300), search, cards, context, ...(ref ? { ref } : {}) } : undefined;
     }
     default: {
       const unknown: never = body;

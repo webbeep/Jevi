@@ -10,6 +10,7 @@ import { flushPendingSave } from './auth/saves';
 import { clearSyncedHistory, noteDeviceAsk } from './auth/sync';
 import { ArrowUp, CornerDownRight, CornerLeftUp, History, Moon, Pencil, Plus, RotateCw, Search, Shuffle, SlidersHorizontal, Sun, WifiOff, X } from 'lucide-react';
 import type { AnswerCard, CardNode } from '../shared/card';
+import { entityOf, type AskRef } from '../shared/askAbout';
 import type { SearchResponse } from '../shared/types';
 import { api } from './api';
 import { AnswerCardView } from './card/AnswerCardView';
@@ -602,6 +603,40 @@ export default function App() {
   );
 }
 
+/** The subject of a card body: the first profile's name, looking inside layout nodes. */
+function profileName(body: CardNode[]): string | undefined {
+  for (const node of body) {
+    if (node.type === 'profile') return node.name;
+    if (node.type === 'tabs') {
+      for (const tab of node.tabs) {
+        const found = profileName(tab.children);
+        if (found) return found;
+      }
+    } else if ('children' in node) {
+      const found = profileName(node.children);
+      if (found) return found;
+    }
+  }
+  return undefined;
+}
+
+/** The card box a follow-up came from, above the question it asked. */
+function RefChip({ askRef: ref }: { askRef: AskRef }) {
+  const label = ref.label ?? '';
+  const value = ref.value ?? '';
+  const text = `${label}${label && value ? ' · ' : ''}${value}`;
+  const inner = (
+    <>
+      <span aria-hidden className="h-3 w-0.5 shrink-0 rounded-full bg-foreground/25" />
+      <span className="truncate" title={text}>{text}</span>
+    </>
+  );
+  const chip = 'inline-flex max-w-[85%] min-w-0 items-center gap-1.5 rounded-md border bg-card px-2 py-0.5 text-xs leading-5 text-muted-foreground';
+  return ref.sourceUrl && /^https:\/\//i.test(ref.sourceUrl)
+    ? <a href={ref.sourceUrl} target="_blank" rel="noopener noreferrer" data-ref-chip="" className={cn(chip, 'transition-colors hover:text-foreground')}>{inner}</a>
+    : <span data-ref-chip="" className={chip}>{inner}</span>;
+}
+
 function isTurnList(data: unknown): data is Turn[] {
   return Array.isArray(data) && data.length > 0 && data.every((item) => {
     if (!item || typeof item !== 'object') return false;
@@ -828,6 +863,8 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
     return out;
   }, [search?.images, turn.live?.credits, card.credits]);
 
+  const entity = useMemo(() => profileName(card.body) ?? entityOf(card.title), [card.body, card.title]);
+
   const id = turn.id;
   const pendingRefine = useRef<string | null>(null);
   useEffect(() => {
@@ -841,6 +878,7 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
     results: search?.results ?? [],
     images: search?.images ?? [],
     credits,
+    entity,
     busy: offlinePartial ? false : turn.filling,
     onSearch: (q) => void actions.followup(q, id, 'search'),
     onAsk: (q) => void actions.followup(q, id, 'ask'),
@@ -853,13 +891,13 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
     },
     onSources: () => onSources(id),
     onDraft: (text) => window.dispatchEvent(new CustomEvent('zo-prefill', { detail: text })),
-    onItem: (q) => {
+    onItem: (q, ref) => {
       const now = Date.now();
       if (threadBusy || now - lastItemTap < 1500) return;
       lastItemTap = now;
-      void actions.followup(q, id, 'ask');
+      void actions.followup(q, id, 'ask', ref);
     },
-  }), [search?.results, search?.images, credits, turn.filling, offlinePartial, actions, id, onSources, threadBusy]);
+  }), [search?.results, search?.images, credits, entity, turn.filling, offlinePartial, actions, id, onSources, threadBusy]);
 
   const degraded = turn.kind === 'search' ? turnDegraded(turn) ?? undefined : undefined;
   const choices = turn.result ? readChoices(turn.result, turn.result.card) : undefined;
@@ -876,6 +914,7 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
               <span className="truncate">From “{turn.base.title}”</span>
             </button>
           )}
+          {turn.ref && <RefChip askRef={turn.ref} />}
           <div className="flex max-w-[85%] items-center gap-2 rounded-2xl rounded-br-md bg-foreground/[0.06] px-4 py-2.5 text-[15px] leading-snug dark:bg-foreground/[0.09]">
             {turn.kind === 'search' && <Search className="size-3.5 shrink-0 text-muted-foreground" />}
             {turn.origin === 'adjust' && <SlidersHorizontal className="size-3.5 shrink-0 text-muted-foreground" />}

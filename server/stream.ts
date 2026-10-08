@@ -5,6 +5,7 @@ import { entityContextLine, entityHintFor, priorEntity, resolveEntity } from './
 import { type EntityHint, mentionsAny } from './imageGate';
 import type { RowImagePlan } from './pictures';
 import type { AnswerCard, FollowupContext, FollowupIntent, LayoutPlan } from '../shared/card';
+import { type AskRef, refContext, withRef } from '../shared/askAbout';
 import type { EngineStatus, Freshness, ImageResult, SearchResponse } from '../shared/types';
 import { rewriteQuery } from './ai';
 import { designParallel, designStream } from './design';
@@ -53,6 +54,8 @@ export type StreamRequest =
       /** Set when the follow-up came from a control or button on card `from` rather than being typed. */
       intent?: FollowupIntent;
       from?: number;
+      /** The card box the follow-up is about (a tapped tile/row/profile), when it came from one. */
+      ref?: AskRef;
     };
 
 interface DesignArgs {
@@ -290,7 +293,8 @@ function engineErrors(engines: EngineStatus[]): string[] {
 }
 
 async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind: 'followup' }>, started: number, scope: AskScope) {
-  const context = req.context?.slice(0, 4000);
+  const refLine = req.ref ? refContext(req.ref) : '';
+  const context = [req.context?.slice(0, 4000), refLine].filter(Boolean).join('\n') || undefined;
   const from = req.cards.find((c) => c.id === req.from);
 
   // A search button on a card: always resolve it against the conversation ("apple varieties" → "best apples for apple pie").
@@ -309,7 +313,7 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
   switch (mode) {
     case 'search': {
       send('plan', plan);
-      const query = await rewritten;
+      const query = withRef(await rewritten, req.ref);
       send('rewrite', { query });
       await searchAndDesign(send, env, query, 'any', context, started, scope, true);
       return;

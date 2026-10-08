@@ -1,3 +1,4 @@
+import type { AskRef } from '../shared/askAbout';
 import type { AnswerCard, CardNode, FollowupContext, FollowupIntent, ImageCredit, LayoutPlan } from '../shared/card';
 import { parseSseFrames, StreamError } from '../shared/sse-parse';
 import type { Freshness, ImageResult, NoSourcesNotice, SearchResponse } from '../shared/types';
@@ -8,7 +9,7 @@ export type { StreamErrorReason } from '../shared/sse-parse';
 export type StreamBody =
   | { kind: 'search'; query: string; freshness: Freshness; context?: string }
   | { kind: 'design'; query: string; pattern: string; depth: LayoutPlan['depth']; readPages: boolean; search: SearchResponse; simple?: boolean; followup?: FollowupContext; context?: string }
-  | { kind: 'followup'; question: string; original: string; search: SearchResponse; cards: { id: number; title: string; card?: AnswerCard; pattern?: string }[]; context?: string; intent?: FollowupIntent; from?: number };
+  | { kind: 'followup'; question: string; original: string; search: SearchResponse; cards: { id: number; title: string; card?: AnswerCard; pattern?: string }[]; context?: string; intent?: FollowupIntent; from?: number; ref?: AskRef };
 
 export type StreamEvent =
   | { event: 'plan'; data: LayoutPlan }

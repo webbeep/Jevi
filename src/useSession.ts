@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { AskRef } from '../shared/askAbout';
 import type { AnswerCard, CardNode, CardResponse, FollowupContext, FollowupIntent, ImageCredit, LayoutPlan } from '../shared/card';
 import { loadSnapshot, normalizeAnswerQuery } from '../shared/answerKey';
 import { readChoices } from '../shared/choices';
@@ -35,6 +36,8 @@ export interface Turn {
   searchId: number;
   /** Set when this turn came from a control or button on a card rather than being typed. */
   origin?: FollowupIntent;
+  /** The card box a tapped follow-up is about, shown as a chip beside its question. */
+  ref?: AskRef;
   /** The card this one is an adjusted version of. */
   base?: { id: number; title: string; card: AnswerCard };
   /** How a follow-up was answered, so redesigns keep the same approach. */
@@ -463,7 +466,7 @@ export function useSession() {
    * answer, adjust a card or search; card controls say what they want (`intent`). Either way the answer is a
    * new card — the card it came from stays as it was.
    */
-  const followup = useCallback(async (question: string, fromId?: number, intent?: FollowupIntent) => {
+  const followup = useCallback(async (question: string, fromId?: number, intent?: FollowupIntent, askRef?: AskRef) => {
     const q = question.trim();
     if (!q) return;
     const last = ref.current[ref.current.length - 1];
@@ -475,7 +478,7 @@ export function useSession() {
     const ctx = searchOf(from) ?? [...ref.current].reverse().find((t) => t.search);
     if (!ctx?.search) return;
     const base = intent === 'adjust' && from?.result ? { id: from.id, title: from.result.card.title, card: from.result.card } : undefined;
-    const id = add({ kind: intent === 'search' ? 'search' : 'answer', question: q, searchId: ctx.id, filling: true, origin: intent, base, pattern: base ? from?.pattern : undefined });
+    const id = add({ kind: intent === 'search' ? 'search' : 'answer', question: q, searchId: ctx.id, filling: true, origin: intent, base, pattern: base ? from?.pattern : undefined, ref: askRef });
     scrollToTurn(id);
     const cards = ref.current.filter((t) => t.result && t.id !== id).slice(-8).map((t) => ({ id: t.id, title: t.result!.card.title, card: t.result!.card, pattern: t.pattern }));
     await run(id, {
@@ -487,6 +490,7 @@ export function useSession() {
       context: memory(id, from?.id) || undefined,
       intent,
       from: from?.id,
+      ...(askRef ? { ref: askRef } : {}),
     }).catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [add, run]);
