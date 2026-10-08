@@ -59,7 +59,12 @@ const cleanWord = (w: string) => w.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, '')
 
 /** Org/product-ish Cap tokens that end a person+org query ("Ray Lee BlueFlame AI"). */
 const ORG_TAIL = /^(ai|ml|io|inc|llc|ltd|corp|co|labs?|technologies|technology|group|studios?|systems?|partners?|associates?)$/i;
-const looksLikeOrgToken = (w: string) => ORG_TAIL.test(w) || /[a-z][A-Z]/.test(w);
+const SPORTS_LEAGUE = /^(nba|nfl|mlb|nhl|ncaa|wnba|mls|pga|ufc|wwe)$/i;
+/** Ends a Cap name run: CamelCase orgs, Inc/AI tails, or ALL-CAPS acronyms (USATF). */
+const looksLikeOrgToken = (w: string) =>
+  ORG_TAIL.test(w) ||
+  /[a-z][A-Z]/.test(w) ||
+  (/^[A-Z]{3,}$/.test(w) && !/^(JR|SR|II|III|IV)$/.test(w));
 
 /** The person the query is about, or '' when there is none. */
 export function personSubject(query: string): string {
@@ -107,6 +112,9 @@ export function contextTerms(query: string, name = personSubject(query)): string
     const t = tokens(w)[0];
     if (!t || nameSet.has(t) || COMMON.has(t)) continue;
     // CamelCase orgs (BlueFlame) or short org tails (AI, Inc) — not NBA/NFL alone.
+    // Sports leagues (NBA) are season context, not identity — requiring them dropped the
+    // Nique Clifford Wikipedia bio from a preseason ask.
+    if (SPORTS_LEAGUE.test(w)) continue;
     if (looksLikeOrgToken(w) || ORG_TAIL.test(w)) {
       if (!out.includes(t)) out.push(t);
     }
@@ -354,11 +362,11 @@ function findAliases(name: string, rows: EntityRow[]): string[] {
   return out;
 }
 
-/** Clusters of row indices (into the original rows array) that share one identity. */
-function clusterRows(rows: EntityRow[], name: string): number[][] {
+/** Strong clusters + weak (name-only) indices. Weak are attached after the choices decision. */
+function clusterRows(rows: EntityRow[], name: string): { strong: number[][]; weak: number[] } {
   const sigs = rows.map((r) => extractSignals(r, name));
   const named = sigs.map((s, i) => (s.hasName ? i : -1)).filter((i) => i >= 0);
-  if (!named.length) return [];
+  if (!named.length) return { strong: [], weak: [] };
   const parent = new Map<number, number>(named.map((i) => [i, i]));
   const find = (x: number): number => {
     const p = parent.get(x)!;
@@ -396,15 +404,21 @@ function clusterRows(rows: EntityRow[], name: string): number[][] {
     groups.get(r)!.push(i);
   }
   const clusters = [...groups.values()];
-  // Weak (name-only) rows absorb into the largest strong cluster.
-  const weak = named.filter((i) => sigs[i]!.sig.size === 0);
-  if (weak.length) {
-    if (clusters.length) {
-      clusters.sort((a, b) => b.length - a.length);
-      clusters[0]!.push(...weak);
-    } else {
-      clusters.push([...weak]);
-    }
+  // Weak (name-only) rows are returned as a trailing marker cluster via attachWeak later —
+  // absorbing them here inflated the first cluster and blocked live choices (Ray Lee / David Kim).
+  for (const c of clusters) c.sort((a, b) => a - b);
+  clusters.sort((a, b) => b.length - a.length || a[0]! - b[0]!);
+  return { strong: clusters, weak: named.filter((i) => sigs[i]!.sig.size === 0) };
+}
+
+function attachWeak(strong: number[][], weak: number[]): number[][] {
+  const clusters = strong.map((c) => [...c]);
+  if (!weak.length) return clusters;
+  if (clusters.length) {
+    clusters.sort((a, b) => b.length - a.length);
+    clusters[0]!.push(...weak);
+  } else {
+    clusters.push([...weak]);
   }
   for (const c of clusters) c.sort((a, b) => a - b);
   clusters.sort((a, b) => b.length - a.length || a[0]! - b[0]!);
@@ -451,21 +465,115 @@ const CLASS_LABEL: Record<string, string> = {
   edu: 'University page',
 };
 
+/** Short natural "Role at Org" / "CEO of Max"; never mashed; ≤ ~40 chars; tokens deduped. */
+function cleanPhrase(s: string, max = 28): string {
+  const words = title(s).split(/\s+/).filter(Boolean);
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const w of words) {
+    const k = low(w);
+    if (seen.has(k)) continue;
+    // Drop role words that leaked into an org capture ("USATF CEO Max" → keep org head).
+    if (ROLE1.has(k) || ROLE2.some((r) => k === r.split(' ')[0])) continue;
+    seen.add(k);
+    out.push(w);
+    if (out.join(' ').length >= max) break;
+  }
+  const joined = out.join(' ');
+  return joined.length > max ? `${joined.slice(0, max - 1).trim()}…` : joined;
+}
+
 function describe(top: { role?: string; org?: string; location?: string }, rows: EntityRow[], name: string): string {
-  if (top.role && top.org) return `${top.role} at ${top.org}`;
-  if (top.role && top.location) return `${top.role} of ${top.location}`;
-  if (top.role) return top.role;
-  if (top.org) return top.org;
-  if (top.location) return top.location;
-  const cls = extractSignals(rows[0]!, name).domainClass;
-  return CLASS_LABEL[cls] ?? hostOf(rows[0]!.url);
+  const role = top.role ? title(top.role) : '';
+  const org = top.org ? cleanPhrase(top.org) : '';
+  const loc = top.location ? cleanPhrase(top.location, 20) : '';
+  let raw = '';
+  if (role && org) raw = /^(ceo|cto|cfo|coo|founder|president|director|chairman)$/i.test(role) ? `${role} of ${org}` : `${role} at ${org}`;
+  else if (role && loc) raw = `${role} of ${loc}`;
+  else if (role) raw = role;
+  else if (org) raw = org;
+  else if (loc) raw = loc;
+  else {
+    const cls = extractSignals(rows[0]!, name).domainClass;
+    raw = CLASS_LABEL[cls] ?? hostOf(rows[0]!.url);
+  }
+  // Final length + token dedupe across the whole string.
+  const parts = raw.split(/\s+/).filter(Boolean);
+  const seen = new Set<string>();
+  const kept: string[] = [];
+  for (const w of parts) {
+    const k = low(w);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    kept.push(w);
+  }
+  const out = kept.join(' ');
+  return out.length > 40 ? `${out.slice(0, 39).trim()}…` : out;
+}
+
+/** Searchable follow-up: "Ray Lee USATF coach" — name + org/role words, no "at/of". */
+function choiceQuery(name: string, top: { role?: string; org?: string; location?: string }): string {
+  const bits = [name];
+  if (top.org) bits.push(cleanPhrase(top.org, 24));
+  if (top.role) bits.push(top.role);
+  else if (top.location) bits.push(cleanPhrase(top.location, 16));
+  return title(bits.filter(Boolean).join(' ')).slice(0, 120);
 }
 
 function toChoice(name: string, cluster: number[], rows: EntityRow[]): EntityChoice {
   const top = topOf(cluster, rows, name);
   const descriptor = describe(top, cluster.map((i) => rows[i]!), name);
-  const query = title([name, top.role, top.org, top.location && !top.org ? top.location : ''].filter(Boolean).join(' '));
-  return { name, descriptor, query, id: slugOf(name, top.role, top.org, top.location) || slugOf(name) };
+  return { name, descriptor, query: choiceQuery(name, top), id: slugOf(name, top.role, top.org, top.location) || slugOf(name) };
+}
+
+/** Wikipedia disambiguation page: title/url "(disambiguation)" or snippet "may refer to". */
+export function isDisambiguationPage(row: EntityRow): boolean {
+  const titleText = row.title ?? '';
+  const url = row.url ?? '';
+  const snip = row.snippet ?? '';
+  if (/\(disambiguation\)/i.test(titleText) || /\(disambiguation\)/i.test(url)) return true;
+  if (/\bmay refer to\b/i.test(titleText) || /\bmay refer to\b/i.test(snip)) return true;
+  return false;
+}
+
+/**
+ * Seed choice descriptors from a disambiguation page's snippet/title entries
+ * ("Ray Lee (coach)", "Ray Lee, American CEO", …).
+ */
+export function disambiguationEntries(row: EntityRow, name: string): { role?: string; org?: string; location?: string; label: string }[] {
+  const text = `${row.title ?? ''}. ${row.snippet ?? ''}`;
+  const out: { role?: string; org?: string; location?: string; label: string }[] = [];
+  const seen = new Set<string>();
+  const push = (label: string, role?: string, org?: string, location?: string) => {
+    const k = low(label);
+    if (!k || seen.has(k) || k === low(name)) return;
+    seen.add(k);
+    out.push({ label: title(label).slice(0, 40), role, org, location });
+  };
+  // "Name (role)" / "Name (role, org)"
+  const paren = new RegExp(`${name.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\s*\\(([^)]{2,40})\\)`, 'gi');
+  for (const m of text.matchAll(paren)) {
+    const inside = title(m[1] ?? '');
+    const parts = inside.split(/,|\/|;/).map((s) => s.trim()).filter(Boolean);
+    let role: string | undefined;
+    let org: string | undefined;
+    for (const p of parts) {
+      const pl = low(p);
+      if (!role && (ROLE1.has(pl) || ROLE2.some((r) => pl.includes(r)))) role = canonRole(pl).display;
+      else if (!org) org = p;
+    }
+    push(inside, role, org);
+  }
+  // "Name, role at Org" / "Name – role"
+  const dash = new RegExp(`${name.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\s*[,–—-]\\s*([^.;\\n]{3,50})`, 'gi');
+  for (const m of text.matchAll(dash)) {
+    const rest = title(m[1] ?? '');
+    if (/\bmay refer to\b/i.test(rest)) continue;
+    const at = /\b(.+?)\s+(?:at|of|for)\s+(.+)$/i.exec(rest);
+    if (at) push(rest, title(at[1]!), title(at[2]!));
+    else push(rest, ROLE1.has(low(rest.split(/\s+/)[0] ?? '')) ? canonRole(rest.split(/\s+/)[0]!).display : undefined, undefined);
+  }
+  return out.slice(0, 6);
 }
 
 export function resolveEntity(
@@ -479,17 +587,27 @@ export function resolveEntity(
   // Drop adult/spam + non-full-name / missing-context hits before clustering.
   const eligible = rows
     .map((row, i) => ({ row, i }))
-    .filter(({ row }) => !isBlockedHost(row.url) && personSourceOk(query, row, name));
+    .filter(({ row }) => {
+      if (isBlockedHost(row.url)) return false;
+      // Picked-choice follow-up: prior already chose the person — keep full-name hits even when
+      // the new query's org/role context is missing from a page (else → no_sources).
+      if (opts?.prior) return hasFullPersonName(opts.prior.name, row) || hasFullPersonName(name, row);
+      return personSourceOk(query, row, name);
+    });
   if (!eligible.length) return { kind: 'skip' };
   const filtered = eligible.map((e) => e.row);
   const indexMap = eligible.map((e) => e.i);
-  const clustersRaw = clusterRows(filtered, name);
-  const clusters = clustersRaw.map((c) => c.map((j) => indexMap[j]!));
-  if (!clusters.length) return { kind: 'skip' };
+  const { strong: strongRaw, weak: weakRaw } = clusterRows(filtered, name);
+  const strong = strongRaw.map((c) => c.map((j) => indexMap[j]!));
+  const weak = weakRaw.map((j) => indexMap[j]!);
+  // Wikipedia disambiguation pages are a strong ambiguity signal even with few cluster peers.
+  const disambig = eligible.filter((e) => isDisambiguationPage(e.row)).map((e) => e.i);
+  if (!strong.length && !weak.length && !disambig.length) return { kind: 'skip' };
 
   // A thread entity locks the choice: prefer clusters that match it, never ask again.
   if (opts?.prior) {
-    const locked = clusters.filter((c) => c.some((i) => matchesEntity(opts.prior!, rows[i]!)));
+    const withWeak = attachWeak(strong.length ? strong : (weak.length ? [weak] : []), strong.length ? weak : []);
+    const locked = withWeak.filter((c) => c.some((i) => matchesEntity(opts.prior!, rows[i]!)));
     if (locked.length) {
       locked.sort((a, b) => b.length - a.length || a[0]! - b[0]!);
       const win = locked[0]!;
@@ -501,15 +619,49 @@ export function resolveEntity(
         dropped: rows.map((_, i) => i).filter((i) => !kept.has(i)),
       };
     }
+    // Prior set but no cluster matched: keep name-matched rows (don't no_sources).
+    const nameHits = rows.map((r, i) => (hasFullPersonName(opts.prior!.name, r) ? i : -1)).filter((i) => i >= 0);
+    if (nameHits.length) {
+      const kept = new Set(nameHits);
+      return {
+        kind: 'single',
+        entity: { ...opts.prior, domains: opts.prior.domains ?? officialDomains(nameHits.map((i) => rows[i]!.url)) },
+        kept: nameHits,
+        dropped: rows.map((_, i) => i).filter((i) => !kept.has(i)),
+      };
+    }
   }
 
-  if (clusters.length >= 2) {
-    const [first, second] = [clusters[0]!, clusters[1]!];
-    if (second.length >= 2 && second.length >= 0.6 * first.length && first.length >= 2) {
-      const choices = clusters.filter((c) => c.length >= 2).slice(0, 4).map((c) => toChoice(name, c, rows));
+  // Seed choices from a disambiguation page when clustering is thin.
+  if (disambig.length) {
+    const entries = disambiguationEntries(rows[disambig[0]!]!, name);
+    if (entries.length >= 2) {
+      const choices: EntityChoice[] = entries.slice(0, 4).map((e) => ({
+        name,
+        descriptor: describe({ role: e.role, org: e.org, location: e.location }, [rows[disambig[0]!]!], name) || e.label,
+        query: choiceQuery(name, { role: e.role, org: e.org, location: e.location }),
+        id: slugOf(name, e.role, e.org, e.location) || slugOf(name, e.label),
+      }));
+      // Prefer real clusters when they already give ≥2 choices.
+      const clustered = strong.filter((c) => c.length >= 1).slice(0, 4).map((c) => toChoice(name, c, rows));
+      const merged = clustered.length >= 2 ? clustered : choices;
+      if (merged.length >= 2) return { kind: 'choices', choices: merged };
+    }
+  }
+
+  // Compare strong clusters only (weak inflated the winner live and blocked choices).
+  // Threshold loosened: 2nd cluster ≥2 and ≥40% of 1st (was 60%). Famous names stay single
+  // when the runner-up is a singleton (Obama dog article).
+  if (strong.length >= 2) {
+    const [first, second] = [strong[0]!, strong[1]!];
+    if (second.length >= 2 && second.length >= 0.4 * first.length && first.length >= 2) {
+      const choices = strong.filter((c) => c.length >= 2).slice(0, 4).map((c) => toChoice(name, c, rows));
       if (choices.length >= 2) return { kind: 'choices', choices };
     }
   }
+
+  const clusters = attachWeak(strong.length ? strong : (weak.length ? [weak] : []), strong.length ? weak : []);
+  if (!clusters.length) return { kind: 'skip' };
   const win = clusters[0]!;
   const kept = new Set(win);
   return {

@@ -180,10 +180,13 @@ export function gateResults<T extends GateHit>(query: string, rows: readonly T[]
     // Multi-word person names only: a single token is never enough to force the person gate.
     if (name && nameToks.length >= 2) {
       const ctx = contextTerms(query, name);
-      const ok = clean.filter((row) => hasFullPersonName(name, row) && (
+      const withCtx = clean.filter((row) => hasFullPersonName(name, row) && (
         ctx.length === 0 ||
         ctx.some((t) => hasTerm(norm(`${row.title} ${row.snippet ?? ''} ${row.url}`), t))
       ));
+      // Picked-choice follow-up (e.g. "Ray Lee USATF coach"): if context is too strict
+      // and every hit is dropped, keep full-name matches rather than no_sources.
+      const ok = withCtx.length ? withCtx : clean.filter((row) => hasFullPersonName(name, row));
       personDropped = clean.length - ok.length;
       pool = ok;
     }

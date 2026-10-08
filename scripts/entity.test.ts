@@ -277,3 +277,86 @@ test('China Games event tile never gets a photo target', () => {
   assert.equal(targetFor('Preseason window').kind, 'none');
   assert.equal(targetFor('Role').kind, 'none');
 });
+
+test('Wikipedia disambiguation page seeds choices (live: Who is Ray Lee / David Kim)', () => {
+  const rows = [
+    row(
+      'Ray Lee (disambiguation) - Wikipedia',
+      'Ray Lee may refer to: Ray Lee (coach), American track coach at USATF; Ray Lee (CEO), CEO of Max Robotics; Ray Lee (actor).',
+      'https://en.wikipedia.org/wiki/Ray_Lee_(disambiguation)',
+    ),
+    row('Other news', 'Unrelated.', 'https://example.com/x'),
+  ];
+  const d = resolveEntity('Who is Ray Lee', rows);
+  assert.equal(d.kind, 'choices');
+  if (d.kind !== 'choices') return;
+  assert.ok(d.choices.length >= 2);
+  for (const c of d.choices) {
+    assert.ok(c.descriptor.length <= 40, c.descriptor);
+    assert.doesNotMatch(c.descriptor, /Coach at USATF CEO/i);
+    assert.match(c.query, /^Ray Lee /);
+    assert.doesNotMatch(c.query, /\bat\b|\bof\b/);
+  }
+});
+
+test('choice descriptors stay short and natural; query is searchable', () => {
+  const d = resolveEntity('Who is Ray Lee', RAY_LEE);
+  assert.equal(d.kind, 'choices');
+  if (d.kind !== 'choices') return;
+  for (const c of d.choices) {
+    assert.ok(c.descriptor.length <= 40, c.descriptor);
+    assert.match(c.descriptor, /^(Software Engineer at Stripe|Actor|Mayor of Springfield|Wikipedia article|IMDb page|.+)$/);
+    assert.ok(c.query.startsWith('Ray Lee'));
+    // Follow-up must not be the mashed "Name (descriptor)" form when query is set.
+    assert.ok(!c.query.includes('('));
+  }
+  const eng = d.choices.find((c) => /stripe/i.test(c.descriptor));
+  assert.ok(eng);
+  assert.match(eng!.query, /Stripe/i);
+});
+
+test('picked-choice follow-up keeps name matches when context would clear the pool', () => {
+  const rows = [
+    row('Ray Lee - USATF coach profile', 'Ray Lee is a coach with USATF in California.', 'https://www.usatf.org/ray-lee'),
+    row('Ray Lee LinkedIn', 'Ray Lee works in tech.', 'https://www.linkedin.com/in/ray-lee'),
+    row('Unrelated headphones', 'Best noise cancelling under 200.', 'https://example.com/headphones'),
+  ];
+  // Strict context (USATF) would drop the LinkedIn row; without USATF on LinkedIn we'd keep coach only.
+  const gated = gateResults('Ray Lee USATF coach', rows);
+  assert.ok(gated.kept.length >= 1);
+  assert.ok(gated.kept.some((r) => /usatf/i.test(r.url)));
+  // When NO row has the context token, fall back to full-name matches instead of empty.
+  const loose = [
+    row('Ray Lee - coach bio', 'Ray Lee has coached track for twenty years.', 'https://www.example.com/ray-lee-coach'),
+    row('Ray Lee actor', 'Ray Lee is an actor.', 'https://en.wikipedia.org/wiki/Ray_Lee_(actor)'),
+  ];
+  const fallback = gateResults('Ray Lee USATF coach', loose);
+  assert.equal(fallback.kept.length, 2, 'name matches kept when context matches none');
+});
+
+test('prior entity with no matching cluster falls back to name hits (not empty)', () => {
+  const prior: Entity = {
+    id: 'ray-lee-coach-usatf',
+    name: 'Ray Lee',
+    role: 'Coach',
+    org: 'USATF',
+    terms: ['coach', 'usatf'],
+  };
+  const rows = [
+    row('Ray Lee - personal site', 'Ray Lee writes about running.', 'https://raylee.example.com/'),
+    row('Someone else', 'Totally different.', 'https://example.com/other'),
+  ];
+  const d = resolveEntity('Ray Lee USATF coach', rows, { prior });
+  assert.equal(d.kind, 'single');
+  if (d.kind === 'single') {
+    assert.deepEqual(d.kept, [0]);
+    assert.equal(d.entity.name, 'Ray Lee');
+  }
+});
+
+test('spam *.web.app random subdomains are blocked; named hosts are not', () => {
+  assert.equal(isBlockedHost('https://newlibraryjgza.web.app/page'), true);
+  assert.equal(isBlockedHost('https://x7k9m2qp1ab.web.app/'), true);
+  assert.equal(isBlockedHost('https://docs.web.app/guide'), false);
+  assert.equal(isBlockedHost('https://my-app.web.app/'), false);
+});
