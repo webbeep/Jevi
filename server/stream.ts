@@ -24,6 +24,9 @@ import { extraQueries, understand } from './understand';
 import { cacheBypass, testForce, validTestToken } from './token';
 import type { Env } from './util';
 
+/** Asks whose answer depends on when they are asked: they wait for the intent read's freshness before searching. */
+const TIME_SENSITIVE = /\b(news|latest|today|tonight|yesterday|tomorrow|this (?:week|weekend|month|year|season)|right now|now|current(?:ly)?|live|breaking|recent(?:ly)?|update[sd]?|score[sd]?|standings|price[sd]?|cost[s]?|deals?|sale|weather|forecast|stocks?|market|election|polls?|20\d\d)\b/i;
+
 export interface CardOnScreen {
   id: number;
   title: string;
@@ -177,17 +180,31 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     return plan;
   });
 
-  const u = await understood;
-  const extras = extraQueries(query, u);
-  if (u) send('intent', { intent: u.intent, queries: u.queries });
-  // Literal question first. Planner rewrites are the later calls, still inside the cap.
-  const q = queriesForAsk(query, extras);
   const route = routeOf(query);
   scope.ledger.route = route;
   const deep = route === 'deep';
-  const more = routeExtras(route, moreQueries(query, extras));
-  const fresh = freshness === 'any' && u ? u.freshness : freshness;
-  const found = await searchWithLate({ q, more, freshness: fresh, count: 20 }, env, scope);
+  let found: Awaited<ReturnType<typeof searchWithLate>>;
+  let u: Awaited<typeof understood>;
+  if (!rewritten && freshness === 'any' && !TIME_SENSITIVE.test(query)) {
+    // SPD2 (t457): a timeless ask searches its literal words at once; the understood rewrites join the same
+    // engine when the intent read lands (~1 s), instead of the whole search waiting for it.
+    const later = understood.then((x) => {
+      if (x) send('intent', { intent: x.intent, queries: x.queries });
+      return { more: routeExtras(route, moreQueries(query, extraQueries(query, x))), freshness: x?.freshness ?? freshness };
+    });
+    found = await searchWithLate({ q: queriesForAsk(query, []), later, freshness, count: 20 }, env, scope);
+    u = await understood;
+    await later;
+  } else {
+    u = await understood;
+    const extras = extraQueries(query, u);
+    if (u) send('intent', { intent: u.intent, queries: u.queries });
+    // Literal question first. Planner rewrites are the later calls, still inside the cap.
+    const q = queriesForAsk(query, extras);
+    const more = routeExtras(route, moreQueries(query, extras));
+    const fresh = freshness === 'any' && u ? u.freshness : freshness;
+    found = await searchWithLate({ q, more, freshness: fresh, count: 20 }, env, scope);
+  }
   let results = applyRelevance(query, { ...found.response, query }, scope.ledger);
   let late: Promise<LateExtras> | undefined = found.late;
 

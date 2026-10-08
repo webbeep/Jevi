@@ -35,6 +35,8 @@ interface Query {
   q: string;
   /** Planner rewrites. Each is one more call on the engine that already succeeded. */
   more?: string[];
+  /** SPD2: rewrites (and their freshness) that arrive while the literal search is already running. */
+  later?: Promise<{ more: string[]; freshness: Freshness }>;
   freshness: Freshness;
   count: number;
 }
@@ -365,12 +367,12 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUnt
     if (grantBonus && KEYED.has(name) && failure.reason !== 'empty') ledger.bonus = Math.max(ledger.bonus ?? 0, 2);
   };
   const statuses: EngineStatus[] = [];
-  const catalog = new Map<SearchEngine, { name: SearchEngine; enabled: boolean; run: (text: string) => Promise<{ hits: WebHit[]; images: ImageResult[] }> }>([
-    ['exa', { name: 'exa', enabled: hasKey(env, 'EXA_API_KEY'), run: (text) => exaSearch({ ...q, q: text }, env) }],
-    ['langsearch', { name: 'langsearch', enabled: hasKey(env, 'LANGSEARCH_API_KEY'), run: (text) => langSearch({ ...q, q: text }, env) }],
-    ['tavily', { name: 'tavily', enabled: hasKey(env, 'TAVILY_API_KEY'), run: (text) => tavilySearch({ ...q, q: text }, env) }],
-    ['firecrawl', { name: 'firecrawl', enabled: hasKey(env, 'FIRECRAWL_API_KEY'), run: (text) => firecrawlSearch({ ...q, q: text }, env) }],
-    ['serper', { name: 'serper', enabled: hasKey(env, 'SERPER_API_KEY'), run: (text) => serperSearch({ ...q, q: text }, env) }],
+  const catalog = new Map<SearchEngine, { name: SearchEngine; enabled: boolean; run: (text: string, fresh?: Freshness) => Promise<{ hits: WebHit[]; images: ImageResult[] }> }>([
+    ['exa', { name: 'exa', enabled: hasKey(env, 'EXA_API_KEY'), run: (text, fresh = q.freshness) => exaSearch({ ...q, q: text, freshness: fresh }, env) }],
+    ['langsearch', { name: 'langsearch', enabled: hasKey(env, 'LANGSEARCH_API_KEY'), run: (text, fresh = q.freshness) => langSearch({ ...q, q: text, freshness: fresh }, env) }],
+    ['tavily', { name: 'tavily', enabled: hasKey(env, 'TAVILY_API_KEY'), run: (text, fresh = q.freshness) => tavilySearch({ ...q, q: text, freshness: fresh }, env) }],
+    ['firecrawl', { name: 'firecrawl', enabled: hasKey(env, 'FIRECRAWL_API_KEY'), run: (text, fresh = q.freshness) => firecrawlSearch({ ...q, q: text, freshness: fresh }, env) }],
+    ['serper', { name: 'serper', enabled: hasKey(env, 'SERPER_API_KEY'), run: (text, fresh = q.freshness) => serperSearch({ ...q, q: text, freshness: fresh }, env) }],
     ['you', { name: 'you', enabled: youKeyPresent(env), run: (text) => youKeyedSearch(text, env) }],
     ['you-keyless', { name: 'you-keyless', enabled: true, run: (text) => youKeylessSearch(text, env) }],
     ['wikipedia', { name: 'wikipedia', enabled: true, run: async () => ({ hits: await fetchWikiSearch(q.q), images: [] }) }],
@@ -408,7 +410,11 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUnt
   };
 
   const none = (): CascadeResult => ({ engine: 'none', hits: [], more: [], wikiHits: [], images: [], statuses });
-  const extras = plannedExtras(q);
+  // SPD2: with `later`, the literal call starts before the rewrites are known; they join as soon as they arrive.
+  const extrasReady: Promise<{ extras: string[]; fresh: Freshness }> = q.later
+    ? q.later.then((l) => ({ extras: plannedExtras({ ...q, more: l.more }), fresh: l.freshness }), () => ({ extras: [], fresh: q.freshness }))
+    : Promise.resolve({ extras: plannedExtras(q), fresh: q.freshness });
+  let extras: string[] = q.later ? [] : plannedExtras(q);
 
   for (const step of steps) {
     if (!step.enabled) continue;
@@ -433,6 +439,9 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUnt
     }
     ledger.search[step.name] += 1;
     const started = Date.now();
+    const early = q.later && KEYED.has(step.name) ? settled(step.run(q.q)) : undefined;
+    const ready = await extrasReady;
+    extras = ready.extras;
     // Two planner rewrites plus this call fill the cap. Wikipedia stays off so both rewrites still run.
     if (KEYED.has(step.name) && extras.length < 2) startWiki();
     // SPD1 (t457): every route runs its rewrites alongside the literal search, each counted and capped like it.
@@ -444,11 +453,11 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUnt
         if (searchCalls(ledger) >= callCap(ledger)) break;
         if (!(await takeSlot(env, step.name, bucket))) break;
         ledger.search[step.name] += 1;
-        parallel.push({ text, task: settled(step.run(text)), at: Date.now() });
+        parallel.push({ text, task: settled(step.run(text, ready.fresh)), at: Date.now() });
       }
     }
     try {
-      const out = await step.run(q.q);
+      const out = early ? await early.then((r) => { if (!r.ok) throw r.error; return r.value; }) : await step.run(q.q);
       let hits = out.hits.filter((h) => h.url && h.title);
       let images = out.images;
       if (!hits.length) {

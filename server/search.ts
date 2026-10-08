@@ -22,6 +22,8 @@ interface Query {
   q: string;
   /** Planner rewrites. Each is one extra call on the engine that answered, still inside the cap. */
   more?: string[];
+  /** SPD2: rewrites (and their freshness) that arrive while the literal search is already running. */
+  later?: Promise<{ more: string[]; freshness: Freshness }>;
   freshness: Freshness;
   count: number;
   /**
