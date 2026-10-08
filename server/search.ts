@@ -46,6 +46,8 @@ export function keyedEngines(env: Env): string[] {
     ['PERPLEXITY_API_KEY', 'perplexity'],
     ['SERPER_API_KEY', 'serper'],
     ['JINA_API_KEY', 'jina'],
+    ['LANGSEARCH_API_KEY', 'langsearch'],
+    ['FIRECRAWL_API_KEY', 'firecrawl'],
   ];
   return keys.filter(([k]) => !!env[k]).map(([, name]) => name);
 }
@@ -237,7 +239,7 @@ export async function searchWithLate(q: Query, env: Env, scope?: AskScope): Prom
     ask.ledger.cache = cached.kind === 'off' ? 'off' : 'miss';
   }
 
-  const webPromise = cascadeWeb(q, env, ask.ledger);
+  const webPromise = cascadeWeb(q, env, ask.ledger, ask.waitUntil);
   // ZO_SOCIAL=1 only: one keyless Bluesky call beside the cascade, not counted as a web engine. No-op on error.
   const socialTask = maybeBluesky(q, env);
   const graceOver = webPromise.then(() => new Promise<void>((r) => setTimeout(r, EXTRAS_GRACE_MS)));

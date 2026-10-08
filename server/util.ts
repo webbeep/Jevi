@@ -1,4 +1,6 @@
-export type Env = Record<string, string | undefined>;
+export type Env = Record<string, string | undefined> & {
+  ENGINE_SKIP?: KVNamespace;
+};
 
 export const UA = 'Mozilla/5.0 (compatible; ZoBot/1.0; +https://zo.page)';
 

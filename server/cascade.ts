@@ -2,6 +2,7 @@ import { cleanMarkdown } from '../shared/text';
 import type { EngineStatus, Freshness, ImageResult } from '../shared/types';
 import { ddgBackupOn, fetchBackup } from './backup';
 import { callCap, type CallLedger, type SearchEngine, engineDead, failureOf, rememberDead, searchCalls } from './budget';
+import { loadSkips, tripSkip } from './engineSkip';
 import { HttpStatusError, type Env, clip, domainOf, fetchJson } from './util';
 import { fetchWikiSearch } from './wikiSearch';
 
@@ -142,8 +143,10 @@ async function tavilySearch(q: Query, env: Env): Promise<{ hits: WebHit[]; image
 
 async function langSearch(q: Query, env: Env): Promise<{ hits: WebHit[]; images: ImageResult[] }> {
   const data = await fetchJson<{
-    code?: number;
-    data?: { webPages?: { value?: { name?: string; url: string; snippet?: string; datePublished?: string | null }[] } };
+    code?: number | string;
+    msg?: string;
+    message?: string;
+    data?: { webPages?: { value?: { name?: string; url: string; snippet?: string; text?: string; datePublished?: string | null }[] } };
   }>(
     'https://api.langsearch.com/v1/web-search',
     {
@@ -153,18 +156,26 @@ async function langSearch(q: Query, env: Env): Promise<{ hits: WebHit[]; images:
         query: q.q,
         count: 10,
         freshness: q.freshness === 'any' ? 'noLimit' : LANG_FRESH[q.freshness],
+        contents: { text: { maxCharacters: 6000 } },
       }),
     },
     ENGINE_TIMEOUT_MS,
   );
-  if (typeof data.code === 'number' && data.code !== 200) throw new HttpStatusError(data.code);
+  if (data.code != null && Number(data.code) !== 200) {
+    const msg = data.msg ?? data.message;
+    throw new HttpStatusError(Number(data.code), typeof msg === 'string' ? msg : '');
+  }
   return {
-    hits: (data.data?.webPages?.value ?? []).map((r) => ({
-      title: r.name || domainOf(r.url),
-      url: r.url,
-      snippet: clip(r.snippet ?? '', 320),
-      date: r.datePublished ?? undefined,
-    })),
+    hits: (data.data?.webPages?.value ?? []).map((r) => {
+      const text = r.text ? cleanMarkdown(r.text) : '';
+      return {
+        title: r.name || domainOf(r.url),
+        url: r.url,
+        snippet: clip(r.snippet ?? text, 320),
+        date: r.datePublished ?? undefined,
+        content: text.length > 300 ? text : undefined,
+      };
+    }),
     images: [],
   };
 }
@@ -197,6 +208,33 @@ async function firecrawlSearch(q: Query, env: Env): Promise<{ hits: WebHit[]; im
   };
 }
 
+const AGO = /^(\d+)\s+(second|minute|hour|day|week|month|year)s?\s+ago$/i;
+const NAMED_DAY = /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+(\d{1,2}),?\s+(\d{4})$/i;
+const MONTH_INDEX: Record<string, number> = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+const AGO_MS: Record<string, number> = { second: 1000, minute: 60_000, hour: 3_600_000, day: 86_400_000, week: 604_800_000, month: 2_592_000_000, year: 31_536_000_000 };
+
+/** Serper's relative dates ("2 days ago") are not ISO. Recency code only understands ISO, so drop what we cannot place. */
+function serperDate(raw: string | undefined, now = Date.now()): string | undefined {
+  if (!raw?.trim()) return undefined;
+  const s = raw.trim();
+  const ago = AGO.exec(s);
+  if (ago) {
+    const ms = Number(ago[1]) * AGO_MS[ago[2].toLowerCase()];
+    return Number.isFinite(ms) ? new Date(now - ms).toISOString() : undefined;
+  }
+  const named = NAMED_DAY.exec(s);
+  if (named) {
+    const month = MONTH_INDEX[named[1].slice(0, 3).toLowerCase()];
+    const day = Number(named[2]);
+    const year = Number(named[3]);
+    if (month === undefined || day < 1 || day > 31) return undefined;
+    return new Date(Date.UTC(year, month, day)).toISOString();
+  }
+  if (!/^\d{4}-\d{2}-\d{2}/.test(s)) return undefined;
+  const parsed = Date.parse(s);
+  return Number.isNaN(parsed) ? undefined : new Date(parsed).toISOString();
+}
+
 async function serperSearch(q: Query, env: Env): Promise<{ hits: WebHit[]; images: ImageResult[] }> {
   const data = await fetchJson<{ organic?: { title: string; link: string; snippet?: string; date?: string; imageUrl?: string }[] }>(
     'https://google.serper.dev/search',
@@ -216,7 +254,7 @@ async function serperSearch(q: Query, env: Env): Promise<{ hits: WebHit[]; image
       title: r.title,
       url: r.link,
       snippet: clip(r.snippet ?? '', 320),
-      date: r.date,
+      date: serperDate(r.date),
       image: r.imageUrl,
     })),
     images: [],
@@ -235,13 +273,24 @@ interface WikiOutcome {
  * Exa, LangSearch, Tavily, Firecrawl, Serper, then Wikipedia. DuckDuckGo lite
  * runs only when ZO_DDG_BACKUP=1, after Wikipedia. Keyed steps are skipped when
  * their key is empty. The next engine runs only after a credit, quota, auth,
- * timeout, upstream, or empty failure. Dead engines are skipped without a call.
- * A keyed success also takes the planner rewrites on that same engine. Wikipedia
+ * timeout, upstream, or empty failure. Dead engines, and engines on the shared
+ * skip list, are skipped without a call. A keyed error raises the call cap by
+ * two so the chain can still reach the next live provider. A keyed success also
+ * takes the planner rewrites on that same engine. Wikipedia
  * runs in parallel only when fewer than two rewrites are queued, so the ask
  * stays inside callCap(ledger). Wikipedia is returned separately so it ranks
  * after the engine. At most callCap(ledger) calls.
  */
-export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger): Promise<CascadeResult> {
+const TRIP_REASONS = new Set(['payment', 'quota', 'unavailable', 'credit']);
+
+export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUntil?: (promise: Promise<unknown>) => void): Promise<CascadeResult> {
+  const skips = await loadSkips(env);
+  const blocked = (name: string) => engineDead(name) || (skips[name] ?? 0) > Date.now();
+  const noteFailure = async (name: SearchEngine, failure: { dead: boolean; reason: string }, grantBonus: boolean) => {
+    if (failure.dead) rememberDead(name);
+    if (TRIP_REASONS.has(failure.reason)) await tripSkip(env, name, failure.reason, waitUntil);
+    if (grantBonus && KEYED.has(name) && failure.reason !== 'empty') ledger.bonus = Math.max(ledger.bonus ?? 0, 2);
+  };
   const statuses: EngineStatus[] = [];
   const steps: { name: SearchEngine; enabled: boolean; run: (text: string) => Promise<{ hits: WebHit[]; images: ImageResult[] }> }[] = [
     { name: 'exa', enabled: hasKey(env, 'EXA_API_KEY'), run: (text) => exaSearch({ ...q, q: text }, env) },
@@ -257,7 +306,7 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger): Promis
   let wikiReported = false;
 
   const startWiki = () => {
-    if (wikiTask || engineDead('wikipedia') || searchCalls(ledger) >= callCap(ledger)) return;
+    if (wikiTask || blocked('wikipedia') || searchCalls(ledger) >= callCap(ledger)) return;
     ledger.search.wikipedia += 1;
     const started = Date.now();
     wikiTask = fetchWikiSearch(q.q).then(
@@ -292,7 +341,7 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger): Promis
       if (hits.length) return { engine: 'wikipedia', hits, more: [], wikiHits: [], images: [], statuses };
       continue;
     }
-    if (engineDead(step.name)) {
+    if (blocked(step.name)) {
       ledger.fellThrough.push(`${step.name}:skipped`);
       statuses.push({ name: step.name, ok: false, count: 0, ms: 0, error: 'skipped' });
       continue;
@@ -330,7 +379,7 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger): Promis
             }
           } catch (err) {
             const failure = failureOf(err);
-            if (failure.dead) rememberDead(step.name);
+            await noteFailure(step.name, failure, false);
             ledger.fellThrough.push(`${step.name}:also-${failure.reason}`);
             statuses.push({ name: step.name, ok: false, count: 0, ms: Date.now() - againAt, error: failure.reason });
             if (failure.dead) break;
@@ -342,7 +391,7 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger): Promis
       return { engine: step.name, hits, more, wikiHits, images, statuses };
     } catch (err) {
       const failure = failureOf(err);
-      if (failure.dead) rememberDead(step.name);
+      await noteFailure(step.name, failure, true);
       ledger.fellThrough.push(`${step.name}:${failure.reason}`);
       statuses.push({ name: step.name, ok: false, count: 0, ms: Date.now() - started, error: failure.reason });
       if (!failure.fall) break;

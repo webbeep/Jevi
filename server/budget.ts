@@ -1,3 +1,4 @@
+import { clearSkipCache } from './engineSkip';
 import { HttpStatusError } from './util';
 
 /** Hard cap on paid and backup search HTTP calls for one ask, including sub-queries and retries. */
@@ -62,6 +63,7 @@ export function engineDead(engine: string, now = Date.now()): boolean {
 
 export function clearDeadEngines(): void {
   deadUntil.clear();
+  clearSkipCache();
 }
 
 const CREDIT = /credit|trial|expired|billing|payment|insufficient|quota|exceed/;
@@ -86,6 +88,7 @@ export function failureOf(err: unknown): { fall: boolean; dead: boolean; reason:
       const dead = status === 402 || status === 429 || status === 432 || status === 401 || status === 403;
       return { fall: true, dead, reason };
     }
+    if (status >= 400 && status < 500 && credit) return { fall: true, dead: true, reason: 'quota' };
     return { fall: false, dead: false, reason: `http${status}` };
   }
   if (err instanceof TypeError) return { fall: true, dead: false, reason: 'network' };

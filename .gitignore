@@ -3,6 +3,7 @@ dist
 .env
 .dev.vars
 .secrets.tmp.json
+.secrets/
 .wrangler
 *.tsbuildinfo
 .DS_Store

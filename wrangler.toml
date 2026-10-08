@@ -16,3 +16,8 @@ binding = "DB"
 database_name = "zo2-db"
 database_id = "844612c9-4b38-469f-b14a-93d841e1dfa9"
 migrations_dir = "migrations"
+
+# Engine skip flags (payment/quota/unavailable), short TTL, shared across isolates.
+[[kv_namespaces]]
+binding = "ENGINE_SKIP"
+id = "a36aaa21669444bcb00505c45d7a1c21"
