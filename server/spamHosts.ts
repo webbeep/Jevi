@@ -18,25 +18,10 @@ export function hostOfUrl(url: string): string {
 }
 
 /** True when this URL must never appear as a source or picture. */
-/**
- * Firebase `*.web.app` host with a random-looking subdomain (Lead: newlibraryjgza.web.app
- * on a serper-off probe). Named product hosts like `docs.web.app` are kept.
- */
-export function isSpamWebApp(host: string): boolean {
-  if (!host.endsWith('.web.app')) return false;
-  const sub = host.slice(0, -'.web.app'.length);
-  if (!sub || sub.includes('.')) return false; // multi-label (docs.foo.web.app) left alone
-  // Lead serper-off spam: newlibraryjgza.web.app — long single label, no hyphen.
-  if (!sub.includes('-') && sub.length >= 12) return true;
-  // Shorter gibberish with digits (x7k9m2qp1ab).
-  if (!sub.includes('-') && sub.length >= 8 && /\d/.test(sub)) return true;
-  return false;
-}
-
 export function isBlockedHost(url: string): boolean {
   if (!url) return false;
   const host = hostOfUrl(url);
-  if (host && (HOST_RE.test(host) || isSpamWebApp(host))) return true;
+  if (host && HOST_RE.test(host)) return true;
   try {
     const u = new URL(url);
     if (PATH_RE.test(u.pathname)) return true;
