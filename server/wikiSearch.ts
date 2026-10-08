@@ -47,3 +47,49 @@ export async function fetchWikiSearch(q: string): Promise<WikiHit[]> {
   const data = await fetchJsonCapped<unknown>(url, { headers: { 'User-Agent': WIKI_UA, Accept: 'application/json' } }, ENGINE_TIMEOUT_MS, WIKI_BODY_CAP);
   return parseWikiSearch(data);
 }
+
+/** REST summary shape used only for disambiguation detection (keyless). */
+interface WikiSummary {
+  type?: string;
+  title?: string;
+  extract?: string;
+  content_urls?: { desktop?: { page?: string } };
+}
+
+/**
+ * Keyless Wikipedia disambiguation lookup for bare person names (0 Serper).
+ * Tries `Name (disambiguation)` then `Name`; returns a synthetic hit when the
+ * page is type=disambiguation or the extract says "may refer to".
+ */
+export async function fetchWikiDisambiguation(name: string): Promise<WikiHit | null> {
+  const clean = name.trim().replace(/\s+/g, ' ');
+  if (!clean || clean.split(' ').length < 2) return null;
+  const titles = [`${clean} (disambiguation)`, clean];
+  for (const title of titles) {
+    const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title.replace(/ /g, '_'))}`;
+    try {
+      const data = await fetchJsonCapped<WikiSummary>(
+        url,
+        { headers: { 'User-Agent': WIKI_UA, Accept: 'application/json' } },
+        ENGINE_TIMEOUT_MS,
+        WIKI_BODY_CAP,
+      );
+      const extract = (data.extract ?? '').trim();
+      // Require a real "may refer to" list — thin "(disambiguation)" pages (Obama) must not poison a famous name.
+      const isDis = /\bmay refer to\b/i.test(extract);
+      if (!isDis || extract.length < 40) continue;
+      const page =
+        data.content_urls?.desktop?.page ??
+        `https://en.wikipedia.org/wiki/${encodeURIComponent((data.title ?? title).replace(/ /g, '_'))}`;
+      return {
+        title: data.title ?? title,
+        url: page,
+        snippet: clip(extract.replace(/\s+/g, ' '), 480),
+      };
+    } catch {
+      // 404 / network — try the next title.
+    }
+  }
+  return null;
+}
+
