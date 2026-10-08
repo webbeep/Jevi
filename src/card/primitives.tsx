@@ -100,13 +100,13 @@ export function Text({ node }: { node: Of<'text'> }) {
 }
 
 export function StatView({ node }: { node: Of<'stat'> }) {
-  const { onDraft } = useCard();
+  const { onItem } = useCard();
   const Trend = node.trend === 'up' ? TrendingUp : node.trend === 'down' ? TrendingDown : Minus;
   const [img, onImgError] = useLoadable(httpsOnly(node.image));
   const ask = askAbout(plain(node.label));
   return (
     <div className="relative rounded-xl border bg-card p-3 transition-colors has-[>button:hover]:border-foreground/20 sm:p-4">
-      <button type="button" aria-label={ask} onClick={() => onDraft(ask)} className={cn('absolute inset-0 rounded-[inherit] cursor-pointer', ITEM_FOCUS)} />
+      <button type="button" aria-label={ask} onClick={() => onItem(ask)} className={cn('absolute inset-0 rounded-[inherit] cursor-pointer', ITEM_FOCUS)} />
       <div className="pointer-events-none relative flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5 text-[12.5px] text-muted-foreground"><Icon name={node.icon} className="size-3.5" />{node.label}</div>
@@ -162,7 +162,7 @@ const ITEM_FOCUS = 'outline-none focus-visible:ring-[3px] focus-visible:ring-ins
 
 /**
  * Round chip that opens an item's source in a new tab. 18px visual, 44×44 hit area via ::after.
- * It sits next to (never inside) the item's button, and stops propagation so it never drafts a question.
+ * It sits next to (never inside) the item's button, and stops propagation so it never sends a question.
  */
 function SourceChip({ result: r, n, className }: { result: SearchResult; n: number; className?: string }) {
   const [iconFailed, setIconFailed] = useState(false);
@@ -254,7 +254,7 @@ export function VideoView({ node }: { node: Of<'video'> }) {
 }
 
 export function Links({ node }: { node: Of<'links'> }) {
-  const { onDraft, results } = useCard();
+  const { onItem, results } = useCard();
   const items = node.items.flatMap((i) => (results[i.source - 1] ? [{ ...i, r: results[i.source - 1] }] : []));
   if (!items.length) return null;
   return (
@@ -264,7 +264,7 @@ export function Links({ node }: { node: Of<'links'> }) {
         const ask = askAbout(subjectOf(label ?? r.title));
         return (
           <li key={r.url} className="relative">
-            <button type="button" aria-label={ask} onClick={() => onDraft(ask)} className={cn('absolute inset-0 cursor-pointer transition-colors hover:bg-foreground/[0.03] [li:first-child>&]:rounded-t-xl [li:last-child>&]:rounded-b-xl', ITEM_FOCUS)} />
+            <button type="button" aria-label={ask} onClick={() => onItem(ask)} className={cn('absolute inset-0 cursor-pointer transition-colors hover:bg-foreground/[0.03] [li:first-child>&]:rounded-t-xl [li:last-child>&]:rounded-b-xl', ITEM_FOCUS)} />
             <div className="pointer-events-none relative flex w-full items-center gap-3 p-2.5 text-left sm:p-3">
               <span className="relative flex size-9 shrink-0 items-center justify-center rounded-lg border bg-background">
                 <img src={`https://icons.duckduckgo.com/ip3/${r.domain}.ico`} alt="" className="size-[18px] rounded-sm" loading="lazy" />
@@ -312,7 +312,7 @@ function tileKind(node: Of<'tile'>): 'role' | 'location' | 'education' | 'compan
 const NO_PHOTO = new Set(['role', 'location']);
 
 export function Tile({ node }: { node: Of<'tile'> }) {
-  const { onDraft, busy } = useCard();
+  const { onItem, busy } = useCard();
   const want = useContext(TilePictures) || wantsPicture(node);
   const slotRef = useRef(false);
   if (want) slotRef.current = true;
@@ -334,7 +334,7 @@ export function Tile({ node }: { node: Of<'tile'> }) {
         node.active ? 'border-foreground/25 bg-muted ring-1 ring-foreground/10' : 'bg-card',
       )}
     >
-      <button type="button" aria-label={ask} onClick={() => onDraft(ask)} className={cn('absolute inset-0 rounded-[inherit] cursor-pointer', ITEM_FOCUS)} />
+      <button type="button" aria-label={ask} onClick={() => onItem(ask)} className={cn('absolute inset-0 rounded-[inherit] cursor-pointer', ITEM_FOCUS)} />
       {slot && (
         <span data-picture-slot="" className="pointer-events-none relative mb-1 flex aspect-square w-full max-w-24 items-center justify-center overflow-hidden rounded-lg bg-muted">
           {pending ? <Skeleton className="absolute inset-0 rounded-lg" /> : <Icon name={icon} fallback="layout-grid" className="size-7 text-muted-foreground/70 sm:size-8" />}
@@ -381,11 +381,11 @@ function MediaThumb({ item, index }: { item: Of<'list'>['items'][number]; index:
 
 function MediaRow({ item, index }: { item: Of<'list'>['items'][number]; index: number }) {
   const r = useSource(item.source);
-  const { onDraft } = useCard();
+  const { onItem } = useCard();
   const ask = askAbout(subjectOf(item.text));
   return (
     <li className="relative">
-      <button type="button" aria-label={ask} onClick={() => onDraft(ask)} className={cn('absolute inset-0 cursor-pointer transition-colors hover:bg-foreground/[0.03] [li:first-child>&]:rounded-t-xl [li:last-child>&]:rounded-b-xl', ITEM_FOCUS)} />
+      <button type="button" aria-label={ask} onClick={() => onItem(ask)} className={cn('absolute inset-0 cursor-pointer transition-colors hover:bg-foreground/[0.03] [li:first-child>&]:rounded-t-xl [li:last-child>&]:rounded-b-xl', ITEM_FOCUS)} />
       <div className="pointer-events-none relative flex w-full items-center gap-3 p-2.5 text-left sm:p-3">
         <MediaThumb item={item} index={index} />
         <span className="flex min-w-0 flex-1 flex-col items-start gap-1 text-sm leading-snug">

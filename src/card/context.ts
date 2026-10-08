@@ -15,6 +15,8 @@ export interface CardContextValue {
   onSources: () => void;
   /** Puts text in the follow-up box and focuses it, without sending. */
   onDraft: (text: string) => void;
+  /** t447: a tapped item/row/tile sends "Ask about X" as a follow-up right away (ignored while a request streams). */
+  onItem: (question: string) => void;
 }
 
 export const CardContext = createContext<CardContextValue>({
@@ -27,6 +29,7 @@ export const CardContext = createContext<CardContextValue>({
   onRefine: () => undefined,
   onSources: () => undefined,
   onDraft: () => undefined,
+  onItem: () => undefined,
 });
 
 export const useCard = () => useContext(CardContext);

@@ -129,6 +129,8 @@ export default function App() {
   const initial = useMemo(() => new URLSearchParams(location.search), []);
   const [dark, setDark] = useTheme();
   const { turns, actions: session } = useSession();
+  // t447: item taps send right away, so they are ignored while any answer in the thread is still streaming.
+  const threadBusy = turns.some((t) => t.filling);
   const { items: suggestions, shuffle, shuffleEnabled, refresh } = useSuggestions();
   const [recents, setRecents] = useState<string[]>(() => (typeof window !== 'undefined' ? readRecents() : []));
   const [histRev, setHistRev] = useState(0);
@@ -525,7 +527,7 @@ export default function App() {
 
             <div className={cn(SHELL, GRID, 'relative pb-[50vh] pt-5 sm:pt-8')}>
               <main ref={mainRef} className="min-w-0 space-y-8 sm:space-y-10">
-                {turns.map((t, i) => <TurnView key={t.id} turn={t} first={i === 0} search={session.searchOf(t)?.search} actions={session} onSources={openSources} />)}
+                {turns.map((t, i) => <TurnView key={t.id} turn={t} first={i === 0} search={session.searchOf(t)?.search} actions={session} onSources={openSources} threadBusy={threadBusy} />)}
 
                 {last?.result && last.result.followups.length > 0 && !busy && (
                   <section className="-mt-2 px-4 animate-in fade-in sm:-mt-4 sm:px-6">
@@ -636,7 +638,7 @@ function Composer({ actions, topic, mainRef }: { actions: SessionActions; topic:
     return () => window.removeEventListener('zo-draft', onDraft);
   }, []);
 
-  // Tapping an item in a card drafts "Ask about X" here and focuses the box; it is never sent for you.
+  // Drafts text here and focuses the box (zo-prefill). Card item taps send right away instead (t447).
   useEffect(() => {
     const onPrefill = (event: Event) => {
       const text = (event as CustomEvent<string>).detail;
@@ -789,13 +791,17 @@ function OfflineNotice({ filling, partial, reconnects, onRetry }: { filling: boo
   );
 }
 
-const TurnView = memo(function TurnView({ turn, first, search, actions, onSources }: {
+/** t447 double-submit guard: a second item tap within this window is ignored even before `filling` flips. */
+let lastItemTap = 0;
+
+const TurnView = memo(function TurnView({ turn, first, search, actions, onSources, threadBusy }: {
   turn: Turn;
   first: boolean;
   /** Results of the search this turn builds on. */
   search?: SearchResponse;
   actions: SessionActions;
   onSources: (scope?: number) => void;
+  threadBusy: boolean;
 }) {
   const streaming = !!turn.live?.nodes.some(Boolean);
   const offlinePartial = Boolean(turn.offline && (turn.live?.head || streaming));
@@ -845,7 +851,13 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
     },
     onSources: () => onSources(id),
     onDraft: (text) => window.dispatchEvent(new CustomEvent('zo-prefill', { detail: text })),
-  }), [search?.results, search?.images, credits, turn.filling, offlinePartial, actions, id, onSources]);
+    onItem: (q) => {
+      const now = Date.now();
+      if (threadBusy || now - lastItemTap < 1500) return;
+      lastItemTap = now;
+      void actions.followup(q, id, 'ask');
+    },
+  }), [search?.results, search?.images, credits, turn.filling, offlinePartial, actions, id, onSources, threadBusy]);
 
   const degraded = turn.kind === 'search' ? turnDegraded(turn) ?? undefined : undefined;
 
