@@ -187,31 +187,10 @@ export async function fillRowImages(nodes: CardNode[], deps: RowImageDeps, used:
     if (pooled) take(s, pooled.thumb, credit(pooled));
   }
 
-  // SPD4 (t457): steps 2, 2b and 3 used to run one after another after the text was done (up to ~6.5 s before
-  // `done`). They now start together for the rows still blank after step 1 and are applied in the same
-  // priority order (card search, then per-name lookups, then og:image), so each row gets the same picture.
-  const blank = live.filter((s) => !s.src);
-  const cardTask = blank.length && deps.cardImages ? deps.cardImages() : undefined;
-  const wantLookup = deps.lookup ? blank.filter((s) => s.target.kind === 'named').slice(0, 6) : [];
-  const lookupTask = Promise.all(wantLookup.map((s) => Promise.race([deps.lookup!(s.entity).catch(() => [] as ImageResult[]), new Promise<ImageResult[]>((r) => setTimeout(() => r([]), 2000))])));
-  // A source page shared by several rows (a rankings article) has one picture that fits none of them in particular.
-  const perSource = new Map<number, number>();
-  for (const s of live) if (s.source) perSource.set(s.source, (perSource.get(s.source) ?? 0) + 1);
-  // Orgs: og:image of their own site. Named rows: og:image of their own unshared source page when that page names them.
-  const wantOg = !deps.og ? [] : blank
-    .filter((s) => s.ogOk)
-    .flatMap((s) => {
-      if (s.target.kind === 'org') return s.officialSite ? [{ s, url: s.officialSite }] : [];
-      const own = s.source ? deps.results[s.source - 1] : undefined;
-      return own && perSource.get(s.source!) === 1 && pageNames(s.target, own) ? [{ s, url: own.url }] : [];
-    })
-    .slice(0, deps.ogMax ?? 6);
-  const ogTask = Promise.all(wantOg.map((w) => deps.og!(w.url)));
-
   // 2. At most one picture search for the card, matched to rows by name.
   let imageCalls = 0;
-  if (cardTask) {
-    const found = await cardTask;
+  if (live.some((s) => !s.src) && deps.cardImages) {
+    const found = await deps.cardImages();
     imageCalls = found.length ? 1 : 0;
     for (const s of live) {
       if (s.src) continue;
@@ -221,9 +200,10 @@ export async function fillRowImages(nodes: CardNode[], deps: RowImageDeps, used:
   }
 
   // 2b. Free per-name lookups (Wikipedia first) for name-like rows still blank, at most 6, ~2s.
-  if (wantLookup.length) {
-    const found = await lookupTask;
-    wantLookup.forEach((s, i) => {
+  if (deps.lookup) {
+    const want = live.filter((s) => !s.src && s.target.kind === 'named').slice(0, 6);
+    const found = await Promise.all(want.map((s) => Promise.race([deps.lookup!(s.entity).catch(() => [] as ImageResult[]), new Promise<ImageResult[]>((r) => setTimeout(() => r([]), 2000))])));
+    want.forEach((s, i) => {
       if (s.src) return;
       const hit = pick(s.target, found[i], used);
       if (hit) take(s, hit.thumb, credit(hit));
@@ -231,12 +211,25 @@ export async function fillRowImages(nodes: CardNode[], deps: RowImageDeps, used:
   }
 
   // 3. The row's source page og:image, a few in parallel with a short timeout.
-  const og = wantOg.length;
-  if (og) {
-    const pics = await ogTask;
-    wantOg.forEach((w, i) => {
+  let og = 0;
+  if (deps.og) {
+    // A source page shared by several rows (a rankings article) has one picture that fits none of them in particular.
+    const perSource = new Map<number, number>();
+    for (const s of live) if (s.source) perSource.set(s.source, (perSource.get(s.source) ?? 0) + 1);
+    // Orgs: og:image of their own site. Named rows: og:image of their own unshared source page when that page names them.
+    const want = live
+      .filter((s) => !s.src && s.ogOk)
+      .flatMap((s) => {
+        if (s.target.kind === 'org') return s.officialSite ? [{ s, url: s.officialSite }] : [];
+        const own = s.source ? deps.results[s.source - 1] : undefined;
+        return own && perSource.get(s.source!) === 1 && pageNames(s.target, own) ? [{ s, url: own.url }] : [];
+      })
+      .slice(0, deps.ogMax ?? 6);
+    og = want.length;
+    const pics = await Promise.all(want.map((w) => deps.og!(w.url)));
+    want.forEach((w, i) => {
       const src = pics[i];
-      if (!w.s.src && https(src) && !used.has(src)) take(w.s, src, { url: w.url });
+      if (https(src) && !used.has(src)) take(w.s, src, { url: w.url });
     });
   }
 
