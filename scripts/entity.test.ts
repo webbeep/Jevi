@@ -7,8 +7,15 @@ import {
   matchesEntity,
   priorEntity,
   resolveEntity,
+  contextTerms,
+  hasFullPersonName,
+  personSourceOk,
+  personSubject,
   type Entity,
 } from '../server/entity.ts';
+import { gateResults } from '../server/relevanceGate.ts';
+import { isBlockedHost } from '../server/spamHosts.ts';
+import { isEventOrCategory, targetFor } from '../server/imageGate.ts';
 
 const row = (title: string, snippet: string, url: string) => ({ title, url, snippet });
 
@@ -209,4 +216,57 @@ describe('T444 entity disambiguation', () => {
     assert.equal(prior!.location, 'San Francisco');
     assert.equal(priorEntity('no chosen line here'), undefined);
   });
+});
+
+
+const GATE_RAY_LEE_BLUEFLAME = [
+  { title: 'You are here', url: 'https://multporn.net/characters/ray_ray_lee', snippet: '' },
+  { title: 'Lee A Ray & Associates in 309 Cedar Street', url: 'http://thedford-ne.thedealpages.com/lee-ray-associates/', snippet: '' },
+  {
+    title: 'Industry Innovators Launch BlueFlame AI',
+    url: 'https://ffnews.com/newsarticle/fintech/industry-innovators-launch-blueflame-ai-to-help-alternative-i',
+    snippet: 'BlueFlame was built by a team of industry innovators and GRC experts who have been at the forefront of the most signific',
+  },
+  {
+    title: 'The End of Oak Street',
+    url: 'https://en.wikipedia.org/wiki/The_End_of_Oak_Street',
+    snippet: 'Blu- ray , and Ultra HD Blu- ray release follows on November 3, 2026. The film\'s marketing campaign was criticized on so',
+  },
+  {
+    title: 'Ray Lee, founder of BlueFlame AI',
+    url: 'https://blueflame.ai/team/ray-lee',
+    snippet: 'Ray Lee founded BlueFlame AI to help alternative investment firms with GRC.',
+  },
+];
+
+test('personSubject splits Ray Lee from BlueFlame AI context', () => {
+  assert.equal(personSubject('Ray Lee BlueFlame AI'), 'Ray Lee');
+  assert.deepEqual(contextTerms('Ray Lee BlueFlame AI').sort(), ['ai', 'blueflame']);
+});
+
+test('GATE-2cce9c0 rows: adult/Lee A Ray/Blu-ray fail; real BlueFlame page kept', () => {
+  const q = 'Ray Lee BlueFlame AI';
+  assert.equal(isBlockedHost(GATE_RAY_LEE_BLUEFLAME[0].url), true);
+  assert.equal(hasFullPersonName('Ray Lee', GATE_RAY_LEE_BLUEFLAME[1]), false);
+  assert.equal(hasFullPersonName('Ray Lee', GATE_RAY_LEE_BLUEFLAME[3]), false);
+  assert.equal(personSourceOk(q, GATE_RAY_LEE_BLUEFLAME[2]), false);
+  assert.equal(personSourceOk(q, GATE_RAY_LEE_BLUEFLAME[4]), true);
+  const gated = gateResults(q, GATE_RAY_LEE_BLUEFLAME);
+  assert.deepEqual(gated.kept.map((r) => r.title), ['Ray Lee, founder of BlueFlame AI']);
+  const decision = resolveEntity(q, GATE_RAY_LEE_BLUEFLAME);
+  assert.equal(decision.kind, 'single');
+  if (decision.kind === 'single') assert.match(decision.entity.name, /Ray Lee/i);
+});
+
+test('Who is Ray Lee still returns choices for distinct people', () => {
+  const d = resolveEntity('Who is Ray Lee', RAY_LEE);
+  assert.equal(d.kind, 'choices');
+  assert.ok(d.choices.length >= 2);
+});
+
+test('China Games event tile never gets a photo target', () => {
+  assert.equal(isEventOrCategory('China Games'), true);
+  assert.equal(targetFor('China Games').kind, 'none');
+  assert.equal(targetFor('Preseason window').kind, 'none');
+  assert.equal(targetFor('Role').kind, 'none');
 });

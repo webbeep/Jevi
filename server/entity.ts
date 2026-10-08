@@ -1,4 +1,5 @@
 import { nameLike, tokens, type EntityHint } from './imageGate';
+import { isBlockedHost } from './spamHosts';
 
 /**
  * T444 entity disambiguation for people/profile asks.
@@ -51,28 +52,95 @@ const COMMON = new Set([
 
 const WHO_IS = /^(who\s+is|who\s+was)\b\s*/i;
 const ABOUT = /^(tell\s+me\s+about|profile\s+of|biography\s+of|bio\s+of)\s+/i;
+/** "How is Nique Clifford…" / "What is …" — strip so Cap runs start at the name. */
+const LEAD_Q = /^(who|what|when|where|why|how)\s+(is|are|was|were|did|does|do)\b\s*/i;
 
 const cleanWord = (w: string) => w.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, '');
 
+/** Org/product-ish Cap tokens that end a person+org query ("Ray Lee BlueFlame AI"). */
+const ORG_TAIL = /^(ai|ml|io|inc|llc|ltd|corp|co|labs?|technologies|technology|group|studios?|systems?|partners?|associates?)$/i;
+const looksLikeOrgToken = (w: string) => ORG_TAIL.test(w) || /[a-z][A-Z]/.test(w);
+
 /** The person the query is about, or '' when there is none. */
 export function personSubject(query: string): string {
-  let s = query.trim().replace(/\?+\s*$/, '').replace(WHO_IS, '').replace(ABOUT, '').trim();
+  const raw = query.trim();
+  const hadWho = WHO_IS.test(raw) || ABOUT.test(raw);
+  let s = raw.replace(/\?+\s*$/, '').replace(WHO_IS, '').replace(ABOUT, '').replace(LEAD_Q, '').trim();
   if (!s) return '';
   const words = s.split(/\s+/).map(cleanWord).filter(Boolean);
   if (!words.length) return '';
   const run: string[] = [];
   for (const w of words) {
+    // Skip leading Cap interrogatives / common words ("How is…").
+    if (!run.length && (COMMON.has(w.toLowerCase()) || /^(how|what|when|where|why|which)$/i.test(w))) continue;
     if (/^[A-Z]/.test(w)) {
       run.push(w);
-      if (run.length === 4) break;
+      if (run.length === 6) break;
     } else break;
   }
-  if (run.length) return run.join(' ');
-  // Lowercase query ("who is barack obama"): accept a short run with no common words.
-  if (words.length <= 4 && words.every((w) => /^[a-z0-9][a-z0-9.'-]*$/i.test(w) && !COMMON.has(w.toLowerCase()))) {
+  if (run.length) {
+    // "Ray Lee BlueFlame AI" → person "Ray Lee"; keep "Barack Hussein Obama" (no org-like token).
+    let cut = run.length;
+    for (let i = 2; i < run.length; i++) {
+      if (looksLikeOrgToken(run[i]!)) {
+        cut = i;
+        break;
+      }
+    }
+    return run.slice(0, Math.min(cut, 3)).join(' ');
+  }
+  // Lowercase person asks only after who/about: "who is barack obama" (not "open source database" or "zxqv").
+  if (hadWho && words.length <= 4 && words.every((w) => /^[a-z0-9][a-z0-9.'-]*$/i.test(w) && !COMMON.has(w.toLowerCase()))) {
     return words.map((w) => w[0]!.toUpperCase() + w.slice(1)).join(' ');
   }
   return '';
+}
+
+/** Strong org/role context beyond the person name (BlueFlame, AI) — not sports acronyms or filler. */
+export function contextTerms(query: string, name = personSubject(query)): string[] {
+  if (!name) return [];
+  const nameSet = new Set(tokens(name));
+  const raw = query.trim().replace(/\?+\s*$/, '').replace(WHO_IS, '').replace(ABOUT, '').replace(LEAD_Q, '');
+  const words = raw.split(/\s+/).map(cleanWord).filter(Boolean);
+  const out: string[] = [];
+  for (const w of words) {
+    const t = tokens(w)[0];
+    if (!t || nameSet.has(t) || COMMON.has(t)) continue;
+    // CamelCase orgs (BlueFlame) or short org tails (AI, Inc) — not NBA/NFL alone.
+    if (looksLikeOrgToken(w) || ORG_TAIL.test(w)) {
+      if (!out.includes(t)) out.push(t);
+    }
+  }
+  return out;
+}
+
+/**
+ * Multi-word person name must appear as an adjacent phrase in title/snippet
+ * (not URL — "blu-ray" / "lee-a-ray" false positives). A single name token is never enough.
+ */
+export function hasFullPersonName(name: string, row: EntityRow): boolean {
+  const nameToks = tokens(name).filter((t) => t.length >= 2);
+  if (nameToks.length < 2) return false;
+  const body = normText(`${row.title ?? ''} ${row.snippet ?? ''}`);
+  if (!body) return false;
+  const phrase = nameToks.join(' ');
+  if (body.includes(phrase)) return true;
+  // Allow one middle initial between the first and last name tokens: "ray j lee".
+  if (nameToks.length === 2) {
+    const [a, b] = nameToks;
+    const mid = new RegExp(`\\b${a}\\s+[a-z]\\.?\\s+${b}\\b`);
+    if (mid.test(body)) return true;
+  }
+  return false;
+}
+
+/** Source is about this person ask: full name + (>=1 context token when the query gives one). */
+export function personSourceOk(query: string, row: EntityRow, name = personSubject(query)): boolean {
+  if (!name || !hasFullPersonName(name, row)) return false;
+  const ctx = contextTerms(query, name);
+  if (!ctx.length) return true;
+  const body = new Set(tokens(`${row.title ?? ''} ${row.snippet ?? ''} ${row.url ?? ''}`));
+  return ctx.some((t) => body.has(t));
 }
 
 export function isPersonAsk(query: string, pattern?: string): boolean {
@@ -188,7 +256,8 @@ function extractSignals(row: EntityRow, name: string): RowSignals {
   const text = `${row.title ?? ''} ${row.snippet ?? ''} ${row.url ?? ''}`;
   const toks = new Set(tokens(text));
   const nameToks = tokens(name).filter((t) => t.length >= 2);
-  const hasName = nameToks.length > 0 && nameToks.every((t) => toks.has(t));
+  // Full adjacent name in title/snippet only — never a lone token or a URL fragment ("blu-ray").
+  const hasName = hasFullPersonName(name, row);
 
   const roles: string[] = [];
   const roleCores: string[] = [];
@@ -402,7 +471,15 @@ export function resolveEntity(
   if (!isPersonAsk(query, opts?.pattern)) return { kind: 'skip' };
   const name = personSubject(query);
   if (!name || !rows.length) return { kind: 'skip' };
-  const clusters = clusterRows(rows, name);
+  // Drop adult/spam + non-full-name / missing-context hits before clustering.
+  const eligible = rows
+    .map((row, i) => ({ row, i }))
+    .filter(({ row }) => !isBlockedHost(row.url) && personSourceOk(query, row, name));
+  if (!eligible.length) return { kind: 'skip' };
+  const filtered = eligible.map((e) => e.row);
+  const indexMap = eligible.map((e) => e.i);
+  const clustersRaw = clusterRows(filtered, name);
+  const clusters = clustersRaw.map((c) => c.map((j) => indexMap[j]!));
   if (!clusters.length) return { kind: 'skip' };
 
   // A thread entity locks the choice: prefer clusters that match it, never ask again.
@@ -440,9 +517,7 @@ export function resolveEntity(
 
 /** True when this result is about the chosen entity (name + a matching signal, or name only). */
 export function matchesEntity(entity: Entity, row: EntityRow): boolean {
-  const toks = new Set(tokens(`${row.title ?? ''} ${row.snippet ?? ''} ${row.url ?? ''}`));
-  const nameToks = tokens(entity.name).filter((t) => t.length >= 2);
-  if (!nameToks.length || !nameToks.every((t) => toks.has(t))) return false;
+  if (!hasFullPersonName(entity.name, row)) return false;
   const sig = extractSignals(row, entity.name);
   if (sig.sig.size === 0) return true;
   const terms = new Set(entity.terms.map(low));

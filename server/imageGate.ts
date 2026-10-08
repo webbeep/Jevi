@@ -115,10 +115,19 @@ export function namedTarget(entity: string, ctx?: GateContext): PicTarget {
   return properName(entity, ctx?.corpus) ? withHint({ kind: 'named', entity }, ctx) : NONE;
 }
 
+
+/** Event / country / category tiles ("China Games", "Preseason window") get an icon, never a photo or flag. */
+export function isEventOrCategory(label: string): boolean {
+  const l = label.trim().replace(/[:：]$/, '');
+  if (/^(event|category|tournament|championship|festival|summit|conference|league|season|window|preseason|cup|open|flag|nation|national)$/i.test(l)) return true;
+  if (/^[A-Z][\w.'-]*(?:\s+[A-Z][\w.'-]*){0,3}\s+(Games|Event|Tournament|Championship|Cup|Open|League|Season|Window|Preseason|Festival|Summit|Finals)$/i.test(l)) return true;
+  return false;
+}
+
 /** What a tile, stat or row may show, from its label/value/imageQuery. */
 export function targetFor(label: string, value?: string, imageQuery?: string, ctx?: GateContext): PicTarget {
   const l = label.trim().replace(/[:：]$/, '');
-  if (ATTR.test(l)) return NONE;
+  if (ATTR.test(l) || isEventOrCategory(l)) return NONE;
   if (ORG.test(l)) return value && value.trim() ? withHint({ kind: 'org', entity: value.trim() }, ctx) : NONE;
   if (properName(l, ctx?.corpus)) return withHint({ kind: 'named', entity: l }, ctx);
   if (imageQuery && properName(imageQuery, ctx?.corpus)) return withHint({ kind: 'named', entity: imageQuery }, ctx);

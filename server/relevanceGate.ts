@@ -32,6 +32,9 @@ const TASK = new Set([
 
 const TOKEN = /[A-Za-z0-9]+(?:['’.-][A-Za-z0-9]+)*/g;
 
+import { isBlockedHost } from './spamHosts';
+import { contextTerms, hasFullPersonName, isPersonAsk, personSubject } from './entity';
+
 export interface GateHit {
   title: string;
   url: string;
@@ -164,21 +167,43 @@ function judge(profile: Profile, row: GateHit): { pass: boolean; hard: boolean; 
 
 export function gateResults<T extends GateHit>(query: string, rows: readonly T[]): { kept: T[]; dropped: number } {
   if (!rows.length) return { kept: [], dropped: 0 };
+  // Adult/spam hosts never survive (sources or images use the same check).
+  const clean = rows.filter((row) => !isBlockedHost(row.url));
+  const spamDropped = rows.length - clean.length;
+  // Multi-word person ask: require the full adjacent name in title/snippet, plus a context
+  // token (org/role) when the query names one. A single-token match is never enough.
+  let pool = clean;
+  let personDropped = 0;
+  if (isPersonAsk(query)) {
+    const name = personSubject(query);
+    const nameToks = name ? name.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length >= 2) : [];
+    // Multi-word person names only: a single token is never enough to force the person gate.
+    if (name && nameToks.length >= 2) {
+      const ctx = contextTerms(query, name);
+      const ok = clean.filter((row) => hasFullPersonName(name, row) && (
+        ctx.length === 0 ||
+        ctx.some((t) => hasTerm(norm(`${row.title} ${row.snippet ?? ''} ${row.url}`), t))
+      ));
+      personDropped = clean.length - ok.length;
+      pool = ok;
+    }
+  }
+  if (!pool.length) return { kept: [], dropped: rows.length };
   const profile = termsOf(query);
-  const judged = rows.map((row) => judge(profile, row));
+  const judged = pool.map((row) => judge(profile, row));
   const passing = judged.filter((j) => j.pass).length;
   let kept: T[];
   if (passing > 0) {
     const soft = judged.filter((j) => !j.pass && !j.hard).length;
-    const dropSoft = soft * 2 < rows.length;
-    kept = rows.filter((_, i) => {
+    const dropSoft = soft * 2 < pool.length;
+    kept = pool.filter((_, i) => {
       const j = judged[i];
       if (j.hard) return false;
       if (j.pass) return true;
       return !dropSoft;
     });
   } else {
-    kept = rows.filter((_, i) => !judged[i].hard && judged[i].score >= FLOOR && sharesTerms(profile, judged[i].hits));
+    kept = pool.filter((_, i) => !judged[i].hard && judged[i].score >= FLOOR && sharesTerms(profile, judged[i].hits));
   }
   return { kept, dropped: rows.length - kept.length };
 }
