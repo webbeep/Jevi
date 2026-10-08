@@ -16,6 +16,8 @@ export interface TypeaheadResponse {
   suggestions: string[];
   source: 'ai' | 'cache' | 'none';
   ms: number;
+  /** Why AI gave nothing (timeout, error class/message, empty parse). No secrets: provider error text only. */
+  reason?: string;
 }
 
 interface AiBinding {
@@ -47,8 +49,8 @@ function cacheKey(prefix: string): string {
   return `https://typeahead.cache/v1?q=${encodeURIComponent(prefix)}`;
 }
 
-function none(t0: number): TypeaheadResponse {
-  return { suggestions: [], source: 'none', ms: Date.now() - t0 };
+function none(t0: number, reason?: string): TypeaheadResponse {
+  return { suggestions: [], source: 'none', ms: Date.now() - t0, ...(reason ? { reason: reason.slice(0, 160) } : {}) };
 }
 
 function stripLine(line: string): string {
@@ -132,9 +134,9 @@ export async function suggestTypeahead(q: string, env: Env): Promise<TypeaheadRe
     return { suggestions: edge, source: 'cache', ms: Date.now() - t0 };
   }
 
-  if (env.TYPEAHEAD === 'off') return none(t0);
+  if (env.TYPEAHEAD === 'off') return none(t0, 'off');
   const ai = (env as Record<string, unknown>).AI as AiBinding | undefined;
-  if (!ai || typeof ai.run !== 'function') return none(t0);
+  if (!ai || typeof ai.run !== 'function') return none(t0, 'no binding');
 
   const model = env.TYPEAHEAD_MODEL || DEFAULT_MODEL;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -147,19 +149,20 @@ export async function suggestTypeahead(q: string, env: Env): Promise<TypeaheadRe
         ],
         max_tokens: 60,
         temperature: 0.2,
-      }).then((v) => ({ ok: true as const, v })).catch(() => ({ ok: false as const })),
-      new Promise<{ ok: false }>((resolve) => {
-        timer = setTimeout(() => resolve({ ok: false }), AI_TIMEOUT_MS);
+      }).then((v) => ({ ok: true as const, v })).catch((e: unknown) => ({ ok: false as const, why: `error: ${e instanceof Error ? e.message : String(e)}` })),
+      new Promise<{ ok: false; why: string }>((resolve) => {
+        timer = setTimeout(() => resolve({ ok: false, why: 'timeout' }), AI_TIMEOUT_MS);
       }),
     ]);
-    if (!raced.ok) return none(t0);
-    const suggestions = parseAiLines(extractText(raced.v), prefix);
-    if (!suggestions.length) return none(t0);
+    if (!raced.ok) return none(t0, raced.why);
+    const text = extractText(raced.v);
+    const suggestions = parseAiLines(text, prefix);
+    if (!suggestions.length) return none(t0, `empty: ${typeof raced.v === 'object' && raced.v ? Object.keys(raced.v).join(',') : typeof raced.v} ${text.slice(0, 60)}`);
     memSet(prefix, suggestions);
     await writeEdgeCache(prefix, suggestions);
     return { suggestions, source: 'ai', ms: Date.now() - t0 };
-  } catch {
-    return none(t0);
+  } catch (e) {
+    return none(t0, `error: ${e instanceof Error ? e.message : String(e)}`);
   } finally {
     if (timer) clearTimeout(timer);
   }
