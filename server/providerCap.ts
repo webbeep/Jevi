@@ -14,9 +14,9 @@ function readCap(raw: string | undefined): number | undefined {
   return Math.floor(n);
 }
 
-/** Built-in daily caps for the free/one-time pools. Serper's 2.5k credits are one-time (~1 month at 80/day). */
+/** Built-in daily caps for the free/one-time pools. Serper's 2.5k credits are one-time (~12 days at 200/day; Lead decision 8 Oct for Ricky's live experience). */
 const DEFAULT_CAPS: Record<string, Record<CapBucket, number>> = {
-  serper: { prod: 80, eval: 300 },
+  serper: { prod: 200, eval: 300 },
   langsearch: { prod: 300, eval: 300 },
   // Exa is the paid last resort: a strict prod cap and none for eval traffic.
   exa: { prod: 10, eval: 0 },

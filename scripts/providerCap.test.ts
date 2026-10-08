@@ -79,7 +79,7 @@ describe('provider daily cap', { concurrency: 1 }, () => {
       assert.equal(await takeSlot({ DB: broken } as Env, 'tavily', 'prod'), true);
       assert.equal(await takeSlot({} as Env, 'tavily', 'prod'), true);
       assert.equal(broken.prepares, before + 1);
-      assert.equal(capFor({} as Env, 'serper', 'prod'), 80);
+      assert.equal(capFor({} as Env, 'serper', 'prod'), 200);
       assert.equal(capFor({} as Env, 'serper', 'eval'), 300);
       assert.equal(capFor({} as Env, 'exa', 'prod'), 10);
       assert.equal(capFor({} as Env, 'exa', 'eval'), 0);
