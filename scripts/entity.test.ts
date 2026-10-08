@@ -6,7 +6,9 @@ import {
   entityHintFor,
   isPersonAsk,
   matchesEntity,
+  pickSeeds,
   priorEntity,
+  publicChoices,
   resolveEntity,
   disambiguationEntries,
   contextTerms,
@@ -789,5 +791,88 @@ describe('EN4 part 7: a choice re-asks its org/location, never the bare name', (
         assert.ok(wordsBeyond(c.query, c.name) <= 3, `${key}: ${c.query}`);
       }
     }
+  });
+});
+
+describe('EN4 part 8: a pick never comes back empty (server/entity.ts pickSeeds)', () => {
+  test('pickSeeds("Ray Lee Raycon Founder") keeps the Raycon rows and drops the namesakes', () => {
+    const rows = SERPS['serper-ray']!.rows;
+    const { seeds, label } = pickSeeds('Ray Lee Raycon Founder', rows);
+    const urls = seeds.map((i) => rows[i]!.url);
+    assert.ok(urls.includes('https://www.linkedin.com/in/rayleeny'), urls.join(' | '));
+    assert.ok(urls.includes('https://www.zoominfo.com/p/Ray-Lee/2329190828'), urls.join(' | '));
+    for (const host of ['nopixel.fandom', 'filmfreeway', 'nautiluslive']) {
+      assert.ok(!urls.some((u) => u.includes(host)), `${host} is another person: ${urls.join(' | ')}`);
+    }
+    assert.equal(label, 'Founder of Raycon');
+  });
+
+  test('pickSeeds("Ray Lee Footballer") is the Wikipedia article, never the singer page', () => {
+    const fx = live2('ls-ray-knowledge');
+    const panel = knowledgeRow(fx.knowledge!, fx.results);
+    assert.ok(panel, 'fixture carries a knowledge panel');
+    const rows = [panel!, ...fx.results];
+    const { seeds, label } = pickSeeds('Ray Lee Footballer', rows);
+    assert.deepEqual(seeds.map((i) => rows[i]!.url), ['https://en.wikipedia.org/wiki/Ray_Lee']);
+    assert.ok(!seeds.some((i) => rows[i]!.url.includes('gaana')), 'gaana is another Ray Lee');
+    assert.equal(label, 'Footballer');
+  });
+
+  test('pickSeeds("David Kim C2 Education CEO") never seeds the "may refer to" page', () => {
+    const rows = SERPS['ls-dk']!.rows;
+    const disambig = rows.findIndex((r) => isDisambiguationPage(r));
+    assert.ok(disambig >= 0, 'the fixture carries a disambiguation page');
+    const { seeds, label } = pickSeeds('David Kim C2 Education CEO', rows);
+    assert.ok(!seeds.includes(disambig), `seeds ${seeds.join(',')} include the namesake page`);
+    assert.equal(label, 'CEO of C2 Education Centers');
+    assert.ok(
+      seeds.length === 0 || seeds.some((i) => /C2/.test(`${rows[i]!.title ?? ''} ${rows[i]!.snippet ?? ''}`)),
+      `seeds are empty or mention C2: ${seeds.map((i) => rows[i]!.url).join(' | ')}`,
+    );
+  });
+
+  test('publicChoices strips the internal seeds: exactly name, descriptor, query, id', () => {
+    const d = run('serper-ray');
+    assert.equal(d.kind, 'choices');
+    if (d.kind !== 'choices') return;
+    // The server-side decision still carries the rows behind each choice.
+    for (const c of d.choices) assert.ok(Array.isArray(c.seeds) && c.seeds.length > 0, JSON.stringify(c));
+    for (const c of publicChoices(d.choices)) {
+      assert.deepEqual(Object.keys(c).sort(), ['descriptor', 'id', 'name', 'query'], JSON.stringify(c));
+    }
+    assert.equal(publicChoices([]).length, 0);
+  });
+});
+
+describe('EN4 part 8: tighter generic labels (Athlete/Artist/Musician → the real role)', () => {
+  test('a generic descriptor becomes the sport or the art the cluster names', () => {
+    const fx = live2('ls-ray-knowledge');
+    const panel = knowledgeRow(fx.knowledge!, fx.results);
+    assert.ok(panel, 'fixture carries a knowledge panel');
+    const d = resolveEntity(fx.query, [panel!, ...fx.results], { pattern: 'profile' });
+    assert.equal(d.kind, 'choices');
+    if (d.kind !== 'choices') return;
+    const labels = d.choices.map((c) => c.descriptor);
+    assert.ok(labels.includes('Footballer'), labels.join(' | '));
+    assert.ok(labels.includes('Singer'), labels.join(' | '));
+    for (const descriptor of ['Footballer', 'Singer']) {
+      const c = d.choices.find((x) => x.descriptor === descriptor)!;
+      assert.ok(c, descriptor);
+      assert.equal(c.query, `Ray Lee ${descriptor}`, c.query);
+      // The pick still re-asks the named person, within SPD-C1's 3 extra words.
+      assert.equal(personSubject(c.query), c.name, c.query);
+      assert.equal(isPersonAsk(c.query), true, c.query);
+      assert.ok(wordsBeyond(c.query, c.name) <= 3, c.query);
+    }
+  });
+
+  test('no other label moves: David Kim, John Smith and the Raycon/Arsenal picks stand', () => {
+    assert.deepEqual(descriptorsOf('ls-dk'), ['Violinist', 'Restaurateur', 'CEO of C2 Education Centers']);
+    assert.deepEqual(descriptorsOf('ls-js'), ['Based in Northamptonshire', 'Housebreaker', 'Explorer']);
+    assert.deepEqual(descriptorsOf('serper-js'), ['Explorer', 'Player', 'Actor in Los Angeles']);
+    const ray = descriptorsOf('serper-ray');
+    assert.ok(ray.includes('Founder of Raycon'), ray.join(' | '));
+    assert.ok(ray.includes('Linked to Arsenal'), ray.join(' | '));
+    assert.ok(descriptorsOf('serper-dk').some((l) => l.includes('C2 Education')), descriptorsOf('serper-dk').join(' | '));
   });
 });

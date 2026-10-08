@@ -1,7 +1,22 @@
 import { DEEP_PAGES, routeExtras, routeOf } from './router';
 import { serperImages } from './cascade';
 import { publicEvent } from './publicPayload';
-import { contextTerms, distinguishingTerms, entityContextLine, entityHintFor, isDisambiguationPage, isPersonAsk, knowledgeForKept, knowledgeRow, personSourceOk, personSubject, priorEntity, resolveEntity } from './entity';
+import {
+  contextTerms,
+  distinguishingTerms,
+  entityContextLine,
+  entityHintFor,
+  isDisambiguationPage,
+  isPersonAsk,
+  knowledgeForKept,
+  knowledgeRow,
+  personSourceOk,
+  personSubject,
+  pickSeeds,
+  priorEntity,
+  publicChoices,
+  resolveEntity,
+} from './entity';
 import { fetchWikiDisambiguation, fetchWikiLeadImage } from './wikiSearch';
 import { type EntityHint, mentionsAny } from './imageGate';
 import type { RowImagePlan } from './pictures';
@@ -189,7 +204,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
  * inside the three-call cap (two rewrites leave no room for Wikipedia).
  * Rewritten follow-ups already say what they mean, so they skip the understanding step.
  */
-async function searchAndDesign(send: Send, env: Env, query: string, freshness: Freshness, context: string | undefined, started: number, scope: AskScope, rewritten = false) {
+async function searchAndDesign(send: Send, env: Env, query: string, freshness: Freshness, context: string | undefined, started: number, scope: AskScope, rewritten = false, seedRows?: SearchResult[]) {
   const understood = rewritten ? Promise.resolve(undefined) : understand(query, env, context);
   const planned = understood.then((u) => planLayout(query, env, { intent: u?.intent })).then((plan) => {
     send('plan', plan);
@@ -227,6 +242,9 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   const scholar = await scholarly;
   if (scholar.length) results = { ...results, results: withScholarly(scholar, results.results) };
   let late: Promise<LateExtras> | undefined = found.late;
+  // EN4 part 8: set when the answer is rebuilt from the rows behind a Which-one? pick, so the
+  // seed pages get re-read instead of designed from the snippets alone.
+  let fromSeeds = false;
 
   if (!results.results.length) {
     const firstEngines = results.engines;
@@ -236,7 +254,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     const relaxed = relaxQuery(query);
     const tryRelaxed = relaxed.length > 0 && relaxed.toLowerCase() !== query.trim().toLowerCase();
     let triedEntity = false;
-    let recovered: 'relaxed' | 'entity' | 'knowledge' | 'none' = 'none';
+    let recovered: 'relaxed' | 'entity' | 'knowledge' | 'seeds' | 'none' = 'none';
     if (tryRelaxed) {
       const again = await searchWithLate({ q: relaxed, freshness: 'any', count: 20 }, env, scope);
       const gated = applyPickGate(query, applyRelevance(query, { ...again.response, query }, scope.ledger));
@@ -267,15 +285,32 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
           late = again.late;
           recovered = 'entity';
         } else if (pickPerson) {
-          // Nothing about the asker's person: re-ask on the bare name and let them pick.
-          const decision = resolveEntity(`Who is ${person}`, again.response.results, { pattern: 'profile' });
-          if (decision.kind === 'choices') {
-            scope.ledger.entity = { kind: 'choices', choices: decision.choices.length };
-            send('search', { ...again.response, query });
-            // Choices ride on the done event (FE readChoices() in shared/choices.ts); never cached.
-            send('done', { engine: 'extractive', removed: 0, pagesRead: 0, ms: Date.now() - started, choices: decision.choices });
-            console.log(JSON.stringify({ zo: 'entity', pickNoMatch: true, rechoices: decision.choices.length }));
-            return;
+          // EN4 part 8: the tap that offered these choices is still in hand, so re-ask on the rows
+          // behind the picked choice before offering the same choices again (live "Ray Lee Raycon
+          // Founder" → the LinkedIn/ZoomInfo rows, never "No results for this search").
+          const seeds = seedRows?.length && isPersonAsk(query) ? pickSeeds(query, seedRows) : undefined;
+          if (seeds?.seeds.length) {
+            results = { ...results, results: seeds.seeds.map((i) => seedRows![i]!), knowledge: undefined };
+            fromSeeds = true;
+            recovered = 'seeds';
+            console.log(JSON.stringify({ zo: 'entity', pickSeeds: seeds.seeds.length, label: seeds.label }));
+          } else if (!seedRows?.length) {
+            // Nothing about the asker's person: re-ask on the bare name and let them pick.
+            const decision = resolveEntity(`Who is ${person}`, again.response.results, { pattern: 'profile' });
+            if (decision.kind === 'choices') {
+              scope.ledger.entity = { kind: 'choices', choices: decision.choices.length };
+              send('search', { ...again.response, query });
+              // Choices ride on the done event (FE readChoices() in shared/choices.ts); never cached.
+              send('done', {
+                engine: 'extractive',
+                removed: 0,
+                pagesRead: 0,
+                ms: Date.now() - started,
+                choices: publicChoices(decision.choices),
+              });
+              console.log(JSON.stringify({ zo: 'entity', pickNoMatch: true, rechoices: decision.choices.length }));
+              return;
+            }
           }
         }
         if (person) console.log(JSON.stringify({ zo: 'entity', nameFallback: true, kept: picked.length, gatedOut }));
@@ -284,6 +319,23 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     if (!results.results.length && hasLlm(env)) recovered = 'knowledge';
     console.log(JSON.stringify({ zo: 'empty-recovery', reason, providers: engineErrors(firstEngines), relaxed: tryRelaxed, entity: triedEntity, recovered }));
     if (!results.results.length) {
+      // EN4 part 8: a person ask never ends in "No results for this search" — the person the ask
+      // named is still on screen, so say plainly that nothing more turned up (never choices again).
+      const subject = personSubject(query);
+      // Only a tapped Which-one? choice or a person + descriptor ask ("Ray Lee BlueFlame AI"): a bare
+      // name ask ("Who is Elon Musk") still gets the LLM knowledge answer instead of this one.
+      if (isPersonAsk(query) && subject && (seedRows?.length || distinguishingTerms(query).length > 0)) {
+        const label = pickSeeds(query, seedRows ?? []).label;
+        console.log(JSON.stringify({ zo: 'entity', pickEmpty: true }));
+        send('search', { ...results, results: [] });
+        send('head', { title: subject, subtitle: label });
+        send('node', {
+          index: 0,
+          node: { type: 'text', text: `I couldn't find more about ${subject}${label ? ` (${label})` : ''} right now.`, size: 'lg' },
+        });
+        send('done', { engine: 'extractive', removed: 0, pagesRead: 0, ms: Date.now() - started });
+        return;
+      }
       if (!hasLlm(env)) {
         throw new Error(reason === 'unavailable'
           ? 'Search is unavailable right now. Try again in a few minutes.'
@@ -346,7 +398,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     console.log(JSON.stringify({ zo: 'entity', kind: 'choices', choices: decision.choices.length }));
     send('search', results);
     // Choices ride on the done event (FE readChoices() in shared/choices.ts); never cached.
-    send('done', { engine: 'extractive', removed: 0, pagesRead: 0, ms: Date.now() - started, choices: decision.choices });
+    send('done', { engine: 'extractive', removed: 0, pagesRead: 0, ms: Date.now() - started, choices: publicChoices(decision.choices) });
     return;
   }
   let designContext = context;
@@ -395,7 +447,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   }
   send('search', results);
   const boost = imageBoost(pattern, results, env, scope, boostQuery);
-  await design(send, env, { query, pattern, depth: plan.depth, readPages: plan.readPages || deep, search: results, context: designContext, intent: u?.intent, deep, boost, entityHint }, started, scope, late);
+  await design(send, env, { query, pattern, depth: plan.depth, readPages: plan.readPages || deep || fromSeeds, search: results, context: designContext, intent: u?.intent, deep, boost, entityHint }, started, scope, late);
 }
 
 /**
@@ -424,7 +476,8 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
     // Card/control prompts (incl. Which-one? choice.query) are already the search string — do not LLM-rewrite.
     const query = req.question.trim();
     send('rewrite', { query });
-    await searchAndDesign(send, env, query, 'any', context, started, scope, true);
+    // EN4 part 8: the rows that produced these choices come along, so the pick never comes back empty.
+    await searchAndDesign(send, env, query, 'any', context, started, scope, true, req.search?.results);
     return;
   }
 

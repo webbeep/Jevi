@@ -28,6 +28,11 @@ export interface EntityChoice {
   /** Standalone re-ask query. */
   query: string;
   id: string;
+  /**
+   * EN4 part 8: indices (into the rows this decision saw) of the sources behind this choice.
+   * Internal only — the client gets `publicChoices()`, which never carries it.
+   */
+  seeds?: number[];
 }
 
 export type EntityDecision =
@@ -39,6 +44,11 @@ export interface EntityRow {
   title: string;
   url: string;
   snippet?: string;
+}
+
+/** Choices ride on the `done` event: the FE reads {name, descriptor, query, id} (shared/choices.ts). */
+export function publicChoices(choices: EntityChoice[]): { name: string; descriptor: string; query: string; id: string }[] {
+  return choices.map(({ name, descriptor, query, id }) => ({ name, descriptor, query, id }));
 }
 
 /** Words that prove a short query is NOT a person name. */
@@ -79,6 +89,31 @@ const DESCRIPTOR_WORDS = new Set([
   'entrepreneur', 'journalist', 'professor', 'lawyer', 'physician', 'cricketer', 'boxer', 'wrestler',
 ]);
 
+/**
+ * EN4 part 8: the specific role a generic choice descriptor ("Athlete", "Artist") becomes, in the
+ * order the first match wins. Sourced from the cluster's own title+snippet text.
+ */
+const SPECIFIC_ROLES: [RegExp, string][] = [
+  [/\b(?:footballer|soccer player)\b/i, 'Footballer'],
+  [/\bcricketer\b/i, 'Cricketer'],
+  [/\bbasketball player\b/i, 'Basketball Player'],
+  [/\bbaseball player\b/i, 'Baseball Player'],
+  [/\bboxer\b/i, 'Boxer'],
+  [/\bwrestler\b/i, 'Wrestler'],
+  [/\bsprinter\b/i, 'Sprinter'],
+  [/\bsinger\b|\bsung\b|\bsongs\b/i, 'Singer'],
+  [/\brapper\b/i, 'Rapper'],
+  [/\bguitarist\b/i, 'Guitarist'],
+  [/\bdrummer\b/i, 'Drummer'],
+  [/\bpainter\b/i, 'Painter'],
+  [/\bsculptor\b/i, 'Sculptor'],
+  [/\bactor\b/i, 'Actor'],
+  [/\bactress\b/i, 'Actress'],
+];
+
+/** Every word of those roles, so a pick query built from one still cuts at the person name. */
+const ROLE_TAIL = new Set(SPECIFIC_ROLES.flatMap(([, label]) => label.toLowerCase().split(' ')));
+
 /** The person the query is about, or '' when there is none. */
 export function personSubject(query: string): string {
   const raw = query.trim();
@@ -104,7 +139,7 @@ export function personSubject(query: string): string {
       const w = run[i]!;
       const lowW = w.toLowerCase();
       // A role or descriptor word ends the name: "John Smith Explorer", "David Kim Violinist".
-      if (looksLikeOrgToken(w) || ROLE1.has(lowW) || DESCRIPTOR_WORDS.has(lowW) || /^co-founder$/i.test(w)) {
+      if (looksLikeOrgToken(w) || ROLE1.has(lowW) || DESCRIPTOR_WORDS.has(lowW) || ROLE_TAIL.has(lowW) || /^co-founder$/i.test(w)) {
         cut = i;
         break;
       }
@@ -682,6 +717,33 @@ function describe(top: { role?: string; org?: string; location?: string; label?:
   return hasSiteWord(short) ? '' : short;
 }
 
+/** EN4 part 8: descriptor words that name no person at all, so they always get a second look. */
+const GENERIC_LABELS = new Set(['athlete', 'artist', 'person', 'musician', 'sportsperson']);
+
+/** The specific role these rows (title + snippet) name, in SPECIFIC_ROLES order. */
+function specificRole(rows: EntityRow[]): string | undefined {
+  const text = rows.map((r) => `${title(r.title ?? '')} ${r.snippet ?? ''}`).join(' \n ');
+  if (!text.trim()) return undefined;
+  return SPECIFIC_ROLES.find(([re]) => re.test(text))?.[1];
+}
+
+/**
+ * EN4 part 8: a generic descriptor ("Athlete", "Artist", "Musician") says nothing about which
+ * person this is. The cluster's own rows usually name the sport or the art, so use that instead
+ * (role, descriptor and the re-ask query all move together). Nothing else is touched.
+ */
+function specificLabel(
+  top: { role?: string; org?: string; location?: string; label?: string },
+  rows: EntityRow[],
+  name: string,
+): { role?: string; descriptor: string } {
+  const descriptor = describe(top, rows, name);
+  if (!GENERIC_LABELS.has(low(descriptor))) return { role: top.role, descriptor };
+  const specific = specificRole(rows);
+  if (!specific) return { role: top.role, descriptor };
+  return { role: specific, descriptor: describe({ ...top, role: specific }, rows, name) };
+}
+
 /**
  * Searchable follow-up: "Ray Lee USATF coach" — name + org/role words, no "at/of".
  * A bare org/location that would join the name falls back to a lowercase connector,
@@ -736,11 +798,19 @@ function toChoice(name: string, cluster: number[], rows: EntityRow[]): EntityCho
   const top = topOf(cluster, rows, name);
   const rowsIn = cluster.map((i) => rows[i]!);
   const label = wikiQualifier(rowsIn, name);
-  const descriptor = describe({ ...top, label }, rowsIn, name);
+  // EN4 part 8: a generic "Athlete"/"Artist" becomes the role the cluster's rows name.
+  const { role, descriptor } = specificLabel({ ...top, label }, rowsIn, name);
   // A Wikipedia qualifier IS the identity ("John Smith (explorer)"): re-ask name + qualifier,
   // never the cluster's org/role words ("John Smith New England Author").
-  const query = label ? title(`${name} ${label}`) : choiceQuery(name, top);
-  return { name, descriptor, query, id: slugOf(name, top.role, top.org, top.location) || slugOf(name) };
+  const query = label ? title(`${name} ${label}`) : choiceQuery(name, { ...top, role });
+  return {
+    name,
+    descriptor,
+    query,
+    id: slugOf(name, role, top.org, top.location) || slugOf(name),
+    // The rows behind this choice: a tap on it re-asks these, so it never comes back empty.
+    seeds: [...cluster],
+  };
 }
 
 /** Wikipedia disambiguation page: title/url "(disambiguation)" or snippet "may refer to". */
@@ -1032,13 +1102,23 @@ export function resolveEntity(
   if (!pickAsk && disambig.length) {
     const entries = disambiguationEntries(rows[disambig[0]!]!, name);
     if (entries.length >= 2) {
+      const page = rows[disambig[0]!]!;
       const choices: EntityChoice[] = entries
-        .map((e) => ({
-          name,
-          descriptor: describe({ role: e.role, org: e.org, location: e.location, label: e.label }, [rows[disambig[0]!]!], name),
-          query: choiceQuery(name, { role: e.role, org: e.org, location: e.location }),
-          id: slugOf(name, e.role, e.org, e.location) || slugOf(name, e.label),
-        }))
+        .map((e) => {
+          const top = { role: e.role, org: e.org, location: e.location, label: e.label };
+          const { role, descriptor } = specificLabel(top, [page], name);
+          const query = choiceQuery(name, { ...top, role });
+          return {
+            name,
+            descriptor,
+            query,
+            id: slugOf(name, role, e.org, e.location) || slugOf(name, e.label),
+            // EN4 part 8: the rows that prove this entry (a namesake page lists other people).
+            seeds: rows
+              .map((r, i) => i)
+              .filter((i) => !isDisambiguationPage(rows[i]!) && personSourceOk(query, rows[i]!, name)),
+          };
+        })
         // A choice with no descriptor says nothing about the person — never offer it.
         .filter((c) => c.descriptor !== '')
         .slice(0, 3);
@@ -1094,6 +1174,50 @@ export function resolveEntity(
     kept: [...win],
     dropped: rows.map((_, i) => i).filter((i) => !kept.has(i)),
   };
+}
+
+/** The ask's words after the person name ("Ray Lee BlueFlame AI" → "BlueFlame AI"). */
+function queryTail(query: string, name: string): string {
+  if (!name) return '';
+  const words = title(query.replace(/\?+\s*$/, '')).split(' ').filter(Boolean);
+  const head = name.split(' ')[0]!.toLowerCase();
+  const at = words.findIndex((w) => w.toLowerCase().replace(/[^a-z0-9]/g, '') === head);
+  if (at < 0) return '';
+  return title(words.slice(at + name.split(' ').length).join(' '));
+}
+
+/**
+ * EN4 part 8: the sources behind a Which-one? pick. The tapped choice is found again in a fresh
+ * disambiguation of the turn's own rows, and every row that proves that person (its org/role on
+ * the page, never a namesake page, blocked or fiction host) joins it — so a pick never comes
+ * back with nothing to show.
+ */
+export function pickSeeds(query: string, rows: EntityRow[]): { seeds: number[]; label: string } {
+  const name = personSubject(query);
+  const tail = queryTail(query, name);
+  if (!name || !rows.length) return { seeds: [], label: tail };
+  let seeds: number[] = [];
+  let label = '';
+  const decision = resolveEntity(`Who is ${name}`, rows, { pattern: 'profile' });
+  if (decision.kind === 'choices') {
+    const asked = normText(query);
+    const slug = slugOf(query);
+    const hit = decision.choices.find((c) => normText(c.query) === asked || c.id === slug);
+    if (hit) {
+      seeds = [...(hit.seeds ?? [])];
+      label = hit.descriptor;
+    }
+  }
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i]!;
+    if (seeds.includes(i)) continue;
+    if (isBlockedHost(r.url) || isFictionHost(r.url)) continue;
+    if (isDisambiguationPage(r)) continue;
+    if (!personSourceOk(query, r, name)) continue;
+    seeds.push(i);
+  }
+  // Original SERP order, deduped.
+  return { seeds: [...new Set(seeds)].sort((a, b) => a - b), label: label || tail };
 }
 
 /** True when this result is about the chosen entity (name + a matching signal, or name only). */
