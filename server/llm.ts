@@ -194,19 +194,54 @@ async function jsonFrom<T>(p: Provider, system: string, user: string, maxTokens:
   }
 }
 
+const CONTENT_DELTA = '"delta":{"content":"';
+
+/**
+ * The text of a frame whose delta is exactly `{"content":"…"}`, the shape of almost every token frame.
+ * Reads just that JSON string instead of parsing the whole frame. Anything else (role or reasoning
+ * deltas, Workers AI `response`, odd layouts) returns undefined and takes the full JSON.parse path.
+ * The needle cannot occur inside a JSON string value, where quotes are escaped.
+ */
+export function contentDelta(data: string): string | undefined {
+  const at = data.indexOf(CONTENT_DELTA);
+  if (at < 0 || data.charCodeAt(0) !== 123 || data.charCodeAt(data.length - 1) !== 125) return undefined;
+  const open = at + CONTENT_DELTA.length - 1;
+  for (let i = open + 1; ; ) {
+    const q = data.indexOf('"', i);
+    if (q < 0) return undefined;
+    let slashes = 0;
+    while (data.charCodeAt(q - 1 - slashes) === 92) slashes++;
+    if (slashes % 2 === 0) {
+      if (data.charCodeAt(q + 1) !== 125) return undefined;
+      try {
+        return JSON.parse(data.slice(open, q + 1)) as string;
+      } catch {
+        return undefined;
+      }
+    }
+    i = q + 1;
+  }
+}
+
 /** Parses an SSE body into text deltas; `onReasoning` fires on hidden-reasoning deltas. */
 async function readSse(body: ReadableStream<Uint8Array>, onText: (t: string) => void, onReasoning: () => void): Promise<void> {
-  const reader = body.pipeThrough(new TextDecoderStream()).getReader();
+  // Decoding in place instead of piping through a TextDecoderStream saves a stream hop per network chunk.
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
   let buf = '';
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
+  const take = (value: string) => {
     buf += value;
     const events = buf.split(/\r?\n\r?\n/);
     buf = events.pop() ?? '';
     for (const event of events) {
-      const data = event.replace(/^data:\s*/gm, '').trim();
+      // One-line `data: {...}` events (nearly all) skip the multiline regex; the result is the same string.
+      const data = (event.startsWith('data: ') && !/[\r\n]/.test(event) ? event.slice(6) : event.replace(/^data:\s*/gm, '')).trim();
       if (!data || data === '[DONE]') continue;
+      const fast = contentDelta(data);
+      if (fast !== undefined) {
+        if (fast) onText(fast);
+        continue;
+      }
       try {
         const obj = JSON.parse(data) as { response?: string; choices?: { delta?: { content?: string; reasoning_content?: string; reasoning?: string } }[] };
         const delta = obj.choices?.[0]?.delta;
@@ -217,6 +252,16 @@ async function readSse(body: ReadableStream<Uint8Array>, onText: (t: string) => 
         // keep-alive or partial frame
       }
     }
+  };
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) {
+      const tail = decoder.decode();
+      if (tail) take(tail);
+      break;
+    }
+    const text = decoder.decode(value, { stream: true });
+    if (text) take(text);
   }
 }
 
