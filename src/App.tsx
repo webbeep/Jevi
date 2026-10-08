@@ -224,7 +224,7 @@ export default function App() {
         continue;
       }
       const card = t.result?.card;
-      if (!card || !streamed.current.has(t.id) || (t.result as { degraded?: boolean } | undefined)?.degraded) continue;
+      if (!card || !card.body.length || !streamed.current.has(t.id) || (t.result as { degraded?: boolean } | undefined)?.degraded) continue;
       const key = `${t.id}:${t.version}:${t.question}`;
       if (reported.current.has(key)) continue;
       reported.current.add(key);
@@ -863,6 +863,8 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
 
   const degraded = turn.kind === 'search' ? turnDegraded(turn) ?? undefined : undefined;
   const choices = turn.result ? readChoices(turn.result, turn.result.card) : undefined;
+  // Only options came back (no card body): show the question and the list, not an empty card.
+  const choicesOnly = Boolean(choices && !turn.filling && turn.result && !turn.result.card.body.length);
 
   return (
     <section id={`turn-${turn.id}`} data-turn={turn.id} data-degraded={degraded} className="scroll-mt-20 space-y-3 animate-in fade-in slide-in-from-bottom-3 duration-500">
@@ -892,7 +894,8 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
                 : 'No fresh sources found — answered from general knowledge, may be out of date.'}
             </p>
           )}
-          <CardContext.Provider value={context}>
+          {choicesOnly && first && <h2 className="text-balance text-[16.5px] font-semibold leading-[1.3] tracking-[-0.02em] sm:text-[17px]">{turn.question}</h2>}
+          {!choicesOnly && <CardContext.Provider value={context}>
             <AnswerCardView
               card={card}
               version={`${turn.id}-${turn.version}`}
@@ -908,7 +911,7 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
               onRetry={() => actions.retry(id)}
               toolbar={!turn.filling && !offlinePartial && turn.result ? <SaveButton query={turn.question} title={card.title} card={card} /> : undefined}
             />
-          </CardContext.Provider>
+          </CardContext.Provider>}
           {choices && !turn.filling && <WhichOne choices={choices} onPick={(text) => void actions.followup(text, id, 'search')} />}
         </>
       )}

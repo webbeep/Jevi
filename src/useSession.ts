@@ -275,6 +275,12 @@ export function useSession() {
         case 'done':
           return update(route, (t) => {
             if (!t.live?.nodes.some(Boolean)) {
+              // An ambiguous name ends with only "Which one?" options and no card body.
+              const only = readChoices(e.data, t.live?.head);
+              if (only) {
+                const result: CardResponse = { card: { title: t.live?.head?.title ?? t.question, body: [] }, followups: [], engine: e.data.engine, pagesRead: e.data.pagesRead, removed: e.data.removed, ms: e.data.ms, choices: only };
+                return { result, live: undefined, filling: false, status: undefined, thinking: false, error: undefined, retryable: undefined, offline: undefined, reconnects: undefined };
+              }
               return { live: undefined, filling: false, status: undefined, thinking: false, offline: undefined, reconnects: undefined, ...emptyDoneState(Boolean(t.result)) };
             }
             const choices = readChoices(e.data, t.live.head);
