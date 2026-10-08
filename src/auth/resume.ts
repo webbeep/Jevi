@@ -38,6 +38,10 @@ export function finishBoot(): BootPlan | null {
 
   if (q.trigger) ssDel('zo_signin_trigger');
 
+  if (!auth.enabled) {
+    return { snapshot: null, pendingRun: null, pendingRestore: null, flushSave: false };
+  }
+
   if (success) {
     const props: Record<string, unknown> = { trigger: q.trigger || 'header' };
     if (q.isNew) props.new_user = true;

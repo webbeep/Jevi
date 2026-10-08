@@ -130,7 +130,7 @@ function usageOf(r) {
   };
 }
 
-async function d1(sql) {
+async function d1Rows(sql) {
   const out = await new Promise((resolve, reject) => {
     const child = spawn(
       'npx',
@@ -153,7 +153,11 @@ async function d1(sql) {
   const end = out.stdout.lastIndexOf(']');
   if (start < 0 || end < start) throw new Error('d1 json missing');
   const parsed = JSON.parse(out.stdout.slice(start, end + 1));
-  const row = parsed?.[0]?.results?.[0] ?? {};
+  return parsed?.[0]?.results ?? [];
+}
+
+async function d1(sql) {
+  const row = (await d1Rows(sql))[0] ?? {};
   const n = row.n ?? row['count(*)'] ?? Object.values(row)[0];
   return Number(n);
 }
@@ -251,9 +255,11 @@ async function authOn() {
   await testToken();
 
   const startA = await req(new Jar('203.0.113.22'), '/api/auth/start?return=%2Fwelcome');
-  check(redirectAuth(startA), `start?return redirects with auth= status=${startA.status}`);
+  check(redirectAuth(startA), `start?return 302 → Google with same-origin callback status=${startA.status}`);
+  check(await stateCarriesAuth('/welcome'), 'start?return state carries auth=ok / auth=error / new_user=1 return URLs');
   const startB = await req(new Jar('203.0.113.23'), '/api/auth/start?return_to=%2Fwelcome');
-  check(redirectAuth(startB), `start?return_to redirects with auth= status=${startB.status}`);
+  check(redirectAuth(startB), `start?return_to 302 → Google with same-origin callback status=${startB.status}`);
+  check(await stateCarriesAuth('/welcome'), 'start?return_to state carries auth return URLs');
 
   await signedInFlow();
 
@@ -264,19 +270,30 @@ async function authOn() {
   check(unknown.status === 204, 'unknown event → 204');
 }
 
+/** Start must 302 to Google consent with a same-origin Better Auth callback (auth=ok lands later, after consent). */
 function redirectAuth(r) {
   if (r.status < 300 || r.status >= 400) return false;
-  const loc = r.headers.get('location') || '';
   let url;
   try {
-    url = new URL(loc, BASE);
+    url = new URL(r.headers.get('location') || '');
   } catch {
     return false;
   }
-  if (url.origin !== new URL(BASE).origin) return false;
-  const auth = url.searchParams.get('auth');
-  if (auth === 'ok') return true;
-  return auth === 'error' && url.searchParams.has('error');
+  if (url.hostname !== 'accounts.google.com') return false;
+  return url.searchParams.get('redirect_uri') === `${new URL(BASE).origin}/api/auth/callback/google`;
+}
+
+/** Local only: the stored OAuth state carries callbackURL/errorURL with auth=ok / auth=error on the return path. */
+async function stateCarriesAuth(returnPath) {
+  if (!d1Name) return true;
+  const rows = await d1Rows("SELECT value FROM verification ORDER BY createdAt DESC LIMIT 1");
+  try {
+    const v = JSON.parse(rows?.[0]?.value ?? '{}');
+    const base = `${new URL(BASE).origin}${returnPath}`;
+    return v.callbackURL === `${base}?auth=ok` && v.errorURL === `${base}?auth=error` && v.newUserURL === `${base}?auth=ok&new_user=1`;
+  } catch {
+    return false;
+  }
 }
 
 async function testToken() {
@@ -364,7 +381,7 @@ async function signedInFlow() {
 
   const prefs = await req(jar, '/api/account/prefs');
   check(prefs.status === 200 && prefs.data?.sync_history === false, 'GET prefs default sync_history false');
-  const history = Array.from({ length: 60 }, (_, i) => ({ q: `q${i}` }));
+  const history = Array.from({ length: 60 }, (_, i) => `question ${i}`);
   const put = await req(jar, '/api/account/prefs', { method: 'PUT', body: { sync_history: true, history }, headers: { origin } });
   const stored = await req(jar, '/api/account/prefs');
   const capped = Array.isArray(stored.data?.history) ? stored.data.history.length : Array.isArray(put.data?.history) ? put.data.history.length : -1;

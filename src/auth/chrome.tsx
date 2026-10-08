@@ -71,6 +71,7 @@ export function AuthHeader() {
         <DropdownMenuItem className="min-h-11" onSelect={() => requestSaves()}>{COPY.savedAnswers}</DropdownMenuItem>
         <DropdownMenuItem
           className="min-h-11 whitespace-normal"
+          role="menuitemcheckbox"
           aria-checked={syncOn}
           onSelect={(event) => {
             event.preventDefault();

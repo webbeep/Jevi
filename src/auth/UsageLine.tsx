@@ -56,7 +56,7 @@ export function UsageLine() {
           : COPY.ipCap(notice.limit);
     return (
       <div className="pointer-events-auto mb-2 flex items-start gap-1 px-1">
-        <p className="min-w-0 flex-1 pt-2.5 text-[13px] leading-snug text-muted-foreground">
+        <p role="status" className="min-w-0 flex-1 pt-2.5 text-[13px] leading-snug text-muted-foreground">
           {text}
           {notice.kind === 'error' && (
             <>

@@ -28,9 +28,8 @@ export function bootCapture() {
     const params = new URLSearchParams(location.search);
     const code = params.get('error') || '';
     const status = code === 'access_denied' ? 'cancelled' : 'error';
-    const q = snapshotQuery(peekSnapshot());
-    history.replaceState(history.state, '', q ? `/?q=${encodeURIComponent(q)}` : '/');
-    remember({ status, isNew: false, errorCode: code || null, trigger, q });
+    history.replaceState(history.state, '', '/');
+    remember({ status, isNew: false, errorCode: code || null, trigger, q: snapshotQuery(peekSnapshot()) });
     return;
   }
 

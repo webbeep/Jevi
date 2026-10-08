@@ -67,7 +67,7 @@ export function Panel({
         <SheetContent
           side={mobile ? 'bottom' : 'right'}
           showCloseButton={false}
-          className={cn('relative gap-3 p-4', mobile ? 'max-h-[90dvh] rounded-t-2xl pb-[max(16px,env(safe-area-inset-bottom))]' : 'w-full sm:max-w-sm')}
+          className={cn('gap-3 p-4', mobile ? 'max-h-[90dvh] rounded-t-2xl pb-[max(16px,env(safe-area-inset-bottom))]' : 'w-full sm:max-w-sm')}
         >
           <SheetTitle className="pr-11 text-base">{title}</SheetTitle>
           {children}
@@ -77,7 +77,7 @@ export function Panel({
   }
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent showCloseButton={false} className={cn('relative gap-3 p-4', maxWidth)}>
+      <DialogContent showCloseButton={false} className={cn('gap-3 p-4', maxWidth)}>
         <DialogTitle className="pr-11 text-base">{title}</DialogTitle>
         {children}
       </DialogContent>

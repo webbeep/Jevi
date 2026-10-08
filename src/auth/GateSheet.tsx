@@ -32,12 +32,14 @@ export function GateSheet({
           {COPY.notNow}
         </button>
         <p className="text-[13px] leading-snug text-muted-foreground">{COPY.s6(resetLabel())}</p>
-        <p className="text-[13px] leading-snug text-muted-foreground">
-          By continuing you agree to the{' '}
-          <a href="/terms" className="underline underline-offset-2">{COPY.terms}</a>
-          {' '}and{' '}
-          <a href="/privacy" className="underline underline-offset-2">{COPY.privacy}</a>.
-        </p>
+        <div className="text-[13px] leading-snug text-muted-foreground">
+          <p>By continuing you agree to ZO's</p>
+          <div className="-ml-1 flex items-center gap-1">
+            <a href="/terms" className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md px-1 underline underline-offset-2 hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50">{COPY.terms}</a>
+            <span aria-hidden>·</span>
+            <a href="/privacy" className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md px-1 underline underline-offset-2 hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50">{COPY.privacy}</a>
+          </div>
+        </div>
       </div>
     </Panel>
   );
