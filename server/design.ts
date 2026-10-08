@@ -11,8 +11,6 @@ import { patternById } from './patterns';
 import { sanitizeCard, sanitizeNodes, type PriceSource } from './sanitize';
 import { clip, type Env } from './util';
 import { VerdictSession } from './verdict';
-import { stampOfficialPriceCite } from '../shared/vendorPrice';
-import { isStoreProductAsk } from '../shared/pricing';
 
 const GRAMMAR = `Each node is a JSON object with a "type" field.
 LAYOUT
@@ -290,13 +288,6 @@ const MAX_CONTENT_NODES = 8;
 
 const isContent = (n: CardNode) => n.type !== 'actions' && n.type !== 'citations';
 
-
-/** Plan catalogs (P05 Workspace) cite the official page for prices; store products keep retailer cites (V3 reconcile adds the vendor price). */
-function officialCite(node: CardNode, req: DesignRequest): CardNode {
-  if (isStoreProductAsk(req.query)) return node;
-  return stampOfficialPriceCite(node, req.query, req.search.results);
-}
-
 /** Runs the verdict gate on every node before it is shown. Picture updates pass through the same function, so a later patch keeps the corrected tile. */
 function bindVerdict(req: DesignRequest, emit: (node: CardNode, index: number) => void): (node: CardNode, index: number) => void {
   const session = new VerdictSession({ query: req.followup?.question ?? req.query, results: req.search.results, pages: req.pages });
@@ -345,8 +336,7 @@ export async function designStream(req: DesignRequest, env: Env, on: DesignEvent
           headSent = true;
           return on.head(parsed.head);
         case 'node': {
-          const polished = polish.apply(parsed.node);
-          const node = emitReady(polished && officialCite(polished, req), req.search.results.length === 0);
+          const node = emitReady(polish.apply(parsed.node), req.search.results.length === 0);
           if (!node) return;
           if (isContent(node)) {
             if (contentNodes >= MAX_CONTENT_NODES) return;
@@ -435,8 +425,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
       const parsed = parseLine(line, g, imageCount, req.query, sources, req.followup?.question ?? req.query);
       if (parsed?.kind === 'node') {
         done = true;
-        const polished = polish.apply(parsed.node);
-        const node = emitReady(polished && officialCite(polished, req), req.search.results.length === 0);
+        const node = emitReady(polish.apply(parsed.node), req.search.results.length === 0);
         if (!node) return;
         contentNodes++;
         pictures.emit(node, i, emitNode);
@@ -464,7 +453,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
             headSentAny = true;
             return on.head({ title: heading.text, subtitle: heading.eyebrow });
           }
-          const node = emitReady(officialCite(parsed.node, req), req.search.results.length === 0);
+          const node = emitReady(parsed.node, req.search.results.length === 0);
           if (!node) return;
           const order = FINISH_ORDER[node.type];
           return pictures.emit(node, order === undefined ? regions.length + FINISH_SLOTS + extra++ : regions.length + order, emitNode);
