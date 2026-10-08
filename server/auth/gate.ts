@@ -170,11 +170,22 @@ export function signedInUser(user: ZoUser | null): user is ZoUser {
   return !!user && !user.anonymous;
 }
 
+/**
+ * Owner allowlist: ZO_OWNER_EMAILS (comma-separated, case-insensitive) on the Pages env.
+ * A signed-in account on it gets the owner cap (GATE_OWNER_PER_DAY, default 1000/day) instead of
+ * the signed cap. Emails are never logged.
+ */
+export function isOwner(user: ZoUser | null, env: Env): boolean {
+  if (!signedInUser(user) || !user.email) return false;
+  const list = (env.ZO_OWNER_EMAILS ?? '').split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
+  return list.length > 0 && list.includes(user.email.trim().toLowerCase());
+}
+
 /** Read-only counter for /api/auth/me and save 401s. Does not increment. */
 export async function readFacingUsage(request: Request, env: Env, user: ZoUser | null, now = new Date()): Promise<UsageShape> {
   const day = DAY(now);
   const signedIn = signedInUser(user);
-  const limit = signedIn ? intEnv(env, 'GATE_SIGNED_PER_DAY', 100) : intEnv(env, 'GATE_ANON_PER_DAY', 5);
+  const limit = isOwner(user, env) ? intEnv(env, 'GATE_OWNER_PER_DAY', 1000) : signedIn ? intEnv(env, 'GATE_SIGNED_PER_DAY', 100) : intEnv(env, 'GATE_ANON_PER_DAY', 5);
   let used = 0;
   const db = d1(env);
   if (db) {
@@ -200,7 +211,9 @@ function deny(count: number, limit: number, signedIn: boolean, reason: GateReaso
 }
 
 /**
- * Daily gate. Counts device, salted IP, and signed-in user.
+ * Daily gate. Anonymous asks count the device and the salted IP; signed-in asks count only the user
+ * (a valid session never touches or hits the IP cap). Owner-allowlisted accounts (ZO_OWNER_EMAILS)
+ * get a 1000/day per-account cap instead of the signed cap.
  * `x-zo-retry: 1` is uncounted only when the same identity (signed-in user id,
  * otherwise the device cookie) and the same salted IP hash already counted this
  * normalized question within 60s, and fewer than 3 free retries have been used
@@ -225,16 +238,19 @@ export async function applyGate(
     const secret = sessionSecret(env);
     const limits = {
       anon: intEnv(env, 'GATE_ANON_PER_DAY', 5),
-      ip: intEnv(env, 'GATE_IP_PER_DAY', 30),
+      // Mobile carriers put many people behind one IP (CGNAT): 200/day for anonymous asks only.
+      ip: intEnv(env, 'GATE_IP_PER_DAY', 200),
       signed: intEnv(env, 'GATE_SIGNED_PER_DAY', 100),
     };
     const cookie = readCookie(request.headers.get('cookie'), 'zo_dev');
     const deviceId = secret && cookie ? await verifyDevice(cookie, secret) : null;
     const user = await lookup(request, env, now);
+    if (isOwner(user, env)) limits.signed = intEnv(env, 'GATE_OWNER_PER_DAY', 1000);
     const signedIn = signedInUser(user);
     const ip = request.headers.get('CF-Connecting-IP');
     const salt = env.IP_HASH_SALT;
-    const ipKey = ip && salt ? `ip:${await saltedHash(salt, ip)}` : null;
+    // Signed-in asks never count against (or get blocked by) the network cap.
+    const ipKey = !signedIn && ip && salt ? `ip:${await saltedHash(salt, ip)}` : null;
 
     const deviceKey = deviceId ? `d:${deviceId}` : null;
     const userKey = signedIn ? `u:${user.id}` : null;
@@ -269,7 +285,7 @@ export async function applyGate(
 
     if (!userKey && deviceKey && deviceCount > limits.anon) return deny(deviceCount, limits.anon, false, 'device');
     if (userKey && userCount > limits.signed) return deny(userCount, limits.signed, true, 'signed');
-    if (ipKey && ipCount > limits.ip) return deny(ipCount, limits.ip, signedIn, 'ip');
+    if (!userKey && ipKey && ipCount > limits.ip) return deny(ipCount, limits.ip, false, 'ip');
     return { ok: true, headers };
   } catch (err) {
     console.error('usage gate skipped', err instanceof Error ? err.name : 'error');

@@ -585,3 +585,65 @@ test('stream and middleware module graphs do not import better-auth', () => {
   for (const start of starts) visit(start);
   assert.equal(seen.size > 2, true);
 });
+
+test('IPCAP: signed-in asks never count against or hit the network cap; anonymous asks still do', async () => {
+  const { db, env } = mem();
+  env.AUTH_ENABLED = 'true';
+  env.GATE_IP_PER_DAY = '1';
+  const day = new Date('2026-10-08T12:00:00Z');
+  const headers = { cookie: await cookie(), 'CF-Connecting-IP': IP };
+  for (let i = 0; i < 3; i++) {
+    const d = await applyGate(new Request('http://127.0.0.1/api/stream', { headers }), env, day, signed, `q${i}`);
+    assert.equal(d.ok, true);
+  }
+  assert.equal(keys(db).some((k) => k.startsWith('ip:')), false);
+  assert.equal(keys(db).includes('u:user-1'), true);
+  const anon1 = await applyGate(new Request('http://127.0.0.1/api/stream', { headers }), env, day, nobody, 'a1');
+  const anon2 = await applyGate(new Request('http://127.0.0.1/api/stream', { headers }), env, day, nobody, 'a2');
+  assert.equal(anon1.ok, true);
+  assert.equal(anon2.ok, false);
+  if (!anon2.ok) assert.equal(anon2.body.reason, 'ip');
+  // A user already over the network count is still let through.
+  const after = await applyGate(new Request('http://127.0.0.1/api/stream', { headers }), env, day, signed, 'q9');
+  assert.equal(after.ok, true);
+});
+
+test('IPCAP: default anonymous network cap is 200', async () => {
+  const { env } = mem();
+  env.AUTH_ENABLED = 'true';
+  env.GATE_ANON_PER_DAY = '1000';
+  const day = new Date('2026-10-08T12:00:00Z');
+  const headers = { 'CF-Connecting-IP': IP };
+  let last: Awaited<ReturnType<typeof applyGate>> = { ok: true };
+  for (let i = 0; i < 201; i++) last = await applyGate(new Request('http://127.0.0.1/api/stream', { headers }), env, day, nobody, `q${i}`);
+  assert.equal(last.ok, false);
+  if (!last.ok) {
+    assert.equal(last.body.reason, 'ip');
+    assert.equal(last.body.limit, 200);
+  }
+});
+
+test('IPCAP: owner allowlist (ZO_OWNER_EMAILS, case-insensitive) gets the 1000/day owner cap, never the IP cap', async () => {
+  const { env } = mem();
+  env.AUTH_ENABLED = 'true';
+  env.GATE_SIGNED_PER_DAY = '1';
+  env.GATE_IP_PER_DAY = '1';
+  env.GATE_OWNER_PER_DAY = '3';
+  env.ZO_OWNER_EMAILS = ' x@y.z , A@B.C ';
+  const day = new Date('2026-10-08T12:00:00Z');
+  const headers = { cookie: await cookie(), 'CF-Connecting-IP': IP };
+  for (let i = 0; i < 3; i++) assert.equal((await applyGate(new Request('http://127.0.0.1/api/stream', { headers }), env, day, signed, `q${i}`)).ok, true);
+  const fourth = await applyGate(new Request('http://127.0.0.1/api/stream', { headers }), env, day, signed, 'q3');
+  assert.equal(fourth.ok, false);
+  if (!fourth.ok) {
+    assert.equal(fourth.body.reason, 'signed');
+    assert.equal(fourth.body.limit, 3);
+  }
+  delete env.GATE_OWNER_PER_DAY;
+  assert.equal((await applyGate(new Request('http://127.0.0.1/api/stream', { headers }), env, day, signed, 'q4')).ok, true, 'default owner cap is 1000');
+  // Not on the list: the per-user cap (1) applies.
+  env.ZO_OWNER_EMAILS = 'x@y.z';
+  const over = await applyGate(new Request('http://127.0.0.1/api/stream', { headers }), env, day, signed, 'n2');
+  assert.equal(over.ok, false);
+  if (!over.ok) assert.equal(over.body.reason, 'signed');
+});

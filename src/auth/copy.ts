@@ -26,7 +26,7 @@ export const COPY = {
   failed: "Couldn't sign you in. Please try again.",
   tryAgain: 'Try again',
   signedCap: (_limit: number) => `You've reached today's limit. It resets at ${resetLabel()} your time.`,
-  ipCap: (limit: number) => `This network has hit today's limit of ${limit}. More at midnight UTC.`,
+  ipCap: (_limit: number) => "This network has used today's free questions. Sign in to keep asking.",
   e1: 'Sign-in cancelled. Your question is still here.',
   e2: "Couldn't sign you in. Please try again.",
   e4: (_limit: number) => `You've reached today's limit. It resets at ${resetLabel()} your time.`,
