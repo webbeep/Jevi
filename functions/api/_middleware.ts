@@ -35,7 +35,11 @@ export const onRequest: PagesFunction<Env> = async ({ request, env, next }) => {
 
   const path = url.pathname.replace(/\/+$/, '');
   if (path === '/api/health' || forwarded.method === 'OPTIONS') return finish(await next(forwarded));
-  if (testBypass(forwarded, env)) return finish(await next(forwarded));
+  if (testBypass(forwarded, env)) {
+    // Forced QA faults (x-zo-test-force) leave no trace on the client: no device cookie, no session.
+    if (forwarded.headers.has('x-zo-test-force')) return next(forwarded);
+    return finish(await next(forwarded));
+  }
 
   const isStream = path === '/api/stream';
   const isTypeahead = path === '/api/suggest-typeahead';
