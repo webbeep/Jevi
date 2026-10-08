@@ -87,6 +87,7 @@ function CiteRun({ cites, noLinks }: { cites: Cite[]; noLinks: boolean }) {
 }
 
 function renderParts(parts: string[], results: SearchResult[], noLinks: boolean): ReactNode[] {
+  const isSep = (s: string) => /^\s*[,;]?\s*$/.test(s);
   const out: ReactNode[] = [];
   let i = 0;
   while (i < parts.length) {
@@ -106,9 +107,9 @@ function renderParts(parts: string[], results: SearchResult[], noLinks: boolean)
       const cites: Cite[] = [hit];
       const seen = new Set([hit.n]);
       let j = i + 1;
-      while (j < parts.length && !parts[j].trim()) {
+      while (j < parts.length && isSep(parts[j])) {
         let k = j;
-        while (k < parts.length && !parts[k].trim()) k++;
+        while (k < parts.length && isSep(parts[k])) k++;
         const next = readCite(parts[k], results);
         if (!next) break;
         if (!seen.has(next.n)) {
@@ -129,7 +130,7 @@ function renderParts(parts: string[], results: SearchResult[], noLinks: boolean)
 
 /**
  * Renders **bold** and [n] citations that link to the nth search result.
- * Neighbouring citations merge into one chip. Inside buttons pass `noLinks`:
+ * Neighbouring citations merge into one chip across whitespace or `, ` / `; `. Inside buttons pass `noLinks`:
  * links can't nest in interactive elements, so citations become plain badges.
  */
 export function RichText({ text, inline = false, noLinks = false }: { text: string; inline?: boolean; noLinks?: boolean }) {
