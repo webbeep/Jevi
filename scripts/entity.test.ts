@@ -683,3 +683,111 @@ describe('EN4 live LangSearch fixes (scripts/fixtures/en4/live2.json)', () => {
     }
   });
 });
+
+const wordsBeyond = (query: string, name: string) =>
+  query.trim().split(/\s+/).filter(Boolean).length - name.trim().split(/\s+/).filter(Boolean).length;
+
+describe('EN4 part 6: a pick must stay a person ask', () => {
+  test('personSubject cuts the name at a role or descriptor word', () => {
+    assert.equal(personSubject('John Smith Explorer'), 'John Smith');
+    assert.equal(personSubject('Ray Lee Athlete'), 'Ray Lee');
+    assert.equal(personSubject('Ray Lee Artist'), 'Ray Lee');
+    assert.equal(personSubject('David Kim Violinist'), 'David Kim');
+    assert.equal(personSubject('David Kim Restaurateur'), 'David Kim');
+    assert.equal(personSubject('Ray Lee Housebreaker'), 'Ray Lee');
+    // A three-token name with no org/role tail stays whole.
+    assert.equal(personSubject('Barack Hussein Obama'), 'Barack Hussein Obama');
+    assert.equal(personSubject('Who is Barack Hussein Obama'), 'Barack Hussein Obama');
+    assert.equal(personSubject('Ray Lee BlueFlame AI'), 'Ray Lee');
+    assert.equal(personSubject('Ray Lee Raycon Founder'), 'Ray Lee');
+  });
+
+  test('every recorded choice re-asks the named person within SPD-C1 (3 words)', () => {
+    const ray = live2('ls-ray-knowledge');
+    const panel = knowledgeRow(ray.knowledge, ray.results);
+    assert.ok(panel, 'fixture carries a knowledge panel');
+    const decisions: [string, ReturnType<typeof resolveEntity>][] = [
+      ...['ls-dk', 'serper-dk', 'ls-js', 'serper-ray'].map((k) => [k, run(k)] as [string, ReturnType<typeof resolveEntity>]),
+      ['ls-ray-knowledge', resolveEntity(ray.query, [panel!, ...ray.results], { pattern: 'profile' })],
+    ];
+    for (const [key, d] of decisions) {
+      if (d.kind !== 'choices') continue;
+      assert.ok(d.choices.length >= 1, `${key}: no choices`);
+      for (const c of d.choices) {
+        assert.equal(isPersonAsk(c.query), true, `${key}: ${c.query}`);
+        assert.equal(personSubject(c.query), c.name, `${key}: ${c.query}`);
+        assert.ok(wordsBeyond(c.query, c.name) <= 3, `${key}: ${c.query}`);
+      }
+    }
+    // "C2 Education Centers" + "CEO" keeps the org core the pick gate needs.
+    const dk = run('ls-dk');
+    assert.equal(dk.kind, 'choices');
+    if (dk.kind !== 'choices') return;
+    const c2 = dk.choices.find((c) => /C2/.test(c.query));
+    assert.ok(c2, dk.choices.map((c) => c.query).join(' | '));
+    assert.equal(c2!.query, 'David Kim C2 Education CEO', c2!.query);
+    assert.ok(distinguishingTerms(c2!.query).includes('c2'), c2!.query);
+  });
+
+  test('the C2 pick resolves to one person and never the "may refer to" page', () => {
+    const fx = live2('ls-dkpick');
+    const disambig = fx.results[3]!;
+    assert.ok(isDisambiguationPage(disambig), 'fixture row 3 is the "may refer to" page');
+    const d = resolveEntity('David Kim C2 Education CEO', fx.results, { pattern: 'profile' });
+    assert.equal(d.kind, 'single');
+    if (d.kind !== 'single') return;
+    assert.equal(d.entity.name, 'David Kim');
+    assert.ok(d.kept.includes(0) && d.kept.includes(1) && d.kept.includes(2), d.kept.join(','));
+    assert.ok(!d.kept.includes(3), 'the disambiguation page lists other people');
+    assert.ok(d.dropped.includes(3), d.dropped.join(','));
+  });
+});
+
+describe('EN4 part 7: a choice re-asks its org/location, never the bare name', () => {
+  test('the "Linked to Arsenal" choice re-asks "Ray Lee of Arsenal"', () => {
+    for (const key of ['ls-ray', 'serper-ray1']) {
+      const d = run(key);
+      assert.equal(d.kind, 'choices', key);
+      if (d.kind !== 'choices') continue;
+      const c = d.choices.find((x) => x.descriptor === 'Linked to Arsenal');
+      assert.ok(c, `${key}: ${d.choices.map((x) => x.descriptor).join(' | ')}`);
+      assert.equal(c!.query, 'Ray Lee of Arsenal', c!.query);
+      assert.equal(isPersonAsk(c!.query), true, c!.query);
+      assert.equal(personSubject(c!.query), 'Ray Lee', c!.query);
+      assert.ok(contextTerms(c!.query).includes('arsenal'), c!.query);
+      assert.ok(wordsBeyond(c!.query, c!.name) <= 3, c!.query);
+      // The connector is a stop word, never context: only the org word picks this person.
+      for (const stop of ['of', 'in', 'at']) assert.ok(!contextTerms(c!.query).includes(stop), c!.query);
+      // The pick now names the org, so it comes back as one person, not the same choices.
+      assert.equal(resolveEntity(c!.query, SERPS[key]!.rows, { pattern: 'profile' }).kind, 'single', c!.query);
+    }
+  });
+
+  test('the "Based in Northamptonshire" choice re-asks "John Smith in Northamptonshire"', () => {
+    const d = run('ls-js');
+    assert.equal(d.kind, 'choices');
+    if (d.kind !== 'choices') return;
+    const c = d.choices.find((x) => x.descriptor === 'Based in Northamptonshire');
+    assert.ok(c, d.choices.map((x) => x.descriptor).join(' | '));
+    assert.equal(c!.query, 'John Smith in Northamptonshire', c!.query);
+    assert.equal(isPersonAsk(c!.query), true, c!.query);
+    assert.equal(personSubject(c!.query), 'John Smith', c!.query);
+    assert.ok(contextTerms(c!.query).includes('northamptonshire'), c!.query);
+    assert.ok(wordsBeyond(c!.query, c!.name) <= 3, c!.query);
+    for (const stop of ['of', 'in', 'at']) assert.ok(!contextTerms(c!.query).includes(stop), c!.query);
+  });
+
+  test('no recorded choice re-asks the bare name', () => {
+    for (const key of ['ls-ray', 'ls-dk', 'ls-js', 'serper-ray', 'serper-ray1', 'serper-dk', 'serper-js']) {
+      const d = run(key);
+      assert.equal(d.kind, 'choices', key);
+      if (d.kind !== 'choices') continue;
+      assert.ok(d.choices.length >= 2, `${key}: ${d.choices.length} choices`);
+      for (const c of d.choices) {
+        assert.notEqual(c.query, c.name, `${key}: ${c.query}`);
+        assert.equal(personSubject(c.query), c.name, `${key}: ${c.query}`);
+        assert.ok(wordsBeyond(c.query, c.name) <= 3, `${key}: ${c.query}`);
+      }
+    }
+  });
+});

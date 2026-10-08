@@ -68,6 +68,17 @@ const looksLikeOrgToken = (w: string) =>
   /[a-z][A-Z]/.test(w) ||
   (/^[A-Z]{3,}$/.test(w) && !/^(JR|SR|II|III|IV)$/.test(w));
 
+/**
+ * Occupation/descriptor words that name no part of a person's name, as they come from a
+ * Wikipedia qualifier ("John Smith (explorer)", "David Kim (restaurateur)"). Most are also
+ * in ROLE1 below; a qualifier can carry either kind of word.
+ */
+const DESCRIPTOR_WORDS = new Set([
+  'explorer', 'housebreaker', 'artist', 'athlete', 'violinist', 'restaurateur', 'footballer', 'analyst',
+  'musician', 'rapper', 'painter', 'poet', 'scientist', 'politician', 'businessman', 'businesswoman',
+  'entrepreneur', 'journalist', 'professor', 'lawyer', 'physician', 'cricketer', 'boxer', 'wrestler',
+]);
+
 /** The person the query is about, or '' when there is none. */
 export function personSubject(query: string): string {
   const raw = query.trim();
@@ -91,7 +102,9 @@ export function personSubject(query: string): string {
     let cut = run.length;
     for (let i = 2; i < run.length; i++) {
       const w = run[i]!;
-      if (looksLikeOrgToken(w) || /^(founder|co-founder|coach|player|writer|singer|actor|ceo|cto|cfo|coo|director|engineer|dentist|pianist|mayor|president|author)$/i.test(w)) {
+      const lowW = w.toLowerCase();
+      // A role or descriptor word ends the name: "John Smith Explorer", "David Kim Violinist".
+      if (looksLikeOrgToken(w) || ROLE1.has(lowW) || DESCRIPTOR_WORDS.has(lowW) || /^co-founder$/i.test(w)) {
         cut = i;
         break;
       }
@@ -669,13 +682,39 @@ function describe(top: { role?: string; org?: string; location?: string; label?:
   return hasSiteWord(short) ? '' : short;
 }
 
-/** Searchable follow-up: "Ray Lee USATF coach" — name + org/role words, no "at/of". */
+/**
+ * Searchable follow-up: "Ray Lee USATF coach" — name + org/role words, no "at/of".
+ * A bare org/location that would join the name falls back to a lowercase connector,
+ * so both the name and the words that pick this person survive ("Ray Lee of Arsenal").
+ */
 function choiceQuery(name: string, top: { role?: string; org?: string; location?: string }): string {
-  const bits = [name];
-  if (top.org) bits.push(cleanPhrase(top.org, 24));
-  if (top.role) bits.push(top.role);
-  else if (top.location) bits.push(cleanPhrase(top.location, 16));
-  return title(bits.filter(Boolean).join(' ')).slice(0, 120);
+  const role = top.role ? top.role.split(/\s+/).filter(Boolean) : [];
+  const org = top.org ? cleanPhrase(top.org, 24).split(/\s+/).filter(Boolean) : [];
+  const loc = top.location ? cleanPhrase(top.location, 16).split(/\s+/).filter(Boolean) : [];
+  // SPD-C1 keeps a pick a person ask only with at most 3 words beyond the name, so the role
+  // (1-2 words) is kept whole and the org's leading words fill the rest; the trailing org
+  // words that do not fit are dropped. The location fills the same room when there is no role.
+  const tail = role.length ? [...org.slice(0, Math.max(0, 3 - role.length)), ...role] : loc.slice(0, 3);
+  const query = title([name, ...tail].join(' '));
+  // A pick that re-asks the bare name just brings the choices back, so it only stands when
+  // there is no org/location to ask about.
+  if (tail.length && personSubject(query) === name) return query.slice(0, 120);
+  // personSubject keeps a 3-token Cap phrase as a name, so a lone org/location word joins it
+  // ("Ray Lee Arsenal" → the person "Ray Lee Arsenal") or is dropped for it. A lowercase
+  // connector stops the capitalised run and still asks for the words that pick this person
+  // ("Ray Lee of Arsenal", "John Smith in Northamptonshire"); it costs one of the 3 words
+  // beyond the name, so the org/location keeps at most 2.
+  const budget = 2;
+  if (org.length) {
+    const withOrg = title(`${name} of ${org.slice(0, budget).join(' ')}`);
+    if (personSubject(withOrg) === name) return withOrg.slice(0, 120);
+  }
+  if (loc.length) {
+    const withLoc = title(`${name} in ${loc.slice(0, budget).join(' ')}`);
+    if (personSubject(withLoc) === name) return withLoc.slice(0, 120);
+  }
+  // Nothing asks for the org/location without breaking the name: never a name no source carries.
+  return title(name);
 }
 
 /** "John Smith (explorer)" → "Explorer" — the en.wikipedia head-title qualifier, title-cased. */
