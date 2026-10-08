@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
-import { billingFromSources, billingLabel, billingNearAmount, inferSeats, isPlanQuery, monthlyTotal, priceAsOf, priceForBasis, publishedLabel, settleCardPrices, stripPricesDeep, stripStrayPrices, type Price } from '../shared/pricing.ts';
+import { billingFromSources, billingLabel, billingNearAmount, inferSeats, isBareUnitHusk, isPlanQuery, monthlyTotal, priceAsOf, priceForBasis, publishedLabel, settleCardPrices, stripPricesDeep, stripStrayPrices, type Price } from '../shared/pricing.ts';
 
 const WS = 'https://workspace.google.com/pricing';
 const LINEAR = 'https://linear.app/pricing';
@@ -222,4 +222,50 @@ test('stray-price matching reads whole amounts', () => {
   assert.equal(stripStrayPrices('Pro is $1,299.99 today', [1299.99]), 'Pro is $1,299.99 today');
   assert.equal(stripStrayPrices('Pro is $1299.99 today'), 'Pro is today');
   assert.equal(stripStrayPrices('No prices here.'), 'No prices here.');
+});
+
+test('list-row meta husks become an em dash (QA q6/q8), while sourced metas and headlines stay', () => {
+  assert.equal(isBareUnitHusk('/mo'), true);
+  assert.equal(isBareUnitHusk('–/mo'), true);
+  assert.equal(isBareUnitHusk('-/yr'), true);
+  assert.equal(isBareUnitHusk('$/seat'), true);
+  assert.equal(isBareUnitHusk('/user/mo'), true);
+  assert.equal(isBareUnitHusk('5 seats cost /mo'), false);
+  assert.equal(isBareUnitHusk('$43/mo'), false);
+
+  const FB = 'https://smarttoolspick.com/freshbooks-pricing/';
+  const nodes = [
+    { type: 'hero', value: '$43', unit: '/mo', label: 'FreshBooks Plus' },
+    {
+      type: 'list',
+      style: 'bullet',
+      items: [
+        { text: 'FreshBooks Plus — Best overall', meta: '$43/mo' },
+        { text: 'Bonsai Essentials — Best all-in-one', meta: '$25/mo' },
+        { text: 'Xero — Best for multi-currency', meta: '$25–$90/mo' },
+        { text: 'QuickBooks Online Simple Start — Best accountant-ready', meta: '$38/mo' },
+        { text: 'Help Scout — Shared inbox', meta: '$25/mo' },
+      ],
+    },
+    {
+      type: 'keyvalue',
+      items: [{ label: 'Bonsai', value: '$25/mo' }, { label: 'FreshBooks', value: '$43/mo' }],
+    },
+    {
+      type: 'pricing',
+      seats: 1,
+      plans: [{
+        name: 'Plus',
+        prices: [{ amount: 43, currency: 'USD', unit: 'flat', period: 'month', billing: 'monthly', sourceUrl: FB, asOf: 'Aug 16, 2026' }],
+      }],
+    },
+  ];
+  const shown = settleCardPrices(nodes, 'best invoicing app for freelancers') as any[];
+  assert.equal(shown[0].value, '$43');
+  assert.equal(shown[0].unit, '/mo');
+  const metas = shown[1].items.map((i: any) => i.meta);
+  assert.deepEqual(metas, ['$43/mo', '—', '—', '—', '—']);
+  assert.equal(shown[2].items[0].value, '—');
+  assert.equal(shown[2].items[1].value, '$43/mo');
+  assert.deepEqual(shown[3], nodes[3]);
 });

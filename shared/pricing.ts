@@ -165,11 +165,19 @@ export function stripStrayPrices(text: string, keep: readonly number[] = []): st
 
 const STRIP_SKIP = new Set(['type', 'icon', 'href', 'url', 'src', 'query', 'prompt', 'imageQuery', 'sourceUrl', 'credit', 'image', 'imageSrc']);
 const VALUE_NODES = new Set(['hero', 'stat', 'tile']);
+/** Whole-field leftovers after a price was stripped: "/mo", "–/mo", "-/yr", "$/seat", "/user/mo". */
+const BARE_UNIT_HUSK = /^\s*[–—-]?\s*\$?\s*\/\s*(?:(?:user|seat|agent)\s*\/\s*)?(?:mo|month|yr|year|user|seat|agent)\b\s*$/i;
+
+/** True when a stripped field is only a bare unit (no digits left). */
+export function isBareUnitHusk(text: string): boolean {
+  return !/\d/.test(text) && BARE_UNIT_HUSK.test(text);
+}
 
 /**
  * Remove stray dollar amounts from every node except pricing.
  * A hero/stat/tile whose whole value was a stray price shows "—" with no unit,
- * so the card never shows a bare "/user/mo".
+ * so the card never shows a bare "/user/mo". List-row meta, keyvalue values and
+ * captions get the same treatment when stripping leaves only "/mo" or "–/mo".
  */
 export function stripPricesDeep<T>(value: T, keep: readonly number[] = []): T {
   if (typeof value === 'string') return stripStrayPrices(value, keep) as T;
@@ -185,6 +193,15 @@ export function stripPricesDeep<T>(value: T, keep: readonly number[] = []): T {
   if (type && VALUE_NODES.has(type) && typeof before === 'string' && out.value !== before && !/\d/.test(String(out.value))) {
     out.value = '—';
     delete out.unit;
+  }
+  // List rows / keyvalues / captions: "$25/mo" → "/mo", "$25–$90/mo" → "–/mo".
+  for (const k of ['meta', 'caption', 'value'] as const) {
+    if (k === 'value' && type && VALUE_NODES.has(type)) continue;
+    const prev = (value as Record<string, unknown>)[k];
+    const next = out[k];
+    if (typeof prev === 'string' && typeof next === 'string' && next !== prev && isBareUnitHusk(next)) {
+      out[k] = '—';
+    }
   }
   return out as T;
 }
