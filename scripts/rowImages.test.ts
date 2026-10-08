@@ -14,7 +14,7 @@ describe('T442 row and tile pictures', () => {
   });
 
   test('own source picture first, then one card search matched by name, then og:image of an unshared source', async () => {
-    const results = [res('https://a.com/1', 'https://a.com/peterson.jpg', 'Darryn Peterson shines for Jazz'), res('https://b.com/2'), res('https://c.com/3', undefined, 'Caleb Wilson Bulls debut'), res('https://d.com/rank')];
+    const results = [res('https://a.com/1', 'https://a.com/peterson.jpg', 'Darryn Peterson shines for Jazz'), res('https://b.com/2'), res('https://c.com/3', undefined, 'Caleb Wilson Bulls debut'), res('https://d.com/rank'), res('https://e.com/5', undefined, 'Yaxel Lendeborg leads Warriors rookies; 4 games tonight')];
     const list: CardNode = {
       type: 'list',
       style: 'media',
@@ -68,7 +68,7 @@ describe('T442 stat tiles', () => {
       { type: 'stat', label: 'Steph', value: '10 pts' },
       { type: 'stat', label: 'Points per game', value: '21' },
     ];
-    const out = await fillRowImages(nodes, { results: [], pool: [], cardImages: async () => [pic('Steph Curry Warriors preseason', 'https://img.com/steph.jpg')] });
+    const out = await fillRowImages(nodes, { results: [res('https://n.com/1', undefined, 'Steph Curry scores 10 points in preseason')], pool: [], cardImages: async () => [pic('Steph Curry Warriors preseason', 'https://img.com/steph.jpg')] });
     assert.equal((out.nodes[0] as Extract<CardNode, { type: 'stat' }>).image, 'https://img.com/steph.jpg');
     assert.equal((out.nodes[1] as Extract<CardNode, { type: 'stat' }>).image, undefined);
   });
@@ -94,6 +94,22 @@ describe('T443 image relevance gate', () => {
   test('people need every name token', () => {
     assert.equal(accepts({ kind: 'named', entity: 'Ray Lee' }, img('Ray Lee - BlueFlame AI | LinkedIn')), true);
     assert.equal(accepts({ kind: 'named', entity: 'Ray Lee' }, img('Lee Kuan Yew')), false);
-    assert.equal(accepts(targetFor('Steph', '10 pts'), img('Steph Curry hits three')), true);
+    assert.equal(accepts(targetFor('Steph', '10 pts', undefined, { corpus: 'Steph Curry hits three' }), img('Steph Curry hits three')), true);
+  });
+  test('one-word labels need proper-noun evidence; stat metrics never get a photo (t443 Points regression)', () => {
+    assert.equal(targetFor('Points', '20').kind, 'none');
+    assert.equal(targetFor('Steph', '10 pts').kind, 'none', 'no result text: no evidence');
+    assert.equal(targetFor('Highlights', '3', undefined, { corpus: 'Clifford highlights from the Kings win. Highlights: dunk' }).kind, 'none');
+    assert.equal(targetFor('Lendeborg', 'Warriors', undefined, { corpus: 'Yaxel Lendeborg shines. Lendeborg scored 12' }).kind, 'named');
+  });
+  test('optional t444 entity hint: aliases and official domains', () => {
+    const hintFor = (e: string) => (e === 'Ray Lee' ? { name: 'Raymond Lee', aliases: ['R. J. Lee'] } : e === 'BlueFlame AI' ? { domains: ['blueflameai.com'] } : undefined);
+    const ray = targetFor('Ray Lee', '', undefined, { hintFor });
+    assert.equal(accepts(ray, img('Raymond Lee portrait')), true);
+    assert.equal(accepts(ray, img('Ray Lee headshot')), true);
+    assert.equal(accepts(ray, img('Lee Kuan Yew')), false);
+    const org = targetFor('Company', 'BlueFlame AI', undefined, { hintFor });
+    assert.equal(accepts(org, img('', 'https://cdn.blueflameai.com/x', 'https://cdn.blueflameai.com/logo.png')), true);
+    assert.equal(accepts(targetFor('Company', 'BlueFlame AI'), img('', 'https://cdn.example.com/x', 'https://cdn.example.com/logo.png')), false);
   });
 });

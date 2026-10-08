@@ -1,6 +1,6 @@
 import type { CardNode } from '../shared/card';
 import { isComposite } from '../shared/imagematch';
-import { type PicTarget, accepts, hostNames, nameLike, pageNames, targetFor } from './imageGate';
+import { type EntityHint, type GateContext, type PicTarget, accepts, hostNames, namedTarget, pageNames, targetFor } from './imageGate';
 import type { ImageResult, SearchResult } from '../shared/types';
 
 /**
@@ -20,7 +20,12 @@ export interface RowImageDeps {
   lookup?: (entity: string) => Promise<ImageResult[]>;
   /** Most og:image fetches per card. */
   ogMax?: number;
+  /** t444 hook (Backend patch-entity): disambiguated name/aliases/domains for an entity. */
+  hintFor?: (entity: string) => EntityHint | undefined;
 }
+
+/** Result titles + snippets: proper-noun evidence for one-word labels. */
+export const corpusOf = (results: SearchResult[]) => results.map((r) => `${r.title ?? ''}. ${r.snippet ?? ''}`).join('\n');
 
 interface Slot {
   entity: string;
@@ -51,18 +56,18 @@ export function rowEntity(text: string): string {
 const blankTile = (n: Extract<CardNode, { type: 'tile' }>) => !n.imageSrc && n.imageRef === undefined && !n.imageQuery;
 const blankItem = (i: Extract<CardNode, { type: 'list' }>['items'][number]) => !i.imageSrc && i.imageRef === undefined && !i.imageQuery;
 
-function slotsOf(node: CardNode, out: Slot[]): void {
+function slotsOf(node: CardNode, out: Slot[], ctx?: GateContext): void {
   switch (node.type) {
     case 'stat': {
       // Stat tiles carry no source: only a gated picture that names them, never og:image.
       if (node.image) return;
-      const target = targetFor(node.label, node.value);
+      const target = targetFor(node.label, node.value, undefined, ctx);
       out.push({ entity: target.entity, target, ogOk: false });
       return;
     }
     case 'tile': {
       if (!blankTile(node)) return;
-      const target = targetFor(node.label, node.value);
+      const target = targetFor(node.label, node.value, undefined, ctx);
       out.push({ entity: target.entity, target, source: node.source, ogOk: true });
       return;
     }
@@ -71,7 +76,7 @@ function slotsOf(node: CardNode, out: Slot[]): void {
         for (const item of node.items) {
           if (!blankItem(item)) continue;
           const entity = rowEntity(item.text);
-          const target: PicTarget = nameLike(entity) ? { kind: 'named', entity } : { kind: 'none', entity: '' };
+          const target: PicTarget = namedTarget(entity, ctx);
           out.push({ entity, target, source: item.source, ogOk: true });
         }
       }
@@ -80,10 +85,10 @@ function slotsOf(node: CardNode, out: Slot[]): void {
     case 'grid':
     case 'section':
     case 'scroller':
-      node.children.forEach((c) => slotsOf(c, out));
+      node.children.forEach((c) => slotsOf(c, out, ctx));
       return;
     case 'tabs':
-      node.tabs.forEach((t) => t.children.forEach((c) => slotsOf(c, out)));
+      node.tabs.forEach((t) => t.children.forEach((c) => slotsOf(c, out, ctx)));
       return;
     default:
       return;
@@ -126,9 +131,9 @@ function apply(node: CardNode, slots: Slot[], at: { i: number }): CardNode {
 }
 
 /** True when the node has a tile or media row without any picture. */
-export function hasBlankPictures(node: CardNode): boolean {
+export function hasBlankPictures(node: CardNode, ctx?: GateContext): boolean {
   const out: Slot[] = [];
-  slotsOf(node, out);
+  slotsOf(node, out, ctx);
   return out.length > 0;
 }
 
@@ -140,9 +145,10 @@ function pick(target: PicTarget, images: ImageResult[], used: Set<string>): Imag
 
 /** Fills blank tiles and media rows across the card's nodes. Returns the patched nodes (same order) and the calls spent. */
 export async function fillRowImages(nodes: CardNode[], deps: RowImageDeps, used: Set<string> = new Set()): Promise<{ nodes: CardNode[]; changed: boolean[]; imageCalls: number; og: number }> {
+  const ctx: GateContext = { corpus: corpusOf(deps.results), hintFor: deps.hintFor };
   const perNode = nodes.map((n) => {
     const s: Slot[] = [];
-    slotsOf(n, s);
+    slotsOf(n, s, ctx);
     return s;
   });
   const all = perNode.flat();

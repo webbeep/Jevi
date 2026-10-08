@@ -2,8 +2,8 @@ import type { CardNode, ImageCredit } from '../shared/card';
 import { fileWords, fitsEntity, isComposite, namesSibling, rankForEntity, splitEntities } from '../shared/imagematch';
 import type { ImageResult } from '../shared/types';
 import { findImages } from './images';
-import { type PicTarget, accepts, mentions, mentionsAny, nameLike, targetFor } from './imageGate';
-import { fillRowImages, hasBlankPictures, rowEntity, type RowImageDeps } from './rowImages';
+import { type GateContext, type PicTarget, accepts, mentions, mentionsAny, nameLike, namedTarget, targetFor, withHint } from './imageGate';
+import { corpusOf, fillRowImages, hasBlankPictures, rowEntity, type RowImageDeps } from './rowImages';
 import type { Env } from './util';
 
 type Emit = (node: CardNode, index: number) => void;
@@ -49,6 +49,8 @@ export class PictureResolver {
   private readonly latest = new Map<number, { node: CardNode; emit: Emit }>();
   private readonly rows?: RowImagePlan & { results: RowImageDeps['results'] };
   private readonly subject: string;
+  /** T443 gate context: result text for proper-noun checks, plus the optional t444 entity hint lookup. */
+  private readonly ctx: GateContext;
 
   constructor(env: Env, pool: ImageResult[], onCredit: (credit: ImageCredit) => void, query?: string, find: FindImages = findImages, rows?: RowImagePlan & { results: RowImageDeps['results'] }) {
     this.env = env;
@@ -57,6 +59,7 @@ export class PictureResolver {
     this.find = find;
     this.rows = rows;
     this.subject = query ?? '';
+    this.ctx = { corpus: corpusOf(rows?.results ?? []), hintFor: rows?.hintFor };
     for (const name of splitEntities(query ?? '')) this.note(name);
   }
 
@@ -135,31 +138,35 @@ export class PictureResolver {
   }
 
   /** T443 target for a node's picture. */
-  private static tileTarget(n: { label: string; value?: string; imageQuery?: string }): PicTarget {
-    return targetFor(n.label, n.value, n.imageQuery);
+  private tileTarget(n: { label: string; value?: string; imageQuery?: string }): PicTarget {
+    return targetFor(n.label, n.value, n.imageQuery, this.ctx);
   }
 
-  private static itemTarget(i: { text: string; imageQuery?: string }): PicTarget {
+  private itemTarget(i: { text: string; imageQuery?: string }): PicTarget {
     const entity = i.imageQuery && nameLike(i.imageQuery) ? i.imageQuery : rowEntity(i.text);
-    return nameLike(entity) ? { kind: 'named', entity } : { kind: 'none', entity: '' };
+    return namedTarget(entity, this.ctx);
+  }
+
+  private profileTarget(name: string): PicTarget {
+    return withHint({ kind: 'named', entity: name }, this.ctx);
   }
 
   private vet(node: CardNode): CardNode {
     switch (node.type) {
       case 'tile':
-        return { ...node, ...this.place(node.label, node.imageRef, node.imageQuery, PictureResolver.tileTarget(node)) };
+        return { ...node, ...this.place(node.label, node.imageRef, node.imageQuery, this.tileTarget(node)) };
       case 'profile':
-        return { ...node, ...this.place(node.name, node.imageRef, node.imageQuery, { kind: 'named', entity: node.name }) };
+        return { ...node, ...this.place(node.name, node.imageRef, node.imageQuery, this.profileTarget(node.name)) };
       case 'stat': {
         // A designer-supplied stat picture must pass the gate on its own URL; attribute stats never keep one.
         if (!node.image) return node;
-        const t = targetFor(node.label, node.value);
+        const t = targetFor(node.label, node.value, undefined, this.ctx);
         return accepts(t, { title: '', url: node.image, thumb: node.image }) ? node : { ...node, image: undefined };
       }
       case 'list':
         return {
           ...node,
-          items: node.items.map((item) => ({ ...item, ...this.place(itemEntity(item.text), item.imageRef, item.imageQuery, PictureResolver.itemTarget(item)) })),
+          items: node.items.map((item) => ({ ...item, ...this.place(itemEntity(item.text), item.imageRef, item.imageQuery, this.itemTarget(item)) })),
         };
       case 'gallery': {
         // T443: card-level pictures must mention the card subject.
@@ -231,13 +238,13 @@ export class PictureResolver {
       case 'tile':
       case 'profile': {
         if (!node.imageQuery || node.imageRef !== undefined) return node;
-        const target: PicTarget = node.type === 'tile' ? PictureResolver.tileTarget(node) : { kind: 'named', entity: node.name };
+        const target: PicTarget = node.type === 'tile' ? this.tileTarget(node) : this.profileTarget(node.name);
         const pic = await this.one(node.imageQuery, false, target);
         return { ...node, imageQuery: undefined, imageSrc: pic?.src };
       }
       case 'list': {
         const items = await Promise.all(
-          node.items.map(async (i) => (i.imageQuery && i.imageRef === undefined ? { ...i, imageQuery: undefined, imageSrc: (await this.one(i.imageQuery, false, PictureResolver.itemTarget(i)))?.src } : i)),
+          node.items.map(async (i) => (i.imageQuery && i.imageRef === undefined ? { ...i, imageQuery: undefined, imageSrc: (await this.one(i.imageQuery, false, this.itemTarget(i)))?.src } : i)),
         );
         return { ...node, items };
       }
@@ -272,7 +279,7 @@ export class PictureResolver {
     };
     track(vetted);
     // Start the card's one picture search early so it is ready when the card completes.
-    if (this.rows?.cardImages && hasBlankPictures(vetted)) void this.rows.cardImages();
+    if (this.rows?.cardImages && hasBlankPictures(vetted, this.ctx)) void this.rows.cardImages();
     if (!PictureResolver.needs(vetted)) return;
     this.pending.push(
       this.resolve(vetted)
