@@ -11,6 +11,7 @@ import type { AskScope } from './budget';
 import { newLedger } from './budget';
 import { cacheDb, packSearch, readSearchCache, searchCacheKey, writeSearchCache } from './cache';
 import { cascadeWeb } from './cascade';
+import { searchDegraded } from './degraded';
 import { diversify } from './diversify';
 import { commons, openverse, permitted } from './images';
 import { maybeBluesky, socialSources } from './social';
@@ -232,7 +233,8 @@ export async function searchWithLate(q: Query, env: Env, scope?: AskScope): Prom
     ask.ledger.cache = 'bypass';
   } else {
     const cached = await readSearchCache(db, key);
-    if (cached.kind === 'hit') {
+    // T424: a degraded cached search (0 sources / Wikipedia-only / provider errors) is a miss.
+    if (cached.kind === 'hit' && !searchDegraded(cached.response)) {
       ask.ledger.cache = 'hit';
       return { response: { ...cached.response, query: q.q, freshness: q.freshness }, late: Promise.resolve(emptyLate()) };
     }
@@ -295,7 +297,10 @@ export async function searchWithLate(q: Query, env: Env, scope?: AskScope): Prom
     engines: social.status ? [...web.statuses, social.status] : web.statuses,
   };
 
-  if (!ask.bypass && ask.ledger.cache === 'miss' && db && response.results.length) {
+  const degraded = searchDegraded(response);
+  if (degraded) Object.assign(response, { degraded: true, degradedReason: degraded });
+  // T424: never cache a degraded search.
+  if (!ask.bypass && ask.ledger.cache === 'miss' && db && response.results.length && !degraded) {
     const payload = packSearch(response);
     const pending = writeSearchCache(db, key, payload).catch(() => undefined);
     if (ask.waitUntil) ask.waitUntil(pending);

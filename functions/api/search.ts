@@ -16,7 +16,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env, waitUntil
   const bypass = cacheBypass(request, env);
   const evalAsk = validTestToken(request.headers.get('x-zo-test-token'), env.ZO_TEST_TOKEN);
   const cache = caches.default;
-  const cacheKey = new Request(`${url.origin}/api/search?q=${encodeURIComponent(q.toLowerCase())}&freshness=${freshness}`);
+  const cacheKey = new Request(`${url.origin}/api/search?q=${encodeURIComponent(q.toLowerCase())}&freshness=${freshness}&v=2`);
   if (!bypass) {
     const cached = await cache.match(cacheKey);
     if (cached) return cached;
@@ -25,7 +25,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env, waitUntil
   try {
     const data = await search({ q, freshness, count: 20 }, env, { ledger: newLedger(), bypass, eval: evalAsk, waitUntil: (p) => waitUntil(p) });
     const res = json(data, 200, { 'cache-control': bypass ? 'no-store' : 'public, max-age=600' });
-    if (!bypass && data.results.length) waitUntil(cache.put(cacheKey, res.clone()));
+    if (!bypass && data.results.length && !(data as { degraded?: boolean }).degraded) waitUntil(cache.put(cacheKey, res.clone()));
     return res;
   } catch (err) {
     return errorJson(err);

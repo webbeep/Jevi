@@ -75,12 +75,12 @@ test('normalizeAnswerQuery collapses case, space, quotes and trailing punctuatio
 
 test('answerCacheUrl includes freshness and a context hash only when context is set', () => {
   const plain = answerCacheUrl({ query: '  Kindle  vs Kobo? ', freshness: 'week' });
-  assert.equal(plain, 'https://answer-cache.zo.internal/v1?q=kindle%20vs%20kobo&f=week');
+  assert.equal(plain, 'https://answer-cache.zo.internal/v1-e2?q=kindle%20vs%20kobo&f=week');
   assert.equal(plain.includes('&c='), false);
   const empty = answerCacheUrl({ query: 'Kindle vs Kobo', freshness: 'any', context: '' });
   assert.equal(empty.includes('&c='), false);
   const withContext = answerCacheUrl({ query: 'Kindle vs Kobo', freshness: 'day', context: 'topic' });
-  assert.equal(withContext, `https://answer-cache.zo.internal/v1?q=kindle%20vs%20kobo&f=day&c=${fnv1a('topic')}`);
+  assert.equal(withContext, `https://answer-cache.zo.internal/v1-e2?q=kindle%20vs%20kobo&f=day&c=${fnv1a('topic')}`);
   assert.equal(fnv1a('topic'), fnv1a('topic'));
   assert.notEqual(fnv1a('topic'), fnv1a('other'));
   assert.match(fnv1a('topic'), /^[0-9a-f]{8}$/);
