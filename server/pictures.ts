@@ -34,15 +34,17 @@ export class PictureResolver {
   private readonly used = new Set<string>();
   /** Query entities plus every item named on the card so far. */
   private readonly seen = new Set<string>();
+  private readonly env: Env;
+  /** Pictures that came with the search results (already allowed by the image policy). */
+  private readonly pool: ImageResult[];
+  private readonly onCredit: (credit: ImageCredit) => void;
+  private readonly find: FindImages;
 
-  constructor(
-    private readonly env: Env,
-    /** Pictures that came with the search results (already allowed by the image policy). */
-    private readonly pool: ImageResult[],
-    private readonly onCredit: (credit: ImageCredit) => void,
-    query?: string,
-    private readonly find: FindImages = findImages,
-  ) {
+  constructor(env: Env, pool: ImageResult[], onCredit: (credit: ImageCredit) => void, query?: string, find: FindImages = findImages) {
+    this.env = env;
+    this.pool = pool;
+    this.onCredit = onCredit;
+    this.find = find;
     for (const name of splitEntities(query ?? '')) this.note(name);
   }
 
