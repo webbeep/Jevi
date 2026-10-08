@@ -11,7 +11,7 @@ import {
 import { COPY } from './copy';
 import { track } from './events';
 import { GateSheet } from './GateSheet';
-import { onGate, registerSavesOpener, registerSheetOpener, requestSaves } from './gatebus';
+import { onGate, registerProfileOpener, registerSavesOpener, registerSheetOpener, requestProfile, requestSaves } from './gatebus';
 import { GoogleMark } from './GoogleMark';
 import { setAuthNotice } from './notice';
 import type { OpenedSave } from './SavedPanel';
@@ -21,6 +21,7 @@ import { getAuth, markSignedOut, useAuth } from './store';
 import { resetSyncLocal, setSyncEnabled, useSyncEnabled } from './sync';
 
 const SavedPanel = lazy(() => import('./SavedPanel'));
+const ProfilePanel = lazy(() => import('./ProfilePanel'));
 
 export function AuthHeader() {
   const auth = useAuth();
@@ -68,6 +69,7 @@ export function AuthHeader() {
           <span className="block break-all text-xs text-muted-foreground">{user.email}</span>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
+        <DropdownMenuItem className="min-h-11" onSelect={() => requestProfile()}>{COPY.profile}</DropdownMenuItem>
         <DropdownMenuItem className="min-h-11" onSelect={() => requestSaves()}>{COPY.savedAnswers}</DropdownMenuItem>
         <DropdownMenuItem
           className="min-h-11 whitespace-normal"
@@ -104,6 +106,7 @@ export function AuthRoot({
   const auth = useAuth();
   const [sheet, setSheet] = useState({ open: false, waiting: false });
   const [savesOpen, setSavesOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
 
   useEffect(() => {
     if (auth.ready && !auth.enabled && sheet.open) setSheet((current) => ({ ...current, open: false }));
@@ -119,6 +122,12 @@ export function AuthRoot({
   useEffect(() => {
     return registerSavesOpener(() => {
       setSavesOpen(true);
+    });
+  }, []);
+
+  useEffect(() => {
+    return registerProfileOpener(() => {
+      setProfileOpen(true);
     });
   }, []);
 
@@ -140,6 +149,22 @@ export function AuthRoot({
           setSheet((current) => ({ ...current, open: next }));
         }}
       />
+      {profileOpen && auth.enabled && auth.signedIn && (
+        <Suspense fallback={null}>
+          <ProfilePanel
+            open={profileOpen}
+            onOpenChange={setProfileOpen}
+            onOpen={(saved) => {
+              setProfileOpen(false);
+              openRef.current(saved);
+            }}
+            onDraft={(q) => {
+              setProfileOpen(false);
+              draftRef.current(q);
+            }}
+          />
+        </Suspense>
+      )}
       {savesOpen && auth.enabled && auth.signedIn && (
         <Suspense fallback={null}>
           <SavedPanel

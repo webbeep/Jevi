@@ -2,6 +2,7 @@ import { type FormEvent, type RefObject, memo, useCallback, useEffect, useMemo, 
 import { skipInitialQuery } from './auth/boot';
 import { registerSnapshot } from './auth/bridge';
 import { AuthHeader, AuthRoot } from './auth/chrome';
+import { getAuth } from './auth/store';
 import { SaveButton } from './auth/SaveButton';
 import { UsageLine } from './auth/UsageLine';
 import { bootAuthOnce, claimBoot } from './auth/resume';
@@ -206,6 +207,32 @@ export default function App() {
     clearPending(localStorage);
     history.pushState(null, '', '/');
   };
+
+  // T446: report each finished card once so the account's ask history can reopen it.
+  const streamed = useRef(new Set<number>());
+  const reported = useRef(new Set<string>());
+  useEffect(() => {
+    const auth = getAuth();
+    if (!auth.enabled || !auth.signedIn) return;
+    for (const t of turns) {
+      if (t.filling) {
+        streamed.current.add(t.id);
+        continue;
+      }
+      const card = t.result?.card;
+      if (!card || !streamed.current.has(t.id) || (t.result as { degraded?: boolean } | undefined)?.degraded) continue;
+      const key = `${t.id}:${t.version}:${t.question}`;
+      if (reported.current.has(key)) continue;
+      reported.current.add(key);
+      streamed.current.delete(t.id);
+      void fetch('/api/history/card', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ query: t.question, card }),
+      }).catch(() => undefined);
+    }
+  }, [turns]);
 
   const turnsRef = useRef(turns);
   turnsRef.current = turns;

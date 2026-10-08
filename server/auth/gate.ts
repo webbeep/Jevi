@@ -23,7 +23,8 @@ export type GateDeny = {
   reason: GateReason;
 };
 
-export type GateDecision = { ok: true; headers?: Record<string, string> } | { ok: false; body: GateDeny };
+/** `userId` is set for a signed-in ask (T446 history). */
+export type GateDecision = { ok: true; headers?: Record<string, string>; userId?: string } | { ok: false; body: GateDeny };
 
 const DAY = (now: Date) => now.toISOString().slice(0, 10);
 
@@ -281,12 +282,12 @@ export async function applyGate(
     const used = userKey ? userCount : deviceCount;
     const headers = facingKey ? usageHeaders(used, facingLimit) : undefined;
 
-    if (!authEnabled(env)) return { ok: true, headers };
+    if (!authEnabled(env)) return { ok: true, headers, ...(userKey ? { userId: user!.id } : {}) };
 
     if (!userKey && deviceKey && deviceCount > limits.anon) return deny(deviceCount, limits.anon, false, 'device');
     if (userKey && userCount > limits.signed) return deny(userCount, limits.signed, true, 'signed');
     if (!userKey && ipKey && ipCount > limits.ip) return deny(ipCount, limits.ip, false, 'ip');
-    return { ok: true, headers };
+    return { ok: true, headers, ...(userKey ? { userId: user!.id } : {}) };
   } catch (err) {
     console.error('usage gate skipped', err instanceof Error ? err.name : 'error');
     return { ok: true };

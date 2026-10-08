@@ -45,6 +45,19 @@ export function requestSaves() {
   openSaves?.();
 }
 
+let openProfile: (() => void) | null = null;
+
+export function registerProfileOpener(fn: () => void) {
+  openProfile = fn;
+  return () => {
+    if (openProfile === fn) openProfile = null;
+  };
+}
+
+export function requestProfile() {
+  openProfile?.();
+}
+
 /** 401 from the daily gate. Does not retry. `signed` and `ip` stay off the sheet. */
 export function reportNeedSignin(err: NeedSigninError, question: string, pending: PendingQ | null) {
   const route = routeGate(err.reason);

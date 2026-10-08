@@ -49,4 +49,10 @@ export const COPY = {
   openSaveError: "Couldn't open that answer.",
   signOut: 'Sign out',
   account: 'Account',
+  profile: 'Profile',
+  today: 'Today',
+  resets: (time: string) => `Resets ${time}`,
+  historyTitle: 'History',
+  emptyHistory: 'No questions yet.',
+  historyError: "Couldn't load history.",
 } as const;

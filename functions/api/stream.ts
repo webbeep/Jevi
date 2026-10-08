@@ -1,4 +1,5 @@
 import { applyGate } from '../../server/auth/gate';
+import { recordAsk } from '../../server/auth/history';
 import type { Freshness, SearchResponse } from '../../shared/types';
 import { bindAiWaitUntil } from '../../server/aiBudget';
 import { serveStream } from '../../server/answerCache';
@@ -75,6 +76,11 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env, waitUnti
   const body = clean(raw);
   if (!body) return stamp(errorJson('Invalid request', 400), gate.headers);
   const req = body;
+  // T446: every signed-in search/follow-up goes into the account's ask history.
+  if (gate.userId && (req.kind === 'search' || req.kind === 'followup')) {
+    const q = req.kind === 'search' ? req.query : req.question;
+    if (typeof q === 'string' && q.trim()) waitUntil(recordAsk(env, gate.userId, q, req.kind));
+  }
   bindAiWaitUntil(env, waitUntil);
   return stamp(await serveStream({ request, env, req, run: (send) => runStream(req, env, send, { request, waitUntil: (p) => waitUntil(p) }), waitUntil }), gate.headers);
 };
