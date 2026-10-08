@@ -298,6 +298,15 @@ export function useSession() {
     commit(() => []);
   }, [commit]);
 
+  /** Replays a finished conversation (same-tab reload) without starting a search. */
+  const restore = useCallback((incoming: Turn[]) => {
+    epoch.current++;
+    controllers.current.forEach((c) => c.abort());
+    controllers.current.clear();
+    for (const turn of incoming) if (turn.id > nextId) nextId = turn.id;
+    commit(() => incoming.map((t) => ({ ...t, filling: false, live: undefined, thinking: false, status: undefined })));
+  }, [commit]);
+
   const search = useCallback((query: string, opts: { reset: boolean }) => {
     const q = query.trim();
     if (!q) return;
@@ -399,8 +408,8 @@ export function useSession() {
 
   // Stable across renders, so turns that didn't change can skip re-rendering.
   const actions = useMemo(
-    () => ({ searchOf, clear, search, followup, digest, retry, pin, setPattern, setSimple, redesign }),
-    [searchOf, clear, search, followup, digest, retry, pin, setPattern, setSimple, redesign],
+    () => ({ searchOf, clear, restore, search, followup, digest, retry, pin, setPattern, setSimple, redesign }),
+    [searchOf, clear, restore, search, followup, digest, retry, pin, setPattern, setSimple, redesign],
   );
   return { turns, actions };
 }

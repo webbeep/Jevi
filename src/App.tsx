@@ -11,6 +11,7 @@ import { type LibraryEntry, buildLibrary } from './library';
 import { FaviconStack, Reader, SourcesRail, SourcesSheet } from './Sources';
 import { type SessionActions, type Turn, liveBody, scrollToTurn, useSession } from './useSession';
 import { useSuggestions } from './useSuggestions';
+import { loadSnapshot, normalizeAnswerQuery, saveSnapshot } from '../shared/answerKey';
 import { placeholderExamples } from '../shared/starters';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -36,6 +37,22 @@ interface Quote {
 
 const RECENTS_KEY = 'zo:recent';
 const TAGLINE = 'Ask anything. Get answers you can compare, tweak and keep.';
+
+function readAnswerCache(query: string): Turn[] | undefined {
+  try {
+    return loadSnapshot<Turn[]>(sessionStorage, query);
+  } catch {
+    return undefined;
+  }
+}
+
+function writeAnswerCache(query: string, turns: Turn[]) {
+  try {
+    saveSnapshot(sessionStorage, query, turns);
+  } catch {
+    /* private mode */
+  }
+}
 
 function readRecents(): string[] {
   try {
@@ -162,8 +179,13 @@ export default function App() {
   };
 
   useEffect(() => {
+    const openQuery = (q: string) => {
+      const cached = readAnswerCache(q);
+      if (cached) session.restore(cached);
+      else session.search(q, { reset: true });
+    };
     const q = initial.get('q');
-    if (q) session.search(q, { reset: true });
+    if (q) openQuery(q);
     const onPop = () => {
       if (overlay.current) return closeOverlays();
       const next = new URLSearchParams(location.search).get('q') ?? '';
@@ -171,13 +193,24 @@ export default function App() {
       if (next === shown.current) return;
       shown.current = next;
       resetUi();
-      if (next) session.search(next, { reset: true });
+      if (next) openQuery(next);
       else session.clear();
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (busy) return;
+    const first = turns[0];
+    if (!first || first.kind !== 'search' || !first.result) return;
+    if (turns.some((t) => t.error)) return;
+    const query = shown.current;
+    if (!query) return;
+    if (normalizeAnswerQuery(first.question) !== normalizeAnswerQuery(query)) return;
+    writeAnswerCache(query, turns);
+  }, [turns, busy]);
 
   const onSearchSubmit = (e: FormEvent) => {
     e.preventDefault();

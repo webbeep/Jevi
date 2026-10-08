@@ -1,7 +1,7 @@
 export type Send = (event: string, data: unknown) => void;
 
 /** Runs `work` while streaming its events to the client as Server-Sent Events. */
-export function sseResponse(work: (send: Send) => Promise<void>): Response {
+export function sseResponse(work: (send: Send) => Promise<void>, opts?: { headers?: Record<string, string>; onFrame?: (event: string, frame: string) => void }): Response {
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
   const writer = writable.getWriter();
   const encoder = new TextEncoder();
@@ -10,7 +10,9 @@ export function sseResponse(work: (send: Send) => Promise<void>): Response {
   const send: Send = (event, data) => {
     if (!open) return;
     if (event === 'done' || event === 'error') terminal = true;
-    writer.write(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)).catch(() => {
+    const frame = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+    opts?.onFrame?.(event, frame);
+    writer.write(encoder.encode(frame)).catch(() => {
       open = false;
     });
   };
@@ -26,6 +28,6 @@ export function sseResponse(work: (send: Send) => Promise<void>): Response {
     }
   })();
   return new Response(readable, {
-    headers: { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache, no-transform', 'x-accel-buffering': 'no' },
+    headers: { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache, no-transform', 'x-accel-buffering': 'no', ...opts?.headers },
   });
 }
