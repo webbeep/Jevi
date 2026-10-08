@@ -9,6 +9,8 @@ import type { SearchResult } from '../../shared/types';
 import { useCard } from './context';
 
 const CITE = "mx-0.5 inline-flex h-4 min-w-4 -translate-y-px items-center justify-center rounded-sm bg-muted px-1 align-middle text-[10px] font-medium text-muted-foreground no-underline relative after:absolute after:-inset-[14px] after:content-['']";
+// In list rows (pitch ≈ 30.5px, ≈ 33px from sm) the 44px hit area would reach into the next row; stop at half the gap: 16px chip + 2×7 = 30px, + 2×8 = 32px from sm.
+const LIST_ROW = '[li_&]:after:-inset-y-[7px] sm:[li_&]:after:-inset-y-[8px]';
 const HOVER = 'transition-colors hover:bg-foreground hover:text-background';
 const domainLabel = (d: string) => d.replace(/^(www|en|m)\./, '');
 
@@ -38,7 +40,7 @@ function CiteRun({ cites, noLinks }: { cites: Cite[]; noLinks: boolean }) {
   if (cites.length === 1) {
     if (noLinks) return <span title={r.title} className={CITE}>{n}</span>;
     return (
-      <a href={r.url} target="_blank" rel="noreferrer" title={r.title} className={`${CITE} ${HOVER}`}>
+      <a href={r.url} target="_blank" rel="noreferrer" title={r.title} className={`${CITE} ${LIST_ROW} ${HOVER}`}>
         {n}
       </a>
     );
@@ -52,7 +54,7 @@ function CiteRun({ cites, noLinks }: { cites: Cite[]; noLinks: boolean }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button type="button" aria-label={aria} className={`${CITE} cursor-pointer ${HOVER} data-[state=open]:bg-foreground data-[state=open]:text-background`}>
+        <button type="button" aria-label={aria} className={`${CITE} ${LIST_ROW} cursor-pointer ${HOVER} data-[state=open]:bg-foreground data-[state=open]:text-background`}>
           {label}
         </button>
       </DropdownMenuTrigger>
