@@ -1,4 +1,4 @@
-import { Fragment, useRef, type ReactNode } from 'react';
+import { Fragment, type ReactNode } from 'react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -34,8 +34,6 @@ function sourcesLabel(nums: number[]) {
 }
 
 function CiteRun({ cites, noLinks }: { cites: Cite[]; noLinks: boolean }) {
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const interactedOutside = useRef(false);
   const { n, result: r } = cites[0];
   if (cites.length === 1) {
     if (noLinks) return <span title={r.title} className={CITE}>{n}</span>;
@@ -54,7 +52,7 @@ function CiteRun({ cites, noLinks }: { cites: Cite[]; noLinks: boolean }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button ref={triggerRef} type="button" aria-label={aria} className={`${CITE} cursor-pointer ${HOVER} data-[state=open]:bg-foreground data-[state=open]:text-background`}>
+        <button type="button" aria-label={aria} className={`${CITE} cursor-pointer ${HOVER} data-[state=open]:bg-foreground data-[state=open]:text-background`}>
           {label}
         </button>
       </DropdownMenuTrigger>
@@ -62,13 +60,6 @@ function CiteRun({ cites, noLinks }: { cites: Cite[]; noLinks: boolean }) {
         align="start"
         collisionPadding={8}
         className="w-72 max-w-[calc(100vw-1rem)]"
-        onInteractOutside={() => { interactedOutside.current = true; }}
-        onCloseAutoFocus={(e) => {
-          // Radix focuses the trigger without preventScroll, which yanks the page back to the chip after a wheel-scroll close.
-          e.preventDefault();
-          if (!interactedOutside.current) triggerRef.current?.focus({ preventScroll: true });
-          interactedOutside.current = false;
-        }}
       >
         {cites.map((c) => (
           <DropdownMenuItem key={c.n} asChild className="min-h-11">
