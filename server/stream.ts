@@ -253,8 +253,8 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     scope.ledger.entity = { kind: 'choices', choices: decision.choices.length };
     console.log(JSON.stringify({ zo: 'entity', kind: 'choices', choices: decision.choices.length }));
     send('search', results);
-    send('entity-choices', { choices: decision.choices });
-    send('done', { engine: 'extractive', removed: 0, pagesRead: 0, ms: Date.now() - started });
+    // Choices ride on the done event (FE readChoices() in shared/choices.ts); never cached.
+    send('done', { engine: 'extractive', removed: 0, pagesRead: 0, ms: Date.now() - started, choices: decision.choices });
     return;
   }
   let designContext = context;
