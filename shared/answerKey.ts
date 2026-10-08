@@ -29,8 +29,8 @@ export function fnv1a(str: string): string {
 
 export function answerCacheUrl(input: { query: string; freshness: string; context?: string }): string {
   const q = encodeURIComponent(normalizeAnswerQuery(input.query));
-  // '-e8': purge cards whose stored plan carried the router name, and cards from before the verdict gate (skips '-e7', which holds reverted vendor-price cards). '-e6': t444 entity filter fix. '-e5': t444 purge of a profile cached with a namesake's photo. '-e4': T443 purge of cards cached with a metric stat photo ("Points"). '-e3': T442 purge of cards cached before row pictures (and '-e2': T424 edge purge). Every answer cached before this ship (incl. Wikipedia-only cards) is unreachable.
-  let url = `https://answer-cache.zo.internal/${ANSWER_CACHE_VERSION}-e8?q=${q}&f=${input.freshness}`;
+  // '-e9': batch C entity2/verdict2 (cached person and yes/no cards from e8 would skip the new choices and labels). '-e8': purge cards whose stored plan carried the router name, and cards from before the verdict gate (skips '-e7', which holds reverted vendor-price cards). '-e6': t444 entity filter fix. '-e5': t444 purge of a profile cached with a namesake's photo. '-e4': T443 purge of cards cached with a metric stat photo ("Points"). '-e3': T442 purge of cards cached before row pictures (and '-e2': T424 edge purge). Every answer cached before this ship (incl. Wikipedia-only cards) is unreachable.
+  let url = `https://answer-cache.zo.internal/${ANSWER_CACHE_VERSION}-e9?q=${q}&f=${input.freshness}`;
   if (input.context) url += `&c=${fnv1a(input.context)}`;
   return url;
 }
