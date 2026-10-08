@@ -59,8 +59,8 @@ interface DesignArgs {
   intent?: string;
 }
 
-/** How many pages to read and how long to wait for them before designing. At most four pages per ask. */
-const pageBudget = (readPages: boolean) => (readPages ? { count: 4, need: 3, budgetMs: 2200 } : { count: 3, need: 2, budgetMs: 1000 });
+/** How many pages to read and how long to wait for them before designing. At most five pages per ask. */
+const pageBudget = (readPages: boolean) => (readPages ? { count: 5, need: 3, budgetMs: 2200 } : { count: 3, need: 2, budgetMs: 1000 });
 
 async function design(send: Send, env: Env, req: DesignArgs, started: number, scope: AskScope, late?: Promise<LateExtras>) {
   // Cards already on screen point into this search's image list by index, so only a new search may reorder it.
