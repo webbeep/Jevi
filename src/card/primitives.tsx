@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { Check, ChevronLeft, ChevronRight, Copy, Minus, Play, Star, ThumbsDown, ThumbsUp, TrendingDown, TrendingUp } from 'lucide-react';
 import { askQuestion, type AskRef, type Box } from '../../shared/askAbout';
 import type { CardNode, Tone } from '../../shared/card';
+import { initials } from '../../shared/initials';
 import type { SearchResult } from '../../shared/types';
 import { cn } from '@/lib/utils';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -757,7 +758,7 @@ export function Profile({ node }: { node: Of<'profile'> }) {
       <span className="relative shrink-0">
         <Avatar className="size-16 rounded-2xl border sm:size-20">
           {img && <AvatarImage src={img} alt={node.name} className="object-cover" />}
-          <AvatarFallback className="rounded-2xl text-xl">{node.name.slice(0, 2).toUpperCase()}</AvatarFallback>
+          <AvatarFallback className="rounded-2xl text-xl">{initials(node.name)}</AvatarFallback>
         </Avatar>
         {img && <PhotoCredit src={img} className="bottom-1 left-1/2 -translate-x-1/2" />}
       </span>
