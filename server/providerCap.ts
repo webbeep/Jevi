@@ -18,7 +18,8 @@ function readCap(raw: string | undefined): number | undefined {
 const DEFAULT_CAPS: Record<string, Record<CapBucket, number>> = {
   serper: { prod: 200, eval: 50 },
   langsearch: { prod: 300, eval: 300 },
-  // You.com keyless MCP free profile (~100/day).
+  // You.com keyless MCP free profile (~100/day total). Stored under bucket 'shared'
+  // so prod+eval share one counter (the free MCP is ~100/day per IP, not 200).
   'you-keyless': { prod: 100, eval: 100 },
   // Exa is the paid last resort: a strict prod cap and none for eval traffic.
   exa: { prod: 10, eval: 0 },
@@ -44,8 +45,19 @@ function logRefusal(provider: string, bucket: CapBucket): void {
  * With no D1 binding or a D1 error, Serper (one-time credit pool) is refused (fail closed);
  * daily-renewing pools such as LangSearch are allowed (fail open).
  */
+/** Providers whose free quota is one pool for the day (prod+eval share a counter). */
+const SHARED_DAY = new Set(['you-keyless']);
+
+/** D1 bucket key: 'shared' for you-keyless so prod and eval share the 100/day MCP quota. */
+export function usageBucket(provider: string, bucket: CapBucket): string {
+  return SHARED_DAY.has(provider) ? 'shared' : bucket;
+}
+
 export async function takeSlot(env: Env, provider: string, bucket: CapBucket, now = Date.now()): Promise<boolean> {
-  const cap = capFor(env, provider, bucket);
+  // Shared providers: one daily cap (prod default), counted once across buckets.
+  const cap = SHARED_DAY.has(provider)
+    ? (env.YOU_KEYLESS_DAILY_CAP?.trim().toLowerCase() === 'off' ? undefined : readCap(env.YOU_KEYLESS_DAILY_CAP) ?? DEFAULT_CAPS[provider]?.prod)
+    : capFor(env, provider, bucket);
   if (cap === undefined) return true;
   if (cap === 0) {
     logRefusal(provider, bucket);
@@ -58,8 +70,9 @@ export async function takeSlot(env: Env, provider: string, bucket: CapBucket, no
     return !failClosed;
   }
   const day = new Date(now).toISOString().slice(0, 10);
+  const store = usageBucket(provider, bucket);
   try {
-    const row = await db.prepare(SLOT_SQL).bind(day, provider, bucket, cap).first<{ count: number }>();
+    const row = await db.prepare(SLOT_SQL).bind(day, provider, store, cap).first<{ count: number }>();
     const count = Number(row?.count);
     if (Number.isFinite(count) && count <= cap) return true;
     logRefusal(provider, bucket);
@@ -82,14 +95,21 @@ export async function usageToday(env: Env, now = Date.now()): Promise<Record<str
   const day = new Date(now).toISOString().slice(0, 10);
   const out: Record<string, Record<CapBucket, ProviderUsage>> = {};
   const providers = new Set(Object.keys(DEFAULT_CAPS));
-  let rows: { provider: string; bucket: CapBucket; count: number }[] = [];
+  let rows: { provider: string; bucket: string; count: number }[] = [];
   try {
-    rows = (await db.prepare('SELECT provider, bucket, count FROM provider_usage WHERE day = ?1').bind(day).all<{ provider: string; bucket: CapBucket; count: number }>()).results ?? [];
+    rows = (await db.prepare('SELECT provider, bucket, count FROM provider_usage WHERE day = ?1').bind(day).all<{ provider: string; bucket: string; count: number }>()).results ?? [];
   } catch {
     return undefined;
   }
   for (const r of rows) providers.add(r.provider);
   for (const p of providers) {
+    if (SHARED_DAY.has(p)) {
+      const used = Number(rows.find((r) => r.provider === p && r.bucket === 'shared')?.count
+        ?? rows.filter((r) => r.provider === p).reduce((n, r) => n + Number(r.count || 0), 0));
+      const cap = (env.YOU_KEYLESS_DAILY_CAP?.trim().toLowerCase() === 'off' ? null : readCap(env.YOU_KEYLESS_DAILY_CAP) ?? DEFAULT_CAPS[p]?.prod ?? null);
+      out[p] = { prod: { used, cap }, eval: { used, cap } };
+      continue;
+    }
     const used = (b: CapBucket) => Number(rows.find((r) => r.provider === p && r.bucket === b)?.count ?? 0);
     out[p] = {
       prod: { used: used('prod'), cap: capFor(env, p, 'prod') ?? null },

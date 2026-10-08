@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { clearDeadEngines, newLedger } from '../server/budget.ts';
 import { cascadeWeb, searchOrder } from '../server/cascade.ts';
-import { capFor, takeSlot } from '../server/providerCap.ts';
+import { capFor, takeSlot, usageBucket } from '../server/providerCap.ts';
 import type { Env } from '../server/util.ts';
 
 function openUsageDb(fail = false) {
@@ -89,6 +89,19 @@ describe('provider daily cap', { concurrency: 1 }, () => {
     } finally {
       console.log = orig;
     }
+  });
+
+
+  test('you-keyless shares one 100/day counter across prod and eval', async () => {
+    const db = openUsageDb();
+    const env = { DB: db, YOU_KEYLESS_DAILY_CAP: '2' } as Env;
+    const now = Date.parse('2026-10-08T12:00:00.000Z');
+    assert.equal(await takeSlot(env, 'you-keyless', 'prod', now), true);
+    assert.equal(await takeSlot(env, 'you-keyless', 'eval', now), true);
+    assert.equal(await takeSlot(env, 'you-keyless', 'prod', now), false);
+    assert.equal(await takeSlot(env, 'you-keyless', 'eval', now), false);
+    assert.equal(usageBucket('you-keyless', 'prod'), 'shared');
+    assert.equal(usageBucket('serper', 'eval'), 'eval');
   });
 
   test('SEARCH_ORDER keeps known names and appends the rest in default order', () => {
