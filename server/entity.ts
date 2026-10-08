@@ -561,12 +561,14 @@ export function entityHintFor(entity: Entity): (label: string) => EntityHint | u
   return (label: string) => {
     const lt = tokens(label);
     if (!lt.length) return undefined;
+    // Org tile: the org's own domains may supply its logo; no person context needed.
     if (orgToks.length > 0 && orgToks.some((t) => t.length >= 3 && lt.includes(t))) {
       return { name: entity.name, aliases: entity.aliases, domains: entity.domains };
     }
     if (!nameLike(label)) return undefined;
     if ((surname && lt.includes(surname)) || (key && lt.includes(key))) {
-      return { name: entity.name, aliases: entity.aliases, domains: entity.domains };
+      // Person: their photo must also name the chosen org (or come from its domains), never a namesake's.
+      return { name: entity.name, aliases: entity.aliases, domains: entity.domains, ...(entity.org ? { context: [entity.org] } : {}) };
     }
     return undefined;
   };

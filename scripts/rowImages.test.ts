@@ -113,3 +113,14 @@ describe('T443 image relevance gate', () => {
     assert.equal(accepts(targetFor('Company', 'BlueFlame AI'), img('', 'https://cdn.example.com/x', 'https://cdn.example.com/logo.png')), false);
   });
 });
+
+describe('t444 entity context: no namesake photos', () => {
+  const img = (title: string, url = 'https://x.com/p', thumb = 'https://x.com/p.jpg') => ({ title, url, thumb });
+  test('a chosen person needs their org word (or own domain) in the picture', () => {
+    const hintFor = () => ({ name: 'Ray Lee', domains: ['rayconglobal.com'], context: ['Raycon Inc.'] });
+    const t = targetFor('Ray Lee', '', undefined, { hintFor });
+    assert.equal(accepts(t, img('Ray Lee - Football - Eastern Michigan', 'https://emueagles.com/roster/ray-lee', 'https://images.sidearmdev.com/crop?x=1')), false);
+    assert.equal(accepts(t, img('Raycon co-founder Ray Lee')), true);
+    assert.equal(accepts(t, img('Ray Lee', 'https://rayconglobal.com/about', 'https://cdn.rayconglobal.com/ray.jpg')), true);
+  });
+});

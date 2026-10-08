@@ -24,6 +24,20 @@ export interface EntityHint {
   name?: string;
   aliases?: string[];
   domains?: string[];
+  /**
+   * Disambiguating words for the chosen entity (its org, e.g. "Raycon"). When set, a named picture must also
+   * carry one of them (or come from one of `domains`), so a namesake's photo is never used.
+   */
+  context?: string[];
+}
+
+/** The chosen entity's context words, or a picture from its own domains (t444: no namesake photos). */
+function contextOk(target: PicTarget, words: string[], urls: string[]): boolean {
+  const ctx = (target.hint?.context ?? []).flatMap((c) => tokens(c)).filter((t) => t.length >= 3 && !STOP.has(t) && !ORG_GENERIC.has(t));
+  if (!ctx.length) return true;
+  if (ctx.some((t) => hit(t, words))) return true;
+  const domains = (target.hint?.domains ?? []).map((d) => norm(d).replace(/^www\./, '')).filter(Boolean);
+  return urls.some((u) => { const h = hostOf(u); return !!h && domains.some((d) => h === d || h.endsWith(`.${d}`)); });
 }
 
 /** Context for targetFor: result text (proper-noun evidence) and an optional per-entity hint lookup. */
@@ -156,7 +170,8 @@ export function accepts(target: PicTarget, img: Pick<ImageResult, 'title' | 'url
     const domains = (target.hint?.domains ?? []).map((d) => norm(d).replace(/^www\./, ''));
     return domains.some((d) => !!d && [hostOf(img.url), hostOf(img.thumb)].some((h) => h === d || h.endsWith(`.${d}`)));
   }
-  return namesOf(target).some((need) => need.slice(0, 3).every((t) => hit(t, hay(img))));
+  const words = hay(img);
+  return namesOf(target).some((need) => need.slice(0, 3).every((t) => hit(t, words))) && contextOk(target, words, [img.url, img.thumb]);
 }
 
 /** Looser check for galleries and card-level pictures: the subject's main token appears in the picture's title or URLs. */
@@ -170,7 +185,7 @@ export function pageNames(target: PicTarget, page: { title?: string; snippet?: s
   if (target.kind === 'org') return hostNames(target.entity, page.url);
   if (target.kind !== 'named') return false;
   const words = tokens(`${page.title ?? ''} ${page.snippet ?? ''} ${page.url}`);
-  return namesOf(target).some((need) => need.slice(0, 3).every((t) => hit(t, words)));
+  return namesOf(target).some((need) => need.slice(0, 3).every((t) => hit(t, words))) && contextOk(target, words, [page.url]);
 }
 
 /** Card-level pictures (T436 boost, gallery/image refs): at least one of the subject's significant words (4+ letters) is in the picture. */
