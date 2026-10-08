@@ -22,6 +22,7 @@ import { type LateExtras, searchWithLate } from './search';
 import type { Send } from './sse';
 import { extraQueries, understand } from './understand';
 import { cacheBypass, testForce, validTestToken } from './token';
+import { SERPER_ANON_SHARE } from './providerCap';
 import type { Env } from './util';
 
 /** Asks whose answer depends on when they are asked: they wait for the intent read's freshness before searching. */
@@ -363,6 +364,8 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
 
 export interface StreamOpts {
   request?: Request;
+  /** Signed-in ask (gate userId). Signed-out asks draw on at most SERPER_ANON_SHARE of the Serper prod day. */
+  signedIn?: boolean;
   waitUntil?: (promise: Promise<unknown>) => void;
 }
 
@@ -376,6 +379,7 @@ export async function runStream(req: StreamRequest, env: Env, rawSend: Send, opt
     rawSend(event, out.data);
   };
   ledger.force = opts?.request ? testForce(opts.request, env) : undefined;
+  if (opts && !opts.signedIn) ledger.serperShare = SERPER_ANON_SHARE;
   const scope: AskScope = {
     ledger,
     bypass: opts?.request ? cacheBypass(opts.request, env) : false,

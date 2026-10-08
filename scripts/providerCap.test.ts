@@ -44,6 +44,16 @@ describe('provider daily cap', { concurrency: 1 }, () => {
     assert.equal(db.rows.get('2026-10-08\0serper\0prod'), 3);
   });
 
+  test('SPD-P: a share below 1 refuses at that part of the cap; full share still reaches the cap', async () => {
+    const db = openUsageDb();
+    const env = { DB: db, SERPER_DAILY_CAP: '10' } as Env;
+    const now = Date.parse('2026-10-08T12:00:00.000Z');
+    for (let i = 0; i < 7; i++) assert.equal(await takeSlot(env, 'serper', 'prod', now, 0.7), true);
+    assert.equal(await takeSlot(env, 'serper', 'prod', now, 0.7), false);
+    assert.equal(await takeSlot(env, 'serper', 'prod', now, 0.5), false);
+    assert.equal(await takeSlot(env, 'serper', 'prod', now), true);
+  });
+
   test('eval and prod buckets are separate', async () => {
     const db = openUsageDb();
     const env = { DB: db, SERPER_DAILY_CAP: '1', SERPER_EVAL_DAILY_CAP: '1' } as Env;

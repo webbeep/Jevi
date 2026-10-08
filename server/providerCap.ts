@@ -53,12 +53,21 @@ export function usageBucket(provider: string, bucket: CapBucket): string {
   return SHARED_DAY.has(provider) ? 'shared' : bucket;
 }
 
-export async function takeSlot(env: Env, provider: string, bucket: CapBucket, now = Date.now()): Promise<boolean> {
+/**
+ * SPD-P (t457): Serper prod is a one-time credit pool. Signed-out asks may use at most this share of the prod
+ * day, so signed-in/owner asks still get Serper at the evening peak; the Serper /images extra stops at half the day.
+ */
+export const SERPER_ANON_SHARE = 0.7;
+export const SERPER_IMAGES_SHARE = 0.5;
+
+export async function takeSlot(env: Env, provider: string, bucket: CapBucket, now = Date.now(), share = 1): Promise<boolean> {
   // Shared providers: one daily cap (prod default), counted once across buckets.
   const cap = SHARED_DAY.has(provider)
     ? (env.YOU_KEYLESS_DAILY_CAP?.trim().toLowerCase() === 'off' ? undefined : readCap(env.YOU_KEYLESS_DAILY_CAP) ?? DEFAULT_CAPS[provider]?.prod)
     : capFor(env, provider, bucket);
   if (cap === undefined) return true;
+  // A share below 1 refuses once the day's count reaches that part of the cap (at least one slot).
+  const limit = share < 1 ? Math.max(1, Math.floor(cap * share)) : cap;
   if (cap === 0) {
     logRefusal(provider, bucket);
     return false;
@@ -72,9 +81,9 @@ export async function takeSlot(env: Env, provider: string, bucket: CapBucket, no
   const day = new Date(now).toISOString().slice(0, 10);
   const store = usageBucket(provider, bucket);
   try {
-    const row = await db.prepare(SLOT_SQL).bind(day, provider, store, cap).first<{ count: number }>();
+    const row = await db.prepare(SLOT_SQL).bind(day, provider, store, limit).first<{ count: number }>();
     const count = Number(row?.count);
-    if (Number.isFinite(count) && count <= cap) return true;
+    if (Number.isFinite(count) && count <= limit) return true;
     logRefusal(provider, bucket);
     return false;
   } catch {

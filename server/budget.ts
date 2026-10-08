@@ -34,6 +34,8 @@ export interface CallLedger {
   via?: string;
   /** Hits removed by the relevance gate before the answer model saw them. */
   relevanceDropped?: number;
+  /** SPD-P: share of the Serper prod day this ask may draw on (signed-out asks < 1). */
+  serperShare?: number;
   /** T444 entity disambiguation outcome for this ask (server log only). */
   entity?: { kind: string; id?: string; dropped?: number; choices?: number };
 }

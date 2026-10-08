@@ -84,5 +84,5 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env, waitUnti
     if (typeof q === 'string' && q.trim()) waitUntil(recordAsk(env, gate.userId, q, req.kind));
   }
   bindAiWaitUntil(env, waitUntil);
-  return stamp(await serveStream({ request, env, req, run: (send) => runStream(req, env, send, { request, waitUntil: (p) => waitUntil(p) }), waitUntil }), gate.headers);
+  return stamp(await serveStream({ request, env, req, run: (send) => runStream(req, env, send, { request, signedIn: !!gate.userId, waitUntil: (p) => waitUntil(p) }), waitUntil }), gate.headers);
 };

@@ -3,7 +3,7 @@ import type { EngineStatus, Freshness, ImageResult } from '../shared/types';
 import { ddgBackupOn, fetchBackup } from './backup';
 import { SEARCH_ENGINES, callCap, type CallLedger, type SearchEngine, engineDead, failureOf, rememberDead, searchCalls } from './budget';
 import { loadSkips, tripSkip } from './engineSkip';
-import { takeSlot, type CapBucket } from './providerCap';
+import { SERPER_IMAGES_SHARE, takeSlot, type CapBucket } from './providerCap';
 import { HttpStatusError, type Env, clip, domainOf, fetchJson } from './util';
 import { fetchWikiSearch } from './wikiSearch';
 import { youKeyedSearch, youKeylessSearch, youKeyPresent } from './youSearch';
@@ -258,7 +258,7 @@ function serperPics(list: (SerperPic | undefined)[]): ImageResult[] {
  */
 export async function serperImages(query: string, env: Env, bucket: CapBucket, onCall?: () => void, timeoutMs = 2500): Promise<ImageResult[]> {
   if (!hasKey(env, 'SERPER_API_KEY') || engineDead('serper')) return [];
-  if (!(await takeSlot(env, 'serper', bucket))) return [];
+  if (!(await takeSlot(env, 'serper', bucket, undefined, bucket === 'prod' ? SERPER_IMAGES_SHARE : 1))) return [];
   onCall?.();
   try {
     const data = await fetchJson<{ images?: SerperPic[] }>(
@@ -367,6 +367,7 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUnt
     if (grantBonus && KEYED.has(name) && failure.reason !== 'empty') ledger.bonus = Math.max(ledger.bonus ?? 0, 2);
   };
   const statuses: EngineStatus[] = [];
+  const share = (name: string) => (name === 'serper' && bucket === 'prod' ? ledger.serperShare ?? 1 : 1);
   const catalog = new Map<SearchEngine, { name: SearchEngine; enabled: boolean; run: (text: string, fresh?: Freshness) => Promise<{ hits: WebHit[]; images: ImageResult[] }> }>([
     ['exa', { name: 'exa', enabled: hasKey(env, 'EXA_API_KEY'), run: (text, fresh = q.freshness) => exaSearch({ ...q, q: text, freshness: fresh }, env) }],
     ['langsearch', { name: 'langsearch', enabled: hasKey(env, 'LANGSEARCH_API_KEY'), run: (text, fresh = q.freshness) => langSearch({ ...q, q: text, freshness: fresh }, env) }],
@@ -432,7 +433,7 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUnt
       ledger.fellThrough.push(`${step.name}:cap`);
       break;
     }
-    if (!(await takeSlot(env, step.name, bucket))) {
+    if (!(await takeSlot(env, step.name, bucket, undefined, share(step.name)))) {
       ledger.fellThrough.push(`${step.name}:cap-daily`);
       statuses.push({ name: step.name, ok: false, count: 0, ms: 0, error: 'cap-daily' });
       continue;
@@ -451,7 +452,7 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUnt
       parallel = [];
       for (const text of extras) {
         if (searchCalls(ledger) >= callCap(ledger)) break;
-        if (!(await takeSlot(env, step.name, bucket))) break;
+        if (!(await takeSlot(env, step.name, bucket, undefined, share(step.name)))) break;
         ledger.search[step.name] += 1;
         parallel.push({ text, task: settled(step.run(text, ready.fresh)), at: Date.now() });
       }
@@ -489,7 +490,7 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUnt
       } else if (KEYED.has(step.name)) {
         for (const text of extras) {
           if (searchCalls(ledger) >= callCap(ledger) || engineDead(step.name)) break;
-          if (!(await takeSlot(env, step.name, bucket))) break;
+          if (!(await takeSlot(env, step.name, bucket, undefined, share(step.name)))) break;
           ledger.search[step.name] += 1;
           if (await settle(text, settled(step.run(text)), Date.now())) break;
         }
