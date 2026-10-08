@@ -13,6 +13,7 @@ import { cacheDb, packSearch, readSearchCache, searchCacheKey, writeSearchCache 
 import { cascadeWeb } from './cascade';
 import { diversify } from './diversify';
 import { commons, openverse, permitted } from './images';
+import { maybeBluesky, socialSources } from './social';
 import { UA, domainOf, fetchJson, hedge, type Env } from './util';
 
 interface Query {
@@ -221,24 +222,31 @@ export async function searchWithLate(q: Query, env: Env, scope?: AskScope): Prom
   }
 
   const webPromise = cascadeWeb(q, env, ask.ledger);
+  // ZO_SOCIAL=1 only: one keyless Bluesky call beside the cascade, not counted as a web engine. No-op on error.
+  const socialTask = maybeBluesky(q, env);
   const graceOver = webPromise.then(() => new Promise<void>((r) => setTimeout(r, EXTRAS_GRACE_MS)));
   const bounded = <T,>(p: Promise<T>, fallback: T) => Promise.race([settle(p, fallback), graceOver.then(() => fallback)]);
   const instantP = q.lite ? Promise.resolve(undefined) : instantAnswer(q.q);
   const wikiP = q.lite ? Promise.resolve(undefined) : wikiKnowledge(q.q);
   const imgP = q.lite ? Promise.resolve([] as ImageResult[]) : images(q.q);
   const hnP = q.lite ? Promise.resolve([] as Discussion[]) : discussions(q.q);
-  const [web, instant, wiki, imgs, hn] = await Promise.all([
+  const [web, instant, wiki, imgs, hn, social] = await Promise.all([
     webPromise,
     q.lite ? undefined : bounded(instantP, undefined),
     q.lite ? undefined : bounded(wikiP, undefined),
     q.lite ? [] : bounded(imgP, [] as ImageResult[]),
     q.lite ? [] : bounded(hnP, [] as Discussion[]),
+    socialTask,
   ]);
 
   const primary = fuse([{ engine: web.engine, hits: web.hits }], q.count, q.q);
   const taken = new Set(primary.map((r) => normalizeUrl(r.url)));
   const wikiExtra = fuse([{ engine: 'wikipedia', hits: web.wikiHits }], q.count, q.q).filter((r) => !taken.has(normalizeUrl(r.url)));
-  const results = diversify(q.q, [...primary, ...wikiExtra]).slice(0, q.count);
+  const web12 = diversify(q.q, [...primary, ...wikiExtra]);
+  const webUrls = new Set(web12.map((r) => normalizeUrl(r.url)));
+  const extra = socialSources(social.posts).filter((r) => !webUrls.has(normalizeUrl(r.url))).slice(0, 5);
+  // Lead with posts so a time-sensitive card can cite them inside the same result cap.
+  const results = [...extra, ...web12].slice(0, q.count);
   const knowledge = (instant && knowledgeMatches(q.q, instant.title, instant.description) ? instant : undefined)
     ?? (wiki && knowledgeMatches(q.q, wiki.title, wiki.description) ? wiki : undefined);
   const content = new Map<string, string>();
@@ -260,7 +268,7 @@ export async function searchWithLate(q: Query, env: Env, scope?: AskScope): Prom
     images: allImages.slice(0, 16),
     knowledge,
     discussions: hn,
-    engines: web.statuses,
+    engines: social.status ? [...web.statuses, social.status] : web.statuses,
   };
 
   if (!ask.bypass && ask.ledger.cache === 'miss' && db && response.results.length) {

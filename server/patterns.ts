@@ -1,4 +1,5 @@
 import type { AnswerCard, CardNode, CardPattern } from '../shared/card';
+import { isBriefingQuery } from '../shared/recency';
 
 interface PatternDef extends CardPattern {
   skeleton: CardNode[];
@@ -128,7 +129,7 @@ export function heuristicPattern(q: string): string {
   if (/^(how (to|do i|can i)|steps to|recipe|guide)/.test(s)) return 'steps';
   if (/\b(best|top \d+|recommend)\b/.test(s)) return 'ranked';
   if (/\b(should i|worth it|is it good)\b/.test(s)) return 'decision';
-  if (/\b(news|latest|today|update)\b/.test(s)) return 'briefing';
+  if (isBriefingQuery(s)) return 'briefing';
   if (/\b(history|timeline|origin|evolution)\b/.test(s)) return 'timeline';
   if (/\b(current|right now|price|score|rate|forecast)\b/.test(s)) return 'spotlight';
   if (/\b(statistics|stats|population|how many|growth|trend)\b/.test(s)) return 'dataset';

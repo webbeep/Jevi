@@ -1,0 +1,88 @@
+{
+  "posts": [
+    {
+      "uri": "at://did:plc:nlljdyxsmqixolg3mqyge6pa/app.bsky.feed.post/3mxdasc4iss27",
+      "author": {
+        "handle": "craigtimes.bsky.social",
+        "displayName": "Craig Pittman "
+      },
+      "indexedAt": "2026-10-08T00:55:39.371Z",
+      "record": {
+        "$type": "app.bsky.feed.post",
+        "text": "Ex-CIA official pleads guilty to a charge that he abused his position & govt funds to enrich himself by acquiring South #Florida real estate and hundreds of gold bars worth $40 million. www.sun-sentinel.com/2026/10/06/f... via @sun-sentinel.com",
+        "createdAt": "2026-10-08T00:55:35.516Z",
+        "embed": {
+          "external": {
+            "uri": "https://www.sun-sentinel.com/2026/10/06/former-cia-official-accused-of-stealing-40m-in-gold-bars-pleads-guilty/",
+            "title": "Former CIA official accused of stealing $40M in gold bars pleads guilty",
+            "description": "A former senior CIA official pleaded guilty to a charge that he abused his position and government funds to enrich himself by acquiring South Florida real estate and hundreds of go"
+          }
+        }
+      },
+      "embed": {
+        "$type": "app.bsky.embed.external#view",
+        "external": {
+          "uri": "https://www.sun-sentinel.com/2026/10/06/former-cia-official-accused-of-stealing-40m-in-gold-bars-pleads-guilty/",
+          "title": "Former CIA official accused of stealing $40M in gold bars pleads guilty",
+          "description": "A former senior CIA official pleaded guilty to a charge that he abused his position and government funds to enrich himself by acquiring South Florida real estate and hundreds of go"
+        }
+      }
+    },
+    {
+      "uri": "at://did:plc:22g3mf3sm5z4lp7zfk6ncv32/app.bsky.feed.post/3mxdagt4qz22k",
+      "author": {
+        "handle": "prognews.bsky.social",
+        "displayName": "Progressive News Service"
+      },
+      "indexedAt": "2026-10-08T00:49:15.162Z",
+      "record": {
+        "$type": "app.bsky.feed.post",
+        "text": "CIA official caught with gold bars pleads guilty to wire fraud, is accused of stealing $194 million. \u201cDavid Rush, 49, admitted to one count of wire fraud under an agreement with federal prosecutors and faces up to 20 years in prison when he is sentenced Jan. 28.\" www.nbcnews.com/politics/nat...",
+        "createdAt": "2026-10-08T00:49:10.701Z",
+        "embed": {
+          "external": {
+            "uri": "https://www.nbcnews.com/politics/national-security/cia-officer-arrested-gold-bars-pleads-guilty-wire-fraud-rcna601857",
+            "title": "CIA officer arrested with gold bars admits he exposed secret intelligence source to a foreign official",
+            "description": "David Rush, who was fired, pleaded guilty to one count of wire fraud and will be sentenced Jan. 28."
+          }
+        }
+      },
+      "embed": {
+        "$type": "app.bsky.embed.external#view",
+        "external": {
+          "uri": "https://www.nbcnews.com/politics/national-security/cia-officer-arrested-gold-bars-pleads-guilty-wire-fraud-rcna601857",
+          "title": "CIA officer arrested with gold bars admits he exposed secret intelligence source to a foreign official",
+          "description": "David Rush, who was fired, pleaded guilty to one count of wire fraud and will be sentenced Jan. 28."
+        }
+      }
+    },
+    {
+      "uri": "at://did:plc:wkehvz2pnpugsvw622adr36a/app.bsky.feed.post/3mxd5wafcws2l",
+      "author": {
+        "handle": "bubbles9333.bsky.social",
+        "displayName": "JMay\ud83c\udf41\u2696\ufe0f\ud83c\udfdd\ufe0f\ud83c\udfd6\ufe0f\ud83e\ude96\ud83c\udde8\ud83c\udde6"
+      },
+      "indexedAt": "2026-10-08T00:04:07.968Z",
+      "record": {
+        "$type": "app.bsky.feed.post",
+        "text": "I would keep an eye on this story as Cheeto is having trouble refining gold he took from Venezuela.\n\nFormer CIA Official Pleads Guilty to $194M Fraud Scheme After $46M in Gold Bars Were Found at His Home\npeople.com/former-cia-o...",
+        "createdAt": "2026-10-08T00:04:06.704Z",
+        "embed": {
+          "external": {
+            "uri": "https://people.com/former-cia-official-pleads-guilty-to-usd194m-fraud-scheme-12162343",
+            "title": "Former CIA Official Pleads Guilty to $194M Fraud Scheme After $46M in Gold Bars Were Found at His Home",
+            "description": "Prosecutors said former CIA official David J. Rush fabricated government authorities in order to obtain U.S. government funds for his personal benefit. \u201cFederal employees are entru"
+          }
+        }
+      },
+      "embed": {
+        "$type": "app.bsky.embed.external#view",
+        "external": {
+          "uri": "https://people.com/former-cia-official-pleads-guilty-to-usd194m-fraud-scheme-12162343",
+          "title": "Former CIA Official Pleads Guilty to $194M Fraud Scheme After $46M in Gold Bars Were Found at His Home",
+          "description": "Prosecutors said former CIA official David J. Rush fabricated government authorities in order to obtain U.S. government funds for his personal benefit. \u201cFederal employees are entru"
+        }
+      }
+    }
+  ]
+}
