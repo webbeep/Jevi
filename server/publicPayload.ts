@@ -16,6 +16,11 @@ export function publicSearch(res: SearchResponse): SearchResponse {
 /** Strips provider/model names from one stream event; returns the model name (`via`) for the server log. */
 export function publicEvent(event: string, data: unknown): { data: unknown; via?: string } {
   if (event === 'search' && data && typeof data === 'object' && Array.isArray((data as SearchResponse).results)) return { data: publicSearch(data as SearchResponse) };
+  // The plan's router name ('jev' = the model family) is server-only; the client never reads it.
+  if (event === 'plan' && data && typeof data === 'object' && 'engine' in data) {
+    const { engine: _engine, ...rest } = data as { engine?: unknown };
+    return { data: rest };
+  }
   if (event === 'done' && data && typeof data === 'object' && 'via' in data) {
     const { via, ...rest } = data as { via?: unknown };
     return { data: rest, via: typeof via === 'string' ? via : undefined };
