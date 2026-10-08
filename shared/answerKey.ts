@@ -29,8 +29,8 @@ export function fnv1a(str: string): string {
 
 export function answerCacheUrl(input: { query: string; freshness: string; context?: string }): string {
   const q = encodeURIComponent(normalizeAnswerQuery(input.query));
-  // '-e5': t444 purge of a profile cached with a namesake's photo. '-e4': T443 purge of cards cached with a metric stat photo ("Points"). '-e3': T442 purge of cards cached before row pictures (and '-e2': T424 edge purge). Every answer cached before this ship (incl. Wikipedia-only cards) is unreachable.
-  let url = `https://answer-cache.zo.internal/${ANSWER_CACHE_VERSION}-e5?q=${q}&f=${input.freshness}`;
+  // '-e6': t444 entity filter fix. '-e5': t444 purge of a profile cached with a namesake's photo. '-e4': T443 purge of cards cached with a metric stat photo ("Points"). '-e3': T442 purge of cards cached before row pictures (and '-e2': T424 edge purge). Every answer cached before this ship (incl. Wikipedia-only cards) is unreachable.
+  let url = `https://answer-cache.zo.internal/${ANSWER_CACHE_VERSION}-e6?q=${q}&f=${input.freshness}`;
   if (input.context) url += `&c=${fnv1a(input.context)}`;
   return url;
 }

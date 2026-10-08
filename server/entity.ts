@@ -139,8 +139,11 @@ export function personSourceOk(query: string, row: EntityRow, name = personSubje
   if (!name || !hasFullPersonName(name, row)) return false;
   const ctx = contextTerms(query, name);
   if (!ctx.length) return true;
+  // A specific org word (BlueFlame) outranks tails (AI, Inc): "Humantic AI … Ray Lee, VP at Salient" must not pass on "ai".
+  const specific = ctx.filter((t) => !ORG_TAIL.test(t));
+  const need = specific.length ? specific : ctx;
   const body = new Set(tokens(`${row.title ?? ''} ${row.snippet ?? ''} ${row.url ?? ''}`));
-  return ctx.some((t) => body.has(t));
+  return need.some((t) => body.has(t) || (t.length >= 5 && [...body].some((w) => w.includes(t))));
 }
 
 export function isPersonAsk(query: string, pattern?: string): boolean {
@@ -212,6 +215,8 @@ const GENERIC_HOSTS = new Set([
   'linkedin.com', 'wikipedia.org', 'facebook.com', 'instagram.com', 'threads.net',
   'twitter.com', 'x.com', 'youtube.com', 'youtu.be', 'tiktok.com', 'imdb.com',
   'reddit.com', 'pinterest.com', 'quora.com', 'medium.com', 'substack.com',
+  // People-search / profile aggregators: a namesake's page, never the person's own site.
+  'humantic.ai', 'me.sh', 'rocketreach.co', 'zoominfo.com', 'crunchbase.com', 'apollo.io', 'signalhire.com', 'contactout.com', 'peoplelooker.com', 'spokeo.com',
 ]);
 
 function isGenericHost(host: string): boolean {
@@ -557,7 +562,9 @@ export function entityHintFor(entity: Entity): (label: string) => EntityHint | u
   const nameToks = tokens(entity.name);
   const key = nameToks.length ? nameToks.slice().sort((a, b) => b.length - a.length)[0]! : '';
   const surname = nameToks[nameToks.length - 1] ?? '';
-  const orgToks = entity.org ? tokens(entity.org) : [];
+  // An org parsed as the person's own name ("Ray Lee") is no org.
+  const orgToks = entity.org ? tokens(entity.org).filter((t) => !nameToks.includes(t)) : [];
+  const org = orgToks.length ? entity.org : undefined;
   return (label: string) => {
     const lt = tokens(label);
     if (!lt.length) return undefined;
@@ -568,7 +575,7 @@ export function entityHintFor(entity: Entity): (label: string) => EntityHint | u
     if (!nameLike(label)) return undefined;
     if ((surname && lt.includes(surname)) || (key && lt.includes(key))) {
       // Person: their photo must also name the chosen org (or come from its domains), never a namesake's.
-      return { name: entity.name, aliases: entity.aliases, domains: entity.domains, ...(entity.org ? { context: [entity.org] } : {}) };
+      return { name: entity.name, aliases: entity.aliases, domains: entity.domains, ...(org ? { context: [org] } : {}) };
     }
     return undefined;
   };
