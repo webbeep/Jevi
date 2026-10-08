@@ -36,7 +36,7 @@ function disambiguation(prompt: unknown, list: unknown): Disambiguation | undefi
 function of(payload: unknown): { prompt?: unknown; options?: unknown } | undefined {
   if (!payload || typeof payload !== 'object') return undefined;
   const raw = payload as Record<string, unknown>;
-  // The draft `entity-choices` event sends {choices:[{name,descriptor,query,id},…]}: a bare options list, no prompt.
+  // Backend's `done` event sends {choices:[{name,descriptor,query,id},…]}: a bare options list, no prompt.
   if (Array.isArray(raw[F.list])) return { options: raw[F.list] };
   if (raw[F.list] && typeof raw[F.list] === 'object') {
     const inner = raw[F.list] as Record<string, unknown>;

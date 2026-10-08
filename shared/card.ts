@@ -83,7 +83,8 @@ export interface ImageCredit {
 }
 
 /**
- * PROVISIONAL — Backend entity patch, shape not final. "Which one?" options when a name is ambiguous.
+ * "Which one?" options when a name is ambiguous. Wire shape (Backend, server/stream.ts): the `done` event
+ * carries `choices: { name, descriptor, query, id }[]` (no prompt; `id` unused here).
  * Read ONLY through readChoices() in shared/choices.ts, so field names change in one place.
  */
 export interface Disambiguation { prompt?: string; options: { name: string; descriptor?: string; query?: string }[] }

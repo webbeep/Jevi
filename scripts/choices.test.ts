@@ -33,6 +33,28 @@ test('the array form of the draft entity-choices event is parsed', () => {
   assert.ok(!('id' in found!.options[0]));
 });
 
+test('Backend done payload (server/stream.ts) is read as-is', () => {
+  const found = readChoices({
+    engine: 'extractive',
+    removed: 0,
+    pagesRead: 0,
+    ms: 812,
+    choices: [
+      { name: 'Ray Lee', descriptor: 'VP at Salient', query: 'Ray Lee Salient VP', id: 'ray-lee-salient' },
+      { name: 'Ray Lee', descriptor: 'Actor', query: 'Ray Lee actor', id: 'ray-lee-actor' },
+    ],
+  });
+  const expected: Disambiguation = {
+    options: [
+      { name: 'Ray Lee', descriptor: 'VP at Salient', query: 'Ray Lee Salient VP' },
+      { name: 'Ray Lee', descriptor: 'Actor', query: 'Ray Lee actor' },
+    ],
+  };
+  assert.deepEqual(found, expected);
+  assert.equal(found!.prompt, undefined);
+  assert.equal(choiceQuery(found!.options[0]), 'Ray Lee Salient VP');
+});
+
 test('options on the payload itself are accepted', () => {
   assert.deepEqual(readChoices({ prompt: 'Which one?', options: [{ name: 'A' }, { name: 'B' }] }), { prompt: 'Which one?', options: [{ name: 'A' }, { name: 'B' }] });
 });
