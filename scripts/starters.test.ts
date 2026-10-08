@@ -19,19 +19,30 @@ const passJson = JSON.parse(readFileSync(join(here, '../shared/starters.pass.jso
   passing: { id: string; text: string; group: string }[];
 };
 
-/** Memo §2 PASS rows + CoS ruling: ship H with this set only. */
+/** Starters v2 (STARTERS-v2.md, RICKY-FEEDBACK-T364 #1), in display order. */
 const MEMO_PASSING = [
-  'which Google Workspace plan fits 4 people',
-  'help desk tool under $20/seat',
-  'Kindle vs Kobo for reading',
-  '8-week plan to run my first 10K',
+  'best wireless earbuds under $100',
+  'air fryer vs Instant Pot for a small kitchen',
+  'how to get a red wine stain out of a carpet',
+  'should I lease or buy my next car',
 ];
 
-test('passing starter list matches the decision memo set', () => {
-  assert.deepEqual([...PASSING_TEXTS].sort(), [...MEMO_PASSING].sort());
+test('passing starter list matches the v2 set, in order', () => {
+  assert.deepEqual([...PASSING_TEXTS], MEMO_PASSING);
   assert.equal(PASSING_STARTERS.length, 4);
-  assert.equal(PASSING_STARTERS.filter((s) => s.group === 's1').length, 2);
-  assert.equal(PASSING_STARTERS.filter((s) => s.group === 'broad').length, 2);
+});
+
+test('each shown starter showcases a different rich card type', () => {
+  const cards = PASSING_STARTERS.map((s) => s.card);
+  assert.ok(cards.every(Boolean));
+  assert.equal(new Set(cards).size, cards.length);
+  assert.ok(new Set(cards).size >= 4);
+});
+
+test('retired H set is not shown', () => {
+  for (const text of ['which Google Workspace plan fits 4 people', 'help desk tool under $20/seat', 'Kindle vs Kobo for reading', '8-week plan to run my first 10K']) {
+    assert.equal(PASSING_TEXTS.includes(text), false, `retired still passing: ${text}`);
+  }
 });
 
 test('starters.pass.json stays in sync with PASSING_IDS and texts', () => {
@@ -42,6 +53,7 @@ test('starters.pass.json stays in sync with PASSING_IDS and texts', () => {
     assert.ok(starter, `missing starter ${row.id}`);
     assert.equal(starter!.text, row.text);
     assert.equal(starter!.group, row.group);
+    assert.equal(starter!.card, (row as { card?: string }).card);
   }
 });
 
@@ -65,17 +77,13 @@ test('shown count is 3 on phone and 4 on desktop', () => {
   assert.equal(shownCount(1280), 4);
 });
 
-test('pickShown respects mix and only uses passing ids', () => {
+test('pickShown: phones get #1-#3, desktop all 4, in order, passing ids only', () => {
   const phone = pickShown(390, () => 0.5);
-  assert.equal(phone.length, 3);
-  assert.equal(phone.filter((s) => s.group === 's1').length, 2);
-  assert.equal(phone.filter((s) => s.group === 'broad').length, 1);
+  assert.deepEqual(phone.map((s) => s.text), MEMO_PASSING.slice(0, 3));
   assert.ok(phone.every((s) => (PASSING_IDS as readonly string[]).includes(s.id)));
 
-  const desktop = pickShown(1280, () => 0.5);
-  assert.equal(desktop.length, 4);
-  assert.equal(desktop.filter((s) => s.group === 's1').length, 2);
-  assert.equal(desktop.filter((s) => s.group === 'broad').length, 2);
+  const desktop = pickShown(1280, () => 0.1);
+  assert.deepEqual(desktop.map((s) => s.text), MEMO_PASSING);
 });
 
 test('shuffle stays off while the pool is thin', () => {
@@ -85,5 +93,5 @@ test('shuffle stays off while the pool is thin', () => {
 test('/api/suggestions payload has at least 4 passing starters', () => {
   const suggestions = allPassingSuggestions();
   assert.ok(suggestions.length >= 4);
-  assert.deepEqual(suggestions.map((s) => s.text).sort(), [...MEMO_PASSING].sort());
+  assert.deepEqual(suggestions.map((s) => s.text), MEMO_PASSING);
 });

@@ -1,31 +1,11 @@
 {
-  "gate": "3/3 interactive card, no cut-off (HOME-STARTERS-DECISION-2026-10-07 §2 + CoS ruling)",
+  "gate": "renders its intended rich card node (STARTERS-v2.md), answer completes, no cut-off",
   "probedAt": "2026-10-07",
-  "source": "org/zo/research/usability/2026-10-07/starters-probe/ + HOME-STARTERS-DECISION-2026-10-07.md",
+  "source": "org/eng/zo/STARTERS-v2.md (Strategy) + org/eng/zo/STARTERS-V2-U.md (verification)",
   "passing": [
-    {
-      "id": "s1-workspace-4",
-      "text": "which Google Workspace plan fits 4 people",
-      "group": "s1",
-      "runs": ["ok", "ok", "ok"]
-    },
-    {
-      "id": "s1-helpdesk-20",
-      "text": "help desk tool under $20/seat",
-      "group": "s1",
-      "runs": ["ok", "ok", "ok"]
-    },
-    {
-      "id": "broad-kindle-kobo",
-      "text": "Kindle vs Kobo for reading",
-      "group": "broad",
-      "runs": ["ok", "ok", "ok"]
-    },
-    {
-      "id": "broad-10k",
-      "text": "8-week plan to run my first 10K",
-      "group": "broad",
-      "runs": ["ok", "ok", "ok"]
-    }
+    { "id": "v2-earbuds-100", "text": "best wireless earbuds under $100", "group": "broad", "card": "list", "runs": [] },
+    { "id": "v2-airfryer-instantpot", "text": "air fryer vs Instant Pot for a small kitchen", "group": "broad", "card": "table", "runs": [] },
+    { "id": "v2-wine-stain", "text": "how to get a red wine stain out of a carpet", "group": "broad", "card": "steps", "runs": [] },
+    { "id": "v2-lease-buy-car", "text": "should I lease or buy my next car", "group": "broad", "card": "proscons", "runs": [] }
   ]
 }

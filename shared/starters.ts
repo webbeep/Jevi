@@ -1,11 +1,14 @@
 /**
- * Curated home starter prompts. Only IDs listed in PASSING_IDS (and
- * starters.pass.json) may be shown. Pool math matches
- * HOME-STARTERS-DECISION-2026-10-07.
+ * Curated home starters, v2 (RICKY-FEEDBACK-T364 #1, Strategy set in
+ * org/eng/zo/STARTERS-v2.md). Generic everyday questions, one per rich card
+ * layout. Fixed order: phones show #1–#3, desktop shows all 4. Only IDs in
+ * PASSING_IDS (and starters.pass.json) may be shown.
  */
 
 export type StarterGroup = 's1' | 'broad';
-export type StarterKind = 'compare' | 'plan' | 'explain' | 'draw';
+export type StarterKind = 'compare' | 'plan' | 'explain' | 'draw' | 'ranked' | 'steps' | 'decision';
+/** Card node type the starter is chosen to showcase. */
+export type StarterCard = 'list' | 'table' | 'steps' | 'proscons';
 
 export interface Starter {
   id: string;
@@ -13,6 +16,8 @@ export interface Starter {
   icon: string;
   group: StarterGroup;
   kind: StarterKind;
+  /** Rich card node this starter must render (QA gate). */
+  card?: StarterCard;
   /** Set when a starter must wait for another patch (e.g. diagrams). */
   requires?: 'F';
 }
@@ -25,43 +30,45 @@ export interface Suggestion {
   group: StarterGroup;
 }
 
-/**
- * IDs that passed the 3/3 render gate on 2026-10-07 (see starters.pass.json
- * and HOME-STARTERS-DECISION-2026-10-07 §2). Keep in sync with the JSON.
- */
+/** Shown on home, in display order (phones take the first 3). Keep in sync with the JSON. */
 export const PASSING_IDS = [
-  's1-workspace-4',
-  's1-helpdesk-20',
-  'broad-kindle-kobo',
-  'broad-10k',
+  'v2-earbuds-100',
+  'v2-airfryer-instantpot',
+  'v2-wine-stain',
+  'v2-lease-buy-car',
 ] as const;
 
-/** Full library (candidates + passing). Non-passing IDs never appear on home. */
+/** Full library: v2 primaries, same-card backups, then retired sets (never shown unless passing). */
 export const STARTERS: Starter[] = [
+  { id: 'v2-earbuds-100', text: 'best wireless earbuds under $100', icon: 'headphones', group: 'broad', kind: 'ranked', card: 'list' },
+  { id: 'v2-airfryer-instantpot', text: 'air fryer vs Instant Pot for a small kitchen', icon: 'cooking-pot', group: 'broad', kind: 'compare', card: 'table' },
+  { id: 'v2-wine-stain', text: 'how to get a red wine stain out of a carpet', icon: 'wine', group: 'broad', kind: 'steps', card: 'steps' },
+  { id: 'v2-lease-buy-car', text: 'should I lease or buy my next car', icon: 'car', group: 'broad', kind: 'decision', card: 'proscons' },
+  // Backups (same card type as the primary in the same position).
+  { id: 'v2b-robot-vacuum-300', text: 'best robot vacuum under $300', icon: 'bot', group: 'broad', kind: 'ranked', card: 'list' },
+  { id: 'v2b-costco-sams', text: "Costco vs Sam's Club membership", icon: 'shopping-cart', group: 'broad', kind: 'compare', card: 'table' },
+  { id: 'v2b-jump-start', text: 'how to jump-start a car', icon: 'battery-charging', group: 'broad', kind: 'steps', card: 'steps' },
+  { id: 'v2b-rent-buy-home', text: 'renting vs buying a home', icon: 'house', group: 'broad', kind: 'decision', card: 'proscons' },
+  // Retired H set (2026-10-07).
   { id: 's1-workspace-4', text: 'which Google Workspace plan fits 4 people', icon: 'building-2', group: 's1', kind: 'compare' },
   { id: 's1-helpdesk-20', text: 'help desk tool under $20/seat', icon: 'headset', group: 's1', kind: 'compare' },
-  { id: 's1-crm-5-50', text: 'best CRM for 5 people under $50/mo', icon: 'users', group: 's1', kind: 'compare' },
-  { id: 's1-notion-coda', text: 'Notion vs Coda for a 3-person agency', icon: 'notebook', group: 's1', kind: 'compare' },
-  { id: 's1-project-slack', text: 'cheapest project tool with Slack + GitHub', icon: 'kanban', group: 's1', kind: 'compare' },
-  { id: 's1-linear-jira', text: 'Linear vs Jira for 10 engineers', icon: 'square-kanban', group: 's1', kind: 'compare' },
-  { id: 's1-invoicing', text: 'best invoicing app for freelancers', icon: 'receipt', group: 's1', kind: 'compare' },
-  { id: 's1-zapier-make', text: 'Zapier vs Make for 2k tasks/mo', icon: 'workflow', group: 's1', kind: 'compare' },
   { id: 'broad-kindle-kobo', text: 'Kindle vs Kobo for reading', icon: 'book-open', group: 'broad', kind: 'compare' },
   { id: 'broad-10k', text: '8-week plan to run my first 10K', icon: 'footprints', group: 'broad', kind: 'plan' },
-  { id: 'broad-tokyo', text: 'Plan a 3-day Tokyo trip on a budget', icon: 'map', group: 'broad', kind: 'plan' },
-  { id: 'broad-heat-pump', text: 'Explain how a heat pump works', icon: 'thermometer', group: 'broad', kind: 'explain' },
 ];
 
 const PASS_SET = new Set<string>(PASSING_IDS);
 
-export const PASSING_STARTERS: Starter[] = STARTERS.filter((s) => PASS_SET.has(s.id) && !s.requires);
+/** Passing starters in PASSING_IDS display order. */
+export const PASSING_STARTERS: Starter[] = PASSING_IDS
+  .map((id) => STARTERS.find((s) => s.id === id))
+  .filter((s): s is Starter => !!s && PASS_SET.has(s.id) && !s.requires);
 
-/** Exact texts in the home pool (memo §2 PASS rows). */
+/** Exact texts in the home pool. */
 export const PASSING_TEXTS = PASSING_STARTERS.map((s) => s.text);
 
 const SHOWN_PHONE = 3;
 const SHOWN_DESKTOP = 4;
-/** Pool must be ≥3× shown per group before shuffle turns on. */
+/** Pool must be ≥3× shown before shuffle turns on. */
 const POOL_MULT = 3;
 
 function shuffleInPlace<T>(arr: T[], rand: () => number): T[] {
@@ -81,37 +88,19 @@ export function shownCount(width: number): number {
 }
 
 export function canShuffle(passing = PASSING_STARTERS): boolean {
-  const s1 = passing.filter((s) => s.group === 's1').length;
-  const broad = passing.filter((s) => s.group === 'broad').length;
-  // Desktop slots: up to 3 S1 / 2 broad → need ≥9 S1 and ≥6 broad.
-  return s1 >= 3 * POOL_MULT && broad >= 2 * POOL_MULT;
+  return passing.length >= SHOWN_DESKTOP * POOL_MULT;
 }
 
 /**
- * Pick the home set: phones 2 S1 + 1 broad (3 total); desktop 2 S1 + 2 broad (4).
- * Order is random each call. Only passing IDs.
+ * Pick the home set: the first 3 (phones) or 4 (desktop) passing starters in
+ * display order, so each shown starter showcases a different card layout.
+ * `rand` only applies once shuffle is enabled (pool ≥3× shown).
  */
 export function pickShown(width: number, rand: () => number = Math.random, excludeIds: Set<string> = new Set()): Suggestion[] {
-  const s1 = shuffleInPlace(
-    PASSING_STARTERS.filter((s) => s.group === 's1' && !excludeIds.has(s.id)),
-    rand,
-  );
-  const broad = shuffleInPlace(
-    PASSING_STARTERS.filter((s) => s.group === 'broad' && !excludeIds.has(s.id)),
-    rand,
-  );
   const want = shownCount(width);
-  const wantS1 = Math.min(2, s1.length);
-  const wantBroad = Math.min(want - wantS1, broad.length);
-  const picked = [...s1.slice(0, wantS1), ...broad.slice(0, wantBroad)];
-  if (picked.length < want) {
-    const rest = shuffleInPlace(
-      PASSING_STARTERS.filter((s) => !picked.some((p) => p.id === s.id) && !excludeIds.has(s.id)),
-      rand,
-    );
-    picked.push(...rest.slice(0, want - picked.length));
-  }
-  return shuffleInPlace(picked, rand).map(({ id, text, icon, group }) => ({ id, text, icon, group }));
+  let pool = PASSING_STARTERS.filter((s) => !excludeIds.has(s.id));
+  if (canShuffle()) pool = shuffleInPlace([...pool], rand);
+  return pool.slice(0, want).map(({ id, text, icon, group }) => ({ id, text, icon, group }));
 }
 
 /** All passing starters as API suggestions (e2e checks length ≥ 4). */
@@ -119,9 +108,7 @@ export function allPassingSuggestions(): Suggestion[] {
   return PASSING_STARTERS.map(({ id, text, icon, group }) => ({ id, text, icon, group }));
 }
 
-/** Placeholder examples: one S1 + one broad from the passing pool. */
+/** Placeholder examples: the first two passing starters. */
 export function placeholderExamples(): [string, string] {
-  const s1 = PASSING_STARTERS.find((s) => s.group === 's1')?.text ?? 'Ask anything';
-  const broad = PASSING_STARTERS.find((s) => s.group === 'broad')?.text ?? 'Ask anything';
-  return [s1, broad];
+  return [PASSING_STARTERS[0]?.text ?? 'Ask anything', PASSING_STARTERS[1]?.text ?? 'Ask anything'];
 }
