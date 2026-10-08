@@ -16,7 +16,7 @@ import { readCapped, type Env } from './util';
 
 /** Direct-fetch timeout, HTML window, and page text kept per row. */
 const READ_MS = 6000;
-const HTML_CAP = 400_000;
+const HTML_CAP = 700_000;
 /** Only the head of the page is turned into text: the price sits near the top and CPU stays bounded. */
 const HTML_TEXT_WINDOW = 40_000;
 const TEXT_CAP = 6000;
@@ -130,7 +130,9 @@ export async function readVendorPages(
   skip?: readonly string[],
 ): Promise<VendorRow[]> {
   const done = new Set(skip ?? []);
-  const names = new Map(brandsIn(query).map((b) => [b.id, b.name]));
+  // Sony pages read through Jina carry no product heading: name the model the person asked about.
+  const sonyModel = /\bw[fh]-?1000xm\d\b/i.exec(query)?.[0];
+  const names = new Map(brandsIn(query).map((b) => [b.id, b.id === 'sony' && sonyModel ? `Sony ${sonyModel.toUpperCase()}` : b.name]));
   const targets = vendorPageTargets(query, hits).filter((t) => !done.has(t.id));
   if (!targets.length) return [];
   const rows = await pooled(targets, CONCURRENCY, (t) => readOne(t, names.get(t.id) ?? t.domain, env, scope));

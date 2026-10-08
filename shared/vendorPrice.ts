@@ -454,6 +454,16 @@ function vendorLabel(price: VendorPrice): string {
 }
 
 /** "Sale · list $Y" for a store amount that is a sale price (the vendor page stated both). */
+/**
+ * A tile or hero whose amount is a gap, saving or difference ("an $80 price gap between the
+ * AirPods and XM6") is not a product price: an implausible amount there is left as written.
+ */
+const DIFF_WORDS = /\b(?:gap|difference|differ|more|less|cheaper|pricier|saves?|savings?|off|discount|cut|extra|premium|upcharge)\b/i;
+
+function isDifference(text: string, amount: number, vendor: number): boolean {
+  return DIFF_WORDS.test(text) && !plausibleRetail(amount, vendor);
+}
+
 function saleNote(price: VendorPrice): string | undefined {
   return price.was && price.was > price.amount ? `Sale · list ${formatUsd(price.was)}` : undefined;
 }
@@ -581,7 +591,7 @@ export function reconcileProductPrices<T>(nodes: readonly (T | undefined)[], que
     const product = productIn(`${label} ${value}`, query);
     const price = product ? prices.get(product) : undefined;
     const a = firstAmount(value);
-    if (!price || !a) {
+    if (!price || !a || isDifference(`${label} ${value}`, a.amount, price.amount)) {
       const out: Record<string, unknown> = { ...rec };
       if (typeof rec.sub === 'string') out.sub = annotateText(rec.sub, query, prices, placed);
       return out;
@@ -609,7 +619,7 @@ export function reconcileProductPrices<T>(nodes: readonly (T | undefined)[], que
     const product = productIn(`${label} ${value} ${caption}`, query);
     const price = product ? prices.get(product) : undefined;
     const a = firstAmount(value);
-    if (!price || !a) return { ...rec, ...(caption ? { caption: annotateText(caption, query, prices, placed) } : {}) };
+    if (!price || !a || isDifference(`${label} ${value} ${caption}`, a.amount, price.amount)) return { ...rec, ...(caption ? { caption: annotateText(caption, query, prices, placed) } : {}) };
     placed.add(price.id);
     const { line, flag } = retailerLine(value, a, price);
     const same = Math.abs(a.amount - price.amount) < 0.5 || !plausibleRetail(a.amount, price.amount);
@@ -664,7 +674,7 @@ export function reconcileProductPrices<T>(nodes: readonly (T | undefined)[], que
     const block = {
       type: 'keyvalue',
       vendorPrices: true,
-      items: missing.map((p) => ({ label: `${p.name} · ${p.domain}`, value: `${vendorLabel(p)} [${p.source}]`, icon: 'store' })),
+      items: missing.map((p) => ({ label: `${p.name} · ${p.domain}`, value: `${vendorLabel(p)} [${p.source}]${saleNote(p) ? ` · ${saleNote(p)}` : ''}`, icon: 'store' })),
     } as unknown as T;
     const at = out.findIndex((n) => FINISH.has(typeOf(asRecord(n as unknown) ?? {})));
     out.splice(at < 0 ? out.length : at, 0, block);

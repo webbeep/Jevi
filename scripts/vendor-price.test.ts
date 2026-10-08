@@ -386,8 +386,8 @@ test('readVendorPages: JSON-LD directly, Jina for a 403, and no row without a pr
     assert.equal(airpods.snippet, 'AirPods Pro 3: $249 on apple.com (official store price)');
     assert.match(airpods.content, /^AirPods Pro 3: \$249 on apple\.com \(official store price\)\n\n/);
     assert.deepEqual(airpods.vendor, { id: 'airpods', product: 'AirPods', amount: 249, from: false });
-    assert.equal(sony.snippet, 'Sony: $198 on electronics.sony.com (official store sale price; list $399.99)');
-    assert.deepEqual(sony.vendor, { id: 'sony', product: 'Sony', amount: 198, from: false, was: 399.99 });
+    assert.equal(sony.snippet, 'Sony WF-1000XM5: $198 on electronics.sony.com (official store sale price; list $399.99)');
+    assert.deepEqual(sony.vendor, { id: 'sony', product: 'Sony WF-1000XM5', amount: 198, from: false, was: 399.99 });
     // Sony refused the direct fetch, so it was read through the reader (which counts itself).
     assert.ok(asked.includes('https://r.jina.ai/https://electronics.sony.com/audio/headphones/truly-wireless-earbuds/p/wf1000xm5-b'));
     assert.equal(ledger.pages.direct, 3);
@@ -401,4 +401,15 @@ test('readVendorPages: JSON-LD directly, Jina for a 403, and no row without a pr
   } finally {
     globalThis.fetch = realFetch;
   }
+});
+
+test('V5 live P07: a "price gap" stat keeps its own amount; it is not turned into the AirPods price', () => {
+  const out = settle([
+    { type: 'tile', label: 'That leaves an $80 price gap between the AirPods and XM6', value: '$80' },
+    { type: 'tile', label: 'AirPods Pro 3', value: '$249 [1]' },
+    { type: 'citations', refs: [1, 2] },
+  ], P07, P07_HITS);
+  assert.equal(out[0].value, '$80');
+  assert.equal(out[0].vendorTrue, undefined);
+  assert.equal(out[1].source, 2);
 });
