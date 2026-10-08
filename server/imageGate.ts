@@ -29,6 +29,11 @@ export interface EntityHint {
    * carry one of them (or come from one of `domains`), so a namesake's photo is never used.
    */
   context?: string[];
+  /**
+   * The ask itself names the org ("Raycon CEO", "Ray Lee BlueFlame AI"). A full-name photo without the org word
+   * is still taken unless its page names a different org; strict adds company-suffix pages to that check (t451).
+   */
+  strict?: boolean;
 }
 
 /** The chosen entity's context words, or a picture from its own domains (t444: no namesake photos). */
@@ -37,7 +42,27 @@ function contextOk(target: PicTarget, words: string[], urls: string[]): boolean 
   if (!ctx.length) return true;
   if (ctx.some((t) => hit(t, words))) return true;
   const domains = (target.hint?.domains ?? []).map((d) => norm(d).replace(/^www\./, '')).filter(Boolean);
-  return urls.some((u) => { const h = hostOf(u); return !!h && domains.some((d) => h === d || h.endsWith(`.${d}`)); });
+  if (urls.some((u) => { const h = hostOf(u); return !!h && domains.some((d) => h === d || h.endsWith(`.${d}`)); })) return true;
+  // t451: a single-entity card takes a full-name photo without the org word unless the picture's page names some
+  // other org; an ask that names the org itself ("Raycon CEO") also rejects company-suffix pages ("Acme Capital").
+  return !otherOrg(words, urls, !!target.hint?.strict);
+}
+
+/** School/athletics rosters and people-search pages: a namesake's photo, not the chosen person's (live: Eastern Michigan athlete for the Raycon CEO). */
+const OTHER_ORG_WORDS = ['university', 'college', 'athletics', 'athletic', 'roster', 'sidearm', 'ncaa', 'varsity', 'highschool', 'alumni'];
+const PEOPLE_SEARCH = ['humantic', 'rocketreach', 'zoominfo', 'apollo', 'signalhire', 'contactout', 'peoplelooker', 'spokeo', 'crunchbase', 'whitepages', 'truepeoplesearch'];
+const COMPANY_WORDS = ['inc', 'llc', 'corp', 'capital', 'partners', 'ventures', 'holdings', 'bank', 'gmbh', 'plc'];
+function otherOrg(words: string[], urls: string[], strict: boolean): boolean {
+  if (OTHER_ORG_WORDS.some((t) => hit(t, words))) return true;
+  if (strict && COMPANY_WORDS.some((t) => words.includes(t))) return true;
+  return urls.some((u) => {
+    const h = hostOf(u);
+    if (!h) return false;
+    if (h.endsWith('.edu') || h.split('.').includes('k12')) return true;
+    if (h === 'me.sh' || h.endsWith('.me.sh')) return true;
+    const parts = h.split('.');
+    return PEOPLE_SEARCH.some((p) => parts.includes(p));
+  });
 }
 
 /** Context for targetFor: result text (proper-noun evidence) and an optional per-entity hint lookup. */

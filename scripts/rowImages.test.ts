@@ -142,4 +142,25 @@ describe('t444 entity context: no namesake photos', () => {
     assert.equal(accepts(t, img('Raycon co-founder Ray Lee')), true);
     assert.equal(accepts(t, img('Ray Lee', 'https://rayconglobal.com/about', 'https://cdn.rayconglobal.com/ray.jpg')), true);
   });
+  test('t451: a single-entity card whose ask names no org takes a full-name photo without the org word', () => {
+    const hintFor = () => ({ name: 'David Kim', domains: ['philorch.org'], context: ['Philadelphia Orchestra'] });
+    const t = targetFor('David Kim', '', undefined, { hintFor });
+    assert.equal(accepts(t, img('David Kim, violinist', 'https://en.wikipedia.org/wiki/David_Kim_(violinist)', 'https://upload.wikimedia.org/dk.jpg')), true);
+    assert.equal(accepts(t, img('David Kim - Basketball - State University', 'https://stateathletics.com/roster/david-kim', 'https://images.sidearmdev.com/crop?x=2')), false, 'a roster page names another org');
+    assert.equal(accepts(t, img('David Kim', 'https://rocketreach.co/david-kim', 'https://rocketreach.co/dk.jpg')), false, 'people-search page');
+    assert.equal(accepts(t, img('David Kim', 'https://cs.someschool.edu/~dkim', 'https://cs.someschool.edu/dk.jpg')), false, '.edu page');
+    assert.equal(accepts(t, img('Kim playing', 'https://x.com/p', 'https://x.com/p.jpg')), false, 'still needs the full name');
+  });
+  test('t451: an ask that names the org takes a full-name photo but not one whose page names another org', () => {
+    const hintFor = () => ({ name: 'Ray Lee', domains: ['blueflame.ai'], context: ['BlueFlame AI'], strict: true });
+    const t = targetFor('Ray Lee', '', undefined, { hintFor });
+    assert.equal(accepts(t, img('Ray Lee portrait', 'https://news.example.com/ray-lee', 'https://news.example.com/r.jpg')), true);
+    assert.equal(accepts(t, img('BlueFlame co-founder Ray Lee')), true);
+    assert.equal(accepts(t, img('Ray Lee, partner at Acme Capital', 'https://acme.example/team', 'https://acme.example/r.jpg')), false);
+    assert.equal(accepts(t, img('Ray Lee - Football - Eastern Michigan', 'https://emueagles.com/roster/ray-lee', 'https://images.sidearmdev.com/crop?x=1')), false);
+  });
+  test('t451: stat/role labels stay photo-free under the relaxed rule', () => {
+    const hintFor = (label: string) => (label === 'David Kim' ? { name: 'David Kim', context: ['Philadelphia Orchestra'] } : undefined);
+    assert.equal(targetFor('Points', '', undefined, { hintFor }).kind, 'none');
+  });
 });

@@ -197,6 +197,13 @@ describe('T444 entity disambiguation', () => {
     assert.ok(hintFor('White House'), 'the org label gets a hint');
   });
 
+  test('t451: entityHintFor marks the hint strict only when the ask names the org', () => {
+    const entity: Entity = { id: 'ray-lee-ceo-raycon', name: 'Ray Lee', role: 'CEO', org: 'Raycon', terms: ['ceo', 'raycon'] };
+    assert.equal(entityHintFor(entity, 'Raycon CEO')('Ray Lee')!.strict, true);
+    assert.equal(entityHintFor(entity, 'Who is Ray Lee')('Ray Lee')!.strict, undefined);
+    assert.deepEqual(entityHintFor(entity, 'Who is Ray Lee')('Ray Lee')!.context, ['Raycon']);
+  });
+
   test('the context line round-trips through the thread prior', () => {
     const entity: Entity = {
       id: 'ray-lee-software-engineer-stripe',

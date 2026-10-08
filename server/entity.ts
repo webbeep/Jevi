@@ -558,13 +558,16 @@ export function priorEntity(context?: string): Entity | undefined {
  * T443 image-gate plug-in: returns `hintFor` so the existing gate matches the
  * chosen person/org. A hint never loosens the gate — unrelated labels get undefined.
  */
-export function entityHintFor(entity: Entity): (label: string) => EntityHint | undefined {
+export function entityHintFor(entity: Entity, query = ''): (label: string) => EntityHint | undefined {
   const nameToks = tokens(entity.name);
   const key = nameToks.length ? nameToks.slice().sort((a, b) => b.length - a.length)[0]! : '';
   const surname = nameToks[nameToks.length - 1] ?? '';
   // An org parsed as the person's own name ("Ray Lee") is no org.
   const orgToks = entity.org ? tokens(entity.org).filter((t) => !nameToks.includes(t)) : [];
   const org = orgToks.length ? entity.org : undefined;
+  // t451: only an ask that names the org itself ("Raycon CEO") makes the photo carry that org word.
+  const askToks = tokens(query);
+  const strict = orgToks.some((t) => t.length >= 3 && !['inc', 'llc', 'ltd', 'corp', 'the', 'and', 'company'].includes(t) && askToks.includes(t));
   return (label: string) => {
     const lt = tokens(label);
     if (!lt.length) return undefined;
@@ -575,7 +578,7 @@ export function entityHintFor(entity: Entity): (label: string) => EntityHint | u
     if (!nameLike(label)) return undefined;
     if ((surname && lt.includes(surname)) || (key && lt.includes(key))) {
       // Person: their photo must also name the chosen org (or come from its domains), never a namesake's.
-      return { name: entity.name, aliases: entity.aliases, domains: entity.domains, ...(org ? { context: [org] } : {}) };
+      return { name: entity.name, aliases: entity.aliases, domains: entity.domains, ...(org ? { context: [org], ...(strict ? { strict: true } : {}) } : {}) };
     }
     return undefined;
   };

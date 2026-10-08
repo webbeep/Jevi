@@ -265,7 +265,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     console.log(JSON.stringify({ zo: 'entity', kind: 'single', id: decision.entity.id, kept: decision.kept.length, dropped: decision.dropped.length }));
     results = { ...results, results: decision.kept.map((i) => results.results[i]!).filter(Boolean) };
     designContext = [entityContextLine(decision.entity), context].filter(Boolean).join('\n');
-    entityHint = entityHintFor(decision.entity);
+    entityHint = entityHintFor(decision.entity, query);
     boostQuery = decision.entity.name;
   }
   send('search', results);
