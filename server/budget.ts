@@ -83,15 +83,31 @@ export function failureOf(err: unknown): { fall: boolean; dead: boolean; reason:
   return { fall: true, dead: false, reason: 'error' };
 }
 
+const cleanQuery = (s: string) => s.replace(/\s+/g, ' ').trim().slice(0, 180);
+
 /**
- * One web search per ask. The planner's best alternative replaces the literal
- * text; further alternatives are dropped so Exa is not called once per sub-query.
+ * The person's question, unchanged. It is always one of the searches: a planner
+ * rewrite is an extra call, not a replacement.
  */
-export function queriesForAsk(literal: string, extras: string[]): string {
-  const clean = (s: string) => s.replace(/\s+/g, ' ').trim();
-  const base = clean(literal);
-  const extra = extras.map(clean).filter((q) => q && q.toLowerCase() !== base.toLowerCase());
-  return (extra[0] ?? base).slice(0, 180);
+export function queriesForAsk(literal: string, _extras: string[]): string {
+  return cleanQuery(literal);
+}
+
+/**
+ * Planner rewrites that say something the literal question does not.
+ * At most two: with the literal search that is the whole three-call cap,
+ * so Wikipedia runs only when fewer than two rewrites are left.
+ */
+export function moreQueries(literal: string, extras: string[]): string[] {
+  const base = cleanQuery(literal).toLowerCase();
+  const out: string[] = [];
+  for (const raw of extras) {
+    const q = cleanQuery(raw);
+    if (!q || q.toLowerCase() === base || out.some((x) => x.toLowerCase() === q.toLowerCase())) continue;
+    out.push(q);
+    if (out.length === 2) break;
+  }
+  return out;
 }
 
 /** One line per ask. No keys, headers, query text, or URLs. */

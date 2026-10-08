@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, test } from 'node:test';
 import { parseDdgLite } from '../server/backup.ts';
-import { clearDeadEngines, engineDead, newLedger, queriesForAsk, rememberDead, searchCalls, SEARCH_CALL_CAP } from '../server/budget.ts';
+import { clearDeadEngines, engineDead, moreQueries, newLedger, queriesForAsk, rememberDead, searchCalls, SEARCH_CALL_CAP } from '../server/budget.ts';
 import { packSearch, readSearchCache, searchCacheKey, writeSearchCache, type CacheDb } from '../server/cache.ts';
 import { cascadeWeb } from '../server/cascade.ts';
 import { search } from '../server/search.ts';
@@ -163,9 +163,11 @@ describe('runway', { concurrency: 1 }, () => {
     assert.equal(searchCacheKey('  Foo   BAR ', 'day', 20), searchCacheKey('foo bar', 'day', 20));
     assert.notEqual(searchCacheKey('foo', 'day', 20), searchCacheKey('foo', 'week', 20));
     assert.notEqual(searchCacheKey('foo', 'day', 20), searchCacheKey('foo', 'day', 8));
-    assert.equal(queriesForAsk('news tldr today', ['top headlines today', 'tldr news site']), 'top headlines today');
+    assert.equal(queriesForAsk('news tldr today', ['top headlines today', 'tldr news site']), 'news tldr today');
+    assert.deepEqual(moreQueries('news tldr today', ['top headlines today', 'tldr news site']), ['top headlines today', 'tldr news site']);
     assert.equal(queriesForAsk('  Foo   Bar ', []), 'Foo Bar');
     assert.equal(queriesForAsk('foo', ['foo', 'FOO']), 'foo');
+    assert.deepEqual(moreQueries('foo', ['foo', 'FOO', 'bar']), ['bar']);
     assert.equal(validTestToken('secret', undefined), false);
     assert.equal(validTestToken('nope', 'secret'), false);
     assert.equal(validTestToken('secret', 'secret'), true);
@@ -379,12 +381,12 @@ describe('runway', { concurrency: 1 }, () => {
     }
   });
 
-  test('Wikipedia rides with a keyed hit and the literal query is a second call', async () => {
+  test('Wikipedia rides with a keyed hit and one planner rewrite is a second call', async () => {
     clearDeadEngines();
     const net = install({ exa: 'ok', wikipedia: 'ok' });
     try {
       const ledger = newLedger();
-      const out = await cascadeWeb({ q: 'planner query about postgres', also: 'open source database', freshness: 'any', count: 8 }, env(), ledger);
+      const out = await cascadeWeb({ q: 'planner query about postgres', more: ['open source database'], freshness: 'any', count: 8 }, env(), ledger);
       assert.equal(ledger.search.exa, 2);
       assert.equal(ledger.search.wikipedia, 1);
       assert.equal(ledger.search.tavily, 0);
@@ -404,6 +406,47 @@ describe('runway', { concurrency: 1 }, () => {
       assert.equal(bodies.at(-1)?.type, 'instant');
     } finally {
       net.restore();
+      clearDeadEngines();
+    }
+  });
+
+  test('two planner rewrites stay inside the cap and each list is ranked on its own words', async () => {
+    clearDeadEngines();
+    const orig = globalThis.fetch;
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('api.exa.ai')) {
+        const body = JSON.parse(String(init?.body)) as { query: string };
+        if (body.query.startsWith('bose')) {
+          return Response.json({ results: [{ title: 'Bose QuietComfort Ultra price', url: 'https://www.whathifi.com/bose', text: 'Bose QuietComfort Ultra Earbuds cost $299.' }] });
+        }
+        if (body.query.includes('150')) {
+          return Response.json({ results: [{ title: 'minutes deal roundup', url: 'https://deal.example/minutes', text: 'A sale page that mentions 150 minutes and nothing about guidelines.' }] });
+        }
+        return Response.json({
+          results: [{ title: 'WHO guidelines on physical activity and sedentary behaviour', url: 'https://bjsm.bmj.com/who-2020', text: 'All adults should undertake 150–300 min of moderate intensity, or 75–150 min of vigorous-intensity physical activity.' }],
+        });
+      }
+      if (url.includes('en.wikipedia.org')) return Response.json({ query: { search: [{ title: 'Physical activity', snippet: 'Exercise' }] } });
+      return Response.json({});
+    };
+    try {
+      const ledger = newLedger();
+      const found = await search({
+        q: 'bose quietcomfort ultra earbuds current price',
+        more: ['WHO physical activity guidelines adults 150 minutes primary source', 'WHO Guidelines on physical activity and sedentary behaviour adults'],
+        freshness: 'any',
+        count: 8,
+      }, env(), { ledger, bypass: true });
+      assert.equal(ledger.search.exa, 3);
+      assert.equal(ledger.search.wikipedia, 0);
+      assert.ok(searchCalls(ledger) <= SEARCH_CALL_CAP);
+      const urls = found.results.map((r) => r.url);
+      assert.equal(urls[0], 'https://www.whathifi.com/bose');
+      assert.ok(urls.includes('https://bjsm.bmj.com/who-2020'));
+      assert.equal(urls.includes('https://deal.example/minutes'), false);
+    } finally {
+      globalThis.fetch = orig;
       clearDeadEngines();
     }
   });

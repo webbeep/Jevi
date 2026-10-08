@@ -18,8 +18,8 @@ import { UA, domainOf, fetchJson, hedge, type Env } from './util';
 
 interface Query {
   q: string;
-  /** Second planner query. Same engine, one extra call, still inside the cap. */
-  also?: string;
+  /** Planner rewrites. Each is one extra call on the engine that answered, still inside the cap. */
+  more?: string[];
   freshness: Freshness;
   count: number;
   /**
@@ -80,6 +80,22 @@ function coverage(query: string, hit: Hit): number {
  * covers. Results that only one engine returned and that miss most of the
  * query ("Apple Store" for "apple pie recipe") are dropped.
  */
+/** Rank-by-rank across lists that were each already scored against their own query. */
+function interleaveResults(lists: SearchResult[][]): SearchResult[] {
+  const seen = new Set<string>();
+  const out: SearchResult[] = [];
+  const n = Math.max(0, ...lists.map((list) => list.length));
+  for (let i = 0; i < n; i++) {
+    for (const list of lists) {
+      const hit = list[i];
+      if (!hit?.url || seen.has(normalizeUrl(hit.url))) continue;
+      seen.add(normalizeUrl(hit.url));
+      out.push(hit);
+    }
+  }
+  return out;
+}
+
 function fuse(outputs: { engine: string; hits: Hit[] }[], count: number, query: string): SearchResult[] {
   const merged = new Map<string, SearchResult & { score: number }>();
   for (const { engine, hits } of outputs) {
@@ -239,7 +255,12 @@ export async function searchWithLate(q: Query, env: Env, scope?: AskScope): Prom
     socialTask,
   ]);
 
-  const primary = fuse([{ engine: web.engine, hits: web.hits }], q.count, q.q);
+  // Each query is scored against its own words, then interleaved with the literal question first.
+  const fused = [
+    fuse([{ engine: web.engine, hits: web.hits }], q.count, q.q),
+    ...web.more.map((list) => fuse([{ engine: web.engine, hits: list.hits }], q.count, list.query)),
+  ];
+  const primary = interleaveResults(fused);
   const taken = new Set(primary.map((r) => normalizeUrl(r.url)));
   const wikiExtra = fuse([{ engine: 'wikipedia', hits: web.wikiHits }], q.count, q.q).filter((r) => !taken.has(normalizeUrl(r.url)));
   const web12 = diversify(q.q, [...primary, ...wikiExtra]);

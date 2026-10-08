@@ -18,9 +18,11 @@ export interface WebHit {
 
 export interface CascadeResult {
   engine: string;
-  /** Hits from the keyed engine. A second planner query is interleaved by rank. */
+  /** Hits for the literal question. */
   hits: WebHit[];
-  /** Keyless Wikipedia hits to rank after `hits`. Empty when Wikipedia itself answered. */
+  /** Planner-query hit lists, in call order. Each stays separate so it can be ranked against its own words. */
+  more: { query: string; hits: WebHit[] }[];
+  /** Keyless Wikipedia hits to rank after `hits`. Empty when Wikipedia itself answered, or when two planner queries already used the cap. */
   wikiHits: WebHit[];
   images: ImageResult[];
   statuses: EngineStatus[];
@@ -28,10 +30,26 @@ export interface CascadeResult {
 
 interface Query {
   q: string;
-  /** Second planner query. One extra call on the engine that already succeeded, interleaved behind the first. */
-  also?: string;
+  /** Planner rewrites. Each is one more call on the engine that already succeeded. */
+  more?: string[];
   freshness: Freshness;
   count: number;
+}
+
+/** Planner rewrites that differ from the literal question, at most two. */
+function plannedExtras(q: Query): string[] {
+  const base = q.q.replace(/\s+/g, ' ').trim().toLowerCase();
+  const seen = new Set([base]);
+  const out: string[] = [];
+  for (const raw of q.more ?? []) {
+    const text = raw.replace(/\s+/g, ' ').trim().slice(0, 180);
+    const key = text.toLowerCase();
+    if (!text || seen.has(key)) continue;
+    seen.add(key);
+    out.push(text);
+    if (out.length === 2) break;
+  }
+  return out;
 }
 
 const DAYS: Record<Exclude<Freshness, 'any'>, number> = { day: 1, week: 7, month: 30, year: 365 };
@@ -207,32 +225,6 @@ async function serperSearch(q: Query, env: Env): Promise<{ hits: WebHit[]; image
 
 const KEYED = new Set<SearchEngine>(['exa', 'langsearch', 'tavily', 'firecrawl', 'serper']);
 
-function hitKey(url: string): string {
-  try {
-    const u = new URL(url);
-    return `${u.hostname.replace(/^www\./, '')}${u.pathname.replace(/\/$/, '')}${u.search}`.toLowerCase();
-  } catch {
-    return url;
-  }
-}
-
-/** Rank-by-rank merge. The first list leads each rank; a repeated URL is kept once. */
-function interleave(lead: WebHit[], follow: WebHit[]): WebHit[] {
-  const seen = new Set<string>();
-  const out: WebHit[] = [];
-  const push = (h: WebHit | undefined) => {
-    if (!h?.url || !h.title || seen.has(hitKey(h.url))) return;
-    seen.add(hitKey(h.url));
-    out.push(h);
-  };
-  const n = Math.max(lead.length, follow.length);
-  for (let i = 0; i < n; i++) {
-    push(lead[i]);
-    push(follow[i]);
-  }
-  return out;
-}
-
 interface WikiOutcome {
   hits: WebHit[];
   error?: string;
@@ -244,9 +236,10 @@ interface WikiOutcome {
  * runs only when ZO_DDG_BACKUP=1, after Wikipedia. Keyed steps are skipped when
  * their key is empty. The next engine runs only after a credit, quota, auth,
  * timeout, upstream, or empty failure. Dead engines are skipped without a call.
- * A keyed success also takes Wikipedia in parallel (one extra call) and, when
- * the cap still has room, the literal query on that same engine. Wikipedia is
- * returned separately so it ranks after the engine. At most SEARCH_CALL_CAP calls.
+ * A keyed success also takes the planner rewrites on that same engine. Wikipedia
+ * runs in parallel only when fewer than two rewrites are queued, so the ask
+ * stays inside SEARCH_CALL_CAP. Wikipedia is returned separately so it ranks
+ * after the engine. At most SEARCH_CALL_CAP calls.
  */
 export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger): Promise<CascadeResult> {
   const statuses: EngineStatus[] = [];
@@ -289,13 +282,14 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger): Promis
     return hits;
   };
 
-  const none = (): CascadeResult => ({ engine: 'none', hits: [], wikiHits: [], images: [], statuses });
+  const none = (): CascadeResult => ({ engine: 'none', hits: [], more: [], wikiHits: [], images: [], statuses });
+  const extras = plannedExtras(q);
 
   for (const step of steps) {
     if (!step.enabled) continue;
     if (step.name === 'wikipedia' && wikiTask) {
       const hits = await takeWiki();
-      if (hits.length) return { engine: 'wikipedia', hits, wikiHits: [], images: [], statuses };
+      if (hits.length) return { engine: 'wikipedia', hits, more: [], wikiHits: [], images: [], statuses };
       continue;
     }
     if (engineDead(step.name)) {
@@ -309,7 +303,8 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger): Promis
     }
     ledger.search[step.name] += 1;
     const started = Date.now();
-    if (KEYED.has(step.name)) startWiki();
+    // Two planner rewrites plus this call fill the cap. Wikipedia stays off so both rewrites still run.
+    if (KEYED.has(step.name) && extras.length < 2) startWiki();
     try {
       const out = await step.run(q.q);
       let hits = out.hits.filter((h) => h.url && h.title);
@@ -319,28 +314,32 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger): Promis
         statuses.push({ name: step.name, ok: false, count: 0, ms: Date.now() - started, error: 'empty' });
         continue;
       }
-      const also = q.also?.replace(/\s+/g, ' ').trim();
-      if (KEYED.has(step.name) && also && also.toLowerCase() !== q.q.toLowerCase() && searchCalls(ledger) < SEARCH_CALL_CAP && !engineDead(step.name)) {
-        ledger.search[step.name] += 1;
-        const againAt = Date.now();
-        try {
-          const more = await step.run(also);
-          const extra = more.hits.filter((h) => h.url && h.title);
-          if (!extra.length) ledger.fellThrough.push(`${step.name}:also-empty`);
-          else {
-            hits = interleave(hits, extra);
-            images = [...images, ...more.images];
+      const more: { query: string; hits: WebHit[] }[] = [];
+      if (KEYED.has(step.name)) {
+        for (const text of extras) {
+          if (searchCalls(ledger) >= SEARCH_CALL_CAP || engineDead(step.name)) break;
+          ledger.search[step.name] += 1;
+          const againAt = Date.now();
+          try {
+            const again = await step.run(text);
+            const extra = again.hits.filter((h) => h.url && h.title);
+            if (!extra.length) ledger.fellThrough.push(`${step.name}:also-empty`);
+            else {
+              more.push({ query: text, hits: extra });
+              images = [...images, ...again.images];
+            }
+          } catch (err) {
+            const failure = failureOf(err);
+            if (failure.dead) rememberDead(step.name);
+            ledger.fellThrough.push(`${step.name}:also-${failure.reason}`);
+            statuses.push({ name: step.name, ok: false, count: 0, ms: Date.now() - againAt, error: failure.reason });
+            if (failure.dead) break;
           }
-        } catch (err) {
-          const failure = failureOf(err);
-          if (failure.dead) rememberDead(step.name);
-          ledger.fellThrough.push(`${step.name}:also-${failure.reason}`);
-          statuses.push({ name: step.name, ok: false, count: 0, ms: Date.now() - againAt, error: failure.reason });
         }
       }
-      statuses.push({ name: step.name, ok: true, count: hits.length, ms: Date.now() - started });
+      statuses.push({ name: step.name, ok: true, count: hits.length + more.reduce((n, list) => n + list.hits.length, 0), ms: Date.now() - started });
       const wikiHits = KEYED.has(step.name) ? await takeWiki() : [];
-      return { engine: step.name, hits, wikiHits, images, statuses };
+      return { engine: step.name, hits, more, wikiHits, images, statuses };
     } catch (err) {
       const failure = failureOf(err);
       if (failure.dead) rememberDead(step.name);
@@ -351,7 +350,7 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger): Promis
   }
   if (wikiTask && !wikiReported) {
     const hits = await takeWiki();
-    if (hits.length) return { engine: 'wikipedia', hits, wikiHits: [], images: [], statuses };
+    if (hits.length) return { engine: 'wikipedia', hits, more: [], wikiHits: [], images: [], statuses };
   }
   return none();
 }

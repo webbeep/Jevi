@@ -7,7 +7,7 @@ import { collectPages } from './pages';
 import { MADE_PATTERNS } from './patterns';
 import { planLayout } from './plan';
 import type { AskScope } from './budget';
-import { logAsk, newLedger, queriesForAsk } from './budget';
+import { logAsk, moreQueries, newLedger, queriesForAsk } from './budget';
 import { type LateExtras, searchWithLate } from './search';
 import type { Send } from './sse';
 import { extraQueries, understand } from './understand';
@@ -103,8 +103,8 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
 }
 
 /**
- * Searches the literal words straight away while working out what the person means; searches for that
- * intent ("news tldr today" → today's top headlines) lead the results, the literal ones follow.
+ * The literal question is always the first search. Planner rewrites follow on the same engine,
+ * inside the three-call cap (two rewrites leave no room for Wikipedia).
  * Rewritten follow-ups already say what they mean, so they skip the understanding step.
  */
 async function searchAndDesign(send: Send, env: Env, query: string, freshness: Freshness, context: string | undefined, started: number, scope: AskScope, rewritten = false) {
@@ -117,12 +117,11 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   const u = await understood;
   const extras = extraQueries(query, u);
   if (u) send('intent', { intent: u.intent, queries: u.queries });
-  // First planner query leads. The next planner query is one more call on the same engine when the cap allows.
+  // Literal question first. Planner rewrites are the later calls, still inside the cap.
   const q = queriesForAsk(query, extras);
-  const second = extras[1]?.replace(/\s+/g, ' ').trim().slice(0, 180);
-  const also = second && second.toLowerCase() !== q.toLowerCase() ? second : undefined;
+  const more = moreQueries(query, extras);
   const fresh = freshness === 'any' && u ? u.freshness : freshness;
-  const found = await searchWithLate({ q, also, freshness: fresh, count: 20 }, env, scope);
+  const found = await searchWithLate({ q, more, freshness: fresh, count: 20 }, env, scope);
   const results = { ...found.response, query };
 
   send('search', results);
