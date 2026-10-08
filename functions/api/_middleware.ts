@@ -16,8 +16,17 @@ const limitFor = (env: Env, name: string, fallback: number) => {
   return Number.isFinite(n) && n >= 0 ? n : fallback;
 };
 
+/**
+ * `wrangler pages dev` runs the AI binding remotely on the shared account and usually has no
+ * DeepSeek key, so every LLM call there lands on Workers AI and spends the free neurons
+ * (Oct 7: box dev sessions used the whole 10k/day). Local hosts skip Workers AI unless WORKERS_AI=on.
+ */
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '0.0.0.0']);
+
 export const onRequest: PagesFunction<Env> = async ({ request, env, next }) => {
-  const path = new URL(request.url).pathname.replace(/\/+$/, '');
+  const url = new URL(request.url);
+  if (LOCAL_HOSTS.has(url.hostname) && env.WORKERS_AI !== 'on') env.WORKERS_AI = 'off';
+  const path = url.pathname.replace(/\/+$/, '');
   if (path === '/api/health' || request.method === 'OPTIONS') return next();
 
   const isStream = path === '/api/stream';

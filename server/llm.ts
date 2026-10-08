@@ -1,3 +1,4 @@
+import { isQuotaError, markWorkersAiQuota, workersAiQuotaDown } from './aiQuota.ts';
 import type { Env } from './util';
 
 /**
@@ -42,7 +43,21 @@ const DEFS: ProviderDef[] = [
   { id: 'custom', label: 'Custom', keyVar: 'LLM_API_KEY', baseVar: 'LLM_BASE_URL', modelVar: 'LLM_MODEL', base: '', model: '' },
 ];
 
-const WORKERS_AI = { id: 'workers-ai', label: 'Workers AI', model: '@cf/meta/llama-3.3-70b-instruct-fp8-fast' };
+const WORKERS_AI = { id: 'workers-ai', label: 'Workers AI', model: '@cf/meta/llama-3.1-8b-instruct-fast' };
+const WORKERS_AI_DEFAULT_CHARS = 4000;
+
+/** Keep the head (sources, most relevant first) and the tail (TASK + QUERY) inside `cap`. */
+export function trimForWorkersAi(user: string, cap: number): string {
+  if (user.length <= cap) return user;
+  const tail = user.slice(-Math.min(1600, Math.floor(cap * 0.4)));
+  const head = user.slice(0, cap - tail.length - 3);
+  return `${head}\n…\n${tail}`;
+}
+
+function workersAiMaxChars(env: Env): number {
+  const n = Number(env.WORKERS_AI_MAX_CHARS);
+  return Number.isFinite(n) && n >= 1000 ? n : WORKERS_AI_DEFAULT_CHARS;
+}
 
 interface WorkersAiBinding {
   run(model: string, input: Record<string, unknown>): Promise<unknown>;
@@ -50,7 +65,7 @@ interface WorkersAiBinding {
 
 type Provider =
   | { kind: 'http'; id: string; label: string; base: string; key: string; model: string; extra: ProviderDef['extra'] }
-  | { kind: 'binding'; id: string; label: string; ai: WorkersAiBinding; model: string };
+  | { kind: 'binding'; id: string; label: string; ai: WorkersAiBinding; model: string; maxChars: number };
 
 function providers(env: Env): Provider[] {
   const all: Provider[] = DEFS.flatMap((d): Provider[] => {
@@ -60,8 +75,8 @@ function providers(env: Env): Provider[] {
     return key && base && model ? [{ kind: 'http', id: d.id, label: d.label, base: base.replace(/\/$/, ''), key, model, extra: d.extra }] : [];
   });
   const ai = (env as Record<string, unknown>).AI as WorkersAiBinding | undefined;
-  if (ai && typeof ai.run === 'function' && env.WORKERS_AI !== 'off') {
-    all.push({ kind: 'binding', id: WORKERS_AI.id, label: WORKERS_AI.label, ai, model: env.WORKERS_AI_MODEL || WORKERS_AI.model });
+  if (ai && typeof ai.run === 'function' && env.WORKERS_AI !== 'off' && !workersAiQuotaDown()) {
+    all.push({ kind: 'binding', id: WORKERS_AI.id, label: WORKERS_AI.label, ai, model: env.WORKERS_AI_MODEL || WORKERS_AI.model, maxChars: workersAiMaxChars(env) });
   }
   const order = env.LLM_ORDER?.split(',').map((s) => s.trim()).filter(Boolean);
   if (!order?.length) return all;
@@ -82,8 +97,10 @@ const isDown = (p: Provider) => (downUntil.get(p.id) ?? 0) > Date.now();
 const markDown = (p: Provider, ms: number) => downUntil.set(p.id, Date.now() + ms);
 
 class ProviderError extends Error {
-  constructor(message: string, readonly cooldownMs: number) {
+  readonly cooldownMs: number;
+  constructor(message: string, cooldownMs: number) {
     super(message);
+    this.cooldownMs = cooldownMs;
   }
 }
 
@@ -167,7 +184,7 @@ async function jsonFrom<T>(p: Provider, system: string, user: string, maxTokens:
       return parseObject<T>(data.choices?.[0]?.message?.content ?? '');
     }
     case 'binding': {
-      const out = (await deadline(p.ai.run(p.model, { messages: messages(system, user), max_tokens: maxTokens + 500, temperature: 0.4 }), 25_000, p.label)) as { response?: unknown };
+      const out = (await deadline(p.ai.run(p.model, { messages: messages(system, trimForWorkersAi(user, p.maxChars)), max_tokens: Math.min(maxTokens + 500, 1500), temperature: 0.4 }), 25_000, p.label)) as { response?: unknown };
       return typeof out.response === 'object' && out.response ? (out.response as T) : parseObject<T>(String(out.response ?? ''));
     }
     default: {
@@ -219,7 +236,7 @@ async function streamFrom(p: Provider, system: string, user: string, maxTokens: 
       return readSse(res.body, onText, onReasoning);
     }
     case 'binding': {
-      const out = await deadline(p.ai.run(p.model, { messages: messages(system, user), max_tokens: maxTokens + 500, temperature: 0.4, stream: true }), 15_000, p.label);
+      const out = await deadline(p.ai.run(p.model, { messages: messages(system, trimForWorkersAi(user, p.maxChars)), max_tokens: Math.min(maxTokens + 500, 1500), temperature: 0.4, stream: true }), 15_000, p.label);
       if (out instanceof ReadableStream) return deadline(readSse(out as ReadableStream<Uint8Array>, onText, onReasoning), 60_000, p.label);
       onText(String((out as { response?: unknown }).response ?? ''));
       return;
@@ -232,7 +249,9 @@ async function streamFrom(p: Provider, system: string, user: string, maxTokens: 
 }
 
 function fail(p: Provider, err: unknown) {
-  const cooldown = err instanceof ProviderError ? err.cooldownMs : localFailure(String(err)) ? 0 : 30_000;
+  const message = `${err instanceof Error ? err.message : ''} ${String(err)}`;
+  if (p.kind === 'binding' && isQuotaError(message)) markWorkersAiQuota();
+  const cooldown = err instanceof ProviderError ? err.cooldownMs : localFailure(message) ? 0 : 30_000;
   if (cooldown) markDown(p, cooldown);
   console.error(`LLM ${p.label} failed`, err instanceof Error ? err.message : err);
 }

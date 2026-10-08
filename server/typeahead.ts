@@ -4,6 +4,7 @@
  * so the client can fall back to history and starters.
  */
 import { normalizePrefix } from '../shared/typeahead.ts';
+import { isQuotaError, markWorkersAiQuota, nextUtcMidnight, workersAiQuotaDown } from './aiQuota.ts';
 import type { Env } from './util';
 
 export { normalizePrefix };
@@ -29,9 +30,9 @@ const mem = new Map<string, string[]>();
 /** After a quota error (4006: daily free neurons used) skip AI until the next 00:00 UTC reset; other errors back off 60s. */
 let aiDownUntil = 0;
 function markAiDown(why: string, now = Date.now()) {
-  if (/\b4006\b|daily free allocation|neurons/i.test(why)) {
-    const d = new Date(now);
-    aiDownUntil = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1);
+  if (isQuotaError(why)) {
+    markWorkersAiQuota(now);
+    aiDownUntil = nextUtcMidnight(now);
   } else if (why !== 'timeout') {
     aiDownUntil = now + 60_000;
   }
@@ -148,7 +149,7 @@ export async function suggestTypeahead(q: string, env: Env): Promise<TypeaheadRe
   if (env.TYPEAHEAD === 'off') return none(t0, 'off');
   const ai = (env as Record<string, unknown>).AI as AiBinding | undefined;
   if (!ai || typeof ai.run !== 'function') return none(t0, 'no binding');
-  if (Date.now() < aiDownUntil) return none(t0, 'ai cooling down');
+  if (Date.now() < aiDownUntil || workersAiQuotaDown()) return none(t0, 'ai cooling down');
 
   const model = env.TYPEAHEAD_MODEL || DEFAULT_MODEL;
   let timer: ReturnType<typeof setTimeout> | undefined;
