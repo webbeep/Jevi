@@ -5,6 +5,7 @@ import type {
 } from '../shared/types';
 import { hasLlm, llmJson } from './llm';
 import { askJev, choice, jevKey } from './jev';
+import { priorEntity } from './entity';
 import { pageText } from './pages';
 import { sanitizeSearchQuery } from './queryClean';
 import { clip, type Env } from './util';
@@ -16,7 +17,7 @@ import { clip, type Env } from './util';
 export async function rewriteQuery(original: string, question: string, env: Env, context = '', fromCard?: string): Promise<string> {
   if (!hasLlm(env)) {
     const raw = question.toLowerCase().includes(original.toLowerCase()) ? question : `${question} ${original}`;
-    return sanitizeSearchQuery(raw, fromCard);
+    return keepEntity(sanitizeSearchQuery(raw, fromCard), context, fromCard);
   }
   const { query } = await llmJson<{ query: string }>(
     env,
@@ -24,7 +25,19 @@ export async function rewriteQuery(original: string, question: string, env: Env,
     `Conversation started with: ${original}\n${context ? `Conversation so far:\n${context}\n` : ''}${fromCard ? `Asked from the card: ${fromCard}\n` : ''}Follow-up: ${question}`,
     80,
   );
-  return sanitizeSearchQuery(query?.trim() || question, fromCard);
+  return keepEntity(sanitizeSearchQuery(query?.trim() || question, fromCard), context, fromCard);
+}
+
+/**
+ * T444: a thread that chose a person keeps them. When the context carries a
+ * `Chosen person:` line but the rewrite dropped the surname, name them again.
+ */
+function keepEntity(query: string, context: string, fromCard?: string): string {
+  const prior = priorEntity(context);
+  if (!prior) return query;
+  const surname = prior.name.split(/\s+/).pop()?.toLowerCase();
+  if (!surname || query.toLowerCase().includes(surname)) return query;
+  return sanitizeSearchQuery(`${query} ${prior.name}`, fromCard);
 }
 
 const SLOTS: Record<SlotKind, string> = {

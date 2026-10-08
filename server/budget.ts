@@ -34,6 +34,8 @@ export interface CallLedger {
   via?: string;
   /** Hits removed by the relevance gate before the answer model saw them. */
   relevanceDropped?: number;
+  /** T444 entity disambiguation outcome for this ask (server log only). */
+  entity?: { kind: string; id?: string; dropped?: number; choices?: number };
 }
 
 export interface AskScope {
@@ -156,5 +158,6 @@ export function logAsk(ledger: CallLedger, served?: string): void {
     ...estimateCost(ledger),
     ...(ledger.empty ? { empty: ledger.empty } : {}),
     ...(ledger.relevanceDropped != null ? { relevanceDropped: ledger.relevanceDropped } : {}),
+    ...(ledger.entity ? { entity: ledger.entity } : {}),
   }));
 }

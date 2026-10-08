@@ -60,6 +60,8 @@ export async function serveStream(o: {
         if (event === 'done' && data !== null && typeof data === 'object' && (data as { engine?: unknown }).engine === 'extractive') extractive = true;
         // T424: never cache a degraded answer (no-sources notice, or a degraded search/done payload).
         if (event === 'notice' || ((event === 'search' || event === 'done') && data !== null && typeof data === 'object' && (data as { degraded?: unknown }).degraded === true)) extractive = true;
+        // T444: a disambiguation turn has no card; never cache it.
+        if (event === 'entity-choices') extractive = true;
         send(event, data);
       };
       await o.run(wrapped);

@@ -1,7 +1,8 @@
 import { DEEP_PAGES, routeExtras, routeOf } from './router';
 import { serperImages } from './cascade';
 import { publicEvent } from './publicPayload';
-import { mentionsAny } from './imageGate';
+import { entityContextLine, entityHintFor, priorEntity, resolveEntity } from './entity';
+import { type EntityHint, mentionsAny } from './imageGate';
 import type { RowImagePlan } from './pictures';
 import type { AnswerCard, FollowupContext, FollowupIntent, LayoutPlan } from '../shared/card';
 import type { EngineStatus, Freshness, ImageResult, SearchResponse } from '../shared/types';
@@ -69,6 +70,8 @@ interface DesignArgs {
   deep?: boolean;
   /** Pictures from the one extra Serper /images call, when this picture card had none. */
   boost?: Promise<ImageResult[]>;
+  /** T444: disambiguated person/org for the T443 image gate (never loosens it). */
+  entityHint?: (entity: string) => EntityHint | undefined;
 }
 
 /**
@@ -88,6 +91,8 @@ function rowImagePlan(req: DesignArgs, env: Env, scope: AskScope): RowImagePlan 
           : Promise.resolve([])),
     og: (url) => ogImageOf(url, 2000),
     onFilled: ({ filled, og }) => { if (filled || og) scope.ledger.rowPics = { filled, og }; },
+    // T444: the chosen entity plugs into the existing T443 image gate; never a separate filter.
+    hintFor: req.entityHint,
   };
 }
 
@@ -240,10 +245,32 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     }
   }
 
-  send('search', results);
+  // T444: before building a profile/person card, pick ONE entity from the top
+  // results. Ambiguous names return choices instead of a mixed card.
   const plan = await planned;
-  const boost = imageBoost(plan.pattern, results, env, scope, query);
-  await design(send, env, { query, pattern: plan.pattern, depth: plan.depth, readPages: plan.readPages || deep, search: results, context, intent: u?.intent, deep, boost }, started, scope, late);
+  const decision = resolveEntity(query, results.results, { pattern: plan.pattern, prior: priorEntity(context) });
+  if (decision.kind === 'choices') {
+    scope.ledger.entity = { kind: 'choices', choices: decision.choices.length };
+    console.log(JSON.stringify({ zo: 'entity', kind: 'choices', choices: decision.choices.length }));
+    send('search', results);
+    send('entity-choices', { choices: decision.choices });
+    send('done', { engine: 'extractive', removed: 0, pagesRead: 0, ms: Date.now() - started });
+    return;
+  }
+  let designContext = context;
+  let entityHint: ((entity: string) => EntityHint | undefined) | undefined;
+  let boostQuery = query;
+  if (decision.kind === 'single') {
+    scope.ledger.entity = { kind: 'single', id: decision.entity.id, dropped: decision.dropped.length };
+    console.log(JSON.stringify({ zo: 'entity', kind: 'single', id: decision.entity.id, kept: decision.kept.length, dropped: decision.dropped.length }));
+    results = { ...results, results: decision.kept.map((i) => results.results[i]!).filter(Boolean) };
+    designContext = [entityContextLine(decision.entity), context].filter(Boolean).join('\n');
+    entityHint = entityHintFor(decision.entity);
+    boostQuery = decision.entity.name;
+  }
+  send('search', results);
+  const boost = imageBoost(plan.pattern, results, env, scope, boostQuery);
+  await design(send, env, { query, pattern: plan.pattern, depth: plan.depth, readPages: plan.readPages || deep, search: results, context: designContext, intent: u?.intent, deep, boost, entityHint }, started, scope, late);
 }
 
 /**

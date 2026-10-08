@@ -889,6 +889,21 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
                 : 'No fresh sources found — answered from general knowledge, may be out of date.'}
             </p>
           )}
+          {turn.entityChoices && turn.entityChoices.length > 0 && (
+            <div data-testid="entity-choices" role="group" aria-label="Which person did you mean?" className="flex flex-wrap gap-2">
+              {turn.entityChoices.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => void actions.followup(c.query, id, 'search')}
+                  className="inline-flex min-h-11 items-center gap-2 rounded-xl border px-4 py-2 text-sm transition-colors hover:bg-foreground/5"
+                >
+                  <span className="font-medium">{c.name}</span>
+                  <span className="text-muted-foreground">{c.descriptor}</span>
+                </button>
+              ))}
+            </div>
+          )}
           <CardContext.Provider value={context}>
             <AnswerCardView
               card={card}

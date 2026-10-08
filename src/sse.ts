@@ -27,6 +27,7 @@ export type StreamEvent =
   | { event: 'followups'; data: string[] }
   | { event: 'done'; data: { engine: 'composed' | 'reasoning' | 'extractive'; removed: number; pagesRead: number; ms: number; via?: string; degraded?: boolean; degradedReason?: string } }
   | { event: 'notice'; data: NoSourcesNotice }
+  | { event: 'entity-choices'; data: { choices: { name: string; descriptor: string; query: string; id: string }[] } }
   | { event: 'error'; data: { message: string; retryable?: boolean } };
 
 function httpError(status: number, message: string): StreamError {

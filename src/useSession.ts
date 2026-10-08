@@ -59,6 +59,8 @@ export interface Turn {
   error?: string;
   /** Set when the card was answered without web sources. */
   notice?: NoSourcesNotice;
+  /** T444: the name needs disambiguating — tap one to re-ask. */
+  entityChoices?: { name: string; descriptor: string; query: string; id: string }[];
   /** The failure can be tried again from the same turn. */
   retryable?: boolean;
   /** The failure was a dropped connection; auto-reconnect is pending and the partial stays up. */
@@ -239,6 +241,8 @@ export function useSession() {
           return update(route, { search: e.data });
         case 'notice':
           return update(route, { notice: e.data });
+        case 'entity-choices':
+          return update(route, { entityChoices: e.data.choices });
         case 'pages': {
           const target = searchOf(get(route));
           if (!target?.search) return;
@@ -274,7 +278,8 @@ export function useSession() {
         case 'done':
           return update(route, (t) => {
             if (!t.live?.nodes.some(Boolean)) {
-              return { live: undefined, filling: false, status: undefined, thinking: false, offline: undefined, reconnects: undefined, ...emptyDoneState(Boolean(t.result)) };
+              // A disambiguation turn has choices instead of a card: not an error.
+              return { live: undefined, filling: false, status: undefined, thinking: false, offline: undefined, reconnects: undefined, ...emptyDoneState(Boolean(t.result) || Boolean(t.entityChoices?.length)) };
             }
             const result: CardResponse = {
               card: { title: t.live.head?.title ?? t.question, ...t.live.head, body: liveBody(t.live, false), credits: t.live.credits },
@@ -379,8 +384,8 @@ export function useSession() {
 
   const runSearchTurn = useCallback(async (id: number, query: string, opts?: { retry?: boolean }) => {
     const keep = Boolean(opts?.retry && get(id)?.offline);
-    if (keep) update(id, { kind: 'search', question: query, searchId: id, filling: true, thinking: false, status: undefined });
-    else update(id, { kind: 'search', question: query, searchId: id, filling: true, plan: undefined, search: undefined, result: undefined, live: undefined, error: undefined, offline: undefined, reconnects: undefined });
+    if (keep) update(id, { kind: 'search', question: query, searchId: id, filling: true, thinking: false, status: undefined, entityChoices: undefined });
+    else update(id, { kind: 'search', question: query, searchId: id, filling: true, plan: undefined, search: undefined, result: undefined, live: undefined, error: undefined, offline: undefined, reconnects: undefined, entityChoices: undefined });
     try {
       await run(id, { kind: 'search', query, freshness: 'any', context: memory(id) || undefined }, opts?.retry ? { retry: true } : undefined);
     } catch {
