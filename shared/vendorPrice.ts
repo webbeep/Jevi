@@ -161,17 +161,8 @@ export function differsFromVendor(amount: number, vendor: number): boolean {
   return Math.abs(amount - vendor) > vendor * 0.05 + 1e-9;
 }
 
-/**
- * A retailer amount far from the vendor price (more than 35% off) is almost always a
- * different item (older model, accessory, used, monthly plan), not a discount: never
- * show it next to the vendor price or flag it. Wrong is worse than none.
- */
-export function plausibleRetail(amount: number, vendor: number): boolean {
-  return vendor > 0 && amount >= vendor * 0.65 && amount <= vendor * 1.35;
-}
-
 export function priceFlag(other: number, vendor: number): PriceFlag | undefined {
-  if (!differsFromVendor(other, vendor) || !plausibleRetail(other, vendor)) return undefined;
+  if (!differsFromVendor(other, vendor)) return undefined;
   return { vendor, other, pct: Math.round((Math.abs(other - vendor) / vendor) * 100), dir: other < vendor ? 'below' : 'above' };
 }
 
@@ -395,7 +386,7 @@ export function reconcileProductPrices<T>(nodes: readonly (T | undefined)[], que
     }
     placed.add(price.id);
     const { line, flag } = retailerLine(value, a, price);
-    const same = Math.abs(a.amount - price.amount) < 0.5 || !plausibleRetail(a.amount, price.amount);
+    const same = Math.abs(a.amount - price.amount) < 0.5;
     const sub = typeof rec.sub === 'string' && rec.sub.trim() ? rec.sub.trim() : '';
     const out: Record<string, unknown> = {
       ...rec,
@@ -418,7 +409,7 @@ export function reconcileProductPrices<T>(nodes: readonly (T | undefined)[], que
     if (!price || !a) return { ...rec, ...(caption ? { caption: annotateText(caption, query, prices, placed) } : {}) };
     placed.add(price.id);
     const { line, flag } = retailerLine(value, a, price);
-    const same = Math.abs(a.amount - price.amount) < 0.5 || !plausibleRetail(a.amount, price.amount);
+    const same = Math.abs(a.amount - price.amount) < 0.5;
     const vendorLine = `${price.domain} [${price.source}]${same ? '' : ` · ${line}`}`;
     const out: Record<string, unknown> = { ...rec, value: vendorLabel(price), vendorTrue: true, caption: caption ? `${vendorLine} · ${caption}` : vendorLine };
     if (flag) out.priceFlag = flag;
@@ -442,7 +433,7 @@ export function reconcileProductPrices<T>(nodes: readonly (T | undefined)[], que
         if (!price || !a || cell.includes(`[${price.source}]`)) return annotateText(cell, query, prices, placed);
         placed.add(price.id);
         const flag = priceFlag(a.amount, price.amount);
-        const same = Math.abs(a.amount - price.amount) < 0.5 || !plausibleRetail(a.amount, price.amount);
+        const same = Math.abs(a.amount - price.amount) < 0.5;
         const cite = /^\s*((?:\[\d+\])+)/.exec(cell.slice(a.end))?.[1];
         const retailer = same ? '' : ` · ${formatUsd(a.amount)}${cite ? ` ${cite}` : ''}${flag ? ` (${flagText(flag)})` : ''}`;
         meta = { domain: price.domain, vendorTrue: true, ...(flag ? { note: FLAG_NOTE, flag } : {}) };
