@@ -1,7 +1,8 @@
 import { DEEP_PAGES, routeExtras, routeOf } from './router';
 import { serperImages } from './cascade';
 import { publicEvent } from './publicPayload';
-import { entityContextLine, entityHintFor, priorEntity, resolveEntity } from './entity';
+import { contextTerms, entityContextLine, entityHintFor, isDisambiguationPage, isPersonAsk, personSubject, priorEntity, resolveEntity } from './entity';
+import { fetchWikiDisambiguation } from './wikiSearch';
 import { type EntityHint, mentionsAny } from './imageGate';
 import type { RowImagePlan } from './pictures';
 import type { AnswerCard, FollowupContext, FollowupIntent, LayoutPlan } from '../shared/card';
@@ -233,16 +234,21 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
       }
     }
     if (!results.results.length) {
-      const entity = entityQuery(query);
+      // Picked-choice / person+descriptor: search the bare name and gate on the name so
+      // context filters never drop every source (live Which-one? taps → no-sources).
+      const person = isPersonAsk(query) ? personSubject(query) : '';
+      const entity = (person && person.toLowerCase() !== query.trim().toLowerCase() ? person : '') || entityQuery(query);
       const lower = entity.toLowerCase();
       if (entity && lower !== query.trim().toLowerCase() && lower !== relaxed.toLowerCase()) {
         triedEntity = true;
         const again = await searchWithLate({ q: entity, freshness: 'any', count: 20 }, env, scope);
-        const gated = applyRelevance(query, { ...again.response, query }, scope.ledger);
+        const gateQ = person || query;
+        const gated = applyRelevance(gateQ, { ...again.response, query: gateQ }, scope.ledger);
         if (gated.results.length) {
           results = gated;
           late = again.late;
           recovered = 'entity';
+          if (person) console.log(JSON.stringify({ zo: 'entity', nameFallback: true, kept: gated.results.length }));
         }
       }
     }
@@ -274,6 +280,25 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   // T444: before building a profile/person card, pick ONE entity from the top
   // results. Ambiguous names return choices instead of a mixed card.
   const plan = await planned;
+  // Bare person ask with no Wikipedia "may refer to" in the SERP: one keyless disambiguation lookup (0 Serper).
+  if (isPersonAsk(query, plan.pattern) && !contextTerms(query).length && !priorEntity(context)) {
+    const name = personSubject(query);
+    if (name && !results.results.some((r) => isDisambiguationPage(r))) {
+      const wiki = await fetchWikiDisambiguation(name).catch(() => null);
+      if (wiki) {
+        scope.ledger.search.wikipedia += 1;
+        const row = {
+          title: wiki.title,
+          url: wiki.url,
+          snippet: wiki.snippet,
+          domain: 'en.wikipedia.org',
+          engines: ['wikipedia'],
+        };
+        results = { ...results, results: [row, ...results.results.filter((r) => r.url !== wiki.url)] };
+        console.log(JSON.stringify({ zo: 'entity', wikiDisambiguation: true, title: wiki.title }));
+      }
+    }
+  }
   const decision = resolveEntity(query, results.results, { pattern: plan.pattern, prior: priorEntity(context) });
   if (decision.kind === 'choices') {
     scope.ledger.entity = { kind: 'choices', choices: decision.choices.length };
@@ -322,7 +347,8 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
 
   // A search button on a card: always resolve it against the conversation ("apple varieties" → "best apples for apple pie").
   if (req.intent === 'search') {
-    const query = await rewriteQuery(req.original, req.question, env, context, from?.title).catch(() => req.question);
+    // Card/control prompts (incl. Which-one? choice.query) are already the search string — do not LLM-rewrite.
+    const query = req.question.trim();
     send('rewrite', { query });
     await searchAndDesign(send, env, query, 'any', context, started, scope, true);
     return;
