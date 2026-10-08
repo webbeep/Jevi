@@ -1,7 +1,7 @@
 import type { Freshness } from '../../shared/types';
 import { newLedger } from '../../server/budget';
 import { search } from '../../server/search';
-import { cacheBypass } from '../../server/token';
+import { cacheBypass, validTestToken } from '../../server/token';
 import { Env, errorJson, json } from '../../server/util';
 
 const FRESHNESS: Freshness[] = ['any', 'day', 'week', 'month', 'year'];
@@ -14,6 +14,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env, waitUntil
   const freshness = FRESHNESS.includes(f) ? f : 'any';
 
   const bypass = cacheBypass(request, env);
+  const evalAsk = validTestToken(request.headers.get('x-zo-test-token'), env.ZO_TEST_TOKEN);
   const cache = caches.default;
   const cacheKey = new Request(`${url.origin}/api/search?q=${encodeURIComponent(q.toLowerCase())}&freshness=${freshness}`);
   if (!bypass) {
@@ -22,7 +23,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env, waitUntil
   }
 
   try {
-    const data = await search({ q, freshness, count: 20 }, env, { ledger: newLedger(), bypass, waitUntil: (p) => waitUntil(p) });
+    const data = await search({ q, freshness, count: 20 }, env, { ledger: newLedger(), bypass, eval: evalAsk, waitUntil: (p) => waitUntil(p) });
     const res = json(data, 200, { 'cache-control': bypass ? 'no-store' : 'public, max-age=600' });
     if (!bypass && data.results.length) waitUntil(cache.put(cacheKey, res.clone()));
     return res;

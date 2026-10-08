@@ -27,6 +27,10 @@ export interface AskScope {
   ledger: CallLedger;
   bypass: boolean;
   waitUntil?: (promise: Promise<unknown>) => void;
+  /** Valid `x-zo-test-token` only. Selects the eval daily-cap bucket. */
+  eval?: boolean;
+  /** Engine that answered, when a search ran. */
+  served?: string;
 }
 
 export function newLedger(): CallLedger {
@@ -122,14 +126,15 @@ export function moreQueries(literal: string, extras: string[]): string[] {
   return out;
 }
 
-/** One line per ask. No keys, headers, query text, or URLs. */
-export function logAsk(ledger: CallLedger): void {
+/** One line per ask. No keys, headers, query text, or URLs. `served` is the engine name only. */
+export function logAsk(ledger: CallLedger, served?: string): void {
   console.log(JSON.stringify({
     zo: 'calls',
     search: ledger.search,
     cache: ledger.cache,
     pages: ledger.pages,
     fellThrough: ledger.fellThrough,
+    ...(served ? { served } : {}),
     ...(ledger.empty ? { empty: ledger.empty } : {}),
   }));
 }

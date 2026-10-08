@@ -96,7 +96,8 @@ describe('search fallback', { concurrency: 1 }, () => {
       return Response.json({});
     };
     try {
-      const out = await cascadeWeb({ q: 'open source database', freshness: 'any', count: 8 }, { SERPER_API_KEY: 's' } as Env, newLedger());
+      const allow = { prepare() { return { bind() { return { async first() { return { count: 1 }; } }; } }; } };
+      const out = await cascadeWeb({ q: 'open source database', freshness: 'any', count: 8 }, { SERPER_API_KEY: 's', DB: allow } as Env, newLedger());
       const after = Date.now();
       const byUrl = new Map(out.hits.map((h) => [h.url, h.date]));
       const days = Date.parse(byUrl.get('https://example.com/days') ?? '');
@@ -141,7 +142,7 @@ describe('search fallback', { concurrency: 1 }, () => {
     };
     try {
       const ledger = newLedger();
-      const env = { EXA_API_KEY: 'e', LANGSEARCH_API_KEY: 'l', ENGINE_SKIP: store.kv } as Env;
+      const env = { EXA_API_KEY: 'e', LANGSEARCH_API_KEY: 'l', SEARCH_ORDER: 'exa,langsearch', ENGINE_SKIP: store.kv } as Env;
       const out = await cascadeWeb({ q: 'open source database', freshness: 'any', count: 8 }, env, ledger, (p) => { queued.push(p); });
       assert.equal(out.engine, 'langsearch');
       assert.equal(out.hits[0]?.url, 'https://www.postgresql.org/');
@@ -243,7 +244,7 @@ describe('search fallback', { concurrency: 1 }, () => {
       return Response.json({ results: [{ title: 'Tavily', url: 'https://example.com/t', content: 'An open source database.' }] });
     };
     try {
-      const env = { EXA_API_KEY: 'e', LANGSEARCH_API_KEY: 'l', TAVILY_API_KEY: 't', ENGINE_SKIP: store.kv } as Env;
+      const env = { EXA_API_KEY: 'e', LANGSEARCH_API_KEY: 'l', TAVILY_API_KEY: 't', SEARCH_ORDER: 'exa,langsearch,tavily', ENGINE_SKIP: store.kv } as Env;
       const skips = await loadSkips(env);
       assert.equal(skips.exa, until);
       assert.equal(skips.tavily, undefined);

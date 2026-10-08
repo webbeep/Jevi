@@ -13,7 +13,7 @@ import { entityQuery, relaxQuery } from './queryClean';
 import { type LateExtras, searchWithLate } from './search';
 import type { Send } from './sse';
 import { extraQueries, understand } from './understand';
-import { cacheBypass } from './token';
+import { cacheBypass, validTestToken } from './token';
 import type { Env } from './util';
 
 export interface CardOnScreen {
@@ -265,6 +265,7 @@ export async function runStream(req: StreamRequest, env: Env, send: Send, opts?:
     ledger: newLedger(),
     bypass: opts?.request ? cacheBypass(opts.request, env) : false,
     waitUntil: opts?.waitUntil,
+    eval: opts?.request ? validTestToken(opts.request.headers.get('x-zo-test-token'), env.ZO_TEST_TOKEN) : false,
   };
   try {
     switch (req.kind) {
@@ -283,6 +284,6 @@ export async function runStream(req: StreamRequest, env: Env, send: Send, opts?:
       }
     }
   } finally {
-    logAsk(scope.ledger);
+    logAsk(scope.ledger, scope.served);
   }
 }

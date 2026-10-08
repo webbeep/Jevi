@@ -1,8 +1,9 @@
 import { cleanMarkdown } from '../shared/text';
 import type { EngineStatus, Freshness, ImageResult } from '../shared/types';
 import { ddgBackupOn, fetchBackup } from './backup';
-import { callCap, type CallLedger, type SearchEngine, engineDead, failureOf, rememberDead, searchCalls } from './budget';
+import { SEARCH_ENGINES, callCap, type CallLedger, type SearchEngine, engineDead, failureOf, rememberDead, searchCalls } from './budget';
 import { loadSkips, tripSkip } from './engineSkip';
+import { takeSlot, type CapBucket } from './providerCap';
 import { HttpStatusError, type Env, clip, domainOf, fetchJson } from './util';
 import { fetchWikiSearch } from './wikiSearch';
 
@@ -263,6 +264,25 @@ async function serperSearch(q: Query, env: Env): Promise<{ hits: WebHit[]; image
 
 const KEYED = new Set<SearchEngine>(['exa', 'langsearch', 'tavily', 'firecrawl', 'serper']);
 
+/** Default cascade. `SEARCH_ORDER` may move names; unknown tokens are ignored; anything left out is appended in this order. */
+const DEFAULT_ORDER: readonly SearchEngine[] = ['serper', 'langsearch', 'exa', 'tavily', 'firecrawl', 'wikipedia', 'backup'];
+
+export function searchOrder(env: Env): SearchEngine[] {
+  const known = new Set<string>(SEARCH_ENGINES);
+  const listed: SearchEngine[] = [];
+  const seen = new Set<string>();
+  for (const raw of (env.SEARCH_ORDER ?? '').split(',')) {
+    const name = raw.trim();
+    if (!name || !known.has(name) || seen.has(name)) continue;
+    seen.add(name);
+    listed.push(name as SearchEngine);
+  }
+  for (const name of DEFAULT_ORDER) {
+    if (!seen.has(name)) listed.push(name);
+  }
+  return listed;
+}
+
 interface WikiOutcome {
   hits: WebHit[];
   error?: string;
@@ -270,20 +290,21 @@ interface WikiOutcome {
 }
 
 /**
- * Exa, LangSearch, Tavily, Firecrawl, Serper, then Wikipedia. DuckDuckGo lite
- * runs only when ZO_DDG_BACKUP=1, after Wikipedia. Keyed steps are skipped when
- * their key is empty. The next engine runs only after a credit, quota, auth,
- * timeout, upstream, or empty failure. Dead engines, and engines on the shared
- * skip list, are skipped without a call. A keyed error raises the call cap by
- * two so the chain can still reach the next live provider. A keyed success also
- * takes the planner rewrites on that same engine. Wikipedia
- * runs in parallel only when fewer than two rewrites are queued, so the ask
- * stays inside callCap(ledger). Wikipedia is returned separately so it ranks
- * after the engine. At most callCap(ledger) calls.
+ * Serper, LangSearch, Exa, Tavily, Firecrawl, then Wikipedia, unless SEARCH_ORDER
+ * says otherwise. DuckDuckGo lite runs only when ZO_DDG_BACKUP=1, after Wikipedia.
+ * Keyed steps are skipped when their key is empty. The next engine runs only after
+ * a credit, quota, auth, timeout, upstream, empty, or daily-cap failure. Dead
+ * engines, and engines on the shared skip list, are skipped without a call. A
+ * keyed error raises the call cap by two so the chain can still reach the next
+ * live provider. A keyed success also takes the planner rewrites on that same
+ * engine; each of those counts against the provider's daily cap. Wikipedia runs
+ * in parallel only when fewer than two rewrites are queued, so the ask stays
+ * inside callCap(ledger). Wikipedia is returned separately so it ranks after the
+ * engine. At most callCap(ledger) calls. A refused daily slot is not a call.
  */
 const TRIP_REASONS = new Set(['payment', 'quota', 'unavailable', 'credit']);
 
-export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUntil?: (promise: Promise<unknown>) => void): Promise<CascadeResult> {
+export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUntil?: (promise: Promise<unknown>) => void, bucket: CapBucket = 'prod'): Promise<CascadeResult> {
   const skips = await loadSkips(env);
   const blocked = (name: string) => engineDead(name) || (skips[name] ?? 0) > Date.now();
   const noteFailure = async (name: SearchEngine, failure: { dead: boolean; reason: string }, grantBonus: boolean) => {
@@ -292,15 +313,16 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUnt
     if (grantBonus && KEYED.has(name) && failure.reason !== 'empty') ledger.bonus = Math.max(ledger.bonus ?? 0, 2);
   };
   const statuses: EngineStatus[] = [];
-  const steps: { name: SearchEngine; enabled: boolean; run: (text: string) => Promise<{ hits: WebHit[]; images: ImageResult[] }> }[] = [
-    { name: 'exa', enabled: hasKey(env, 'EXA_API_KEY'), run: (text) => exaSearch({ ...q, q: text }, env) },
-    { name: 'langsearch', enabled: hasKey(env, 'LANGSEARCH_API_KEY'), run: (text) => langSearch({ ...q, q: text }, env) },
-    { name: 'tavily', enabled: hasKey(env, 'TAVILY_API_KEY'), run: (text) => tavilySearch({ ...q, q: text }, env) },
-    { name: 'firecrawl', enabled: hasKey(env, 'FIRECRAWL_API_KEY'), run: (text) => firecrawlSearch({ ...q, q: text }, env) },
-    { name: 'serper', enabled: hasKey(env, 'SERPER_API_KEY'), run: (text) => serperSearch({ ...q, q: text }, env) },
-    { name: 'wikipedia', enabled: true, run: async () => ({ hits: await fetchWikiSearch(q.q), images: [] }) },
-    { name: 'backup', enabled: ddgBackupOn(env), run: async () => ({ hits: await fetchBackup(q.q, q.freshness), images: [] }) },
-  ];
+  const catalog = new Map<SearchEngine, { name: SearchEngine; enabled: boolean; run: (text: string) => Promise<{ hits: WebHit[]; images: ImageResult[] }> }>([
+    ['exa', { name: 'exa', enabled: hasKey(env, 'EXA_API_KEY'), run: (text) => exaSearch({ ...q, q: text }, env) }],
+    ['langsearch', { name: 'langsearch', enabled: hasKey(env, 'LANGSEARCH_API_KEY'), run: (text) => langSearch({ ...q, q: text }, env) }],
+    ['tavily', { name: 'tavily', enabled: hasKey(env, 'TAVILY_API_KEY'), run: (text) => tavilySearch({ ...q, q: text }, env) }],
+    ['firecrawl', { name: 'firecrawl', enabled: hasKey(env, 'FIRECRAWL_API_KEY'), run: (text) => firecrawlSearch({ ...q, q: text }, env) }],
+    ['serper', { name: 'serper', enabled: hasKey(env, 'SERPER_API_KEY'), run: (text) => serperSearch({ ...q, q: text }, env) }],
+    ['wikipedia', { name: 'wikipedia', enabled: true, run: async () => ({ hits: await fetchWikiSearch(q.q), images: [] }) }],
+    ['backup', { name: 'backup', enabled: ddgBackupOn(env), run: async () => ({ hits: await fetchBackup(q.q, q.freshness), images: [] }) }],
+  ]);
+  const steps = searchOrder(env).map((name) => catalog.get(name)!);
 
   let wikiTask: Promise<WikiOutcome> | undefined;
   let wikiReported = false;
@@ -350,6 +372,11 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUnt
       ledger.fellThrough.push(`${step.name}:cap`);
       break;
     }
+    if (!(await takeSlot(env, step.name, bucket))) {
+      ledger.fellThrough.push(`${step.name}:cap-daily`);
+      statuses.push({ name: step.name, ok: false, count: 0, ms: 0, error: 'cap-daily' });
+      continue;
+    }
     ledger.search[step.name] += 1;
     const started = Date.now();
     // Two planner rewrites plus this call fill the cap. Wikipedia stays off so both rewrites still run.
@@ -367,6 +394,7 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUnt
       if (KEYED.has(step.name)) {
         for (const text of extras) {
           if (searchCalls(ledger) >= callCap(ledger) || engineDead(step.name)) break;
+          if (!(await takeSlot(env, step.name, bucket))) break;
           ledger.search[step.name] += 1;
           const againAt = Date.now();
           try {

@@ -224,7 +224,7 @@ async function wikiKnowledge(q: string): Promise<Knowledge | undefined> {
 const emptyLate = (): LateExtras => ({ content: new Map(), images: [] });
 
 export async function searchWithLate(q: Query, env: Env, scope?: AskScope): Promise<SearchWithLate> {
-  const ask = scope ?? { ledger: newLedger(), bypass: false };
+  const ask: AskScope = scope ?? { ledger: newLedger(), bypass: false };
   const key = searchCacheKey(q.q, q.freshness, q.count);
   const db = cacheDb(env);
 
@@ -239,7 +239,7 @@ export async function searchWithLate(q: Query, env: Env, scope?: AskScope): Prom
     ask.ledger.cache = cached.kind === 'off' ? 'off' : 'miss';
   }
 
-  const webPromise = cascadeWeb(q, env, ask.ledger, ask.waitUntil);
+  const webPromise = cascadeWeb(q, env, ask.ledger, ask.waitUntil, ask.eval ? 'eval' : 'prod');
   // ZO_SOCIAL=1 only: one keyless Bluesky call beside the cascade, not counted as a web engine. No-op on error.
   const socialTask = maybeBluesky(q, env);
   const graceOver = webPromise.then(() => new Promise<void>((r) => setTimeout(r, EXTRAS_GRACE_MS)));
@@ -256,6 +256,7 @@ export async function searchWithLate(q: Query, env: Env, scope?: AskScope): Prom
     q.lite ? [] : bounded(hnP, [] as Discussion[]),
     socialTask,
   ]);
+  if (web.engine !== 'none') ask.served = web.engine;
 
   // Each query is scored against its own words, then interleaved with the literal question first.
   const fused = [
