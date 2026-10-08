@@ -336,7 +336,7 @@ export default function App() {
 
               <aside className="hidden lg:block">
                 {library.length > 0 && (
-                  <div className="sticky top-[5.5rem] max-h-[calc(100dvh-7rem)] overflow-y-auto no-scrollbar">
+                  <div className="sticky top-[calc(5.5rem-10px)] -mt-2.5 pt-2.5 max-h-[calc(100dvh-7rem+10px)] overflow-y-auto no-scrollbar">
                     <SourcesRail entries={library} engines={railTurn?.search?.engines ?? []} onRead={read} onAll={() => openSources()} />
                   </div>
                 )}

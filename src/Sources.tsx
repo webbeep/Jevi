@@ -94,7 +94,7 @@ function FilterToggle({ value, onChange, cited, all }: { value: SourceFilter; on
   return (
     <ToggleGroup type="single" size="sm" value={value} onValueChange={(v) => v && onChange(v as SourceFilter)} className="rounded-lg bg-foreground/[0.05] p-0.5">
       {(['cited', 'all'] as const).map((f) => (
-        <ToggleGroupItem key={f} value={f} disabled={f === 'cited' && !cited} className="h-6 rounded-md px-2 text-[11.5px] text-muted-foreground data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm">
+        <ToggleGroupItem key={f} value={f} disabled={f === 'cited' && !cited} className="relative min-w-11 h-6 rounded-md px-2 text-[11.5px] text-muted-foreground after:absolute after:inset-x-0 after:-inset-y-[10px] after:content-[''] data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm">
           {f === 'cited' ? 'Cited' : 'All'}
           <span className="zo-meta">{f === 'cited' ? cited : all}</span>
         </ToggleGroupItem>
