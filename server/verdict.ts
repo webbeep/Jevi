@@ -113,18 +113,17 @@ function clip(s: string, max: number): string {
   return `${t.slice(0, max - 1).replace(/\s+\S*$/, '')}…`;
 }
 
+/** ≤ ~4 words so the hero label is not truncated on the card (Lead: bananas label). */
+function shortLabel(s: string, maxWords = 4): string {
+  const parts = s.replace(/\s*\[\d+\]/g, '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
+  return parts.slice(0, maxWords).join(' ');
+}
+
 /** The short mutual claim inside a sentence, so the tile states the same thing the body does. */
 function claimLabel(s: string): string {
   const clean = s.replace(/\s*\[\d+\]/g, '').replace(/\s+/g, ' ').trim();
   const mutual = clean.match(/\b((?:each|both) (?:speeds?|ripens?)[^.]{0,32}|\b(?:speeds?|ripens?) (?:each other|the other)[^.]{0,24})/i);
-  return clip(mutual?.[0] ?? clean, 80);
-}
-
-function soften(label: string | undefined): string {
-  if (!label) return 'Unproven';
-  if (/\bnever said\b/i.test(label)) return 'No evidence he said it';
-  if (/\b(didn't say|did not say|disproven)\b/i.test(label)) return 'Unproven';
-  return label;
+  return shortLabel(mutual?.[0] ?? clean, 4);
 }
 
 function mutualSentence(body: string, label: string, side: 'yes' | 'no'): string | undefined {
@@ -151,7 +150,12 @@ function fixFace(node: Face, flags: Flags, body: string): CardNode {
   if (pol === 'none') return node;
   const own = `${node.type === 'hero' ? node.caption ?? '' : node.sub ?? ''}`;
   const absenceHere = flags.absence || (ABSENCE.test(own) && shared(words(own), flags.queryWords) >= 1);
-  if (pol === 'no' && absenceHere && !flags.explicitDenial) return paint(node, 'No evidence', 'warning', soften(node.label));
+  // Soften a hard No when sources only say "no proof", and always align the label with the
+  // softened polarity (Lead live: value No proof / No evidence, label still "never said it").
+  if (pol === 'no' && (absenceHere || flags.explicitDenial)) {
+    if (flags.explicitDenial && !absenceHere) return paint(node, 'No', 'negative', 'No');
+    return paint(node, 'No evidence', 'warning', 'No');
+  }
   if ((pol === 'yes' || pol === 'mixed') && flags.officialNeg) return paint(node, 'No', 'negative');
   if (pol === 'no') {
     const s = mutualSentence(body, node.label ?? '', 'yes');

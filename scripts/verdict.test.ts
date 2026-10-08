@@ -85,6 +85,7 @@ test('Q17: No tile is corrected once the body says each fruit speeds the other',
   assert.equal(hero(revised.node)?.value, 'Yes');
   assert.equal(/don't|do not|never/i.test(hero(revised.node)?.label ?? ''), false);
   assert.match(hero(revised.node)?.label ?? '', /speed/i);
+  assert.ok((hero(revised.node)?.label ?? '').split(/\s+/).filter(Boolean).length <= 4, hero(revised.node)?.label);
 });
 
 test('P11: no proof stays No evidence, not a hard No or never', () => {
@@ -101,6 +102,7 @@ test('P11: no proof stays No evidence, not a hard No or never', () => {
   });
   const { node } = session.offer(lead, 0);
   assert.equal(node.type === 'hero' && node.value, 'No evidence');
+  assert.equal(node.type === 'hero' && node.label, 'No');
   assert.equal(/never|didn't|disproven|\bfalse\b/i.test(node.type === 'hero' ? `${node.value} ${node.label}` : ''), false);
 });
 
@@ -132,4 +134,21 @@ test('stray markdown is stripped from card text', () => {
   assert.equal(stripMarkup('use __em__ please'), 'use em please');
   const [node] = sanitizeNodes([{ type: 'text', text: '**But the benefit is not universal." [4]' }], 0);
   assert.equal(node?.type === 'text' && node.text, 'But the benefit is not universal. [4]');
+});
+
+test('P11 explicit never-said: label is No (matches the verdict), not a hard claim', () => {
+  const lead: CardNode = {
+    type: 'hero',
+    value: 'No',
+    label: 'Henry Ford never said it',
+    caption: 'He never said customers would want a faster horse.',
+    tone: 'negative',
+  };
+  const session = new VerdictSession({
+    query: 'Did Henry Ford say if he asked customers they would want a faster horse?',
+    results: [hit({ title: 'Quote', url: 'https://www.snopes.com/ford', domain: 'snopes.com', snippet: 'Henry Ford never said if he had asked customers they would want a faster horse.' })],
+  });
+  const { node } = session.offer(lead, 0);
+  assert.equal(node.type === 'hero' && node.value, 'No');
+  assert.equal(node.type === 'hero' && node.label, 'No');
 });
