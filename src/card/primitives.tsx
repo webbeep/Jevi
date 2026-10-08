@@ -20,6 +20,12 @@ type Of<T extends CardNode['type']> = Extract<CardNode, { type: T }>;
 /** Short labels render as plain text, so inline source markers are dropped from them. */
 export const plain = (s: string) => s.replace(/\s*\[\d+\]/g, '').trim();
 
+/** Mirrors server/verdict.ts polarity(): a short Yes/No/Mixed-style value is a verdict the server may revise in place. */
+const isVerdict = (value: string | undefined) => !!value && value.trim().length <= 24 && /^(yes|true|no|false|mixed|unclear|depends|partly)\b/i.test(value.trim());
+
+/** A label the server already clipped ("… each other —…") drops the dangling dash/comma before its ellipsis. */
+const tidyClip = (s: string) => s.replace(/[\s—–,;:-]+…$/, '…');
+
 /** True when a tile's group (grid, row stack, scroller) has a tile with a picture: every tile there keeps the picture slot. */
 export const TilePictures = createContext(false);
 
@@ -69,7 +75,12 @@ export function Hero({ node }: { node: Of<'hero'> }) {
   const value = useCountUp(node.value);
   return (
     <div className="flex min-w-0 flex-col">
-      {node.label && <span className="zo-label">{plain(node.label)}</span>}
+      {node.label && (
+        // Max two lines; a verdict hero reserves both (text from the top) so an in-place revision (No -> Yes, longer label) never shifts anything.
+        <span data-hero-label="" className={cn('zo-label flex', isVerdict(node.value) && 'min-h-[2lh] items-start')}>
+          <span className="line-clamp-2 text-pretty [overflow-wrap:anywhere]">{tidyClip(plain(node.label))}</span>
+        </span>
+      )}
       <div className="flex items-start gap-3">
         <span className={cn('text-[52px] font-semibold leading-[0.95] tracking-[-0.045em] sm:text-[64px]', node.value.length > 8 && node.value.length <= 14 && 'text-[36px] leading-[1.05] tracking-[-0.035em] sm:text-[64px] sm:leading-[0.95] sm:tracking-[-0.045em]', node.value.length > 14 && 'text-[32px] leading-tight tracking-[-0.03em] sm:text-[40px]', TONE_TEXT[node.tone === 'primary' || !node.tone ? 'default' : node.tone])}>
           <span className="tabular-nums">{plain(value)}</span>
@@ -370,9 +381,14 @@ export function Tile({ node }: { node: Of<'tile'> }) {
           {img && <PhotoCredit src={img} className="right-1 top-1" />}
         </span>
       )}
-      <span className="pointer-events-none relative inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
-        {plain(node.label)}
-        {link && <span className="-my-[3px]"><SourceChip result={link} n={node.source!} /></span>}
+      <span
+        className={cn(
+          'pointer-events-none relative flex max-w-full min-w-0 justify-center gap-1 text-[11px] font-medium text-muted-foreground',
+          isVerdict(node.value) ? 'min-h-[2lh] items-start' : 'items-center',
+        )}
+      >
+        <span className="line-clamp-2 min-w-0 text-pretty [overflow-wrap:anywhere]">{plain(node.label)}</span>
+        {link && <span className="-my-[3px] shrink-0"><SourceChip result={link} n={node.source!} /></span>}
       </span>
       {!slot && !img && !pending && <Icon name={icon} className="pointer-events-none relative size-[18px] text-foreground/70 sm:size-5" />}
       {node.value && <span className="pointer-events-none relative text-[15px] font-semibold tracking-tight sm:text-base">{plain(node.value)}</span>}
