@@ -26,6 +26,17 @@ interface AiBinding {
 
 const mem = new Map<string, string[]>();
 
+/** After a quota error (4006: daily free neurons used) skip AI until the next 00:00 UTC reset; other errors back off 60s. */
+let aiDownUntil = 0;
+function markAiDown(why: string, now = Date.now()) {
+  if (/\b4006\b|daily free allocation|neurons/i.test(why)) {
+    const d = new Date(now);
+    aiDownUntil = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1);
+  } else if (why !== 'timeout') {
+    aiDownUntil = now + 60_000;
+  }
+}
+
 function memGet(key: string): string[] | undefined {
   const hit = mem.get(key);
   if (!hit) return;
@@ -137,6 +148,7 @@ export async function suggestTypeahead(q: string, env: Env): Promise<TypeaheadRe
   if (env.TYPEAHEAD === 'off') return none(t0, 'off');
   const ai = (env as Record<string, unknown>).AI as AiBinding | undefined;
   if (!ai || typeof ai.run !== 'function') return none(t0, 'no binding');
+  if (Date.now() < aiDownUntil) return none(t0, 'ai cooling down');
 
   const model = env.TYPEAHEAD_MODEL || DEFAULT_MODEL;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -154,7 +166,10 @@ export async function suggestTypeahead(q: string, env: Env): Promise<TypeaheadRe
         timer = setTimeout(() => resolve({ ok: false, why: 'timeout' }), AI_TIMEOUT_MS);
       }),
     ]);
-    if (!raced.ok) return none(t0, raced.why);
+    if (!raced.ok) {
+      markAiDown(raced.why);
+      return none(t0, raced.why);
+    }
     const text = extractText(raced.v);
     const suggestions = parseAiLines(text, prefix);
     if (!suggestions.length) return none(t0, `empty: ${typeof raced.v === 'object' && raced.v ? Object.keys(raced.v).join(',') : typeof raced.v} ${text.slice(0, 60)}`);

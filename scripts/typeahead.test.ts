@@ -93,12 +93,20 @@ test('suggestTypeahead returns none when AI is off, errors, or times out', async
   assert.equal(off.source, 'none');
   assert.deepEqual(off.suggestions, []);
 
-  const failed = await suggestTypeahead('quark explode zz', { AI: { async run() { throw new Error('nope'); } } } as Env);
-  assert.equal(failed.source, 'none');
-
+  // Timeout first: an error starts a cooldown that would skip the AI call.
   const timed = await suggestTypeahead('quark timeout zz', { AI: { run: () => new Promise(() => {}) } } as Env);
   assert.equal(timed.source, 'none');
   assert.ok(timed.ms >= 700);
+
+  const failed = await suggestTypeahead('quark explode zz', { AI: { async run() { throw new Error('4006: you have used up your daily free allocation of 10,000 neurons'); } } } as Env);
+  assert.equal(failed.source, 'none');
+  assert.match(failed.reason ?? '', /4006/);
+
+  let calls = 0;
+  const after = await suggestTypeahead('quark after quota zz', { AI: { async run() { calls++; return { response: 'a\nb\nc' }; } } } as Env);
+  assert.equal(after.source, 'none');
+  assert.equal(after.reason, 'ai cooling down');
+  assert.equal(calls, 0, 'quota error skips AI until the daily reset');
 });
 
 test('createDebouncer runs only the last call after the delay, and cancel drops it', async () => {
