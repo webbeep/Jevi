@@ -99,7 +99,7 @@ test('storableAnswer requires done and a node, and rejects errors and extractive
 test('snapshots round-trip, expire, and survive a quota error', () => {
   const store = memoryStore();
   const turns = [{ id: 3, question: 'Kindle vs Kobo' }];
-  assert.equal(snapshotKey('  Kindle vs Kobo? ', 'week'), 'zo:answer:v2:week:kindle vs kobo');
+  assert.equal(snapshotKey('  Kindle vs Kobo? ', 'week'), 'zo:answer:v1:week:kindle vs kobo');
   assert.equal(saveSnapshot(store, '  Kindle vs Kobo? ', turns, 1_000), true);
   assert.deepEqual(loadSnapshot(store, 'kindle vs kobo', 1_000), turns);
   assert.equal(loadSnapshot(store, 'kindle vs kobo', 1_000 + ANSWER_TTL_S * 1000 + 1), undefined);
