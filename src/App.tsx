@@ -1,5 +1,6 @@
 import { type FormEvent, type RefObject, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { skipInitialQuery } from './auth/boot';
+import { useAuth } from './auth/store';
 import { registerSnapshot } from './auth/bridge';
 import { AuthHeader, AuthRoot } from './auth/chrome';
 import { SaveButton } from './auth/SaveButton';
@@ -14,7 +15,9 @@ import { api } from './api';
 import { AnswerCardView } from './card/AnswerCardView';
 import { CardContext, type CardContextValue } from './card/context';
 import { Icon } from './card/Icon';
+import { LandingCtas, LandingExample, LandingFooter, LandingHero, LandingValueProps } from './Landing';
 import { LogoMark, Wordmark } from './Logo';
+import { dismissLanding, isLandingDismissed, shouldShowLanding } from '../shared/landing';
 import { buildLibrary } from './library';
 import { FaviconStack, SourcesRail, SourcesSheet } from './Sources';
 import { type SessionActions, type Turn, liveBody, scrollToTurn, useSession } from './useSession';
@@ -130,6 +133,8 @@ export default function App() {
   const [dark, setDark] = useTheme();
   const { turns, actions: session } = useSession();
   const { items: suggestions, shuffle, shuffleEnabled, personalized, refresh } = useSuggestions();
+  const auth = useAuth();
+  const [dismissed, setDismissed] = useState(() => isLandingDismissed(localStorage));
   const [recents, setRecents] = useState<string[]>(() => (typeof window !== 'undefined' ? readRecents() : []));
   const [histRev, setHistRev] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -156,6 +161,21 @@ export default function App() {
     }
   }, [histRev]);
   const hasHistory = recents.length > 0 || historyCount > 0;
+  const landing =
+    home &&
+    shouldShowLanding({
+      path: location.pathname,
+      dismissed,
+      hasHistory,
+      authReady: auth.ready,
+      signedIn: auth.signedIn,
+      hasQuery: !!new URLSearchParams(location.search).get('q'),
+    });
+  const dismiss = () => {
+    setDismissed(true);
+    dismissLanding(localStorage);
+    if (location.pathname === '/welcome') history.replaceState(null, '', '/');
+  };
   const root = turns[0];
   const last = [...turns].reverse().find((t) => t.result);
   const busy = turns.some((t) => t.filling);
@@ -184,6 +204,7 @@ export default function App() {
   const startSearch = (q: string) => {
     const query = q.trim();
     if (!query) return;
+    dismiss();
     shown.current = query;
     savePending(localStorage, query);
     setRecents(pushRecent(query));
@@ -316,14 +337,20 @@ export default function App() {
               <AuthHeader />
               <ThemeToggle dark={dark} onToggle={() => setDark(!dark)} />
             </header>
-            <main className="relative mx-auto flex w-full max-w-[640px] flex-col px-4 pb-16 pt-[10dvh] sm:pt-[16dvh]">
-              <h1 className="flex justify-center">
-                <Wordmark className="text-[40px] sm:text-[48px]" />
-                <span className="sr-only">ZO</span>
-              </h1>
-              <p className="mx-auto mt-3 max-w-[22rem] text-center text-[14px] leading-snug text-muted-foreground sm:mt-4 sm:max-w-none sm:text-[15px]">
-                {TAGLINE}
-              </p>
+            <main className={cn('relative mx-auto flex w-full max-w-[640px] flex-col px-4 pb-16', landing ? 'pt-[6dvh] sm:pt-[10dvh]' : 'pt-[10dvh] sm:pt-[16dvh]')}>
+              {landing ? (
+                <LandingHero />
+              ) : (
+                <>
+                  <h1 className="flex justify-center">
+                    <Wordmark className="text-[40px] sm:text-[48px]" />
+                    <span className="sr-only">ZO</span>
+                  </h1>
+                  <p className="mx-auto mt-3 max-w-[22rem] text-center text-[14px] leading-snug text-muted-foreground sm:mt-4 sm:max-w-none sm:text-[15px]">
+                    {TAGLINE}
+                  </p>
+                </>
+              )}
               <div className="mt-6 sm:mt-8">
               <UsageLine />
               <form onSubmit={onSearchSubmit} className={cn('group relative', typeahead.open && 'z-20')}>
@@ -347,7 +374,7 @@ export default function App() {
                   autoFocus
                   className="h-14 rounded-2xl border-input bg-card pl-12 pr-14 text-base shadow-card transition-shadow focus-visible:shadow-float focus-visible:ring-0 md:text-base"
                 />
-                <Button type="submit" size="icon" className="absolute right-2 top-1/2 size-10 -translate-y-1/2 rounded-xl" disabled={!input.trim()} aria-label="Send">
+                <Button type="submit" size="icon" className="absolute right-2 top-1/2 size-11 -translate-y-1/2 rounded-xl" disabled={!input.trim()} aria-label="Send">
                   <ArrowUp className="size-4" />
                 </Button>
                 {typeahead.open && (
@@ -457,6 +484,24 @@ export default function App() {
                   ))}
                 </ul>
               </div>
+              {landing && (
+                <>
+                  <LandingCtas
+                    auth={auth}
+                    onTry={() => {
+                      dismiss();
+                      inputRef.current?.focus();
+                      window.scrollTo({ top: 0 });
+                    }}
+                    onGoogle={() => {
+                      dismiss();
+                    }}
+                  />
+                  <LandingValueProps />
+                  <LandingExample />
+                  <LandingFooter />
+                </>
+              )}
             </main>
           </>
         ) : (
@@ -572,7 +617,7 @@ const GRID = 'mx-auto max-w-[720px] lg:grid lg:max-w-[1120px] lg:grid-cols-[minm
 
 function ThemeToggle({ dark, onToggle }: { dark: boolean; onToggle: () => void }) {
   return (
-    <Button variant="ghost" size="icon" className="size-8 shrink-0 rounded-lg text-muted-foreground hover:text-foreground" onClick={onToggle} aria-label="Toggle theme">
+    <Button variant="ghost" size="icon" className="size-11 shrink-0 rounded-xl text-muted-foreground hover:text-foreground" onClick={onToggle} aria-label="Toggle theme">
       {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
     </Button>
   );
