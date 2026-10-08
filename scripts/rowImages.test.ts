@@ -158,6 +158,13 @@ describe('t444 entity context: no namesake photos', () => {
     assert.equal(accepts(t, img('BlueFlame co-founder Ray Lee')), true);
     assert.equal(accepts(t, img('Ray Lee, partner at Acme Capital', 'https://acme.example/team', 'https://acme.example/r.jpg')), false);
     assert.equal(accepts(t, img('Ray Lee - Football - Eastern Michigan', 'https://emueagles.com/roster/ray-lee', 'https://images.sidearmdev.com/crop?x=1')), false);
+    assert.equal(accepts(t, img('Ray Lee', 'https://en.wikipedia.org/wiki/Raymond_Lee_(soccer)', 'https://upload.wikimedia.org/wikipedia/commons/f/f6/CINvPGH_2018-04-21_-_Ray_Lee.jpg')), false, 'live: soccer namesake');
+    assert.equal(accepts(t, img('Ray Lee, midfielder', 'https://www.mlssoccer.com/players/ray-lee', 'https://images.mlssoccer.com/r.jpg')), false);
+  });
+  test('t451: sport words do not block an athlete card', () => {
+    const hintFor = () => ({ name: 'Nique Clifford', domains: [], context: ['Sacramento Kings'] });
+    const t = targetFor('Nique Clifford', '', undefined, { hintFor });
+    assert.equal(accepts(t, img('Nique Clifford NBA player', 'https://www.nba.com/player/1642363/nique-clifford', 'https://cdn.nba.com/headshots/nba/latest/1040x760/1642363.png')), true);
   });
   test('t451: stat/role labels stay photo-free under the relaxed rule', () => {
     const hintFor = (label: string) => (label === 'David Kim' ? { name: 'David Kim', context: ['Philadelphia Orchestra'] } : undefined);

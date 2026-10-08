@@ -45,16 +45,21 @@ function contextOk(target: PicTarget, words: string[], urls: string[]): boolean 
   if (urls.some((u) => { const h = hostOf(u); return !!h && domains.some((d) => h === d || h.endsWith(`.${d}`)); })) return true;
   // t451: a single-entity card takes a full-name photo without the org word unless the picture's page names some
   // other org; an ask that names the org itself ("Raycon CEO") also rejects company-suffix pages ("Acme Capital").
-  return !otherOrg(words, urls, !!target.hint?.strict);
+  return !otherOrg(words, urls, !!target.hint?.strict, ctx);
 }
 
 /** School/athletics rosters and people-search pages: a namesake's photo, not the chosen person's (live: Eastern Michigan athlete for the Raycon CEO). */
 const OTHER_ORG_WORDS = ['university', 'college', 'athletics', 'athletic', 'roster', 'sidearm', 'ncaa', 'varsity', 'highschool', 'alumni'];
 const PEOPLE_SEARCH = ['humantic', 'rocketreach', 'zoominfo', 'apollo', 'signalhire', 'contactout', 'peoplelooker', 'spokeo', 'crunchbase', 'whitepages', 'truepeoplesearch'];
 const COMPANY_WORDS = ['inc', 'llc', 'corp', 'capital', 'partners', 'ventures', 'holdings', 'bank', 'gmbh', 'plc'];
-function otherOrg(words: string[], urls: string[], strict: boolean): boolean {
+/** Live t451: "Ray Lee BlueFlame AI" took the photo of Raymond Lee (soccer) from Wikipedia. */
+const SPORT_WORDS = ['soccer', 'football', 'basketball', 'baseball', 'hockey', 'athlete', 'player', 'nfl', 'nba', 'mls', 'mlb', 'nhl', 'fifa', 'olympic', 'cricket', 'rugby', 'tennis', 'golfer', 'boxer', 'wrestler'];
+function otherOrg(words: string[], urls: string[], strict: boolean, ctx: string[]): boolean {
   if (OTHER_ORG_WORDS.some((t) => hit(t, words))) return true;
   if (strict && COMPANY_WORDS.some((t) => words.includes(t))) return true;
+  if (strict && !ctx.some((t) => SPORT_WORDS.includes(t)) && SPORT_WORDS.some((t) => hit(t, words))) return true;
+  // A disambiguated Wikipedia page ("Raymond_Lee_(soccer)") whose qualifier is not the asked org is a namesake.
+  if (strict && urls.some((u) => { const m = /\/wiki\/[^?#]*_\(([^)]+)\)/.exec(decodeURIComponent(u ?? '')); return !!m && !tokens(m[1]!).some((t) => ctx.includes(t)); })) return true;
   return urls.some((u) => {
     const h = hostOf(u);
     if (!h) return false;
