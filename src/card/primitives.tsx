@@ -467,25 +467,29 @@ function MediaList({ node }: { node: Of<'list'> }) {
 }
 
 export function List({ node }: { node: Of<'list'> }) {
-  const { results } = useCard();
+  const { results, onItem, entity } = useCard();
   const style = node.style ?? 'bullet';
   if (style === 'media') return <MediaList node={node} />;
   return (
     <ul className="space-y-2 sm:space-y-2.5">
       {node.items.map((item, i) => {
         const r = item.source ? results[item.source - 1] : undefined;
+        // T453: every box type taps to a natural follow-up (Ricky: lists too); cites/source chip stay tappable above.
+        const ask = askQuestion({ kind: 'list', label: plain(item.text), detail: item.meta, entity });
+        const ref: AskRef = { label: subjectOf(item.text), value: item.meta, entity, sourceUrl: r?.url, snippet: r?.snippet };
         return (
-          <li key={i} className="flex items-start gap-2 text-sm leading-relaxed sm:gap-3">
-            <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center">
+          <li key={i} className="relative flex items-start gap-2 text-sm leading-relaxed sm:gap-3">
+            <button type="button" aria-label={ask} onClick={() => onItem(ask, ref)} className={cn('absolute -inset-x-1 -inset-y-[3px] cursor-pointer rounded-md transition-colors hover:bg-foreground/[0.03]', ITEM_FOCUS)} />
+            <span className="pointer-events-none relative mt-0.5 flex size-5 shrink-0 items-center justify-center">
               {style === 'number' ? <span className="text-xs font-semibold text-muted-foreground">{i + 1}</span>
                 : style === 'check' ? <Check className="size-4 text-positive" />
                 : style === 'icon' && item.icon ? <Icon name={item.icon} className="text-muted-foreground" />
                 : <span className="size-1.5 rounded-full bg-foreground/40" />}
             </span>
-            <span className="flex-1 text-foreground/85"><RichText text={item.text} /></span>
-            {item.meta && <span className="shrink-0 text-xs text-muted-foreground">{item.meta}</span>}
+            <span className="pointer-events-none relative flex-1 text-foreground/85"><RichText text={item.text} /></span>
+            {item.meta && <span className="pointer-events-none relative shrink-0 text-xs text-muted-foreground">{item.meta}</span>}
             {/* Rows sit 8–10px apart, so the chip's tap area is clipped to stay clear of neighbours (list-row rule: ≥44w, ≥30h). */}
-            {r && <span className="mt-[3px] flex shrink-0"><SourceChip result={r} n={item.source!} className="after:h-[30px]" /></span>}
+            {r && <span className="relative mt-[3px] flex shrink-0"><SourceChip result={r} n={item.source!} className="after:h-[30px]" /></span>}
           </li>
         );
       })}
@@ -554,20 +558,23 @@ export function TableView({ node }: { node: Of<'table'> }) {
 }
 
 export function Timeline({ node }: { node: Of<'timeline'> }) {
-  const { results } = useCard();
+  const { results, onItem, entity } = useCard();
   return (
     <ol className="relative space-y-4 pl-6 before:absolute before:inset-y-1.5 before:left-[5px] before:w-px before:bg-border">
       {node.items.map((t, i) => {
         const r = t.source ? results[t.source - 1] : undefined;
+        const ask = askQuestion({ kind: 'timeline', label: plain(t.title), when: t.when, entity });
+        const ref: AskRef = { label: t.when ? `${t.when}: ${plain(t.title)}` : plain(t.title), value: t.text ? plain(t.text) : undefined, entity, sourceUrl: r?.url, snippet: r?.snippet };
         return (
           <li key={i} className="relative flex gap-2">
-            <span className="absolute -left-6 top-1 size-[11px] rounded-full border-2 border-background bg-foreground ring-1 ring-border" />
-            <div className="min-w-0 flex-1">
+            <button type="button" aria-label={ask} onClick={() => onItem(ask, ref)} className={cn('absolute -inset-x-1 -inset-y-1 cursor-pointer rounded-md transition-colors hover:bg-foreground/[0.03]', ITEM_FOCUS)} />
+            <span className="pointer-events-none absolute -left-6 top-1 size-[11px] rounded-full border-2 border-background bg-foreground ring-1 ring-border" />
+            <div className="pointer-events-none relative min-w-0 flex-1">
               <div className="text-xs font-semibold tabular-nums text-muted-foreground">{t.when}</div>
               <div className="text-sm font-medium"><RichText text={t.title} inline /></div>
               {t.text && <div className="mt-0.5 text-sm text-muted-foreground"><RichText text={t.text} inline /></div>}
             </div>
-            {r && <span className="mt-0.5 flex shrink-0"><SourceChip result={r} n={t.source!} /></span>}
+            {r && <span className="relative mt-0.5 flex shrink-0"><SourceChip result={r} n={t.source!} /></span>}
           </li>
         );
       })}
@@ -763,13 +770,14 @@ export function Profile({ node }: { node: Of<'profile'> }) {
           </div>
         </div>
         {node.facts && node.facts.length > 0 && (
-          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+          <div className="mt-1 flex flex-wrap gap-x-4 text-sm">
             {node.facts.map((f) => {
               const fact: Box = { kind: 'fact', label: f.label, value: f.value, entity: node.name };
               const ask = askQuestion(fact);
               const ref: AskRef = { label: f.label, value: f.value, entity: node.name };
               return (
-                <span key={f.label} className="relative">
+                // T453: ≥44×44 tap target per fact (rows sit flush, so neighbours never overlap).
+                <span key={f.label} className="relative inline-flex min-h-11 min-w-11 items-center">
                   <button type="button" aria-label={ask} onClick={() => onItem(ask, ref)} className={cn('absolute inset-0 rounded-[inherit] cursor-pointer', ITEM_FOCUS)} />
                   <span className="pointer-events-none relative"><span className="text-muted-foreground">{f.label}</span> <span className="font-medium">{f.value}</span></span>
                 </span>
