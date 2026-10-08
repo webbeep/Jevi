@@ -186,3 +186,21 @@ describe('entity3 single-entity pictures', () => {
     assert.equal(accepts(targetFor('Role', 'David Kim'), { title: 'David Kim', url: 'https://x.org/David_Kim', thumb: 'https://x.org/David_Kim.jpg' }), false);
   });
 });
+
+describe('EN3 picked choice: photo must carry the chosen org/descriptor', () => {
+  const img = (title: string, url = 'https://x.com/p', thumb = 'https://x.com/p.jpg', source?: string) => ({ title, url, thumb, ...(source ? { source } : {}) });
+  test('violinist wiki photo never lands on the C2 founder card', () => {
+    const hintFor = () => ({ name: 'David Kim', domains: ['c2.com'], context: ['C2'], strict: true, requireContext: true });
+    const t = targetFor('David Kim', '', undefined, { hintFor });
+    assert.equal(accepts(t, img('David Kim performing live (2024)', 'https://en.wikipedia.org/wiki/David_Kim_(violinist)', 'https://upload.wikimedia.org/dk.jpg', 'American violinist — concertmaster of the Philadelphia Orchestra')), false);
+    assert.equal(accepts(t, img('David Kim portrait', 'https://news.example.com/dk', 'https://news.example.com/dk.jpg')), false, 'no context word: no photo');
+    assert.equal(accepts(t, img('C2 founder David Kim')), true);
+    assert.equal(accepts(t, img('David Kim', 'https://www.c2.com/team', 'https://cdn.c2.com/dk.jpg')), true, 'own domain');
+  });
+  test('typed person+org ask needs the org word too', () => {
+    const hintFor = () => ({ name: 'Ray Lee', domains: [], context: ['BlueFlame AI'], strict: true, requireContext: true });
+    const t = targetFor('Ray Lee', '', undefined, { hintFor });
+    assert.equal(accepts(t, img('Ray Lee', 'https://en.wikipedia.org/wiki/Raymond_Lee_(soccer)', 'https://upload.wikimedia.org/r.jpg')), false);
+    assert.equal(accepts(t, img('Ray Lee - Senior Software Engineer - BlueFlame AI', 'https://www.linkedin.com/in/raylee', 'https://media.licdn.com/r.jpg')), true);
+  });
+});
