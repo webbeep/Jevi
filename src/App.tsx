@@ -132,8 +132,9 @@ export default function App() {
   const initial = useMemo(() => new URLSearchParams(location.search), []);
   const [dark, setDark] = useTheme();
   const { turns, actions: session } = useSession();
-  // t447: item taps send right away, so they are ignored while any answer in the thread is still streaming.
+  // t447 + T455: item taps send right away; a tap while any answer in the thread is still streaming is queued and fires when it finishes.
   const threadBusy = turns.some((t) => t.filling);
+  const [queued, setQueued] = useState<{ q: string; ref?: AskRef; from: number; item?: string } | null>(null);
   const { items: suggestions, shuffle, shuffleEnabled, refresh } = useSuggestions();
   const [recents, setRecents] = useState<string[]>(() => (typeof window !== 'undefined' ? readRecents() : []));
   const [histRev, setHistRev] = useState(0);
@@ -336,6 +337,34 @@ export default function App() {
     writeAnswerCache(query, turns);
   }, [turns, busy]);
 
+  // T455: something else added or removed a turn (typed/related follow-up, choice pick, new chat), so the queued tap is no longer what they want next.
+  // Runs before the fire effect below, so a new chat (fewer turns, thread free) cancels instead of sending.
+  const turnCount = useRef(turns.length);
+  useEffect(() => {
+    if (queued && turnCount.current !== turns.length) setQueued(null);
+    turnCount.current = turns.length;
+  }, [turns.length, queued]);
+
+  // T455: the queued item tap fires once the thread is free; a turn that ends in an error drops it.
+  const firedRef = useRef<{ q: string; ref?: AskRef; from: number; item?: string } | null>(null);
+  useEffect(() => {
+    if (!queued) return;
+    const last = turns[turns.length - 1];
+    if (last && last.error && !last.filling) { setQueued(null); return; }
+    if (threadBusy) return;
+    setQueued(null);
+    if (firedRef.current === queued) return;
+    firedRef.current = queued;
+    void session.followup(queued.q, queued.from, 'ask', queued.ref);
+  }, [queued, threadBusy, turns, session]);
+
+  // T455: typing a follow-up cancels the queued tap.
+  useEffect(() => {
+    const onCancel = () => setQueued(null);
+    window.addEventListener('zo-queue-cancel', onCancel);
+    return () => window.removeEventListener('zo-queue-cancel', onCancel);
+  }, []);
+
   const onSearchSubmit = (e: FormEvent) => {
     e.preventDefault();
     typeahead.close();
@@ -530,7 +559,7 @@ export default function App() {
 
             <div className={cn(SHELL, GRID, 'relative pb-[50vh] pt-5 sm:pt-8')}>
               <main ref={mainRef} className="min-w-0 space-y-8 sm:space-y-10">
-                {turns.map((t, i) => <TurnView key={t.id} turn={t} first={i === 0} search={session.searchOf(t)?.search} actions={session} onSources={openSources} threadBusy={threadBusy} />)}
+                {turns.map((t, i) => <TurnView key={t.id} turn={t} first={i === 0} search={session.searchOf(t)?.search} actions={session} onSources={openSources} threadBusy={threadBusy} pendingItem={queued?.item} onQueue={setQueued} />)}
 
                 {last?.result && last.result.followups.length > 0 && !busy && (
                   <section className="-mt-2 px-4 animate-in fade-in sm:-mt-4 sm:px-6">
@@ -787,7 +816,7 @@ function Composer({ actions, topic, mainRef }: { actions: SessionActions; topic:
             <input
               ref={inputRef}
               value={message}
-              onChange={(e) => setMessage(e.target.value)}
+              onChange={(e) => { const next = e.target.value; if (next) window.dispatchEvent(new Event('zo-queue-cancel')); setMessage(next); }}
               placeholder={quote ? (quoteMode === 'save' ? 'Press send to pin it' : 'Add a note (optional)') : 'Ask a follow-up'}
               aria-label="Ask a follow-up"
               enterKeyHint="send"
@@ -831,7 +860,7 @@ function OfflineNotice({ filling, partial, reconnects, onRetry }: { filling: boo
 /** t447 double-submit guard: a second item tap within this window is ignored even before `filling` flips. */
 let lastItemTap = 0;
 
-const TurnView = memo(function TurnView({ turn, first, search, actions, onSources, threadBusy }: {
+const TurnView = memo(function TurnView({ turn, first, search, actions, onSources, threadBusy, pendingItem, onQueue }: {
   turn: Turn;
   first: boolean;
   /** Results of the search this turn builds on. */
@@ -839,6 +868,10 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
   actions: SessionActions;
   onSources: (scope?: number) => void;
   threadBusy: boolean;
+  /** T455: id of the item box whose tap is queued while the thread streams. */
+  pendingItem?: string;
+  /** T455: queues a tap made while the thread is busy. */
+  onQueue: (queued: { q: string; ref?: AskRef; from: number; item?: string }) => void;
 }) {
   const streaming = !!turn.live?.nodes.some(Boolean);
   const offlinePartial = Boolean(turn.offline && (turn.live?.head || streaming));
@@ -894,13 +927,15 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
     },
     onSources: () => onSources(id),
     onDraft: (text) => window.dispatchEvent(new CustomEvent('zo-prefill', { detail: text })),
-    onItem: (q, ref) => {
+    onItem: (q, ref, item) => {
       const now = Date.now();
-      if (threadBusy || now - lastItemTap < 1500) return;
+      if (now - lastItemTap < 1500) return;
       lastItemTap = now;
+      if (threadBusy) { onQueue({ q, ref, from: id, item }); return; }
       void actions.followup(q, id, 'ask', ref);
     },
-  }), [search?.results, search?.images, credits, entity, turn.filling, offlinePartial, actions, id, onSources, threadBusy]);
+    pendingItem,
+  }), [search?.results, search?.images, credits, entity, turn.filling, offlinePartial, actions, id, onSources, threadBusy, pendingItem, onQueue]);
 
   const degraded = turn.kind === 'search' ? turnDegraded(turn) ?? undefined : undefined;
   const choices = turn.result ? readChoices(turn.result, turn.result.card) : undefined;

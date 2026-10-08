@@ -18,8 +18,10 @@ export interface CardContextValue {
   onSources: () => void;
   /** Puts text in the follow-up box and focuses it, without sending. */
   onDraft: (text: string) => void;
-  /** t447: a tapped item/row/tile sends its follow-up right away, with the box it came from (ignored while a request streams). */
-  onItem: (question: string, ref?: AskRef) => void;
+  /** t447: a tapped item/row/tile sends its follow-up right away, with the box it came from; while an answer is still streaming the tap is queued instead (T455). */
+  onItem: (question: string, ref?: AskRef, item?: string) => void;
+  /** T455: id of the item box whose tap is waiting for the current answer to finish; nothing pending by default. */
+  pendingItem?: string;
 }
 
 export const CardContext = createContext<CardContextValue>({
@@ -33,6 +35,7 @@ export const CardContext = createContext<CardContextValue>({
   onSources: () => undefined,
   onDraft: () => undefined,
   onItem: () => undefined,
+  pendingItem: undefined,
 });
 
 export const useCard = () => useContext(CardContext);
