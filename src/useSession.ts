@@ -6,6 +6,7 @@ import { readChoices } from '../shared/choices';
 import { cardDigest } from '../shared/digest';
 import { MAX_AUTO_RECONNECTS, OFFLINE_MESSAGE, friendlyError, isConnectionError, reconnectDelay } from '../shared/offline';
 import { billingFromSources, settleCardPrices } from '../shared/pricing';
+import type { VendorHit } from '../shared/vendorPrice';
 import { emptyDoneState } from '../shared/sse-parse';
 import { liveBody } from '../shared/liveBody';
 import type { NoSourcesNotice, SearchResponse, SearchResult } from '../shared/types';
@@ -144,7 +145,12 @@ function settleBilling(node: CardNode, results: SearchResult[]): CardNode {
 export function placeNode(live: LiveCard, index: number, node: CardNode, query: string, results: SearchResult[]): LiveCard {
   const raw = [...live.raw];
   raw[index] = settleBilling(node, results);
-  return { ...live, raw, nodes: settleCardPrices(raw, query) };
+  return { ...live, raw, nodes: settleCardPrices(raw, query, vendorHits(results)) };
+}
+
+/** The results a shopping ask's vendor prices are read from (V3 reconcile). */
+export function vendorHits(results: SearchResult[]): VendorHit[] {
+  return results.map((r) => ({ domain: r.domain, url: r.url, title: r.title, snippet: r.snippet, content: r.content }));
 }
 
 export function scrollToTurn(id: number) {
@@ -245,9 +251,18 @@ export function useSession() {
           if (!target?.search) return;
           const results = target.search.results.map((r, i) => {
             const page = e.data.find((p) => p.n === i + 1);
-            return page && !r.content ? { ...r, content: page.text } : r;
+            if (!page) return r;
+            let domain = r.domain;
+            try { if (page.url) domain = new URL(page.url).hostname.replace(/^www\./, ''); } catch { /* keep */ }
+            return { ...r, content: r.content || page.text, url: page.url || r.url, domain };
           });
-          return update(target.id, { search: { ...target.search, results } });
+          return update(target.id, (t) => {
+            const search = { ...target.search!, results };
+            const live = t.live;
+            // A store page's text can carry the vendor "From" price: re-settle the card on it.
+            if (!live?.raw.some(Boolean)) return { search };
+            return { search, live: { ...live, nodes: settleCardPrices(live.raw, t.question, vendorHits(results)) } };
+          });
         }
         case 'images': {
           const target = searchOf(get(route));

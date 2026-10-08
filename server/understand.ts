@@ -17,8 +17,8 @@ const FRESHNESS = new Set<Freshness>(['any', 'day', 'week', 'month', 'year']);
 const SYSTEM = `You read what someone typed into a search box the way a thoughtful person would, work out what they actually want, and write the web searches that find it.
 Reply as JSON: {"intent": string, "queries": string[], "freshness": "day"|"week"|"month"|"year"|"any"}
 - intent: one sentence naming what they want to see, e.g. "A short summary of today's top news stories."
-- queries: 1-3 web search queries, best first, 3-10 words each. Spell out what the words imply: "news tldr today" wants today's top headlines summarised, not a site or channel called TLDR, so search "top news headlines <today's date>". When they mean now (today, latest, this week, current, live, score, price), name the date, month or year. Keep the literal text as a query only when it already finds the answer (names, products, exact phrases).
-- freshness: how recent results must be; "day" for today's news, scores or prices; "any" for timeless things.
+- queries: 1-3 web search queries, best first, 3-10 words each. Spell out what the words imply: "news tldr today" wants today's top headlines summarised, not a site or channel called TLDR, so search "top news headlines <today's date>". When they mean now for something that is dated (today, latest, this week, current, live, score), name the date, month or year. Never add a month or year to a shopping or price question: the current store price lives on the product page, and a dated query pulls deal roundups and last year's prices instead. Keep the literal text as a query only when it already finds the answer (names, products, exact phrases).
+- freshness: how recent results must be; "day" for today's news or scores; "any" for timeless things and for anything with a price, since a store page carries no publish date.
 - Never add facts or guesses about the answer itself.`;
 
 /** Reads the intent behind a query; falls back to nothing (the literal search alone) when slow or unavailable. */

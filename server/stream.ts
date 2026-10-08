@@ -6,7 +6,7 @@ import { type EntityHint, mentionsAny } from './imageGate';
 import type { RowImagePlan } from './pictures';
 import type { AnswerCard, FollowupContext, FollowupIntent, LayoutPlan } from '../shared/card';
 import { type AskRef, refContext, withRef } from '../shared/askAbout';
-import type { EngineStatus, Freshness, ImageResult, SearchResponse } from '../shared/types';
+import type { EngineStatus, Freshness, ImageResult, SearchResponse, SearchResult } from '../shared/types';
 import { rewriteQuery } from './ai';
 import { designParallel, designStream } from './design';
 import { permitted } from './images';
@@ -15,7 +15,7 @@ import { collectPages, ogImageOf } from './pages';
 import { MADE_PATTERNS } from './patterns';
 import { planLayout } from './plan';
 import type { AskScope, CallLedger } from './budget';
-import { logAsk, moreQueries, newLedger, queriesForAsk } from './budget';
+import { logAsk, moreQueries, newLedger, queriesForAsk, searchPlan } from './budget';
 import { gateResults } from './relevanceGate';
 import { entityQuery, relaxQuery } from './queryClean';
 import { type LateExtras, searchWithLate } from './search';
@@ -24,6 +24,9 @@ import { extraQueries, understand } from './understand';
 import { cacheBypass, testForce, validTestToken } from './token';
 import { SERPER_ANON_SHARE } from './providerCap';
 import type { Env } from './util';
+import { readVendorPages, type VendorRow } from './vendorPages';
+import { askedModelName, brandsIn, formatUsd, vendorBuyUrl } from '../shared/vendorPrice';
+import { isStoreProductAsk } from '../shared/pricing';
 
 /** Asks whose answer depends on when they are asked: they wait for the intent read's freshness before searching. */
 const TIME_SENSITIVE = /\b(news|latest|today|tonight|yesterday|tomorrow|this (?:week|weekend|month|year|season)|right now|now|current(?:ly)?|live|breaking|recent(?:ly)?|update[sd]?|score[sd]?|standings|price[sd]?|cost[s]?|deals?|sale|weather|forecast|stocks?|market|election|polls?|20\d\d)\b/i;
@@ -125,6 +128,69 @@ function applyRelevance(query: string, response: SearchResponse, ledger: CallLed
   return gated.dropped ? { ...response, results: gated.kept } : response;
 }
 
+/**
+ * V5: vendor rows are merged into the results once, before the search event. A row whose URL
+ * is already a result takes that result's place (title, snippet, content); the rest are
+ * inserted after the first two results so the designer sees them inside the top 12. A row
+ * never overwrites a different URL's place.
+ */
+function mergeVendorRows(results: SearchResult[], rows: readonly VendorRow[]): SearchResult[] {
+  const out = [...results];
+  const fresh: VendorRow[] = [];
+  for (const row of rows) {
+    const at = out.findIndex((r) => rowKey(r.url) === rowKey(row.url));
+    if (at >= 0) {
+      out[at] = { ...out[at]!, title: row.title, snippet: row.snippet, content: row.content };
+      continue;
+    }
+    const { vendor: _vendor, ...plain } = row;
+    fresh.push(plain as VendorRow);
+  }
+  if (fresh.length) out.splice(Math.min(2, out.length), 0, ...fresh);
+  return out;
+}
+
+/** Host without www plus path without a trailing slash: the same page is the same row. */
+function rowKey(url: string): string {
+  try {
+    const u = new URL(url);
+    return `${u.hostname.replace(/^www\./, '')}${u.pathname.replace(/\/$/, '')}`.toLowerCase();
+  } catch {
+    return url.toLowerCase();
+  }
+}
+
+/** 1-based result index of every vendor row in the merged list. */
+function vendorIndexes(results: readonly SearchResult[], rows: readonly VendorRow[]): number[] {
+  return rows.map((row) => results.findIndex((r) => rowKey(r.url) === rowKey(row.url)) + 1);
+}
+
+/**
+ * One context line naming each product's store price and the source number to cite, so the
+ * designer shows the price instead of writing "prices not in sources", plus the products no
+ * store price was read for.
+ */
+function storePriceHint(rows: readonly VendorRow[], at: readonly number[], query: string): string | undefined {
+  const named = rows
+    .map((row, i) => {
+      const price = row.vendor;
+      if (!price || !(at[i]! > 0)) return undefined;
+      return `${price.product} ${price.from ? 'From ' : ''}${formatUsd(price.amount)} [${at[i]}]`;
+    })
+    .filter((part): part is string => !!part);
+  const read = new Set(rows.map((row) => row.vendor?.id).filter((id): id is string => !!id));
+  const missing = brandsIn(query)
+    .filter((b) => !read.has(b.id))
+    .map((b) => askedModelName(b.id, b.name, query));
+  if (!named.length && !missing.length) return undefined;
+  const parts: string[] = [];
+  if (named.length) {
+    parts.push(`OFFICIAL STORE PRICES (cite these source numbers for prices): ${named.join('; ')}. Show these prices; do not say prices are missing for these products. Only give a price for the exact model asked; a source about a different model or generation (for example a newer one) is not that model's price.`);
+  }
+  if (missing.length) parts.push(`No official store price was read for: ${missing.join('; ')}.`);
+  return parts.join(' ');
+}
+
 async function design(send: Send, env: Env, req: DesignArgs, started: number, scope: AskScope, late?: Promise<LateExtras>) {
   // Follow-ups keep the sources already gated for the original question.
   if (!req.followup) req = { ...req, search: applyRelevance(req.query, req.search, scope.ledger) };
@@ -135,7 +201,8 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   // Conversation turns reason from what is already known; everything else reads pages first.
   const chat = req.followup?.mode === 'chat';
   const budget = chat ? { count: 3, need: 0, budgetMs: 0 } : req.deep ? DEEP_PAGES : pageBudget(req.readPages);
-  const pages = await collectPages(req.search.results, env, budget, late, scope);
+  const collected = await collectPages(req.search.results, env, budget, late, scope);
+  const pages = collected;
   const fresh = pages.filter((p) => !req.search.results[p.n - 1]?.content);
   if (fresh.length) send('pages', fresh.map(({ n, url, text }) => ({ n, url, text })));
 
@@ -176,6 +243,10 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
  */
 async function searchAndDesign(send: Send, env: Env, query: string, freshness: Freshness, context: string | undefined, started: number, scope: AskScope, rewritten = false) {
   const understood = rewritten ? Promise.resolve(undefined) : understand(query, env, context);
+  // V5: the manufacturer's own buy pages are read while understand and the search run — their
+  // URLs are canonical, so they need no SERP hits. Every compared product gets its own page.
+  const storeAsk = isStoreProductAsk(query);
+  const vendorRead = storeAsk ? readVendorPages(query, [], env, scope).catch(() => [] as VendorRow[]) : undefined;
   const planned = understood.then((u) => planLayout(query, env, { intent: u?.intent })).then((plan) => {
     send('plan', plan);
     return plan;
@@ -191,9 +262,11 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     // engine when the intent read lands (~1 s), instead of the whole search waiting for it.
     const later = understood.then((x) => {
       if (x) send('intent', { intent: x.intent, queries: x.queries });
-      return { more: routeExtras(route, moreQueries(query, extraQueries(query, x))), freshness: x?.freshness ?? freshness };
+      // V3: a shopping ask spends one of its calls on the manufacturer's own pages (literal search still first).
+      return { more: routeExtras(route, searchPlan(query, moreQueries(query, extraQueries(query, x))).more), freshness: x?.freshness ?? freshness };
     });
-    found = await searchWithLate({ q: queriesForAsk(query, []), later, freshness, count: 20 }, env, scope);
+    const vendorDomains = searchPlan(query, []).vendorDomains;
+    found = await searchWithLate({ q: queriesForAsk(query, []), later, vendorDomains, freshness, count: 20 }, env, scope);
     u = await understood;
     await later;
   } else {
@@ -202,9 +275,11 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     if (u) send('intent', { intent: u.intent, queries: u.queries });
     // Literal question first. Planner rewrites are the later calls, still inside the cap.
     const q = queriesForAsk(query, extras);
-    const more = routeExtras(route, moreQueries(query, extras));
+    // V3: a shopping ask spends one of its calls on the manufacturer's own pages (literal search still first).
+    const searches = searchPlan(query, moreQueries(query, extras));
+    const more = routeExtras(route, searches.more);
     const fresh = freshness === 'any' && u ? u.freshness : freshness;
-    found = await searchWithLate({ q, more, freshness: fresh, count: 20 }, env, scope);
+    found = await searchWithLate({ q, more, vendorDomains: searches.vendorDomains, freshness: fresh, count: 20 }, env, scope);
   }
   let results = applyRelevance(query, { ...found.response, query }, scope.ledger);
   let late: Promise<LateExtras> | undefined = found.late;
@@ -268,8 +343,11 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
 
   // T444: before building a profile/person card, pick ONE entity from the top
   // results. Ambiguous names return choices instead of a mixed card.
+  // Store-product shopping asks are not people — never cluster/drop retailer rows (P07 live).
   const plan = await planned;
-  const decision = resolveEntity(query, results.results, { pattern: plan.pattern, prior: priorEntity(context) });
+  const decision = isStoreProductAsk(query)
+    ? { kind: 'skip' as const }
+    : resolveEntity(query, results.results, { pattern: plan.pattern, prior: priorEntity(context) });
   if (decision.kind === 'choices') {
     scope.ledger.entity = { kind: 'choices', choices: decision.choices.length };
     console.log(JSON.stringify({ zo: 'entity', kind: 'choices', choices: decision.choices.length }));
@@ -277,6 +355,16 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     // Choices ride on the done event (FE readChoices() in shared/choices.ts); never cached.
     send('done', { engine: 'extractive', removed: 0, pagesRead: 0, ms: Date.now() - started, choices: decision.choices });
     return;
+  }
+  // V5: a product with no canonical buy page (Kindle, Kobo, iPhone) still gets its vendor page,
+  // now from the SERP hits; brands already read are skipped.
+  let vendorRows: VendorRow[] = [];
+  if (vendorRead) {
+    const read = await vendorRead;
+    const done = brandsIn(query).filter((b) => vendorBuyUrl(b.id, query)).map((b) => b.id);
+    const more = brandsIn(query).some((b) => !done.includes(b.id));
+    const second = more ? await readVendorPages(query, results.results.map((r) => ({ domain: r.domain, url: r.url })), env, scope, done).catch(() => [] as VendorRow[]) : [];
+    vendorRows = [...read, ...second];
   }
   let designContext = context;
   let entityHint: ((entity: string) => EntityHint | undefined) | undefined;
@@ -289,7 +377,18 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     entityHint = entityHintFor(decision.entity, query);
     boostQuery = decision.entity.name;
   }
+  // V5: the vendor buy pages become sources of this search, inside the top 12 the designer sees.
+  let vendorAt: number[] = [];
+  if (vendorRows.length) {
+    const merged = mergeVendorRows(results.results, vendorRows);
+    vendorAt = vendorIndexes(merged, vendorRows);
+    results = { ...results, results: merged };
+    const hint = storePriceHint(vendorRows, vendorAt, query);
+    if (hint) designContext = [hint, designContext].filter(Boolean).join('\n');
+  }
   send('search', results);
+  // The pages event rides the final indices, so it goes out after the search event.
+  if (vendorRows.length) send('pages', vendorRows.map((row, i) => ({ n: vendorAt[i]!, url: row.url, text: row.content })).filter((p) => p.n > 0));
   const boost = imageBoost(plan.pattern, results, env, scope, boostQuery);
   await design(send, env, { query, pattern: plan.pattern, depth: plan.depth, readPages: plan.readPages || deep, search: results, context: designContext, intent: u?.intent, deep, boost, entityHint }, started, scope, late);
 }

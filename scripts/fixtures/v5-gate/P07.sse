@@ -1,0 +1,57 @@
+event: intent
+data: {"intent":"Current prices for the AirPods Pro 3, Sony WF-1000XM5, and Bose QuietComfort Ultra Earbuds compared.","queries":["AirPods Pro 3 price","Sony WF-1000XM5 price","Bose QuietComfort Ultra Earbuds price"]}
+
+event: plan
+data: {"query":"AirPods Pro 3 vs Sony WF-1000XM5 vs Bose QuietComfort Ultra Earbuds, current prices","pattern":"compare","alternatives":[{"id":"compare","label":"Side by side","description":"Two or more options compared attribute by attribute, ending with a verdict"},{"id":"spotlight","label":"Spotlight","description":"One big headline value (a current reading, price, score, count or status) with small supporting tiles, a short series over time, and a few details"},{"id":"answer","label":"Direct answer","description":"A short factual question with a direct answer, followed by a few supporting facts"}],"skeleton":{"title":"AirPods Pro 3 vs Sony WF-1000XM5 vs Bose QuietComfort Ultra Earbuds, current prices","subtitle":"Side by side","body":[{"type":"grid","cols":2,"gap":"md","children":[{"type":"slot","hint":"option A","shape":"tile"},{"type":"slot","hint":"option B","shape":"tile"}]},{"type":"slot","hint":"comparison table","shape":"block"},{"type":"slot","hint":"verdict","shape":"line"}]},"confidence":1,"depth":"brief","readPages":true,"think":false,"ms":131}
+
+event: search
+data: {"query":"AirPods Pro 3 vs Sony WF-1000XM5 vs Bose QuietComfort Ultra Earbuds, current prices","freshness":"any","results":[{"title":"Sony WF-1000XM6 vs. Apple AirPods Pro 3: There's a Clear Winner","url":"https://me.pcmag.com/en/headphones/35308/sony-wf-1000xm6-vs-apple-airpods-pro-3-dont-buy-before-reading-this","snippet":"Sony WF-1000XM6 vs. Apple AirPods Pro 3: There's a Clear Winner\nApple sells the AirPods Pro 3 for $249, the same price its pro-level earphones have been for many years. Meanwhile, Bose charges $299 for the QuietComfort Ultra Earbuds, and Sony asks $329.99 for the WF-1000XM6. That leaves an $80 price gap between the Ai…","date":"2026-09-23T11:19:12.000Z","content":"Sony WF-1000XM6 vs. Apple AirPods Pro 3: There's a Clear Winner\nApple sells the AirPods Pro 3 for $249, the same price its pro-level earphones have been for many years. Meanwhile, Bose charges $299 for the QuietComfort Ultra Earbuds, and Sony asks $329.99 for the WF-1000XM6. That leaves an $80 price gap between the AirPods and XM6—substantial enough that most iPhone owners are likely to choose the former.","domain":"me.pcmag.com","engines":["web"]},{"title":"AirPods — official store","url":"https://www.apple.com/shop/buy-airpods/airpods-pro-3","snippet":"AirPods Pro 3: $249 on apple.com (official store price)","domain":"apple.com","engines":["web"],"content":"AirPods Pro 3: $249 on apple.com (official store price)\n\nBuy AirPods Pro 3 - Apple <a href=\"https://www.apple.com/\" data-globalnav-item-name=\"apple\" data-analytics-title=\"apple home\" aria-label=\"Apple\" class=\"globalnav-link globalnav-link-apple\" dat"},{"title":"Bose — official store","url":"https://www.bose.com/p/earbuds/bose-quietcomfort-ultra-earbuds-2nd-gen/QCUE2-HEADPHONEIN.html","snippet":"Bose QuietComfort Ultra Earbuds (2nd Gen): $299 on bose.com (official store price)","domain":"bose.com","engines":["web"],"content":"Bose QuietComfort Ultra Earbuds (2nd Gen): $299 on bose.com (official store price)\n\nBose QuietComfort Ultra Earbuds (2nd Gen) | Noise Cancelling, Bluetooth | Bose Skip to main content Skip to Support Chat Skip to footer content Skip to Accessibility Statement"}],"images":[],"discussions":[],"engines":[{"name":"web","ok":false,"count":0,"ms":0,"error":"skipped"},{"name":"web","ok":true,"count":20,"ms":3730},{"name":"web","ok":false,"count":0,"ms":190,"error":"empty"}]}
+
+event: pages
+data: [{"n":2,"url":"https://www.apple.com/shop/buy-airpods/airpods-pro-3","text":"AirPods Pro 3: $249 on apple.com (official store price)\n\nBuy AirPods Pro 3 - Apple <a href=\"https://www.apple.com/\" data-globalnav-item-name=\"apple\" data-analytics-title=\"apple home\" aria-label=\"Apple\" class=\"globalnav-link globalnav-link-apple\" dat"},{"n":3,"url":"https://www.bose.com/p/earbuds/bose-quietcomfort-ultra-earbuds-2nd-gen/QCUE2-HEADPHONEIN.html","text":"Bose QuietComfort Ultra Earbuds (2nd Gen): $299 on bose.com (official store price)\n\nBose QuietComfort Ultra Earbuds (2nd Gen) | Noise Cancelling, Bluetooth | Bose Skip to main content Skip to Support Chat Skip to footer content Skip to Accessibility Statement"}]
+
+event: designing
+data: {"pagesRead":1,"ms":4800}
+
+event: layout
+data: [{"type":"grid","cols":2,"gap":"md","children":[{"type":"slot","hint":"option A","shape":"tile"},{"type":"slot","hint":"option B","shape":"tile"}]},{"type":"slot","hint":"comparison table","shape":"block"},{"type":"slot","hint":"verdict","shape":"line"}]
+
+event: node
+data: {"index":1,"node":{"type":"table","columns":["Model","Price","Source"],"rows":[["Apple AirPods Pro 3","$249","[2]"],["Bose QuietComfort Ultra Earbuds","$299","[3]"],["Sony WF-1000XM5","Not stated","—"]],"highlight":1}}
+
+event: node
+data: {"index":3,"node":{"type":"choices","options":[{"label":"All three","prompt":"Compare AirPods Pro 3, Sony WF-1000XM5 and Bose QuietComfort Ultra Earbuds prices and features","selected":true},{"label":"Under $260","prompt":"Compare AirPods Pro 3 and Bose QuietComfort Ultra Earbuds prices and features under $260","selected":false},{"label":"Noise cancelling","prompt":"Compare noise cancelling on AirPods Pro 3, Sony WF-1000XM5 and Bose QuietComfort Ultra Earbuds","selected":false}],"label":"Price focus"}}
+
+event: node
+data: {"index":0,"node":{"type":"grid","cols":2,"children":[{"type":"tile","label":"AirPods Pro 3","value":"$249","sub":"Apple","imageQuery":"Apple AirPods Pro 3","active":false,"source":2},{"type":"tile","label":"Bose QuietComfort Ultra Earbuds","value":"$299","sub":"Bose","imageQuery":"Bose QuietComfort Ultra Earbuds","active":false,"source":3}]}}
+
+event: credit
+data: {"src":"https://api.openverse.org/v1/images/d86cccdf-e456-4466-873a-a24dbf4354b3/thumb/","link":"https://commons.wikimedia.org/w/index.php?curid=138579030","credit":"Kyu3 · CC BY-SA 4.0 · wikimedia","license":"open"}
+
+event: node
+data: {"index":2,"node":{"type":"callout","text":"Sony's WF-1000XM6 sits highest at $329.99 [1].","title":"AirPods Pro 3 win on price","tone":"primary","icon":"trophy"}}
+
+event: node
+data: {"index":4,"node":{"type":"actions","items":[{"label":"Add Sony XM5 price","query":"Sony WF-1000XM5 official price","icon":"search","kind":"search"},{"label":"Sound quality","query":"Compare sound quality of AirPods Pro 3, Sony WF-1000XM5 and Bose QuietComfort Ultra Earbuds","icon":"music","kind":"ask"},{"label":"Best for iPhone","query":"Which is best for iPhone: AirPods Pro 3, Sony WF-1000XM5 or Bose QuietComfort Ultra Earbuds","icon":"smartphone","kind":"ask"}]}}
+
+event: node
+data: {"index":5,"node":{"type":"citations","refs":[1,2,3]}}
+
+event: node
+data: {"index":0,"node":{"type":"grid","cols":2,"children":[{"type":"tile","label":"AirPods Pro 3","value":"$249","sub":"Apple","active":false,"source":2},{"type":"tile","label":"Bose QuietComfort Ultra Earbuds","value":"$299","sub":"Bose","active":false,"source":3,"imageSrc":"https://api.openverse.org/v1/images/d86cccdf-e456-4466-873a-a24dbf4354b3/thumb/"}]}}
+
+event: followups
+data: ["What is the Sony WF-1000XM5 price compared to AirPods Pro 3?","Which has better noise cancelling, Bose QuietComfort Ultra Earbuds or AirPods Pro 3?","Are the Bose QuietComfort Ultra Earbuds worth $299?","How does Sony WF-1000XM5 battery life compare to AirPods Pro 3?"]
+
+event: head
+data: {"title":"AirPods Pro 3 vs Sony WF-1000XM5 vs Bose QuietComfort Ultra Earbuds, Current Prices"}
+
+event: credit
+data: {"src":"https://api.openverse.org/v1/images/992a8924-2bb9-4b07-bb41-4163cfae2986/thumb/","link":"https://commons.wikimedia.org/w/index.php?curid=187627188","credit":"Auggie G · CC BY 3.0 · wikimedia","license":"open"}
+
+event: node
+data: {"index":0,"node":{"type":"grid","cols":2,"children":[{"type":"tile","label":"AirPods Pro 3","value":"$249","sub":"Apple","active":false,"source":2,"imageSrc":"https://api.openverse.org/v1/images/992a8924-2bb9-4b07-bb41-4163cfae2986/thumb/"},{"type":"tile","label":"Bose QuietComfort Ultra Earbuds","value":"$299","sub":"Bose","active":false,"source":3,"imageSrc":"https://api.openverse.org/v1/images/d86cccdf-e456-4466-873a-a24dbf4354b3/thumb/"}]}}
+
+event: done
+data: {"engine":"composed","removed":0,"pagesRead":1,"ms":7042}
+

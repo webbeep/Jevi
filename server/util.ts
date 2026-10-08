@@ -46,7 +46,8 @@ export async function fetchJson<T>(url: string, init: RequestInit = {}, ms = 500
   return (await res.json()) as T;
 }
 
-async function readCapped(res: Response, cap: number): Promise<string> {
+/** Reads at most `cap` characters of a response body, cancelling the reader as soon as it has them. */
+export async function readCapped(res: Response, cap: number): Promise<string> {
   if (!res.body) return (await res.text()).slice(0, cap);
   const reader = res.body.getReader();
   const dec = new TextDecoder();
