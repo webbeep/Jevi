@@ -65,5 +65,5 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env, waitUnti
   if (!body) return stamp(errorJson('Invalid request', 400), gate.headers);
   const req = body;
   bindAiWaitUntil(env, waitUntil);
-  return stamp(await serveStream({ request, env, req, run: (send) => runStream(req, env, send), waitUntil }), gate.headers);
+  return stamp(await serveStream({ request, env, req, run: (send) => runStream(req, env, send, { request, waitUntil: (p) => waitUntil(p) }), waitUntil }), gate.headers);
 };

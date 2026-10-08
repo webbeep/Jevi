@@ -10,9 +10,12 @@ export function numberTokens(s: string): string[] {
 export class Grounding {
   private readonly known: Set<string>;
 
+  private readonly lenient: boolean;
+
   /** `lenient` turns checks off, for answers that come from reasoning rather than sources. */
-  constructor(corpus: string, private readonly lenient = false) {
+  constructor(corpus: string, lenient = false) {
     this.known = new Set(numberTokens(corpus));
+    this.lenient = lenient;
   }
 
   ok(s: string | number | undefined): boolean {

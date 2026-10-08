@@ -1,8 +1,10 @@
 import { cleanMarkdown } from '../shared/text';
 import type { SearchResult } from '../shared/types';
+import type { AskScope } from './budget';
+import { engineDead, failureOf, rememberDead } from './budget';
 import { readPage } from './htmlcap';
 import { type LateExtras, normalizeUrl } from './search';
-import { type Env, hedge, stripHtml } from './util';
+import { HttpStatusError, type Env, stripHtml } from './util';
 
 const BROWSER_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36';
 const MIN_TEXT = 300;
@@ -62,31 +64,68 @@ async function direct(url: string, signal: AbortSignal, images?: Map<string, str
   return htmlToText(body);
 }
 
-async function jina(url: string, env: Env, signal: AbortSignal): Promise<string> {
+async function jinaRead(url: string, signal: AbortSignal, key?: string): Promise<string> {
   const headers: Record<string, string> = { 'X-Return-Format': 'markdown', 'X-Timeout': '8' };
-  if (env.JINA_API_KEY) headers.Authorization = `Bearer ${env.JINA_API_KEY}`;
+  if (key) headers.Authorization = `Bearer ${key}`;
   const res = await fetch(`https://r.jina.ai/${url}`, { headers, signal });
-  if (!res.ok) throw new Error(`Jina HTTP ${res.status}`);
+  if (!res.ok) {
+    let peek = '';
+    try {
+      peek = (await res.text()).slice(0, 180);
+    } catch {
+      peek = '';
+    }
+    throw new HttpStatusError(res.status, peek);
+  }
   return cleanMarkdown(await res.text(), 20000);
 }
 
-async function allOrigins(url: string, signal: AbortSignal): Promise<string> {
-  const res = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`, { signal });
-  if (!res.ok) throw new Error(`AllOrigins HTTP ${res.status}`);
-  const { body } = await readPage(res);
-  return htmlToText(body);
+function bump(scope: AskScope | undefined, kind: 'jina' | 'keyless' | 'direct'): void {
+  if (scope) scope.ledger.pages[kind] += 1;
 }
 
-/** Fetches one page's readable text, racing direct fetch, Jina reader and AllOrigins. */
-export async function pageText(url: string, env: Env, timeoutMs = 9000, maxChars = 6000, images?: Map<string, string>): Promise<string> {
-  if (!isFetchable(url)) throw new Error('URL not allowed');
-  const signal = AbortSignal.timeout(timeoutMs);
-  const readable = (task: () => Promise<string>) => async () => {
-    const text = await task();
+/**
+ * One reader, not a race. Keyed Jina when the key is set and not recently dead.
+ * Otherwise keyless r.jina.ai (markdown, less CPU than parsing HTML). Direct fetch
+ * only if that fails.
+ */
+async function readReadable(url: string, env: Env, signal: AbortSignal, images: Map<string, string> | undefined, scope: AskScope | undefined): Promise<string> {
+  const enough = (text: string) => {
     if (text.length < MIN_TEXT) throw new Error('not enough text');
     return text;
   };
-  const text = await hedge([readable(() => direct(url, signal, images)), readable(() => jina(url, env, signal)), readable(() => allOrigins(url, signal))], 500);
+  const key = env.JINA_API_KEY;
+  if (key && !engineDead('jina')) {
+    bump(scope, 'jina');
+    try {
+      return enough(await jinaRead(url, signal, key));
+    } catch (err) {
+      const failure = failureOf(err);
+      if (failure.dead) rememberDead('jina');
+      if (failure.fall || (err instanceof Error && err.message === 'not enough text')) {
+        scope?.ledger.fellThrough.push(`jina:${err instanceof Error && err.message === 'not enough text' ? 'short' : failure.reason}`);
+      } else throw err;
+    }
+  }
+  if (!engineDead('jina-keyless')) {
+    bump(scope, 'keyless');
+    try {
+      return enough(await jinaRead(url, signal));
+    } catch (err) {
+      const failure = failureOf(err);
+      if (failure.dead) rememberDead('jina-keyless');
+      scope?.ledger.fellThrough.push(`jina-keyless:${err instanceof Error && err.message === 'not enough text' ? 'short' : failure.reason}`);
+    }
+  }
+  bump(scope, 'direct');
+  return enough(await direct(url, signal, images));
+}
+
+/** Fetches one page's readable text. Keyless Jina when the key is missing or Jina is dead; direct fetch is the fallback. */
+export async function pageText(url: string, env: Env, timeoutMs = 9000, maxChars = 6000, images?: Map<string, string>, scope?: AskScope): Promise<string> {
+  if (!isFetchable(url)) throw new Error('URL not allowed');
+  const signal = AbortSignal.timeout(timeoutMs);
+  const text = await readReadable(url, env, signal, images, scope);
   return text.length > maxChars ? `${text.slice(0, maxChars)}…` : text;
 }
 
@@ -101,18 +140,21 @@ export async function collectPages(
   env: Env,
   opts: { count: number; need: number; budgetMs: number },
   late?: Promise<LateExtras>,
+  scope?: AskScope,
 ): Promise<PageText[]> {
+  const count = Math.min(3, Math.max(0, opts.count));
+  const need = Math.min(count, opts.need);
   // Only sources the designer is shown (numbered 1-12) are worth reading.
   const numbered = results.slice(0, 12).map((r, i) => ({ r, n: i + 1 }));
   const ready: PageText[] = numbered
     .filter(({ r }) => r.content && r.content.length >= MIN_TEXT)
-    .slice(0, opts.count)
+    .slice(0, count)
     .map(({ r, n }) => ({ n, url: r.url, text: r.content! }));
-  if (ready.length >= opts.need) return ready;
+  if (ready.length >= need) return ready;
 
   const have = new Set(ready.map((p) => p.n));
   const seen = new Set<string>();
-  const missing = numbered.filter(({ r, n }) => !have.has(n) && !seen.has(r.domain) && seen.add(r.domain)).slice(0, opts.count - ready.length);
+  const missing = numbered.filter(({ r, n }) => !have.has(n) && !seen.has(r.domain) && seen.add(r.domain)).slice(0, count - ready.length);
   const fromLate = async (url: string) => {
     const text = (await late)?.content.get(normalizeUrl(url));
     if (!text || text.length < MIN_TEXT) throw new Error('no late content');
@@ -126,10 +168,10 @@ export async function collectPages(
     let pending = missing.length;
     if (!pending) resolve();
     for (const { r, n } of missing) {
-      Promise.any([fromLate(r.url), pageText(r.url, env, opts.budgetMs + 500, 6000, images)])
+      Promise.any([fromLate(r.url), pageText(r.url, env, opts.budgetMs + 500, 6000, images, scope)])
         .then((text) => {
           pages.push({ n, url: r.url, text, image: images.get(r.url) });
-          if (pages.length >= opts.need) resolve();
+          if (pages.length >= need) resolve();
         })
         .catch(() => undefined)
         .finally(() => {
@@ -140,5 +182,5 @@ export async function collectPages(
         });
     }
   });
-  return pages.slice(0, opts.count).sort((a, b) => a.n - b.n);
+  return pages.slice(0, count).sort((a, b) => a.n - b.n);
 }

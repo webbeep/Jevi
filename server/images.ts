@@ -146,16 +146,6 @@ async function unsplash(query: string, env: Env, n: number): Promise<ImageResult
   }));
 }
 
-/** Publisher preview images of pages that match the item (search-engine style thumbnails). */
-async function exa(query: string, env: Env): Promise<ImageResult[]> {
-  const data = await fetchJson<{ results?: { title?: string; url: string; image?: string }[] }>(
-    'https://api.exa.ai/search',
-    { method: 'POST', headers: { 'x-api-key': env.EXA_API_KEY!, 'Content-Type': 'application/json' }, body: JSON.stringify({ query, numResults: 5, type: 'fast', contents: { text: { maxCharacters: 1 } } }) },
-    TIMEOUT_MS,
-  );
-  return (data.results ?? []).filter((r) => r.image).map((r) => ({ url: r.url, thumb: r.image!, title: r.title ?? '', source: domainOf(r.url), license: 'source' as const, credit: domainOf(r.url) }));
-}
-
 async function brave(query: string, env: Env): Promise<ImageResult[]> {
   const data = await fetchJson<{ results?: { title: string; url: string; thumbnail?: { src: string } }[] }>(
     `https://api.search.brave.com/res/v1/images/search?q=${encodeURIComponent(query)}&count=5`,
@@ -172,7 +162,6 @@ function sources(env: Env): { name: string; run: Source; specificOnly?: boolean 
   const pub = allowsSourceImages(env);
   return [
     { name: 'wikipedia', run: (q) => wikipedia(q), specificOnly: true },
-    ...(pub && env.EXA_API_KEY ? [{ name: 'exa', run: (q: string) => exa(q, env), specificOnly: true }] : []),
     { name: 'commons', run: (q, n) => commons(q, Math.max(6, n)) },
     ...(env.UNSPLASH_ACCESS_KEY ? [{ name: 'unsplash', run: (q: string, n: number) => unsplash(q, env, Math.max(6, n)) }] : []),
     ...(env.PEXELS_API_KEY ? [{ name: 'pexels', run: (q: string, n: number) => pexels(q, env, Math.max(6, n)) }] : []),

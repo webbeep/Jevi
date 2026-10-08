@@ -10,7 +10,7 @@ binding = "AI"
 [limits]
 cpu_ms = 30000
 
-# zo2-db (D1): G users/sessions/usage/saves + AI neuron budget. One block only; migrations 0001–0005 share it.
+# zo2-db (D1): G users/sessions/usage/saves, AI neuron budget, search cache. One block only; migrations 0001–0005 share it.
 [[d1_databases]]
 binding = "DB"
 database_name = "zo2-db"

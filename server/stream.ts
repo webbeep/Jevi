@@ -6,9 +6,12 @@ import { permitted } from './images';
 import { collectPages } from './pages';
 import { MADE_PATTERNS } from './patterns';
 import { planLayout } from './plan';
+import type { AskScope } from './budget';
+import { logAsk, newLedger, queriesForAsk } from './budget';
 import { type LateExtras, searchWithLate } from './search';
 import type { Send } from './sse';
-import { extraQueries, mergeLate, mergeSearches, understand } from './understand';
+import { extraQueries, understand } from './understand';
+import { cacheBypass } from './token';
 import type { Env } from './util';
 
 export interface CardOnScreen {
@@ -56,10 +59,10 @@ interface DesignArgs {
   intent?: string;
 }
 
-/** How many pages to read and how long to wait for them before designing. */
-const pageBudget = (readPages: boolean) => (readPages ? { count: 5, need: 3, budgetMs: 2200 } : { count: 3, need: 2, budgetMs: 1000 });
+/** How many pages to read and how long to wait for them before designing. At most three pages per ask. */
+const pageBudget = (readPages: boolean) => (readPages ? { count: 3, need: 2, budgetMs: 2200 } : { count: 2, need: 2, budgetMs: 1000 });
 
-async function design(send: Send, env: Env, req: DesignArgs, started: number, late?: Promise<LateExtras>) {
+async function design(send: Send, env: Env, req: DesignArgs, started: number, scope: AskScope, late?: Promise<LateExtras>) {
   // Cards already on screen point into this search's image list by index, so only a new search may reorder it.
   const newSearch = !req.followup;
   // Writing and code are made for the person, not looked up, so they are composed like a conversation turn.
@@ -67,7 +70,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, la
   // Conversation turns reason from what is already known; everything else reads pages first.
   const chat = req.followup?.mode === 'chat';
   const budget = chat ? { count: 3, need: 0, budgetMs: 0 } : pageBudget(req.readPages);
-  const pages = await collectPages(req.search.results, env, budget, late);
+  const pages = await collectPages(req.search.results, env, budget, late, scope);
   const fresh = pages.filter((p) => !req.search.results[p.n - 1]?.content);
   if (fresh.length) send('pages', fresh.map(({ n, url, text }) => ({ n, url, text })));
 
@@ -104,8 +107,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, la
  * intent ("news tldr today" → today's top headlines) lead the results, the literal ones follow.
  * Rewritten follow-ups already say what they mean, so they skip the understanding step.
  */
-async function searchAndDesign(send: Send, env: Env, query: string, freshness: Freshness, context: string | undefined, started: number, rewritten = false) {
-  const literal = searchWithLate({ q: query, freshness, count: 20 }, env);
+async function searchAndDesign(send: Send, env: Env, query: string, freshness: Freshness, context: string | undefined, started: number, scope: AskScope, rewritten = false) {
   const understood = rewritten ? Promise.resolve(undefined) : understand(query, env, context);
   const planned = understood.then((u) => planLayout(query, env, { intent: u?.intent })).then((plan) => {
     send('plan', plan);
@@ -115,18 +117,19 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   const u = await understood;
   const extras = extraQueries(query, u);
   if (u) send('intent', { intent: u.intent, queries: u.queries });
-  const intended = (await Promise.all(extras.map((q) => searchWithLate({ q, freshness: freshness === 'any' ? u!.freshness : freshness, count: 12, lite: true }, env).catch(() => undefined)))).filter((s) => !!s);
-  const lit = await literal;
-  const results = intended.length ? mergeSearches(query, lit.response, intended.map((s) => s.response), extras.length < (u?.queries.length ?? 0)) : lit.response;
-  const late = intended.length ? mergeLate([lit.late, ...intended.map((s) => s.late)]) : lit.late;
+  // One search for the ask. Planner alternatives are trimmed to a single query so the engine cap holds.
+  const q = queriesForAsk(query, extras);
+  const fresh = freshness === 'any' && u ? u.freshness : freshness;
+  const found = await searchWithLate({ q, freshness: fresh, count: 20 }, env, scope);
+  const results = { ...found.response, query };
 
   send('search', results);
   if (!results.results.length) throw new Error('No results from any engine. Try rephrasing.');
   const plan = await planned;
-  await design(send, env, { query, pattern: plan.pattern, depth: plan.depth, readPages: plan.readPages, search: results, context, intent: u?.intent }, started, late);
+  await design(send, env, { query, pattern: plan.pattern, depth: plan.depth, readPages: plan.readPages, search: results, context, intent: u?.intent }, started, scope, found.late);
 }
 
-async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind: 'followup' }>, started: number) {
+async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind: 'followup' }>, started: number, scope: AskScope) {
   const context = req.context?.slice(0, 4000);
   const from = req.cards.find((c) => c.id === req.from);
 
@@ -134,7 +137,7 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
   if (req.intent === 'search') {
     const query = await rewriteQuery(req.original, req.question, env, context, from?.title).catch(() => req.question);
     send('rewrite', { query });
-    await searchAndDesign(send, env, query, 'any', context, started, true);
+    await searchAndDesign(send, env, query, 'any', context, started, scope, true);
     return;
   }
 
@@ -148,7 +151,7 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
       send('plan', plan);
       const query = await rewritten;
       send('rewrite', { query });
-      await searchAndDesign(send, env, query, 'any', context, started, true);
+      await searchAndDesign(send, env, query, 'any', context, started, scope, true);
       return;
     }
     case 'refine': {
@@ -158,17 +161,17 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
         const pattern = base.pattern ?? plan.pattern;
         send('plan', { ...plan, mode, pattern });
         send('base', { id: base.id });
-        await design(send, env, { query: req.original, pattern, depth: plan.depth, readPages: false, search: req.search, followup: { mode: 'refine', question: req.question, baseCard: base.card }, context }, started);
+        await design(send, env, { query: req.original, pattern, depth: plan.depth, readPages: false, search: req.search, followup: { mode: 'refine', question: req.question, baseCard: base.card }, context }, started, scope);
         return;
       }
       send('plan', { ...plan, mode: 'chat' });
-      await design(send, env, { query: req.original, pattern: plan.pattern, depth: plan.depth, readPages: false, search: req.search, followup: { mode: 'chat', question: req.question }, context }, started);
+      await design(send, env, { query: req.original, pattern: plan.pattern, depth: plan.depth, readPages: false, search: req.search, followup: { mode: 'chat', question: req.question }, context }, started, scope);
       return;
     }
     case 'answer':
     case 'chat':
       send('plan', { ...plan, mode });
-      await design(send, env, { query: req.original, pattern: plan.pattern, depth: plan.depth, readPages: plan.readPages, search: req.search, followup: { mode, question: req.question }, context, think: mode === 'chat' && plan.think }, started);
+      await design(send, env, { query: req.original, pattern: plan.pattern, depth: plan.depth, readPages: plan.readPages, search: req.search, followup: { mode, question: req.question }, context, think: mode === 'chat' && plan.think }, started, scope);
       return;
     default: {
       const unreachable: never = mode;
@@ -177,21 +180,35 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
   }
 }
 
-export async function runStream(req: StreamRequest, env: Env, send: Send): Promise<void> {
+export interface StreamOpts {
+  request?: Request;
+  waitUntil?: (promise: Promise<unknown>) => void;
+}
+
+export async function runStream(req: StreamRequest, env: Env, send: Send, opts?: StreamOpts): Promise<void> {
   const started = Date.now();
-  switch (req.kind) {
-    case 'search':
-      await searchAndDesign(send, env, req.query, req.freshness, req.context, started);
-      return;
-    case 'design':
-      await design(send, env, req, started);
-      return;
-    case 'followup':
-      await followup(send, env, req, started);
-      return;
-    default: {
-      const unreachable: never = req;
-      throw new Error(`Unknown stream request ${JSON.stringify(unreachable)}`);
+  const scope: AskScope = {
+    ledger: newLedger(),
+    bypass: opts?.request ? cacheBypass(opts.request, env) : false,
+    waitUntil: opts?.waitUntil,
+  };
+  try {
+    switch (req.kind) {
+      case 'search':
+        await searchAndDesign(send, env, req.query, req.freshness, req.context, started, scope);
+        return;
+      case 'design':
+        await design(send, env, req, started, scope);
+        return;
+      case 'followup':
+        await followup(send, env, req, started, scope);
+        return;
+      default: {
+        const unreachable: never = req;
+        throw new Error(`Unknown stream request ${JSON.stringify(unreachable)}`);
+      }
     }
+  } finally {
+    logAsk(scope.ledger);
   }
 }

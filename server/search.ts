@@ -1,6 +1,5 @@
 import type {
   Discussion,
-  EngineStatus,
   Freshness,
   ImageResult,
   Knowledge,
@@ -8,9 +7,12 @@ import type {
   SearchResult,
 } from '../shared/types';
 import { knowledgeMatches } from '../shared/relevance';
-import { cleanMarkdown, parseDuckDuckGo } from '../shared/text';
+import type { AskScope } from './budget';
+import { newLedger } from './budget';
+import { cacheDb, packSearch, readSearchCache, searchCacheKey, writeSearchCache } from './cache';
+import { cascadeWeb } from './cascade';
 import { commons, openverse, permitted } from './images';
-import { Env, UA, clip, domainOf, fetchJson, fetchText, hedge, stripHtml } from './util';
+import { UA, domainOf, fetchJson, hedge, type Env } from './util';
 
 interface Query {
   q: string;
@@ -23,8 +25,6 @@ interface Query {
   lite?: boolean;
 }
 
-const KEYED_ENGINES = new Set(['brave', 'tavily', 'exa', 'perplexity', 'serper', 'jina']);
-
 interface Hit {
   title: string;
   url: string;
@@ -34,304 +34,18 @@ interface Hit {
   content?: string;
 }
 
-interface EngineOutput {
-  hits: Hit[];
-  images?: ImageResult[];
-}
-
-interface Engine {
-  name: string;
-  enabled: (env: Env) => boolean;
-  run: (q: Query, env: Env) => Promise<EngineOutput>;
-}
-
-const ENGINE_TIMEOUT_MS = 6500;
-const EARLY_RETURN_MS = 1100;
-const EARLY_RETURN_HITS = 10;
-/** Engines that return page content are worth a short extra wait. */
-const CONTENT_ENGINE_WAIT_MS = 1600;
-/** Past this, answer with whatever has arrived rather than wait for the slowest engine. */
-const HARD_RETURN_MS = 2800;
-/** Lite searches only add to a full one, so they settle for fewer hits sooner. */
-const LITE = { earlyMs: 900, hits: 6, hardMs: 2000 };
-
-function freshnessCode(f: Freshness, codes: Record<Exclude<Freshness, 'any'>, string>): string | undefined {
-  return f === 'any' ? undefined : codes[f];
-}
-
-const brave: Engine = {
-  name: 'brave',
-  enabled: (env) => !!env.BRAVE_API_KEY,
-  async run(q, env) {
-    const u = new URL('https://api.search.brave.com/res/v1/web/search');
-    u.searchParams.set('q', q.q);
-    u.searchParams.set('count', String(Math.min(q.count, 20)));
-    const fresh = freshnessCode(q.freshness, { day: 'pd', week: 'pw', month: 'pm', year: 'py' });
-    if (fresh) u.searchParams.set('freshness', fresh);
-    const data = await fetchJson<{
-      web?: { results?: { title: string; url: string; description: string; age?: string; thumbnail?: { src?: string } }[] };
-    }>(u.toString(), { headers: { 'X-Subscription-Token': env.BRAVE_API_KEY!, Accept: 'application/json' } }, ENGINE_TIMEOUT_MS);
-    return {
-      hits: (data.web?.results ?? []).map((r) => ({
-        title: stripHtml(r.title),
-        url: r.url,
-        snippet: stripHtml(r.description ?? ''),
-        date: r.age,
-        image: r.thumbnail?.src,
-      })),
-    };
-  },
-};
-
-const tavily: Engine = {
-  name: 'tavily',
-  enabled: (env) => !!env.TAVILY_API_KEY,
-  async run(q, env) {
-    const data = await fetchJson<{
-      results?: { title: string; url: string; content: string; raw_content?: string | null; published_date?: string }[];
-      images?: (string | { url: string; description?: string })[];
-    }>(
-      'https://api.tavily.com/search',
-      {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${env.TAVILY_API_KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query: q.q,
-          max_results: 10,
-          include_images: true,
-          include_image_descriptions: true,
-          include_raw_content: 'markdown',
-          time_range: q.freshness === 'any' ? undefined : q.freshness,
-        }),
-      },
-      ENGINE_TIMEOUT_MS,
-    );
-    return {
-      hits: (data.results ?? []).map((r) => ({
-        title: r.title,
-        url: r.url,
-        snippet: clip(r.content ?? '', 320),
-        date: r.published_date,
-        content: r.raw_content ? cleanMarkdown(r.raw_content) || undefined : undefined,
-      })),
-      images: (data.images ?? []).map((img) => {
-        const url = typeof img === 'string' ? img : img.url;
-        return { url, thumb: url, title: typeof img === 'string' ? '' : img.description ?? '', source: domainOf(url), license: 'source' as const, credit: domainOf(url).replace(/^(cdn|images?|img|static|media|assets)\d*\./, '') };
-      }),
-    };
-  },
-};
-
-const DAYS: Record<Exclude<Freshness, 'any'>, number> = { day: 1, week: 7, month: 30, year: 365 };
-
-/** Exa: neural web search that returns page text with each result (free tier: $10 credit/month). */
-const exa: Engine = {
-  name: 'exa',
-  enabled: (env) => !!env.EXA_API_KEY,
-  async run(q, env) {
-    const since = q.freshness === 'any' ? undefined : new Date(Date.now() - DAYS[q.freshness] * 86_400_000).toISOString();
-    const data = await fetchJson<{
-      results?: { title?: string; url: string; publishedDate?: string; image?: string; text?: string; highlights?: string[] }[];
-    }>(
-      'https://api.exa.ai/search',
-      {
-        method: 'POST',
-        headers: { 'x-api-key': env.EXA_API_KEY!, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: q.q, numResults: 10, type: 'fast', contents: { text: { maxCharacters: 6000 } }, ...(since ? { startPublishedDate: since } : {}) }),
-      },
-      ENGINE_TIMEOUT_MS,
-    );
-    return {
-      hits: (data.results ?? []).map((r) => {
-        const text = r.text ? cleanMarkdown(r.text) : '';
-        return {
-          title: r.title || domainOf(r.url),
-          url: r.url,
-          snippet: clip(r.highlights?.[0] ?? text.replace(/\n/g, ' '), 320),
-          date: r.publishedDate,
-          image: r.image,
-          content: text.length > 300 ? text : undefined,
-        };
-      }),
-    };
-  },
-};
-
-/** Perplexity Search API: ranked results with extracted page passages (paid, $5 per 1k requests). */
-const perplexity: Engine = {
-  name: 'perplexity',
-  enabled: (env) => !!env.PERPLEXITY_API_KEY,
-  async run(q, env) {
-    const data = await fetchJson<{ results?: { title: string; url: string; snippet: string; date?: string | null }[] }>(
-      'https://api.perplexity.ai/search',
-      {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${env.PERPLEXITY_API_KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: q.q, max_results: 10, search_type: 'fast', max_tokens_per_page: 1200, ...(q.freshness === 'any' ? {} : { search_recency_filter: q.freshness }) }),
-      },
-      ENGINE_TIMEOUT_MS,
-    );
-    return {
-      hits: (data.results ?? []).map((r) => ({
-        title: r.title,
-        url: r.url,
-        snippet: clip(r.snippet.replace(/\s+/g, ' '), 320),
-        date: r.date ?? undefined,
-        content: r.snippet.length > 600 ? cleanMarkdown(r.snippet) || undefined : undefined,
-      })),
-    };
-  },
-};
-
-const serper: Engine = {
-  name: 'serper',
-  enabled: (env) => !!env.SERPER_API_KEY,
-  async run(q, env) {
-    const tbs = freshnessCode(q.freshness, { day: 'qdr:d', week: 'qdr:w', month: 'qdr:m', year: 'qdr:y' });
-    const data = await fetchJson<{ organic?: { title: string; link: string; snippet?: string; date?: string; imageUrl?: string }[] }>(
-      'https://google.serper.dev/search',
-      {
-        method: 'POST',
-        headers: { 'X-API-KEY': env.SERPER_API_KEY!, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ q: q.q, num: Math.min(q.count, 20), tbs }),
-      },
-      ENGINE_TIMEOUT_MS,
-    );
-    return {
-      hits: (data.organic ?? []).map((r) => ({ title: r.title, url: r.link, snippet: r.snippet ?? '', date: r.date, image: r.imageUrl })),
-    };
-  },
-};
-
-const jina: Engine = {
-  name: 'jina',
-  enabled: (env) => !!env.JINA_API_KEY,
-  async run(q, env) {
-    const data = await fetchJson<{ data?: { title: string; url: string; description?: string; date?: string }[] }>(
-      `https://s.jina.ai/?q=${encodeURIComponent(q.q)}`,
-      { headers: { Authorization: `Bearer ${env.JINA_API_KEY}`, Accept: 'application/json', 'X-Respond-With': 'no-content' } },
-      ENGINE_TIMEOUT_MS,
-    );
-    return { hits: (data.data ?? []).map((r) => ({ title: r.title, url: r.url, snippet: r.description ?? '', date: r.date })) };
-  },
-};
-
-const BROWSER_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36';
-
-const duckduckgo: Engine = {
-  name: 'duckduckgo',
-  enabled: () => true,
-  async run(q) {
-    const df = freshnessCode(q.freshness, { day: 'd', week: 'w', month: 'm', year: 'y' });
-    const params = `q=${encodeURIComponent(q.q)}${df ? `&df=${df}` : ''}`;
-    const html = `https://html.duckduckgo.com/html/?${params}`;
-    const lite = `https://lite.duckduckgo.com/lite/?${params}`;
-    const attempt = (url: string) => async () => {
-      const hits = parseDuckDuckGo(await fetchText(url, { headers: { 'User-Agent': BROWSER_UA } }, ENGINE_TIMEOUT_MS - 1000));
-      if (!hits.length) throw new Error('no results');
-      return { hits };
-    };
-    return hedge([attempt(lite), attempt(html), attempt(`https://api.allorigins.win/raw?url=${encodeURIComponent(html)}`)], 900);
-  },
-};
-
-const bing: Engine = {
-  name: 'bing',
-  enabled: () => true,
-  async run(q) {
-    const fresh = freshnessCode(q.freshness, { day: 'ez1', week: 'ez2', month: 'ez3', year: 'ez5' });
-    const xml = await fetchText(
-      `https://www.bing.com/search?format=rss&count=20&q=${encodeURIComponent(q.q)}${fresh ? `&filters=${encodeURIComponent(`ex1:"${fresh}"`)}` : ''}`,
-      { headers: { 'User-Agent': BROWSER_UA } },
-      ENGINE_TIMEOUT_MS,
-    );
-    const tag = (item: string, name: string) => stripHtml(item.match(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`))?.[1] ?? '');
-    const hits = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].map(([, item]) => ({
-      title: tag(item, 'title'),
-      url: tag(item, 'link'),
-      snippet: tag(item, 'description'),
-      date: tag(item, 'pubDate') || undefined,
-    }));
-    return { hits };
-  },
-};
-
-const DEFAULT_SEARXNG = ['https://searx.be', 'https://search.inetol.net', 'https://priv.au', 'https://searx.tiekoetter.com'];
-
-const searxng: Engine = {
-  name: 'searxng',
-  enabled: () => true,
-  async run(q, env) {
-    const instances = env.SEARXNG_URLS ? env.SEARXNG_URLS.split(',').map((s) => s.trim()).filter(Boolean) : DEFAULT_SEARXNG;
-    const range = freshnessCode(q.freshness, { day: 'day', week: 'week', month: 'month', year: 'year' });
-    return hedge(
-      instances.map((base) => async () => {
-        const u = new URL('/search', base);
-        u.searchParams.set('q', q.q);
-        u.searchParams.set('format', 'json');
-        if (range) u.searchParams.set('time_range', range);
-        const data = await fetchJson<{
-          results?: { title: string; url: string; content?: string; publishedDate?: string; img_src?: string; thumbnail?: string }[];
-        }>(u.toString(), { headers: { 'User-Agent': UA, Accept: 'application/json' } }, ENGINE_TIMEOUT_MS - 1000);
-        const hits = (data.results ?? []).map((r) => ({
-          title: r.title,
-          url: r.url,
-          snippet: stripHtml(r.content ?? ''),
-          date: r.publishedDate ?? undefined,
-          image: r.thumbnail || r.img_src || undefined,
-        }));
-        if (!hits.length) throw new Error('no results');
-        return { hits };
-      }),
-      600,
-    );
-  },
-};
-
-const wikipedia: Engine = {
-  name: 'wikipedia',
-  enabled: () => true,
-  async run(q) {
-    const u = new URL('https://en.wikipedia.org/w/api.php');
-    Object.entries({ action: 'query', list: 'search', srsearch: q.q, format: 'json', srlimit: '4', origin: '*' }).forEach(([k, v]) =>
-      u.searchParams.set(k, v),
-    );
-    const data = await fetchJson<{ query?: { search?: { title: string; snippet: string }[] } }>(
-      u.toString(),
-      { headers: { 'User-Agent': UA } },
-      ENGINE_TIMEOUT_MS,
-    );
-    return {
-      hits: (data.query?.search ?? []).map((r) => ({
-        title: r.title,
-        url: `https://en.wikipedia.org/wiki/${encodeURIComponent(r.title.replace(/ /g, '_'))}`,
-        snippet: stripHtml(r.snippet),
-      })),
-    };
-  },
-};
-
-const marginalia: Engine = {
-  name: 'marginalia',
-  enabled: () => true,
-  async run(q, env) {
-    const key = env.MARGINALIA_API_KEY || 'public';
-    const data = await fetchJson<{ results?: { url: string; title: string; description?: string }[] }>(
-      `https://api.marginalia.nu/${key}/search/${encodeURIComponent(q.q)}?count=10`,
-      { headers: { 'User-Agent': UA } },
-      ENGINE_TIMEOUT_MS,
-    );
-    return { hits: (data.results ?? []).map((r) => ({ title: r.title, url: r.url, snippet: r.description ?? '' })) };
-  },
-};
-
-const WEB_ENGINES: Engine[] = [brave, tavily, exa, perplexity, serper, jina, duckduckgo, bing, marginalia, searxng, wikipedia];
-/** Engines that return page text; the search waits briefly for the first of them. */
-const CONTENT_ENGINES = new Set(['tavily', 'exa', 'perplexity']);
-
 export function keyedEngines(env: Env): string[] {
-  return [brave, tavily, exa, perplexity, serper, jina].filter((e) => e.enabled(env)).map((e) => e.name);
+  const keys: [keyof Env, string][] = [
+    ['BRAVE_API_KEY', 'brave'],
+    ['TAVILY_API_KEY', 'tavily'],
+    ['EXA_API_KEY', 'exa'],
+    ['PERPLEXITY_API_KEY', 'perplexity'],
+    ['SERPER_API_KEY', 'serper'],
+    ['JINA_API_KEY', 'jina'],
+  ];
+  return keys.filter(([k]) => !!env[k]).map(([, name]) => name);
 }
+
 
 export function normalizeUrl(url: string): string {
   try {
@@ -471,8 +185,8 @@ export interface SearchWithLate {
   late: Promise<LateExtras>;
 }
 
-export async function search(q: Query, env: Env): Promise<SearchResponse> {
-  return (await searchWithLate(q, env)).response;
+export async function search(q: Query, env: Env, scope?: AskScope): Promise<SearchResponse> {
+  return (await searchWithLate(q, env, scope)).response;
 }
 
 async function wikiKnowledge(q: string): Promise<Knowledge | undefined> {
@@ -485,87 +199,70 @@ async function wikiKnowledge(q: string): Promise<Knowledge | undefined> {
   return title ? wikiSummary(title) : undefined;
 }
 
-export async function searchWithLate(q: Query, env: Env): Promise<SearchWithLate> {
-  const enabled = WEB_ENGINES.filter((e) => e.enabled(env));
-  const keyed = enabled.filter((e) => KEYED_ENGINES.has(e.name));
-  const engines = !q.lite ? enabled : keyed.length ? keyed : enabled.filter((e) => e.name === 'duckduckgo');
-  const statuses: EngineStatus[] = [];
+const emptyLate = (): LateExtras => ({ content: new Map(), images: [] });
 
-  const done: { engine: string; hits: Hit[]; images?: ImageResult[] }[] = [];
-  const allEngines = Promise.all(
-    engines.map(async (engine) => {
-      const started = Date.now();
-      try {
-        const out = await engine.run(q, env);
-        statuses.push({ name: engine.name, ok: true, count: out.hits.length, ms: Date.now() - started });
-        done.push({ engine: engine.name, ...out });
-      } catch (err) {
-        const error = err instanceof AggregateError ? 'all mirrors failed' : err instanceof Error ? err.message : String(err);
-        statuses.push({ name: engine.name, ok: false, count: 0, ms: Date.now() - started, error });
-      }
-    }),
-  );
-  const enoughEarly = new Promise<void>((resolve) => {
-    const startedAt = Date.now();
-    const tick = setInterval(() => {
-      const webHits = done.filter((d) => d.engine !== 'wikipedia').reduce((n, d) => n + d.hits.length, 0);
-      const elapsed = Date.now() - startedAt;
-      const contentEngines = engines.filter((e) => CONTENT_ENGINES.has(e.name));
-      const contentPending = contentEngines.length > 0 && !done.some((d) => CONTENT_ENGINES.has(d.engine)) && contentEngines.some((e) => !statuses.some((st) => st.name === e.name));
-      const early = q.lite
-        ? (elapsed >= LITE.earlyMs && webHits >= LITE.hits) || (elapsed >= LITE.hardMs && webHits > 0)
-        : (elapsed >= EARLY_RETURN_MS && webHits >= EARLY_RETURN_HITS && (!contentPending || elapsed >= CONTENT_ENGINE_WAIT_MS)) || (elapsed >= HARD_RETURN_MS && webHits > 0);
-      if (early) {
-        clearInterval(tick);
-        resolve();
-      }
-    }, 100);
-    void allEngines.finally(() => clearInterval(tick));
-  });
-  const webPromise = Promise.race([allEngines, enoughEarly]).then(() => {
-    const finished = new Set(statuses.map((s) => s.name));
-    engines.filter((e) => !finished.has(e.name)).forEach((e) => statuses.push({ name: e.name, ok: false, count: 0, ms: 0, error: 'skipped (slow)' }));
-    return [...done];
-  });
+export async function searchWithLate(q: Query, env: Env, scope?: AskScope): Promise<SearchWithLate> {
+  const ask = scope ?? { ledger: newLedger(), bypass: false };
+  const key = searchCacheKey(q.q, q.freshness, q.count);
+  const db = cacheDb(env);
 
+  if (ask.bypass) {
+    ask.ledger.cache = 'bypass';
+  } else {
+    const cached = await readSearchCache(db, key);
+    if (cached.kind === 'hit') {
+      ask.ledger.cache = 'hit';
+      return { response: { ...cached.response, query: q.q, freshness: q.freshness }, late: Promise.resolve(emptyLate()) };
+    }
+    ask.ledger.cache = cached.kind === 'off' ? 'off' : 'miss';
+  }
+
+  const webPromise = cascadeWeb(q, env, ask.ledger);
   const graceOver = webPromise.then(() => new Promise<void>((r) => setTimeout(r, EXTRAS_GRACE_MS)));
   const bounded = <T,>(p: Promise<T>, fallback: T) => Promise.race([settle(p, fallback), graceOver.then(() => fallback)]);
+  const instantP = q.lite ? Promise.resolve(undefined) : instantAnswer(q.q);
+  const wikiP = q.lite ? Promise.resolve(undefined) : wikiKnowledge(q.q);
+  const imgP = q.lite ? Promise.resolve([] as ImageResult[]) : images(q.q);
+  const hnP = q.lite ? Promise.resolve([] as Discussion[]) : discussions(q.q);
   const [web, instant, wiki, imgs, hn] = await Promise.all([
     webPromise,
-    q.lite ? undefined : bounded(instantAnswer(q.q), undefined),
-    q.lite ? undefined : bounded(wikiKnowledge(q.q), undefined),
-    q.lite ? [] : bounded(images(q.q), [] as ImageResult[]),
-    q.lite ? [] : bounded(discussions(q.q), [] as Discussion[]),
+    q.lite ? undefined : bounded(instantP, undefined),
+    q.lite ? undefined : bounded(wikiP, undefined),
+    q.lite ? [] : bounded(imgP, [] as ImageResult[]),
+    q.lite ? [] : bounded(hnP, [] as Discussion[]),
   ]);
 
-  const results = fuse(web, q.count, q.q);
+  const results = fuse([{ engine: web.engine, hits: web.hits }], q.count, q.q);
   const knowledge = (instant && knowledgeMatches(q.q, instant.title, instant.description) ? instant : undefined)
     ?? (wiki && knowledgeMatches(q.q, wiki.title, wiki.description) ? wiki : undefined);
-  const early = new Set(web.map((w) => w.engine));
-  const late = allEngines.then(() => {
-    const content = new Map<string, string>();
-    done.forEach((d) => d.hits.forEach((h) => h.content && content.set(normalizeUrl(h.url), h.content)));
-    return { content, images: permitted(done.filter((d) => !early.has(d.engine)).flatMap((d) => d.images ?? []), env) };
-  });
+  const content = new Map<string, string>();
+  web.hits.forEach((h) => h.content && content.set(normalizeUrl(h.url), h.content));
+  const late = Promise.resolve({ content, images: [] as ImageResult[] });
 
   const seen = new Set<string>();
   const allImages = permitted([
     ...(knowledge?.image ? [{ url: knowledge.url, thumb: knowledge.image, title: knowledge.title, source: domainOf(knowledge.url), license: 'source' as const, credit: 'Wikipedia' }] : []),
-    ...web.flatMap((w) => w.images ?? []),
+    ...web.images,
     ...results.filter((r) => r.image).map((r) => ({ url: r.url, thumb: r.image!, title: r.title, source: r.domain, license: 'source' as const, credit: r.domain })),
     ...imgs,
   ], env).filter((img) => img.thumb && !seen.has(img.thumb) && seen.add(img.thumb));
 
-  return {
-    response: {
-      query: q.q,
-      freshness: q.freshness,
-      results,
-      images: allImages.slice(0, 16),
-      knowledge,
-      discussions: hn,
-      engines: [...new Map(statuses.map((st) => [st.name, st])).values()].sort((a, b) => a.name.localeCompare(b.name)),
-    },
-    late,
+  const response: SearchResponse = {
+    query: q.q,
+    freshness: q.freshness,
+    results,
+    images: allImages.slice(0, 16),
+    knowledge,
+    discussions: hn,
+    engines: web.statuses,
   };
+
+  if (!ask.bypass && ask.ledger.cache === 'miss' && db && response.results.length) {
+    const payload = packSearch(response);
+    const pending = writeSearchCache(db, key, payload).catch(() => undefined);
+    if (ask.waitUntil) ask.waitUntil(pending);
+    else void pending;
+  }
+
+  return { response, late };
 }

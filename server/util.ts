@@ -16,15 +16,37 @@ export function errorJson(err: unknown, status = 500): Response {
   return json({ error: status >= 500 ? 'Something went wrong. Please try again.' : message }, status);
 }
 
+/** HTTP failure with a short body peek for credit/trial checks. The peek is never logged. */
+export class HttpStatusError extends Error {
+  readonly status: number;
+  readonly peek: string;
+  constructor(status: number, peek = '') {
+    super(`HTTP ${status}`);
+    this.name = 'HttpStatusError';
+    this.status = status;
+    this.peek = peek.slice(0, 180);
+  }
+}
+
+async function statusError(res: Response): Promise<HttpStatusError> {
+  let peek = '';
+  try {
+    peek = (await res.text()).slice(0, 180);
+  } catch {
+    peek = '';
+  }
+  return new HttpStatusError(res.status, peek);
+}
+
 export async function fetchJson<T>(url: string, init: RequestInit = {}, ms = 5000): Promise<T> {
   const res = await fetch(url, { ...init, signal: AbortSignal.timeout(ms) });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) throw await statusError(res);
   return (await res.json()) as T;
 }
 
 export async function fetchText(url: string, init: RequestInit = {}, ms = 5000): Promise<string> {
   const res = await fetch(url, { ...init, signal: AbortSignal.timeout(ms) });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) throw await statusError(res);
   return res.text();
 }
 

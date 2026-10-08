@@ -6,7 +6,7 @@ import type {
 import { hasLlm, llmJson } from './llm';
 import { askJev, choice, jevKey } from './jev';
 import { pageText } from './pages';
-import { Env, clip } from './util';
+import { clip, type Env } from './util';
 
 /**
  * Turns a follow-up (typed, or a short button label like "apple varieties") into a standalone web

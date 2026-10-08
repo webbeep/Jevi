@@ -36,7 +36,11 @@ export class Polisher {
     return ref;
   }
 
-  constructor(private readonly textCap: number) {}
+  private readonly textCap: number;
+
+  constructor(textCap: number) {
+    this.textCap = textCap;
+  }
 
   /** Keeps only sentences not seen before; returns '' when nothing new remains. */
   private fresh(text: string): string {
