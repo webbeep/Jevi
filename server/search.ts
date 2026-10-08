@@ -16,6 +16,8 @@ import { UA, domainOf, fetchJson, hedge, type Env } from './util';
 
 interface Query {
   q: string;
+  /** Second planner query. Same engine, one extra call, still inside the cap. */
+  also?: string;
   freshness: Freshness;
   count: number;
   /**
@@ -232,7 +234,10 @@ export async function searchWithLate(q: Query, env: Env, scope?: AskScope): Prom
     q.lite ? [] : bounded(hnP, [] as Discussion[]),
   ]);
 
-  const results = fuse([{ engine: web.engine, hits: web.hits }], q.count, q.q);
+  const primary = fuse([{ engine: web.engine, hits: web.hits }], q.count, q.q);
+  const taken = new Set(primary.map((r) => normalizeUrl(r.url)));
+  const wikiExtra = fuse([{ engine: 'wikipedia', hits: web.wikiHits }], q.count, q.q).filter((r) => !taken.has(normalizeUrl(r.url)));
+  const results = [...primary, ...wikiExtra].slice(0, q.count);
   const knowledge = (instant && knowledgeMatches(q.q, instant.title, instant.description) ? instant : undefined)
     ?? (wiki && knowledgeMatches(q.q, wiki.title, wiki.description) ? wiki : undefined);
   const content = new Map<string, string>();

@@ -142,7 +142,7 @@ export async function collectPages(
   late?: Promise<LateExtras>,
   scope?: AskScope,
 ): Promise<PageText[]> {
-  const count = Math.min(3, Math.max(0, opts.count));
+  const count = Math.min(4, Math.max(0, opts.count));
   const need = Math.min(count, opts.need);
   // Only sources the designer is shown (numbered 1-12) are worth reading.
   const numbered = results.slice(0, 12).map((r, i) => ({ r, n: i + 1 }));

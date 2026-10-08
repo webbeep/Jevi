@@ -1,6 +1,11 @@
 import { stripHtml } from '../shared/text';
 import type { Freshness } from '../shared/types';
-import { HttpStatusError } from './util';
+import { HttpStatusError, type Env } from './util';
+
+/** DuckDuckGo lite is off unless this is exactly "1". It hit a bot challenge from datacenter IPs. */
+export function ddgBackupOn(env: Env): boolean {
+  return env.ZO_DDG_BACKUP === '1';
+}
 
 /** Bytes of HTML the backup parser will scan. Keeps the regex off the rest of the page. */
 export const BACKUP_HTML_CAP = 32_768;

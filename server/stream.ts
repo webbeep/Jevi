@@ -59,8 +59,8 @@ interface DesignArgs {
   intent?: string;
 }
 
-/** How many pages to read and how long to wait for them before designing. At most three pages per ask. */
-const pageBudget = (readPages: boolean) => (readPages ? { count: 3, need: 2, budgetMs: 2200 } : { count: 2, need: 2, budgetMs: 1000 });
+/** How many pages to read and how long to wait for them before designing. At most four pages per ask. */
+const pageBudget = (readPages: boolean) => (readPages ? { count: 4, need: 3, budgetMs: 2200 } : { count: 3, need: 2, budgetMs: 1000 });
 
 async function design(send: Send, env: Env, req: DesignArgs, started: number, scope: AskScope, late?: Promise<LateExtras>) {
   // Cards already on screen point into this search's image list by index, so only a new search may reorder it.
@@ -117,10 +117,12 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   const u = await understood;
   const extras = extraQueries(query, u);
   if (u) send('intent', { intent: u.intent, queries: u.queries });
-  // One search for the ask. Planner alternatives are trimmed to a single query so the engine cap holds.
+  // First planner query leads. The next planner query is one more call on the same engine when the cap allows.
   const q = queriesForAsk(query, extras);
+  const second = extras[1]?.replace(/\s+/g, ' ').trim().slice(0, 180);
+  const also = second && second.toLowerCase() !== q.toLowerCase() ? second : undefined;
   const fresh = freshness === 'any' && u ? u.freshness : freshness;
-  const found = await searchWithLate({ q, freshness: fresh, count: 20 }, env, scope);
+  const found = await searchWithLate({ q, also, freshness: fresh, count: 20 }, env, scope);
   const results = { ...found.response, query };
 
   send('search', results);

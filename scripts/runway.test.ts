@@ -9,9 +9,11 @@ import { search } from '../server/search.ts';
 import { runStream } from '../server/stream.ts';
 import { cacheBypass, validTestToken } from '../server/token.ts';
 import type { Env } from '../server/util.ts';
+import { WIKI_UA, parseWikiSearch } from '../server/wikiSearch.ts';
 import type { SearchResponse } from '../shared/types.ts';
 
 const fixture = readFileSync(new URL('./fixtures/ddg-lite.html', import.meta.url), 'utf8');
+const wikiFixture = JSON.parse(readFileSync(new URL('./fixtures/wiki-search.json', import.meta.url), 'utf8')) as unknown;
 const PAGE = `${'PostgreSQL is an open source database used for reliable storage of application data across many systems. '.repeat(5)}\n`;
 const KEY = 'test-exa-key';
 
@@ -50,13 +52,23 @@ function hasAuth(init?: RequestInit): boolean {
   return Boolean((headers as Record<string, string>).Authorization);
 }
 
-function install(script: { exa?: number | 'ok'; tavily?: number | 'ok'; backup?: number | 'ok'; jina?: number; keyless?: number | 'ok' }) {
-  const calls: { url: string; auth: boolean }[] = [];
+function install(script: {
+  exa?: number | 'ok';
+  tavily?: number | 'ok';
+  backup?: number | 'ok';
+  jina?: number;
+  keyless?: number | 'ok';
+  langsearch?: number | 'ok';
+  firecrawl?: number | 'ok';
+  serper?: number | 'ok';
+  wikipedia?: number | 'ok' | 'empty';
+}) {
+  const calls: { url: string; auth: boolean; init?: RequestInit }[] = [];
   const orig = globalThis.fetch;
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const auth = hasAuth(init);
-    calls.push({ url, auth });
+    calls.push({ url, auth, init });
     if (url.includes('api.exa.ai')) {
       if ((script.exa ?? 'ok') === 'ok') {
         return Response.json({
@@ -69,9 +81,28 @@ function install(script: { exa?: number | 'ok'; tavily?: number | 'ok'; backup?:
       }
       return new Response('payment required', { status: script.exa as number });
     }
+    if (url.includes('api.langsearch.com')) {
+      if (script.langsearch === 'ok') {
+        return Response.json({ code: 200, data: { webPages: { value: [{ name: 'PostgreSQL open source database', url: 'https://www.postgresql.org/', snippet: 'An open source database.' }] } } });
+      }
+      return new Response('no credit', { status: script.langsearch ?? 402 });
+    }
     if (url.includes('api.tavily.com')) {
       if (script.tavily === 'ok') return Response.json({ results: [{ title: 'PostgreSQL open source database', url: 'https://www.postgresql.org/', content: 'An open source database.' }] });
       return new Response('no credit', { status: script.tavily ?? 432 });
+    }
+    if (url.includes('api.firecrawl.dev')) {
+      if (script.firecrawl === 'ok') return Response.json({ success: true, data: [{ title: 'PostgreSQL open source database', url: 'https://www.postgresql.org/', description: 'An open source database.' }] });
+      return new Response('no credit', { status: script.firecrawl ?? 402 });
+    }
+    if (url.includes('google.serper.dev')) {
+      if (script.serper === 'ok') return Response.json({ organic: [{ title: 'PostgreSQL open source database', link: 'https://www.postgresql.org/', snippet: 'An open source database.' }] });
+      return new Response('no credit', { status: script.serper ?? 402 });
+    }
+    if (url.includes('en.wikipedia.org/w/api.php') && url.includes('srlimit=5')) {
+      if (script.wikipedia === 'empty') return Response.json({ query: { search: [] } });
+      if ((script.wikipedia ?? 'ok') === 'ok') return Response.json(wikiFixture);
+      return new Response('no', { status: script.wikipedia as number });
     }
     if (url.includes('lite.duckduckgo.com')) {
       if ((script.backup ?? 'ok') === 'ok') return new Response(fixture, { status: 200, headers: { 'content-type': 'text/html' } });
@@ -88,7 +119,17 @@ function install(script: { exa?: number | 'ok'; tavily?: number | 'ok'; backup?:
   return {
     calls,
     restore() { globalThis.fetch = orig; },
-    counts: () => ({ exa: n('api.exa.ai'), tavily: n('api.tavily.com'), backup: n('lite.duckduckgo.com'), jina: calls.filter((c) => c.url.startsWith('https://r.jina.ai/') && c.auth).length, keyless: calls.filter((c) => c.url.startsWith('https://r.jina.ai/') && !c.auth).length }),
+    counts: () => ({
+      exa: n('api.exa.ai'),
+      langsearch: n('api.langsearch.com'),
+      tavily: n('api.tavily.com'),
+      firecrawl: n('api.firecrawl.dev'),
+      serper: n('google.serper.dev'),
+      wiki: calls.filter((c) => c.url.includes('srlimit=5')).length,
+      backup: n('lite.duckduckgo.com'),
+      jina: calls.filter((c) => c.url.startsWith('https://r.jina.ai/') && c.auth).length,
+      keyless: calls.filter((c) => c.url.startsWith('https://r.jina.ai/') && !c.auth).length,
+    }),
   };
 }
 
@@ -109,7 +150,12 @@ async function ask(query = 'open source database', extra: Record<string, unknown
 }
 
 function callLine(line: string) {
-  return JSON.parse(line) as { search: { exa: number; tavily: number; backup: number }; cache: string; pages: { jina: number; keyless: number; direct: number }; fellThrough: string[] };
+  return JSON.parse(line) as {
+    search: { exa: number; langsearch: number; tavily: number; firecrawl: number; serper: number; wikipedia: number; backup: number };
+    cache: string;
+    pages: { jina: number; keyless: number; direct: number };
+    fellThrough: string[];
+  };
 }
 
 describe('runway', { concurrency: 1 }, () => {
@@ -160,7 +206,20 @@ describe('runway', { concurrency: 1 }, () => {
       assert.equal(parsed.search.exa, 1);
       assert.equal(parsed.search.tavily, 0);
       assert.equal(parsed.search.backup, 0);
-      assert.ok(parsed.search.exa + parsed.search.tavily + parsed.search.backup <= SEARCH_CALL_CAP);
+      assert.equal(parsed.search.wikipedia, 1);
+      assert.equal(net.counts().wiki, 1);
+      assert.equal(net.counts().langsearch, 0);
+      assert.equal(net.counts().firecrawl, 0);
+      assert.equal(net.counts().serper, 0);
+      const exaCall = net.calls.find((c) => c.url.includes('api.exa.ai'));
+      const exaBody = JSON.parse(String(exaCall?.init?.body)) as { type?: string; numResults?: number; contents?: { text?: { maxCharacters?: number } } };
+      assert.equal(exaBody.type, 'fast');
+      assert.equal(exaBody.numResults, 10);
+      assert.equal(exaBody.contents?.text?.maxCharacters, 6000);
+      const wikiCall = net.calls.find((c) => c.url.includes('srlimit=5'));
+      const wikiHeaders = wikiCall?.init?.headers as Record<string, string>;
+      assert.equal(wikiHeaders['User-Agent'], WIKI_UA);
+      assert.ok(searchCalls(parsed) <= SEARCH_CALL_CAP);
       assert.ok(parsed.pages.jina >= 1);
       assert.ok(parsed.pages.keyless >= 1);
       assert.equal(events.includes('done'), true);
@@ -174,14 +233,16 @@ describe('runway', { concurrency: 1 }, () => {
 
   test('Exa and Tavily down: backup answers, then dead memory skips them', async () => {
     clearDeadEngines();
-    const net = install({ exa: 402, tavily: 432, backup: 'ok', jina: 402 });
+    const net = install({ exa: 402, tavily: 432, wikipedia: 'ok', jina: 402 });
     try {
       const first = await ask();
       const parsed = callLine(first.line!);
       assert.equal(first.events.includes('done'), true);
       assert.equal(parsed.search.exa, 1);
       assert.equal(parsed.search.tavily, 1);
-      assert.equal(parsed.search.backup, 1);
+      assert.equal(parsed.search.wikipedia, 1);
+      assert.equal(parsed.search.backup, 0);
+      assert.equal(net.counts().backup, 0);
       assert.ok(searchCalls(parsed) <= SEARCH_CALL_CAP);
       assert.ok(parsed.fellThrough.some((f) => f.startsWith('exa:')));
       assert.ok(parsed.fellThrough.some((f) => f.startsWith('tavily:')));
@@ -191,9 +252,11 @@ describe('runway', { concurrency: 1 }, () => {
       assert.equal(second.events.includes('done'), true);
       assert.equal(again.search.exa, 0);
       assert.equal(again.search.tavily, 0);
-      assert.equal(again.search.backup, 1);
+      assert.equal(again.search.wikipedia, 1);
+      assert.equal(again.search.backup, 0);
       assert.equal(net.counts().exa, 0);
       assert.equal(net.counts().tavily, 0);
+      assert.equal(net.counts().backup, 0);
       assert.ok(again.fellThrough.includes('exa:skipped'));
       assert.ok(again.fellThrough.includes('tavily:skipped'));
     } finally {
@@ -204,14 +267,14 @@ describe('runway', { concurrency: 1 }, () => {
 
   test('search cap stops further calls', async () => {
     clearDeadEngines();
-    const net = install({ exa: 500, tavily: 500, backup: 500 });
+    const net = install({ exa: 500, tavily: 500, wikipedia: 500, backup: 500 });
     try {
       await assert.rejects(() => ask(), /No results/);
       const ledger = newLedger();
       ledger.search.exa = SEARCH_CALL_CAP;
       const out = await cascadeWeb({ q: 'open source database', freshness: 'any', count: 8 }, env(), ledger);
       assert.equal(out.hits.length, 0);
-      assert.equal(net.counts().exa + net.counts().tavily + net.counts().backup, 3);
+      assert.equal(net.counts().exa + net.counts().tavily + net.counts().wiki + net.counts().backup, 3);
       assert.ok(ledger.fellThrough.some((f) => f.endsWith(':cap')));
     } finally {
       net.restore();
@@ -316,12 +379,45 @@ describe('runway', { concurrency: 1 }, () => {
     }
   });
 
+  test('Wikipedia rides with a keyed hit and the literal query is a second call', async () => {
+    clearDeadEngines();
+    const net = install({ exa: 'ok', wikipedia: 'ok' });
+    try {
+      const ledger = newLedger();
+      const out = await cascadeWeb({ q: 'planner query about postgres', also: 'open source database', freshness: 'any', count: 8 }, env(), ledger);
+      assert.equal(ledger.search.exa, 2);
+      assert.equal(ledger.search.wikipedia, 1);
+      assert.equal(ledger.search.tavily, 0);
+      assert.ok(searchCalls(ledger) <= SEARCH_CALL_CAP);
+      assert.equal(out.engine, 'exa');
+      assert.equal(out.hits.some((h) => h.url.includes('wikipedia.org')), false);
+      assert.ok(out.wikiHits.some((h) => h.url.includes('wikipedia.org')));
+      assert.equal(out.hits[0]?.url.includes('postgresql.org'), true);
+      const found = await search({ q: 'open source database', freshness: 'any', count: 8 }, env(), { ledger: newLedger(), bypass: true });
+      const urls = found.results.map((r) => r.url);
+      const engineAt = urls.findIndex((u) => u.includes('postgresql.org'));
+      const wikiAt = urls.findIndex((u) => u.includes('wikipedia.org'));
+      assert.ok(engineAt >= 0 && wikiAt > engineAt);
+      const typed = await cascadeWeb({ q: 'open source database', freshness: 'any', count: 8 }, env({ EXA_SEARCH_TYPE: 'instant', TAVILY_API_KEY: '' }), newLedger());
+      assert.equal(typed.engine, 'exa');
+      const bodies = net.calls.filter((c) => c.url.includes('api.exa.ai')).map((c) => JSON.parse(String(c.init?.body)) as { type?: string });
+      assert.equal(bodies.at(-1)?.type, 'instant');
+    } finally {
+      net.restore();
+      clearDeadEngines();
+    }
+  });
+
   test('cpu bench for cache and backup parse', async () => {
     const n = 40;
     const t0 = performance.now();
     let hits = 0;
     for (let i = 0; i < n; i++) hits += parseDdgLite(fixture).length;
     const parseMs = (performance.now() - t0) / n;
+    const tWiki = performance.now();
+    let wikiHits = 0;
+    for (let i = 0; i < n; i++) wikiHits += parseWikiSearch(wikiFixture).length;
+    const wikiMs = (performance.now() - tWiki) / n;
     const sample: SearchResponse = {
       query: 'open source database',
       freshness: 'any',
@@ -351,10 +447,13 @@ describe('runway', { concurrency: 1 }, () => {
     for (let i = 0; i < n; i++) await writeSearchCache(db, `k${i}`, payload);
     const writeMs = (performance.now() - t3) / n;
     console.log(`bench backup-parse ${parseMs.toFixed(3)} ms/call`);
+    console.log(`bench wiki-parse ${wikiMs.toFixed(3)} ms/call`);
     console.log(`bench cache-hit ${hitMs.toFixed(3)} ms/call`);
     console.log(`bench cache-miss ${missMs.toFixed(3)} ms/call`);
     console.log(`bench cache-write ${writeMs.toFixed(3)} ms/call`);
     assert.ok(hits > 0);
+    assert.ok(wikiHits > 0);
+    assert.ok(wikiMs < 5);
     assert.ok(parseMs < 10);
     assert.ok(hitMs < 5);
   });

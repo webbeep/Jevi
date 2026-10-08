@@ -1,8 +1,9 @@
 import { cleanMarkdown } from '../shared/text';
 import type { EngineStatus, Freshness, ImageResult } from '../shared/types';
-import { fetchBackup } from './backup';
-import { SEARCH_CALL_CAP, type CallLedger, engineDead, failureOf, rememberDead, searchCalls } from './budget';
-import { type Env, clip, domainOf, fetchJson } from './util';
+import { ddgBackupOn, fetchBackup } from './backup';
+import { SEARCH_CALL_CAP, type CallLedger, type SearchEngine, engineDead, failureOf, rememberDead, searchCalls } from './budget';
+import { HttpStatusError, type Env, clip, domainOf, fetchJson } from './util';
+import { fetchWikiSearch } from './wikiSearch';
 
 const ENGINE_TIMEOUT_MS = 6500;
 
@@ -17,18 +18,36 @@ export interface WebHit {
 
 export interface CascadeResult {
   engine: string;
+  /** Hits from the keyed engine. A second planner query is interleaved by rank. */
   hits: WebHit[];
+  /** Keyless Wikipedia hits to rank after `hits`. Empty when Wikipedia itself answered. */
+  wikiHits: WebHit[];
   images: ImageResult[];
   statuses: EngineStatus[];
 }
 
 interface Query {
   q: string;
+  /** Second planner query. One extra call on the engine that already succeeded, interleaved behind the first. */
+  also?: string;
   freshness: Freshness;
   count: number;
 }
 
 const DAYS: Record<Exclude<Freshness, 'any'>, number> = { day: 1, week: 7, month: 30, year: 365 };
+
+const LANG_FRESH: Record<Exclude<Freshness, 'any'>, string> = { day: 'oneDay', week: 'oneWeek', month: 'oneMonth', year: 'oneYear' };
+const TBS: Record<Exclude<Freshness, 'any'>, string> = { day: 'qdr:d', week: 'qdr:w', month: 'qdr:m', year: 'qdr:y' };
+
+function hasKey(env: Env, name: string): boolean {
+  return !!env[name]?.trim();
+}
+
+/** Exa `type`. Defaults to fast. `instant` is an env switch for a later replay, not a code default. */
+function exaSearchType(env: Env): string {
+  const raw = env.EXA_SEARCH_TYPE?.trim();
+  return raw || 'fast';
+}
 
 async function exaSearch(q: Query, env: Env): Promise<{ hits: WebHit[]; images: ImageResult[] }> {
   const since = q.freshness === 'any' ? undefined : new Date(Date.now() - DAYS[q.freshness] * 86_400_000).toISOString();
@@ -41,9 +60,9 @@ async function exaSearch(q: Query, env: Env): Promise<{ hits: WebHit[]; images: 
       headers: { 'x-api-key': env.EXA_API_KEY!, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         query: q.q,
-        numResults: 8,
-        type: 'fast',
-        contents: { text: { maxCharacters: 2000 } },
+        numResults: 10,
+        type: exaSearchType(env),
+        contents: { text: { maxCharacters: 6000 } },
         ...(since ? { startPublishedDate: since } : {}),
       }),
     },
@@ -74,7 +93,7 @@ async function tavilySearch(q: Query, env: Env): Promise<{ hits: WebHit[]; image
       headers: { Authorization: `Bearer ${env.TAVILY_API_KEY}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           query: q.q,
-          max_results: 8,
+          max_results: 10,
           include_images: true,
           time_range: q.freshness === 'any' ? undefined : q.freshness,
         }),
@@ -103,23 +122,182 @@ async function tavilySearch(q: Query, env: Env): Promise<{ hits: WebHit[]; image
   };
 }
 
-type StepName = 'exa' | 'tavily' | 'backup';
+async function langSearch(q: Query, env: Env): Promise<{ hits: WebHit[]; images: ImageResult[] }> {
+  const data = await fetchJson<{
+    code?: number;
+    data?: { webPages?: { value?: { name?: string; url: string; snippet?: string; datePublished?: string | null }[] } };
+  }>(
+    'https://api.langsearch.com/v1/web-search',
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${env.LANGSEARCH_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: q.q,
+        count: 10,
+        freshness: q.freshness === 'any' ? 'noLimit' : LANG_FRESH[q.freshness],
+      }),
+    },
+    ENGINE_TIMEOUT_MS,
+  );
+  if (typeof data.code === 'number' && data.code !== 200) throw new HttpStatusError(data.code);
+  return {
+    hits: (data.data?.webPages?.value ?? []).map((r) => ({
+      title: r.name || domainOf(r.url),
+      url: r.url,
+      snippet: clip(r.snippet ?? '', 320),
+      date: r.datePublished ?? undefined,
+    })),
+    images: [],
+  };
+}
+
+async function firecrawlSearch(q: Query, env: Env): Promise<{ hits: WebHit[]; images: ImageResult[] }> {
+  const data = await fetchJson<{
+    success?: boolean;
+    data?: { title?: string; description?: string; url: string }[];
+  }>(
+    'https://api.firecrawl.dev/v1/search',
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${env.FIRECRAWL_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: q.q,
+        limit: 10,
+        ...(q.freshness === 'any' ? {} : { tbs: TBS[q.freshness] }),
+      }),
+    },
+    ENGINE_TIMEOUT_MS,
+  );
+  if (data.success === false) return { hits: [], images: [] };
+  return {
+    hits: (data.data ?? []).map((r) => ({
+      title: r.title || domainOf(r.url),
+      url: r.url,
+      snippet: clip(r.description ?? '', 320),
+    })),
+    images: [],
+  };
+}
+
+async function serperSearch(q: Query, env: Env): Promise<{ hits: WebHit[]; images: ImageResult[] }> {
+  const data = await fetchJson<{ organic?: { title: string; link: string; snippet?: string; date?: string; imageUrl?: string }[] }>(
+    'https://google.serper.dev/search',
+    {
+      method: 'POST',
+      headers: { 'X-API-KEY': env.SERPER_API_KEY!, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        q: q.q,
+        num: Math.min(q.count, 10),
+        ...(q.freshness === 'any' ? {} : { tbs: TBS[q.freshness] }),
+      }),
+    },
+    ENGINE_TIMEOUT_MS,
+  );
+  return {
+    hits: (data.organic ?? []).map((r) => ({
+      title: r.title,
+      url: r.link,
+      snippet: clip(r.snippet ?? '', 320),
+      date: r.date,
+      image: r.imageUrl,
+    })),
+    images: [],
+  };
+}
+
+const KEYED = new Set<SearchEngine>(['exa', 'langsearch', 'tavily', 'firecrawl', 'serper']);
+
+function hitKey(url: string): string {
+  try {
+    const u = new URL(url);
+    return `${u.hostname.replace(/^www\./, '')}${u.pathname.replace(/\/$/, '')}${u.search}`.toLowerCase();
+  } catch {
+    return url;
+  }
+}
+
+/** Rank-by-rank merge. The first list leads each rank; a repeated URL is kept once. */
+function interleave(lead: WebHit[], follow: WebHit[]): WebHit[] {
+  const seen = new Set<string>();
+  const out: WebHit[] = [];
+  const push = (h: WebHit | undefined) => {
+    if (!h?.url || !h.title || seen.has(hitKey(h.url))) return;
+    seen.add(hitKey(h.url));
+    out.push(h);
+  };
+  const n = Math.max(lead.length, follow.length);
+  for (let i = 0; i < n; i++) {
+    push(lead[i]);
+    push(follow[i]);
+  }
+  return out;
+}
+
+interface WikiOutcome {
+  hits: WebHit[];
+  error?: string;
+  ms: number;
+}
 
 /**
- * Exa, then Tavily, then the keyless backup. The next engine runs only after a
- * credit, quota, auth, timeout, upstream, or empty failure. Dead engines are
- * skipped without a call. At most SEARCH_CALL_CAP calls.
+ * Exa, LangSearch, Tavily, Firecrawl, Serper, then Wikipedia. DuckDuckGo lite
+ * runs only when ZO_DDG_BACKUP=1, after Wikipedia. Keyed steps are skipped when
+ * their key is empty. The next engine runs only after a credit, quota, auth,
+ * timeout, upstream, or empty failure. Dead engines are skipped without a call.
+ * A keyed success also takes Wikipedia in parallel (one extra call) and, when
+ * the cap still has room, the literal query on that same engine. Wikipedia is
+ * returned separately so it ranks after the engine. At most SEARCH_CALL_CAP calls.
  */
 export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger): Promise<CascadeResult> {
   const statuses: EngineStatus[] = [];
-  const steps: { name: StepName; enabled: boolean; run: () => Promise<{ hits: WebHit[]; images: ImageResult[] }> }[] = [
-    { name: 'exa', enabled: !!env.EXA_API_KEY, run: () => exaSearch(q, env) },
-    { name: 'tavily', enabled: !!env.TAVILY_API_KEY, run: () => tavilySearch(q, env) },
-    { name: 'backup', enabled: true, run: async () => ({ hits: await fetchBackup(q.q, q.freshness), images: [] }) },
+  const steps: { name: SearchEngine; enabled: boolean; run: (text: string) => Promise<{ hits: WebHit[]; images: ImageResult[] }> }[] = [
+    { name: 'exa', enabled: hasKey(env, 'EXA_API_KEY'), run: (text) => exaSearch({ ...q, q: text }, env) },
+    { name: 'langsearch', enabled: hasKey(env, 'LANGSEARCH_API_KEY'), run: (text) => langSearch({ ...q, q: text }, env) },
+    { name: 'tavily', enabled: hasKey(env, 'TAVILY_API_KEY'), run: (text) => tavilySearch({ ...q, q: text }, env) },
+    { name: 'firecrawl', enabled: hasKey(env, 'FIRECRAWL_API_KEY'), run: (text) => firecrawlSearch({ ...q, q: text }, env) },
+    { name: 'serper', enabled: hasKey(env, 'SERPER_API_KEY'), run: (text) => serperSearch({ ...q, q: text }, env) },
+    { name: 'wikipedia', enabled: true, run: async () => ({ hits: await fetchWikiSearch(q.q), images: [] }) },
+    { name: 'backup', enabled: ddgBackupOn(env), run: async () => ({ hits: await fetchBackup(q.q, q.freshness), images: [] }) },
   ];
+
+  let wikiTask: Promise<WikiOutcome> | undefined;
+  let wikiReported = false;
+
+  const startWiki = () => {
+    if (wikiTask || engineDead('wikipedia') || searchCalls(ledger) >= SEARCH_CALL_CAP) return;
+    ledger.search.wikipedia += 1;
+    const started = Date.now();
+    wikiTask = fetchWikiSearch(q.q).then(
+      (hits) => ({ hits, ms: Date.now() - started }),
+      (err: unknown) => {
+        const failure = failureOf(err);
+        if (failure.dead) rememberDead('wikipedia');
+        return { hits: [] as WebHit[], error: failure.reason, ms: Date.now() - started };
+      },
+    );
+  };
+
+  const takeWiki = async (): Promise<WebHit[]> => {
+    if (!wikiTask) return [];
+    const wiki = await wikiTask;
+    const hits = wiki.hits.filter((h) => h.url && h.title);
+    if (!wikiReported) {
+      wikiReported = true;
+      if (!hits.length) ledger.fellThrough.push(`wikipedia:${wiki.error ?? 'empty'}`);
+      statuses.push({ name: 'wikipedia', ok: hits.length > 0, count: hits.length, ms: wiki.ms, error: hits.length ? undefined : wiki.error ?? 'empty' });
+    }
+    return hits;
+  };
+
+  const none = (): CascadeResult => ({ engine: 'none', hits: [], wikiHits: [], images: [], statuses });
 
   for (const step of steps) {
     if (!step.enabled) continue;
+    if (step.name === 'wikipedia' && wikiTask) {
+      const hits = await takeWiki();
+      if (hits.length) return { engine: 'wikipedia', hits, wikiHits: [], images: [], statuses };
+      continue;
+    }
     if (engineDead(step.name)) {
       ledger.fellThrough.push(`${step.name}:skipped`);
       statuses.push({ name: step.name, ok: false, count: 0, ms: 0, error: 'skipped' });
@@ -131,16 +309,38 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger): Promis
     }
     ledger.search[step.name] += 1;
     const started = Date.now();
+    if (KEYED.has(step.name)) startWiki();
     try {
-      const out = await step.run();
-      const hits = out.hits.filter((h) => h.url && h.title);
+      const out = await step.run(q.q);
+      let hits = out.hits.filter((h) => h.url && h.title);
+      let images = out.images;
       if (!hits.length) {
         ledger.fellThrough.push(`${step.name}:empty`);
         statuses.push({ name: step.name, ok: false, count: 0, ms: Date.now() - started, error: 'empty' });
         continue;
       }
+      const also = q.also?.replace(/\s+/g, ' ').trim();
+      if (KEYED.has(step.name) && also && also.toLowerCase() !== q.q.toLowerCase() && searchCalls(ledger) < SEARCH_CALL_CAP && !engineDead(step.name)) {
+        ledger.search[step.name] += 1;
+        const againAt = Date.now();
+        try {
+          const more = await step.run(also);
+          const extra = more.hits.filter((h) => h.url && h.title);
+          if (!extra.length) ledger.fellThrough.push(`${step.name}:also-empty`);
+          else {
+            hits = interleave(hits, extra);
+            images = [...images, ...more.images];
+          }
+        } catch (err) {
+          const failure = failureOf(err);
+          if (failure.dead) rememberDead(step.name);
+          ledger.fellThrough.push(`${step.name}:also-${failure.reason}`);
+          statuses.push({ name: step.name, ok: false, count: 0, ms: Date.now() - againAt, error: failure.reason });
+        }
+      }
       statuses.push({ name: step.name, ok: true, count: hits.length, ms: Date.now() - started });
-      return { engine: step.name, hits, images: out.images, statuses };
+      const wikiHits = KEYED.has(step.name) ? await takeWiki() : [];
+      return { engine: step.name, hits, wikiHits, images, statuses };
     } catch (err) {
       const failure = failureOf(err);
       if (failure.dead) rememberDead(step.name);
@@ -149,5 +349,9 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger): Promis
       if (!failure.fall) break;
     }
   }
-  return { engine: 'none', hits: [], images: [], statuses };
+  if (wikiTask && !wikiReported) {
+    const hits = await takeWiki();
+    if (hits.length) return { engine: 'wikipedia', hits, wikiHits: [], images: [], statuses };
+  }
+  return none();
 }

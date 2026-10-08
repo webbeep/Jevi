@@ -44,6 +44,40 @@ export async function fetchJson<T>(url: string, init: RequestInit = {}, ms = 500
   return (await res.json()) as T;
 }
 
+async function readCapped(res: Response, cap: number): Promise<string> {
+  if (!res.body) return (await res.text()).slice(0, cap);
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let out = '';
+  try {
+    while (out.length < cap) {
+      const { done, value } = await reader.read();
+      if (done) {
+        out += dec.decode();
+        break;
+      }
+      out += dec.decode(value, { stream: true });
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+  return out.length > cap ? out.slice(0, cap) : out;
+}
+
+/** JSON only, and only the first `cap` bytes. A challenge page or a huge body fails closed. */
+export async function fetchJsonCapped<T>(url: string, init: RequestInit, ms: number, cap: number): Promise<T> {
+  const res = await fetch(url, { ...init, signal: AbortSignal.timeout(ms) });
+  if (!res.ok) throw await statusError(res);
+  const type = res.headers.get('content-type') ?? '';
+  const text = (await readCapped(res, cap)).trim();
+  if (!type.includes('json') || (!text.startsWith('{') && !text.startsWith('['))) throw new Error('not-json');
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error('bad-json');
+  }
+}
+
 export async function fetchText(url: string, init: RequestInit = {}, ms = 5000): Promise<string> {
   const res = await fetch(url, { ...init, signal: AbortSignal.timeout(ms) });
   if (!res.ok) throw await statusError(res);

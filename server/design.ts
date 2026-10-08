@@ -362,7 +362,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
   const g = new Grounding(corpusOf(req));
   const pictures = new PictureResolver(env, req.search.images, on.credit, req.query);
   const polish = new Polisher(textCap(req));
-  const shared = `${sourcesBlock(req.search, req.pages, 2000)}\n\nTASK\n${taskBlock(req)}\n- Card regions, top to bottom:\n${regions.map((r, i) => `  R${i + 1}: ${regionPurpose(r)}`).join('\n')}\n  FINISH: header, interactive control, actions, citations, follow-ups`;
+  const shared = `${sourcesBlock(req.search, req.pages, 2800)}\n\nTASK\n${taskBlock(req)}\n- Card regions, top to bottom:\n${regions.map((r, i) => `  R${i + 1}: ${regionPurpose(r)}`).join('\n')}\n  FINISH: header, interactive control, actions, citations, follow-ups`;
   const query = req.followup?.question ?? req.query;
 
   let contentNodes = 0;
