@@ -63,5 +63,5 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env, waitUnti
   }
   if (!body) return stamp(errorJson('Invalid request', 400), gate.headers);
   const req = body;
-  return stamp(serveStream({ request, env, req, run: (send) => runStream(req, env, send), waitUntil }), gate.headers);
+  return stamp(await serveStream({ request, env, req, run: (send) => runStream(req, env, send), waitUntil }), gate.headers);
 };

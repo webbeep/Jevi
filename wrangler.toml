@@ -9,3 +9,9 @@ binding = "AI"
 # Workers Paid (active 2026-10-08): CPU per request. Paid default is 30,000 ms; set explicitly so the 10 ms Free cap can't come back silently.
 [limits]
 cpu_ms = 30000
+
+# ZO patch G: users, sessions, usage counts and saved answers (zo2 only; experiment branch).
+[[d1_databases]]
+binding = "DB"
+database_name = "zo2-db"
+database_id = "844612c9-4b38-469f-b14a-93d841e1dfa9"
