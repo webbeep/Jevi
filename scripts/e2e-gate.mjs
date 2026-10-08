@@ -7,7 +7,7 @@
  *
  * Local test token: env ZO_TEST_TOKEN_VALUE (the dummy from .dev.vars). Never printed.
  * Remote test token: read at runtime from the path in ZO_TEST_TOKEN_FILE. Never printed.
- * Signed-in daily cap compared to env GATE_SIGNED_PER_DAY (default 100). One ask only.
+ * Signed-in daily cap compared to env GATE_SIGNED_PER_DAY (default 50). One ask only.
  * --auth=on is local only. --auth=off against a remote host sends 3 stream asks at most.
  */
 import { spawn } from 'node:child_process';
@@ -19,7 +19,7 @@ const BASE = (baseArg || '').replace(/\/$/, '');
 const authFlag = (args.find((a) => a.startsWith('--auth=')) || '').slice(7);
 const d1Name = (args.find((a) => a.startsWith('--d1-local=')) || '').slice('--d1-local='.length);
 const persist = (args.find((a) => a.startsWith('--persist=')) || '').slice('--persist='.length);
-const SIGNED_LIMIT = Number(process.env.GATE_SIGNED_PER_DAY || 100);
+const SIGNED_LIMIT = Number(process.env.GATE_SIGNED_PER_DAY || 50);
 const ROOT = new URL('..', import.meta.url).pathname;
 const NODE_PATH = `${process.env.HOME}/.local/node22/bin:${process.env.HOME}/.local/bin:${process.env.PATH || ''}`;
 

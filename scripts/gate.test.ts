@@ -608,18 +608,18 @@ test('IPCAP: signed-in asks never count against or hit the network cap; anonymou
   assert.equal(after.ok, true);
 });
 
-test('IPCAP: default anonymous network cap is 200', async () => {
+test('IPCAP: default anonymous network cap is 50', async () => {
   const { env } = mem();
   env.AUTH_ENABLED = 'true';
   env.GATE_ANON_PER_DAY = '1000';
   const day = new Date('2026-10-08T12:00:00Z');
   const headers = { 'CF-Connecting-IP': IP };
   let last: Awaited<ReturnType<typeof applyGate>> = { ok: true };
-  for (let i = 0; i < 201; i++) last = await applyGate(new Request('http://127.0.0.1/api/stream', { headers }), env, day, nobody, `q${i}`);
+  for (let i = 0; i < 51; i++) last = await applyGate(new Request('http://127.0.0.1/api/stream', { headers }), env, day, nobody, `q${i}`);
   assert.equal(last.ok, false);
   if (!last.ok) {
     assert.equal(last.body.reason, 'ip');
-    assert.equal(last.body.limit, 200);
+    assert.equal(last.body.limit, 50);
   }
 });
 
@@ -646,4 +646,19 @@ test('IPCAP: owner allowlist (ZO_OWNER_EMAILS, case-insensitive) gets the 1000/d
   const over = await applyGate(new Request('http://127.0.0.1/api/stream', { headers }), env, day, signed, 'n2');
   assert.equal(over.ok, false);
   if (!over.ok) assert.equal(over.body.reason, 'signed');
+});
+
+test('t449: default signed-in cap is 50/day per account and never counts against the network cap', async () => {
+  const { env } = mem();
+  env.AUTH_ENABLED = 'true';
+  env.GATE_IP_PER_DAY = '1';
+  const day = new Date('2026-10-08T12:00:00Z');
+  const headers = { cookie: await cookie(), 'CF-Connecting-IP': IP };
+  for (let i = 0; i < 50; i++) assert.equal((await applyGate(new Request('http://127.0.0.1/api/stream', { headers }), env, day, signed, `s${i}`)).ok, true);
+  const over = await applyGate(new Request('http://127.0.0.1/api/stream', { headers }), env, day, signed, 's50');
+  assert.equal(over.ok, false);
+  if (!over.ok) {
+    assert.equal(over.body.reason, 'signed');
+    assert.equal(over.body.limit, 50);
+  }
 });
