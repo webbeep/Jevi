@@ -51,6 +51,7 @@ export function Panel({
   title,
   desktop = 'center',
   maxWidth,
+  center = false,
   children,
 }: {
   open: boolean;
@@ -58,6 +59,7 @@ export function Panel({
   title: string;
   desktop?: 'center' | 'right';
   maxWidth: string;
+  center?: boolean;
   children: ReactNode;
 }) {
   const mobile = useMobileSheet();
@@ -69,7 +71,7 @@ export function Panel({
           showCloseButton={false}
           className={cn('gap-3 p-4', mobile ? 'max-h-[90dvh] rounded-t-2xl pb-[max(16px,env(safe-area-inset-bottom))]' : 'w-full sm:max-w-sm')}
         >
-          <SheetTitle className="pr-11 text-base">{title}</SheetTitle>
+          <SheetTitle className={cn('text-base', center ? 'px-11 text-center' : 'pr-11')}>{title}</SheetTitle>
           {children}
         </SheetContent>
       </Sheet>
@@ -78,7 +80,7 @@ export function Panel({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent showCloseButton={false} className={cn('gap-3 p-4', maxWidth)}>
-        <DialogTitle className="pr-11 text-base">{title}</DialogTitle>
+        <DialogTitle className={cn('text-base', center ? 'px-11 text-center' : 'pr-11')}>{title}</DialogTitle>
         {children}
       </DialogContent>
     </Dialog>
