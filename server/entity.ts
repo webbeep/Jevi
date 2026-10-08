@@ -281,6 +281,18 @@ const JUNK_VALUE = new Set([
   'today', 'yesterday', 'page', 'article', 'list', 'see', 'category', 'help', 'edit',
 ]);
 
+/**
+ * A label/role that is only a birth/death year phrase ("born 1979", "d. 1968", "1970s")
+ * is a date, never a descriptor: it says nothing about the person (live: "born 1979"
+ * offered as a David Kim choice).
+ */
+const YEAR_PHRASE = /^(?:born|b\.|died|d\.)\s*(?:c\.\s*)?\d{3,4}$/i;
+const BARE_YEAR = /^\d{3,4}s?$/;
+const isYearOnly = (v: string) => {
+  const s = v.trim();
+  return YEAR_PHRASE.test(s) || BARE_YEAR.test(s);
+};
+
 /** Sentence enders that must not cut a capture: "J." initials, "U.S", "St", "Inc". */
 const ABBREV_TAIL = /^(u\.s|st|jr|sr|dr|mr|mrs|ms|inc|co)$/i;
 
@@ -309,7 +321,7 @@ export function cleanCapture(v: string): string {
     break;
   }
   s = s.replace(/[\s.,;:!?…“”"'’)\]}–—-]+$/, '').trim();
-  if (!s || REGNAL_NAME.test(s) || hasSiteWord(s)) return '';
+  if (!s || isYearOnly(s) || REGNAL_NAME.test(s) || hasSiteWord(s)) return '';
   if (s.length < 2 || JUNK_VALUE.has(s.toLowerCase())) return '';
   return s;
 }
@@ -606,7 +618,8 @@ function describe(top: { role?: string; org?: string; location?: string; label?:
   // Wikipedia disambiguation gloss is usually the cleanest one-liner.
   const wikiLabel = (top.label ?? '').trim().replace(/\s+/g, ' ');
   let raw = '';
-  if (wikiLabel && wikiLabel.length >= 3 && wikiLabel.length <= 40) {
+  // A birth/death year phrase is a date, not a descriptor — treat the label as empty.
+  if (wikiLabel && wikiLabel.length >= 3 && wikiLabel.length <= 40 && !isYearOnly(wikiLabel)) {
     // Reject mashed labels ("Coach at USATF CEO Max").
     if (!/\b(CEO|Founder|Coach|Player|Director|Author)\b.*\b(CEO|Founder|Coach|Player|Director|Author)\b/i.test(wikiLabel)) {
       raw = title(wikiLabel).slice(0, 40);
@@ -721,6 +734,38 @@ function exactWikiArticle(row: EntityRow, name: string): boolean {
   return !!t && low(t) === low(name.trim());
 }
 
+const EN_WIKI_ARTICLE = /^https:\/\/en\.wikipedia\.org\/wiki\//i;
+const enWikiArticleRow = (row: EntityRow) => EN_WIKI_ARTICLE.test(row.url ?? '');
+
+/** SERP title without the engine's " - Wikipedia" tail. */
+function plainTitle(row: EntityRow): string {
+  return title((row.title ?? '').replace(/\s+-\s+Wikipedia\s*$/i, ''));
+}
+
+/** The token appears as a whole word, not inside a longer word ("Obama" not "ObamaCare"). */
+function hasWholeWord(text: string, word: string): boolean {
+  const esc = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(^|[^A-Za-z0-9])${esc}([^A-Za-z0-9]|$)`, 'i').test(text);
+}
+
+/**
+ * EN4: the Wikipedia article a one-token ask means ("Who is Obama" → "Barack Obama").
+ * A list/disambiguated/one-word title names no single person, so it never qualifies.
+ */
+function wikiArticleForToken(rows: EntityRow[], token: string): { title: string; index: number } | undefined {
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]!;
+    if (!enWikiArticleRow(row) || isDisambiguationPage(row)) continue;
+    const t = plainTitle(row);
+    if (!t || t.includes('(')) continue;
+    const words = t.split(/\s+/).filter(Boolean);
+    if (words.length < 2 || words.length > 3) continue;
+    if (!hasWholeWord(t, token)) continue;
+    return { title: t, index: i };
+  }
+  return undefined;
+}
+
 /** Title form "<name> (<qualifier>)" — a different, disambiguated person. */
 function qualifiedTitle(t: string, name: string): boolean {
   const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -764,6 +809,8 @@ export function disambiguationEntries(row: EntityRow, name: string): { role?: st
     if (!k || seen.has(k) || k === low(name)) return;
     // Wiki chrome is a page, not a person ("may refer to", "List of", "look up in Wiktionary").
     if (/wiktionary|wikipedia|all pages|see also|may refer to|topics referred|surname|given name|disambiguation|look up|list of/i.test(label)) return;
+    // A bare birth/death year ("born 1979") is not a person's descriptor.
+    if (isYearOnly(label)) return;
     seen.add(k);
     found.push({ label: title(label).slice(0, 40), role, org, location, at });
   };
@@ -837,6 +884,21 @@ export function resolveEntity(
   if (!isPersonAsk(query, opts?.pattern)) return { kind: 'skip' };
   const name = personSubject(query);
   if (!name || !rows.length) return { kind: 'skip' };
+  // A one-token famous ask ("Who is Obama"): one Wikipedia article for the token, plus other
+  // Wikipedia pages about it, is one dominant identity — resolve that person instead of skipping.
+  // The article title has 2+ words, so the follow-up ask can never come back here.
+  if (!/\s/.test(name) && !opts?.prior) {
+    const hit = wikiArticleForToken(rows, name);
+    if (hit) {
+      const support = rows.filter((r, i) => i !== hit.index && enWikiArticleRow(r) && hasWholeWord(plainTitle(r), name)).length;
+      if (support >= 2 && /\s/.test(personSubject(`Who is ${hit.title}`))) {
+        return resolveEntity(`Who is ${hit.title}`, rows, opts);
+      }
+    }
+  }
+  // A pick ("David Kim C2 Education Centers CEO") or a descriptor ask already names the person:
+  // a disambiguation page lists OTHER people, so it is never eligible and never seeds choices.
+  const pickAsk = contextTerms(query, name).length > 0 || !!opts?.prior;
   // Drop adult/spam + non-full-name / missing-context hits before clustering.
   const eligible = rows
     .map((row, i) => ({ row, i }))
@@ -844,6 +906,8 @@ export function resolveEntity(
       if (isBlockedHost(row.url)) return false;
       // Game wikis / fandom never seed person choices (live: "Player at San Andreas State").
       if (!opts?.prior && isFictionHost(row.url)) return false;
+      // Picks/descriptor asks: the "may refer to" page is about namesakes, never the picked person.
+      if (pickAsk && isDisambiguationPage(row)) return false;
       // Picked-choice follow-up: prior already chose the person — keep full-name hits even when
       // the new query's org/role context is missing from a page (else → no_sources).
       if (opts?.prior) return hasFullPersonName(opts.prior.name, row) || hasFullPersonName(name, row);
@@ -858,6 +922,21 @@ export function resolveEntity(
   // Wikipedia disambiguation pages are a strong ambiguity signal even with few cluster peers.
   const disambig = eligible.filter((e) => isDisambiguationPage(e.row)).map((e) => e.i);
   if (!strong.length && !weak.length && !disambig.length) return { kind: 'skip' };
+
+  // A pick ("David Kim C2 Education Centers CEO") already named the person, and eligibility wanted
+  // the full name plus the distinguishing org/role word, so every eligible row is about that one
+  // person. One card, never choices, and never split across clusters that word it differently
+  // (live: the C2 rows were cut down to the Wikipedia page + one news page).
+  if (pickAsk && !opts?.prior) {
+    const kept = eligible.map((e) => e.i);
+    const keptSet = new Set(kept);
+    return {
+      kind: 'single',
+      entity: buildEntity(name, kept, rows),
+      kept,
+      dropped: rows.map((_, i) => i).filter((i) => !keptSet.has(i)),
+    };
+  }
 
   // A thread entity locks the choice: prefer clusters that match it, never ask again.
   if (opts?.prior) {
@@ -911,7 +990,7 @@ export function resolveEntity(
   }
 
   // Seed choices from a disambiguation page when clustering is thin.
-  if (disambig.length) {
+  if (!pickAsk && disambig.length) {
     const entries = disambiguationEntries(rows[disambig[0]!]!, name);
     if (entries.length >= 2) {
       const choices: EntityChoice[] = entries
@@ -1010,6 +1089,55 @@ export function priorEntity(context?: string): Entity | undefined {
   const role = rolePart?.trim() || undefined;
   const terms = [...new Set(tokens(`${role ?? ''} ${org ?? ''} ${location ?? ''}`))];
   return { id: slugOf(name, role, org) || slugOf(name), name, role, org, location, terms };
+}
+
+/**
+ * EN4 encyclopedia knowledge panel helpers (server/stream.ts): the panel is a Wikipedia
+ * summary fetched for the literal query, so it can belong to a namesake of the person the
+ * SERP is about. Its text/photo must only ride along with the row it came from.
+ */
+
+/** Same URL after lowercasing the host and dropping a trailing slash. */
+function sameUrl(a: string, b: string): boolean {
+  const one = (u: string) => {
+    const s = (u ?? '').trim().replace(/\/+$/, '');
+    try {
+      const url = new URL(s);
+      url.hostname = url.hostname.toLowerCase();
+      return url.toString().replace(/\/+$/, '');
+    } catch {
+      return s.toLowerCase();
+    }
+  };
+  return one(a) === one(b);
+}
+
+/**
+ * The knowledge panel as a search row, when it is an en.wikipedia.org summary no SERP row
+ * already carries (the SERP row list decides which person the card is about).
+ */
+export function knowledgeRow(
+  knowledge: { title: string; extract: string; url: string; description?: string } | undefined,
+  rows: EntityRow[],
+): EntityRow | null {
+  const url = knowledge?.url ?? '';
+  if (!knowledge || !url || !EN_WIKI_ARTICLE.test(url)) return null;
+  if (rows.some((r) => sameUrl(r.url, url))) return null;
+  const row = {
+    title: knowledge.title,
+    url,
+    snippet: [knowledge.description, knowledge.extract].filter(Boolean).join(' — '),
+    domain: 'en.wikipedia.org',
+    engines: ['wikipedia'],
+  };
+  return row;
+}
+
+/** True when the knowledge panel is the article of one of the kept rows (never a namesake's). */
+export function knowledgeForKept(knowledge: { url: string } | undefined, keptRows: EntityRow[]): boolean {
+  const url = knowledge?.url ?? '';
+  if (!knowledge || !url) return false;
+  return keptRows.some((r) => sameUrl(r.url, url));
 }
 
 /**

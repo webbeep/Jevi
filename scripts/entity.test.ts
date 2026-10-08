@@ -11,9 +11,13 @@ import {
   disambiguationEntries,
   contextTerms,
   distinguishingTerms,
+  cleanCapture,
   hasFullPersonName,
+  isDisambiguationPage,
   personSourceOk,
   personSubject,
+  knowledgeForKept,
+  knowledgeRow,
   type Entity,
   type EntityRow,
 } from '../server/entity.ts';
@@ -544,6 +548,138 @@ describe('EN4 recorded SERPs (scripts/fixtures/en4/serps.json)', () => {
     for (const l of labels) {
       assert.ok(!l.includes('China. He'), l);
       assert.ok(!l.endsWith(' He'), l);
+    }
+  });
+});
+
+/** Recorded live LangSearch SERPs for the EN4 part-5 fixes (scripts/fixtures/en4/live2.json). */
+interface Live2Knowledge { title: string; extract: string; url: string; description?: string }
+interface Live2Fixture { query: string; results: EntityRow[]; knowledge: Live2Knowledge | null }
+const LIVE2: Record<string, Live2Fixture> = JSON.parse(
+  fs.readFileSync(new URL('./fixtures/en4/live2.json', import.meta.url), 'utf8'),
+);
+const live2 = (key: string) => {
+  const fx = LIVE2[key];
+  assert.ok(fx, `missing fixture ${key}`);
+  return fx;
+};
+const urlsOf = (fx: Live2Fixture, kept: number[]) => kept.map((i) => fx.results[i]!.url);
+
+describe('EN4 live LangSearch fixes (scripts/fixtures/en4/live2.json)', () => {
+  test('a pick or descriptor ask never seeds choices from a disambiguation page', () => {
+    const fx = live2('ls-dkpick');
+    const disambig = fx.results[3]!;
+    assert.ok(isDisambiguationPage(disambig), 'fixture row 3 is the "may refer to" page');
+    const d = resolveEntity(fx.query, fx.results, { pattern: 'profile' });
+    assert.equal(d.kind, 'single');
+    if (d.kind !== 'single') return;
+    assert.equal(d.entity.name, 'David Kim');
+    const kept = urlsOf(fx, d.kept);
+    assert.ok(kept.includes('https://en.wikipedia.org/wiki/David_J._Kim'), kept.join(' | '));
+    assert.ok(
+      kept.includes('https://www.forsythnews.com/local/state-government/political-newcomer-david-kim-running-district-7/'),
+      kept.join(' | '),
+    );
+    assert.ok(kept.includes('https://keia.org/korean-american-day'), kept.join(' | '));
+    // The disambiguation page names other people: never a source, never a choice.
+    assert.ok(!kept.includes(disambig.url), kept.join(' | '));
+    assert.ok(d.dropped.includes(3), d.dropped.join(','));
+    // A picked choice queries the same ask with a thread prior: same rule.
+    const picked = resolveEntity(fx.query, fx.results, {
+      pattern: 'profile',
+      prior: { id: 'david-kim-ceo-c2-education', name: 'David Kim', role: 'CEO', org: 'C2 Education', terms: ['c2', 'ceo'] },
+    });
+    assert.equal(picked.kind, 'single');
+    if (picked.kind === 'single') assert.ok(!urlsOf(fx, picked.kept).includes(disambig.url));
+  });
+
+  test('a birth/death year phrase is never a choice descriptor', () => {
+    const YEAR = /^(born|b\.|died|d\.)\s*(c\.\s*)?\d{3,4}$/i;
+    const fx = live2('ls-dkpick');
+    const entries = disambiguationEntries(fx.results[3]!, 'David Kim');
+    const labels = entries.map((e) => e.label);
+    assert.ok(labels.includes('Violinist'), labels.join(' | '));
+    assert.ok(labels.includes('Restaurateur'), labels.join(' | '));
+    for (const l of labels) {
+      assert.doesNotMatch(l, YEAR, l);
+      assert.doesNotMatch(l, /^\d{3,4}s?$/, l);
+      assert.ok(l.length > 0, l);
+    }
+    // Bare ask: the page still seeds choices, minus the year entry.
+    const d = resolveEntity('Who is David Kim', [fx.results[3]!], { pattern: 'profile' });
+    assert.equal(d.kind, 'choices');
+    if (d.kind !== 'choices') return;
+    assert.ok(d.choices.length >= 2, d.choices.map((c) => c.descriptor).join(' | '));
+    for (const c of d.choices) {
+      assert.ok(c.descriptor.length > 0, c.descriptor);
+      assert.doesNotMatch(c.descriptor, YEAR, c.descriptor);
+      assert.doesNotMatch(c.descriptor, /^\d{3,4}s?$/, c.descriptor);
+    }
+    // An org/label capture that is only a year is dropped, not shown.
+    assert.equal(cleanCapture('born 1979'), '');
+    assert.equal(cleanCapture('1979'), '');
+    assert.equal(cleanCapture('d. 1968'), '');
+    assert.equal(cleanCapture('C2 Education'), 'C2 Education');
+  });
+
+  test('a one-token famous ask resolves to the Wikipedia person, not a skip', () => {
+    const fx = live2('ls-obama-single-token');
+    const d = resolveEntity(fx.query, fx.results, { pattern: 'profile' });
+    assert.equal(d.kind, 'single');
+    if (d.kind !== 'single') return;
+    assert.equal(d.entity.name, 'Barack Obama');
+    const kept = fx.results.filter((_, i) => d.kept.includes(i));
+    assert.ok(kept.some((r) => r.url === 'https://en.wikipedia.org/wiki/Barack_Obama'), urlsOf(fx, d.kept).join(' | '));
+    for (const r of kept) assert.match(`${r.title ?? ''} ${r.snippet ?? ''}`, /obama/i, r.url);
+    // No Wikipedia person article for the token: today's behaviour (skip) stands.
+    const nvidia = resolveEntity('Who is Nvidia', [
+      { title: 'Nvidia', url: 'https://www.nvidia.com/en-us/', snippet: 'Nvidia pioneered accelerated computing.' },
+      { title: 'GeForce - Wikipedia', url: 'https://en.wikipedia.org/wiki/GeForce', snippet: 'GeForce is a brand of graphics processing units.' },
+      { title: 'Nvidia - Wikipedia', url: 'https://en.wikipedia.org/wiki/Nvidia', snippet: 'Nvidia Corporation is an American technology company.' },
+    ], { pattern: 'profile' });
+    assert.equal(nvidia.kind, 'skip');
+  });
+
+  test('the encyclopedia knowledge panel only rides with its own article', () => {
+    const fx = live2('ls-ray-knowledge');
+    assert.ok(fx.knowledge, 'fixture carries a knowledge panel');
+    const panel = knowledgeRow(fx.knowledge!, fx.results);
+    assert.ok(panel, 'the panel becomes a row');
+    assert.equal(panel!.url, fx.knowledge!.url);
+    assert.equal(panel!.title, fx.knowledge!.title);
+    assert.equal(panel!.domain, 'en.wikipedia.org');
+    assert.deepEqual(panel!.engines, ['wikipedia']);
+    assert.equal(panel!.snippet, [fx.knowledge!.description, fx.knowledge!.extract].filter(Boolean).join(' — '));
+    // No duplicate row, no panel for a non-Wikipedia url, nothing without a panel.
+    assert.equal(knowledgeRow(fx.knowledge!, [panel!, ...fx.results]), null);
+    assert.equal(knowledgeRow({ title: 'x', extract: 'y', url: 'https://www.gaana.com/artist/ray-lee' }, fx.results), null);
+    assert.equal(knowledgeRow(null, fx.results), null);
+    // Kept-row matching ignores host case and a trailing slash.
+    assert.equal(knowledgeForKept(fx.knowledge, [panel!, ...fx.results]), true);
+    assert.equal(knowledgeForKept(fx.knowledge, fx.results), false);
+    assert.equal(knowledgeForKept(undefined, fx.results), false);
+    assert.equal(
+      knowledgeForKept({ url: 'https://EN.wikipedia.org/wiki/Ray_Lee/' }, [{ title: 'Ray Lee', url: 'https://en.wikipedia.org/wiki/Ray_Lee' }]),
+      true,
+    );
+
+    // The SERP plus the panel row: the footballer and the singer never share one card.
+    const rows = [panel!, ...fx.results];
+    const d = resolveEntity(fx.query, rows, { pattern: 'profile' });
+    const keptUrls = d.kind === 'single' ? rows.filter((_, i) => d.kept.includes(i)).map((r) => r.url) : [];
+    assert.ok(
+      !(d.kind === 'single' && keptUrls.includes(panel!.url) && keptUrls.includes('https://gaana.com/artist/ray-lee')),
+      `mixed card: ${keptUrls.join(' | ')}`,
+    );
+    if (d.kind === 'single') {
+      assert.ok(keptUrls.includes(panel!.url), keptUrls.join(' | '));
+    } else {
+      assert.equal(d.kind, 'choices');
+      assert.ok(d.choices.length >= 2, d.choices.map((c) => c.descriptor).join(' | '));
+      for (const c of d.choices) {
+        assert.ok(c.descriptor.length > 0, c.descriptor);
+        assert.ok(!/wikipedia|wiktionary/i.test(c.descriptor), c.descriptor);
+      }
     }
   });
 });

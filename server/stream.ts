@@ -1,13 +1,13 @@
 import { DEEP_PAGES, routeExtras, routeOf } from './router';
 import { serperImages } from './cascade';
 import { publicEvent } from './publicPayload';
-import { contextTerms, distinguishingTerms, entityContextLine, entityHintFor, isDisambiguationPage, isPersonAsk, personSourceOk, personSubject, priorEntity, resolveEntity } from './entity';
+import { contextTerms, distinguishingTerms, entityContextLine, entityHintFor, isDisambiguationPage, isPersonAsk, knowledgeForKept, knowledgeRow, personSourceOk, personSubject, priorEntity, resolveEntity } from './entity';
 import { fetchWikiDisambiguation, fetchWikiLeadImage } from './wikiSearch';
 import { type EntityHint, mentionsAny } from './imageGate';
 import type { RowImagePlan } from './pictures';
 import type { AnswerCard, FollowupContext, FollowupIntent, LayoutPlan } from '../shared/card';
 import { type AskRef, refContext, withRef } from '../shared/askAbout';
-import type { EngineStatus, Freshness, ImageResult, SearchResponse } from '../shared/types';
+import type { EngineStatus, Freshness, ImageResult, SearchResponse, SearchResult } from '../shared/types';
 import { rewriteQuery } from './ai';
 import { designParallel, designStream } from './design';
 import { permitted } from './images';
@@ -327,6 +327,18 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
         console.log(JSON.stringify({ zo: 'entity', wikiDisambiguation: true, title: wiki.title }));
       }
     }
+    // EN4: the knowledge panel is a Wikipedia summary of the literal query, so put it in the row
+    // list (right after any disambiguation page) and let the entity pick decide whose card it is.
+    // No extra call — the panel is already on the search response.
+    const panel = knowledgeRow(results.knowledge, results.results);
+    if (panel) {
+      const at = results.results.findIndex((r) => isDisambiguationPage(r));
+      results = {
+        ...results,
+        results: [...results.results.slice(0, at + 1), panel as SearchResult, ...results.results.slice(at + 1)],
+      };
+      console.log(JSON.stringify({ zo: 'entity', knowledgeRow: true, title: panel.title }));
+    }
   }
   const decision = resolveEntity(query, results.results, { pattern: plan.pattern, prior: priorEntity(context) });
   if (decision.kind === 'choices') {
@@ -345,6 +357,13 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     scope.ledger.entity = { kind: 'single', id: decision.entity.id, dropped: decision.dropped.length };
     console.log(JSON.stringify({ zo: 'entity', kind: 'single', id: decision.entity.id, kept: decision.kept.length, dropped: decision.dropped.length }));
     results = { ...results, results: decision.kept.map((i) => results.results[i]!).filter(Boolean) };
+    // EN4: the knowledge panel is the article of one of the kept rows or nothing at all — a
+    // namesake's encyclopedia text/photo must never land on another person's card.
+    const panel = results.knowledge;
+    if (panel && !knowledgeForKept(panel, results.results)) {
+      results = { ...results, knowledge: undefined, images: results.images.filter((i) => i.url !== panel.url) };
+      console.log(JSON.stringify({ zo: 'entity', knowledgeDropped: true, title: panel.title }));
+    }
     designContext = [entityContextLine(decision.entity), context].filter(Boolean).join('\n');
     entityHint = entityHintFor(decision.entity, query);
     // Name + the asker's own context ("Ray Lee BlueFlame AI") pulls that person's photos, not a namesake's.
