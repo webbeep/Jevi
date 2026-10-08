@@ -890,6 +890,7 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
               simple={turn.simple}
               onSimple={(v) => actions.setSimple(id, v)}
               onRegenerate={() => actions.redesign(id)}
+              onRetry={() => actions.retry(id)}
               toolbar={!turn.filling && !offlinePartial && turn.result ? <SaveButton query={turn.question} title={card.title} card={card} /> : undefined}
             />
           </CardContext.Provider>

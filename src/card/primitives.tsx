@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { Check, ChevronLeft, ChevronRight, Copy, Minus, Play, Star, ThumbsDown, ThumbsUp, TrendingDown, TrendingUp } from 'lucide-react';
 import type { CardNode, Tone } from '../../shared/card';
 import type { SearchResult } from '../../shared/types';
@@ -12,12 +12,19 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useCard, useCredit } from './context';
 import { Icon } from './Icon';
+import { ICON_NAMES } from './iconNames';
 import { RichText } from './RichText';
 
 type Of<T extends CardNode['type']> = Extract<CardNode, { type: T }>;
 
 /** Short labels render as plain text, so inline source markers are dropped from them. */
 export const plain = (s: string) => s.replace(/\s*\[\d+\]/g, '').trim();
+
+/** True when a tile's group (grid, row stack, scroller) has a tile with a picture: every tile there keeps the picture slot. */
+export const TilePictures = createContext(false);
+
+/** Whether a tile brings its own picture, so its group's tiles all keep the picture slot. */
+export const wantsPicture = (n: CardNode) => n.type === 'tile' && (!!n.imageSrc || n.imageRef !== undefined || !!n.imageQuery);
 
 export const TONE_TEXT: Record<Tone, string> = {
   default: 'text-foreground',
@@ -276,32 +283,69 @@ export function Links({ node }: { node: Of<'links'> }) {
   );
 }
 
+const KNOWN_ICONS = new Set(ICON_NAMES.split('|'));
+
+/** Type icon for a tile without a picture: the server's icon when it is a real one, else one from the label, else none. */
+const TILE_KINDS: [RegExp, string][] = [
+  [/\b(role|job|title|position|occupation|profession)\b/i, 'briefcase'],
+  [/\b(location|city|hometown|home ?town|based|lives|born|birthplace|country|region|address)\b/i, 'map-pin'],
+  [/\b(education|school|college|university|degree|alma mater|studied)\b/i, 'graduation-cap'],
+  [/\b(company|employer|team|org|organi[sz]ation|club|firm|works? at)\b/i, 'building-2'],
+];
+
+function tileIcon(node: Of<'tile'>): string | undefined {
+  if (node.icon && KNOWN_ICONS.has(node.icon)) return node.icon;
+  const label = plain(node.label);
+  return TILE_KINDS.find(([re]) => re.test(label))?.[1];
+}
+
+/** Kind of a tile from its label (or, failing that, the server's icon). Role and location tiles never show a photo, even if one is sent. */
+function tileKind(node: Of<'tile'>): 'role' | 'location' | 'education' | 'company' | undefined {
+  const label = plain(node.label);
+  if (TILE_KINDS[0][0].test(label) || /^briefcase/.test(node.icon ?? '')) return 'role';
+  if (TILE_KINDS[1][0].test(label) || /^map-pin|^map$/.test(node.icon ?? '')) return 'location';
+  if (TILE_KINDS[2][0].test(label) || /^graduation-cap|^school|^university/.test(node.icon ?? '')) return 'education';
+  if (TILE_KINDS[3][0].test(label) || /^building/.test(node.icon ?? '')) return 'company';
+  return undefined;
+}
+
+const NO_PHOTO = new Set(['role', 'location']);
+
 export function Tile({ node }: { node: Of<'tile'> }) {
   const { onDraft, busy } = useCard();
-  const [img, onImgError] = useLoadable(usePicture(node.imageSrc, node.imageRef));
+  const want = useContext(TilePictures) || wantsPicture(node);
+  const slotRef = useRef(false);
+  if (want) slotRef.current = true;
+  const slot = slotRef.current;
+  const icon = tileIcon(node);
+  const kind = tileKind(node);
+  const noPhoto = !!kind && NO_PHOTO.has(kind);
+  const [img, onImgError] = useLoadable(usePicture(noPhoto ? undefined : node.imageSrc, noPhoto ? undefined : node.imageRef));
   const credit = useCredit(img);
-  const pending = !img && !!node.imageQuery && busy;
+  const pending = !noPhoto && !img && !!node.imageQuery && busy;
   const link = useSource(node.source);
   const ask = askAbout(plain(node.label));
   return (
     <div
       data-item=""
+      data-tile-kind={kind}
       className={cn(
         'relative flex min-w-[72px] flex-col items-center gap-0.5 rounded-xl border px-2 py-2.5 text-center transition-colors has-[>button:hover]:border-foreground/20 sm:min-w-[84px] sm:gap-1 sm:px-3 sm:py-3',
         node.active ? 'border-foreground/25 bg-muted ring-1 ring-foreground/10' : 'bg-card',
       )}
     >
       <button type="button" aria-label={ask} onClick={() => onDraft(ask)} className={cn('absolute inset-0 rounded-[inherit] cursor-pointer', ITEM_FOCUS)} />
-      {img ? (
-        <img src={img} alt={node.label} title={credit} loading="lazy" className="pointer-events-none relative mb-1 aspect-square w-full max-w-24 rounded-lg bg-muted object-cover animate-in fade-in" onError={onImgError} />
-      ) : pending ? (
-        <Skeleton className="pointer-events-none relative mb-1 aspect-square w-full max-w-24 rounded-lg" />
-      ) : null}
+      {slot && (
+        <span data-picture-slot="" className="pointer-events-none relative mb-1 flex aspect-square w-full max-w-24 items-center justify-center overflow-hidden rounded-lg bg-muted">
+          {pending ? <Skeleton className="absolute inset-0 rounded-lg" /> : <Icon name={icon} fallback="layout-grid" className="size-7 text-muted-foreground/70 sm:size-8" />}
+          {img && <img src={img} alt={plain(node.label)} title={credit} loading="lazy" className="absolute inset-0 size-full object-cover animate-in fade-in" onError={onImgError} />}
+        </span>
+      )}
       <span className="pointer-events-none relative inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
         {plain(node.label)}
         {link && <span className="-my-[3px]"><SourceChip result={link} n={node.source!} /></span>}
       </span>
-      {!img && !pending && <Icon name={node.icon} className="pointer-events-none relative size-[18px] text-foreground/70 sm:size-5" />}
+      {!slot && !img && !pending && <Icon name={icon} className="pointer-events-none relative size-[18px] text-foreground/70 sm:size-5" />}
       {node.value && <span className="pointer-events-none relative text-[15px] font-semibold tracking-tight sm:text-base">{plain(node.value)}</span>}
       {node.sub && <span className="pointer-events-none relative text-[11px] leading-tight text-muted-foreground"><RichText text={node.sub} inline noLinks /></span>}
     </div>

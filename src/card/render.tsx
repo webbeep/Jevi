@@ -8,6 +8,7 @@ import { AccordionNode, Choices, Pricing, Reveal, Scaler, SliderNode } from './i
 import {
   Actions, Badges, Callout, CodeView, Draft, Gallery, Heading, Hero, ImageView, KeyValue, Links, List, Profile,
   ProgressView, ProsCons, Quote, Rating, SlotView, StatView, Steps, TableView, Text, Tile, Timeline, TONE_TEXT, VideoView,
+  TilePictures, wantsPicture,
 } from './primitives';
 
 const ChartView = lazy(() => import('./ChartView'));
@@ -68,14 +69,20 @@ export function NodeView({ node }: { node: CardNode }): ReactNode {
       const row = node.direction === 'row';
       const compact = row && node.children.every(isCompact);
       return (
-        <div className={cn('flex min-w-0', GAP[node.gap ?? 'md'], compact ? 'no-scrollbar flex-row overflow-x-auto overscroll-x-contain' : row ? cn('flex-col sm:flex-row', ALIGN[node.align ?? 'start'], node.wrap && 'sm:flex-wrap') : 'flex-col')}>
-          {node.children.map((c, i) => <div key={i} className={cn('flex min-w-0 flex-col [&>*]:flex-1', compact ? 'flex-1' : row && 'sm:flex-1')}><NodeView node={c} /></div>)}
-        </div>
+        <TilePictures.Provider value={node.children.some(wantsPicture)}>
+          <div className={cn('flex min-w-0', GAP[node.gap ?? 'md'], compact ? 'no-scrollbar flex-row overflow-x-auto overscroll-x-contain' : row ? cn('flex-col sm:flex-row', ALIGN[node.align ?? 'start'], node.wrap && 'sm:flex-wrap') : 'flex-col')}>
+            {node.children.map((c, i) => <div key={i} className={cn('flex min-w-0 flex-col [&>*]:flex-1', compact ? 'flex-1' : row && 'sm:flex-1')}><NodeView node={c} /></div>)}
+          </div>
+        </TilePictures.Provider>
       );
     }
     case 'grid':
       // Only small cells (tiles, stats) stay two-up on phones; larger blocks get the full width.
-      return <div className={cn('grid', node.children.every(isCompact) ? COLS[node.cols] : WIDE_COLS[node.cols], GAP[node.gap ?? 'md'], '[&>*]:h-full')}>{node.children.map((c, i) => <NodeView key={i} node={c} />)}</div>;
+      return (
+        <TilePictures.Provider value={node.children.some(wantsPicture)}>
+          <div className={cn('grid', node.children.every(isCompact) ? COLS[node.cols] : WIDE_COLS[node.cols], GAP[node.gap ?? 'md'], '[&>*]:h-full')}>{node.children.map((c, i) => <NodeView key={i} node={c} />)}</div>
+        </TilePictures.Provider>
+      );
     case 'section':
       return (
         <section className="space-y-2 sm:space-y-3">
@@ -100,9 +107,11 @@ export function NodeView({ node }: { node: CardNode }): ReactNode {
       );
     case 'scroller':
       return (
-        <div className="no-scrollbar -mx-4 overflow-x-auto overscroll-x-contain px-4 sm:-mx-6 sm:px-6">
-          <div className="flex w-max min-w-full gap-2 [&>*]:flex-1">{node.children.map((c, i) => <NodeView key={i} node={c} />)}</div>
-        </div>
+        <TilePictures.Provider value={node.children.some(wantsPicture)}>
+          <div className="no-scrollbar -mx-4 overflow-x-auto overscroll-x-contain px-4 sm:-mx-6 sm:px-6">
+            <div className="flex w-max min-w-full gap-2 [&>*]:flex-1">{node.children.map((c, i) => <NodeView key={i} node={c} />)}</div>
+          </div>
+        </TilePictures.Provider>
       );
     case 'divider':
       return <Separator />;

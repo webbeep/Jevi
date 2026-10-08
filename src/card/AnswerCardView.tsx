@@ -1,5 +1,5 @@
-import { useMemo, type ReactNode } from 'react';
-import { ChevronRight, Image as ImageIcon, Loader2, MoreHorizontal, RefreshCw } from 'lucide-react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { ChevronRight, Copy, Image as ImageIcon, Loader2, MoreHorizontal, RefreshCw, RotateCw, Share2 } from 'lucide-react';
 import type { AnswerCard, CardNode, CardPattern } from '../../shared/card';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -19,6 +19,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Skeleton } from '@/components/ui/skeleton';
+import { cardPlainText } from '../../shared/cardText';
 import { citedRefs } from '../library';
 import { LogoMark } from '../Logo';
 import { FaviconStack } from '../Sources';
@@ -59,7 +60,7 @@ function pictureSources(body: CardNode[], images: { thumb: string }[]): string[]
   return [...new Set(out.filter(Boolean))];
 }
 
-export function AnswerCardView({ card, version, filling, streaming, status, pattern, alternatives, onPattern, simple, onSimple, onRegenerate, toolbar }: {
+export function AnswerCardView({ card, version, filling, streaming, status, pattern, alternatives, onPattern, simple, onSimple, onRegenerate, onRetry, toolbar }: {
   card: AnswerCard;
   /** Changes whenever a fresh design starts, replaying the entrance animation. */
   version: string;
@@ -74,17 +75,48 @@ export function AnswerCardView({ card, version, filling, streaming, status, patt
   simple: boolean;
   onSimple: (v: boolean) => void;
   onRegenerate: () => void;
+  onRetry: () => void;
   toolbar?: ReactNode;
 }) {
   const { images, credits, results, onSources } = useCard();
+  const [toast, setToast] = useState<string | null>(null);
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 1600);
+    return () => clearTimeout(timer);
+  }, [toast]);
   const credited = useMemo(
     () => (filling ? [] : pictureSources(card.body, images).flatMap((src) => (credits[src] ? [{ src, ...credits[src] }] : []))),
     [filling, card.body, images, credits],
   );
   const cited = useMemo(() => (filling ? [] : citedRefs(card).flatMap((n) => (results[n - 1] ? [results[n - 1]] : []))), [filling, card, results]);
+  const copyAnswer = () => {
+    navigator.clipboard.writeText(cardPlainText(card, results)).then(() => setToast('Copied'), () => setToast("Couldn't copy"));
+  };
+  // Native share sheet where there is one; otherwise (or if it fails) the link is copied. Cancelling the sheet is silent.
+  const share = async () => {
+    const url = window.location.href;
+    if (typeof navigator.share === 'function') {
+      try {
+        await navigator.share({ title: card.title, text: card.subtitle ?? card.title, url });
+        return;
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      setToast('Link copied');
+    } catch {
+      setToast("Couldn't copy link");
+    }
+  };
   return (
     <div className="relative isolate rounded-2xl">
     <div className="zo-aura" data-on={filling} />
+    <div role="status" aria-live="polite" className="pointer-events-none absolute right-3 top-3 z-20">
+      {toast && <span className="block rounded-lg bg-foreground px-3 py-1.5 text-xs font-medium text-background shadow-float animate-in fade-in">{toast}</span>}
+    </div>
     <Card className="relative gap-0 overflow-hidden rounded-2xl py-0 shadow-card">
       <div className="flex items-start gap-2.5 pb-1 pl-4 pr-2 pt-3.5 sm:gap-3 sm:pl-6 sm:pr-3 sm:pt-5">
         <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg border bg-background sm:size-9">
@@ -98,30 +130,34 @@ export function AnswerCardView({ card, version, filling, streaming, status, patt
           {toolbar}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="size-8 shrink-0 text-muted-foreground" aria-label="Card options">
+            <Button variant="ghost" size="icon" className="relative size-8 shrink-0 text-muted-foreground after:absolute after:-inset-1.5 after:content-['']" aria-label="Card options">
 <MoreHorizontal className="size-4" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuItem className="min-h-11" disabled={filling} onSelect={copyAnswer}><Copy className="size-4" />Copy answer</DropdownMenuItem>
+            <DropdownMenuItem className="min-h-11" disabled={filling} onSelect={() => void share()}><Share2 className="size-4" />Share</DropdownMenuItem>
+            <DropdownMenuItem className="min-h-11" disabled={filling} onSelect={onRetry}><RotateCw className="size-4" />Retry</DropdownMenuItem>
+            <DropdownMenuSeparator />
             {alternatives.length > 0 && (
               <>
                 <DropdownMenuLabel className="text-xs text-muted-foreground">Layout</DropdownMenuLabel>
                 <DropdownMenuRadioGroup value={pattern} onValueChange={(v) => v !== pattern && onPattern(v)}>
                   {alternatives.map((a) => (
-                    <DropdownMenuRadioItem key={a.id} value={a.id} disabled={filling}>{a.label}</DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem key={a.id} className="min-h-11" value={a.id} disabled={filling}>{a.label}</DropdownMenuRadioItem>
                   ))}
                 </DropdownMenuRadioGroup>
                 <DropdownMenuSeparator />
-                <DropdownMenuCheckboxItem checked={simple} disabled={filling} onCheckedChange={(v) => onSimple(!!v)}>Explain simpler</DropdownMenuCheckboxItem>
+                <DropdownMenuCheckboxItem className="min-h-11" checked={simple} disabled={filling} onCheckedChange={(v) => onSimple(!!v)}>Explain simpler</DropdownMenuCheckboxItem>
               </>
             )}
-            <DropdownMenuItem disabled={filling} onSelect={onRegenerate}><RefreshCw className="size-4" />Redesign</DropdownMenuItem>
+            <DropdownMenuItem className="min-h-11" disabled={filling} onSelect={onRegenerate}><RefreshCw className="size-4" />Redesign</DropdownMenuItem>
             {credited.length > 0 && (
               <DropdownMenuSub>
-                <DropdownMenuSubTrigger><ImageIcon className="size-4 text-muted-foreground" />Image credits</DropdownMenuSubTrigger>
+                <DropdownMenuSubTrigger className="min-h-11"><ImageIcon className="size-4 text-muted-foreground" />Image credits</DropdownMenuSubTrigger>
                 <DropdownMenuSubContent className="max-h-80 w-72 overflow-y-auto">
                   {credited.map((c) => (
-                    <DropdownMenuItem key={c.src} asChild>
+                    <DropdownMenuItem key={c.src} className="min-h-11" asChild>
                       <a href={c.link} target="_blank" rel="noopener noreferrer" className="gap-2.5">
                         <img src={c.src} alt="" className="size-8 shrink-0 rounded-md object-cover" />
                         <span className="min-w-0 flex-1 truncate text-xs">{c.credit}</span>
