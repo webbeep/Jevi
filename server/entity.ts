@@ -146,7 +146,11 @@ export function personSourceOk(query: string, row: EntityRow, name = personSubje
   return need.some((t) => body.has(t) || (t.length >= 5 && [...body].some((w) => w.includes(t))));
 }
 
+/** SPD3 (t457): "A vs B" / "compare A and B" names two things, so it is never one person to disambiguate. */
+const COMPARE_ASK = /\b(?:vs\.?|versus|compare[sd]?|comparison)\b/i;
+
 export function isPersonAsk(query: string, pattern?: string): boolean {
+  if (COMPARE_ASK.test(query) && !WHO_IS.test(query.trim())) return false;
   const subject = personSubject(query);
   if (pattern === 'profile') return subject !== '';
   if (WHO_IS.test(query.trim())) return subject !== '';

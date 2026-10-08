@@ -277,3 +277,9 @@ test('China Games event tile never gets a photo target', () => {
   assert.equal(targetFor('Preseason window').kind, 'none');
   assert.equal(targetFor('Role').kind, 'none');
 });
+
+test('SPD3: product comparisons are never a person ask (live P06 got Kindle choices)', () => {
+  assert.equal(isPersonAsk('Kindle Paperwhite vs Kobo Clara BW for reading, which should I buy and what do they cost?'), false);
+  assert.equal(isPersonAsk('iPad Air vs iPad Pro for drawing, which one and how much?', 'profile'), false);
+  assert.equal(isPersonAsk('Who is Jensen Huang'), true);
+});
