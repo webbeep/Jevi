@@ -198,18 +198,6 @@ describe('T444 entity disambiguation', () => {
     assert.ok(hintFor('White House'), 'the org label gets a hint');
   });
 
-  test('EN3: a picked-choice ask makes the person hint require its org/descriptor', () => {
-    const c2: Entity = { id: 'david-kim-founder-c2', name: 'David Kim', role: 'Founder', org: 'C2', terms: ['founder', 'c2'] };
-    const h = entityHintFor(c2, 'David Kim C2 Founder')('David Kim')!;
-    assert.equal(h.requireContext, true);
-    assert.ok(h.context!.includes('C2'));
-    assert.ok(!h.context!.includes('founder'), 'role word is not enough when an org exists');
-    const actor: Entity = { id: 'david-kim-actor', name: 'David Kim', role: 'Actor', terms: ['actor'] };
-    assert.deepEqual(entityHintFor(actor, 'David Kim Actor')('David Kim')!.context, ['actor']);
-    assert.equal(entityHintFor(c2, 'Who is David Kim')('David Kim')!.requireContext, undefined);
-    assert.equal(entityHintFor(c2, 'David Kim')('David Kim')!.requireContext, undefined);
-  });
-
   test('t451: entityHintFor marks the hint strict only when the ask names the org', () => {
     const entity: Entity = { id: 'ray-lee-ceo-raycon', name: 'Ray Lee', role: 'CEO', org: 'Raycon', terms: ['ceo', 'raycon'] };
     assert.equal(entityHintFor(entity, 'Raycon CEO')('Ray Lee')!.strict, true);

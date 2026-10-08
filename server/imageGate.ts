@@ -34,25 +34,11 @@ export interface EntityHint {
    * is still taken unless its page names a different org; strict adds company-suffix pages to that check (t451).
    */
   strict?: boolean;
-  /**
-   * The card comes from a picked choice or a person+descriptor ask ("David Kim C2 Founder"): the photo must carry
-   * a context word or come from the hint's domains, else no photo. A wrong face is worse than none (EN3 gate).
-   */
-  requireContext?: boolean;
 }
 
 /** The chosen entity's context words, or a picture from its own domains (t444: no namesake photos). */
 function contextOk(target: PicTarget, words: string[], urls: string[]): boolean {
   const ctx = (target.hint?.context ?? []).flatMap((c) => tokens(c)).filter((t) => t.length >= 3 && !STOP.has(t) && !ORG_GENERIC.has(t));
-  if (target.hint?.requireContext) {
-    // Short org tokens ("C2") count here as exact words; generic tails ("AI") only when nothing else is left.
-    const all = (target.hint?.context ?? []).flatMap((c) => tokens(c)).filter((t) => !STOP.has(t));
-    const need = ctx.length ? ctx : all;
-    if (!need.length) return true;
-    if (need.some((t) => words.includes(t) || (t.length >= 5 && hit(t, words)))) return true;
-    const ds = (target.hint?.domains ?? []).map((d) => norm(d).replace(/^www\./, '')).filter(Boolean);
-    return urls.some((u) => { const h = hostOf(u); return !!h && ds.some((d) => h === d || h.endsWith(`.${d}`)); });
-  }
   if (!ctx.length) return true;
   if (ctx.some((t) => hit(t, words))) return true;
   const domains = (target.hint?.domains ?? []).map((d) => norm(d).replace(/^www\./, '')).filter(Boolean);
