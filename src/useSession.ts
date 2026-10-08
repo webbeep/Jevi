@@ -456,33 +456,6 @@ export function useSession() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [add, run]);
 
-  /** Turns one source page into its own card. */
-  const digest = useCallback(async (r: SearchResult, searchTurnId: number) => {
-    const ctx = get(searchTurnId);
-    if (!ctx?.search) return;
-    const mine = epoch.current;
-    const id = add({ kind: 'digest', question: `Summarize: ${r.title}`, searchId: searchTurnId, filling: true });
-    scrollToTurn(id);
-    try {
-      const page = await api.read(r.url, ctx.question, r.content);
-      const n = ctx.search.results.findIndex((x) => x.url === r.url) + 1;
-      const card: AnswerCard = {
-        title: page.title || r.title,
-        subtitle: r.domain,
-        icon: 'book-open',
-        body: [
-          { type: 'text', text: page.tldr, size: 'lg' },
-          ...(page.bullets.length ? [{ type: 'list' as const, style: 'check' as const, items: page.bullets.map((text) => ({ text })) }] : []),
-          ...(n > 0 ? [{ type: 'citations' as const, refs: [n] }] : []),
-        ],
-      };
-      if (mine === epoch.current) update(id, (t) => ({ result: { card, followups: [], engine: 'extractive', pagesRead: 1, removed: 0, ms: 0 }, version: t.version + 1, filling: false }));
-    } catch (err) {
-      if (mine === epoch.current) update(id, { filling: false, error: friendlyError(err) });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [add, update]);
-
   /** Shows a cached design for this view if there is one; otherwise designs it. */
   const switchView = useCallback((id: number, pattern: string, simple: boolean) => {
     const cached = get(id)?.variants[variantKey(pattern, simple)];
@@ -568,8 +541,8 @@ export function useSession() {
 
   // Stable across renders, so turns that didn't change can skip re-rendering.
   const actions = useMemo(
-    () => ({ searchOf, clear, restore, search, followup, digest, retry, pin, setPattern, setSimple, redesign }),
-    [searchOf, clear, restore, search, followup, digest, retry, pin, setPattern, setSimple, redesign],
+    () => ({ searchOf, clear, restore, search, followup, retry, pin, setPattern, setSimple, redesign }),
+    [searchOf, clear, restore, search, followup, retry, pin, setPattern, setSimple, redesign],
   );
   return { turns, actions };
 }

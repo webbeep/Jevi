@@ -117,7 +117,7 @@ export function AnswerCardView({ card, version, filling, streaming, status, patt
                 <DropdownMenuSubContent className="max-h-80 w-72 overflow-y-auto">
                   {credited.map((c) => (
                     <DropdownMenuItem key={c.src} asChild>
-                      <a href={c.link} target="_blank" rel="noreferrer" className="gap-2.5">
+                      <a href={c.link} target="_blank" rel="noopener noreferrer" className="gap-2.5">
                         <img src={c.src} alt="" className="size-8 shrink-0 rounded-md object-cover" />
                         <span className="min-w-0 flex-1 truncate text-xs">{c.credit}</span>
                       </a>

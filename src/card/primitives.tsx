@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useState } from 'react';
-import { ArrowUpRight, BookOpen, Check, ChevronLeft, ChevronRight, Copy, MessageCircle, Minus, Play, Star, ThumbsDown, ThumbsUp, TrendingDown, TrendingUp } from 'lucide-react';
+import { ArrowUpRight, Check, ChevronLeft, ChevronRight, Copy, MessageCircle, Minus, Play, Star, ThumbsDown, ThumbsUp, TrendingDown, TrendingUp } from 'lucide-react';
 import type { CardNode, Tone } from '../../shared/card';
 import type { SearchResult } from '../../shared/types';
 import { cn } from '@/lib/utils';
@@ -140,11 +140,11 @@ function useSource(n: number | undefined) {
 const subjectOf = (text: string) => plain(text).replace(/\*\*/g, '').split(/\s[—–-]\s|:\s/)[0].trim().slice(0, 80);
 
 /**
- * What to do with a source an item points at: read it here, ask about it in the conversation, or leave for the site.
+ * What to do with a source an item points at: ask about it in the conversation, or open the site in a new tab.
  * `children` is the trigger (a whole row or tile); without it, a small button is shown.
  */
 function SourceMenu({ result: r, subject, children, className }: { result: SearchResult; subject: string; children?: ReactNode; className?: string }) {
-  const { onRead, onAsk } = useCard();
+  const { onAsk } = useCard();
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -159,15 +159,12 @@ function SourceMenu({ result: r, subject, children, className }: { result: Searc
           <img src={`https://icons.duckduckgo.com/ip3/${r.domain}.ico`} alt="" className="size-3.5 rounded-sm" />
           <span className="truncate">{domainLabel(r.domain)}</span>
         </DropdownMenuLabel>
-        <DropdownMenuItem onSelect={() => onRead(r)}>
-          <BookOpen />Read it here
-        </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => onAsk(`Tell me more about ${subject || r.title}, based on ${domainLabel(r.domain)}`)}>
+        <DropdownMenuItem className="min-h-11" onSelect={() => onAsk(`Tell me more about ${subject || r.title}, based on ${domainLabel(r.domain)}`)}>
           <MessageCircle /><span className="truncate">Ask about {subject || 'this'}</span>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem asChild>
-          <a href={r.url} target="_blank" rel="noreferrer">
+        <DropdownMenuItem asChild className="min-h-11">
+          <a href={r.url} target="_blank" rel="noopener noreferrer">
             <ArrowUpRight />Open site
           </a>
         </DropdownMenuItem>
@@ -177,9 +174,9 @@ function SourceMenu({ result: r, subject, children, className }: { result: Searc
 }
 
 /** Small menu button for an item that links to one of the sources. */
-function SourceLink({ n, subject }: { n?: number; subject: string }) {
+function SourceLink({ n, subject, className }: { n?: number; subject: string; className?: string }) {
   const r = useSource(n);
-  return r ? <SourceMenu result={r} subject={subject} /> : null;
+  return r ? <SourceMenu result={r} subject={subject} className={className} /> : null;
 }
 
 const domainLabel = (d: string) => d.replace(/^(www|en|m)\./, '');
@@ -223,7 +220,7 @@ export function VideoView({ node }: { node: Of<'video'> }) {
           <a
             href={r.url}
             target="_blank"
-            rel="noreferrer"
+            rel="noopener noreferrer"
             onClick={(e) => {
               if (!embed) return;
               e.preventDefault();
@@ -242,7 +239,7 @@ export function VideoView({ node }: { node: Of<'video'> }) {
       <figcaption className="flex items-start gap-2 text-sm">
         <img src={`https://icons.duckduckgo.com/ip3/${r.domain}.ico`} alt="" className="mt-0.5 size-4 shrink-0 rounded-sm" />
         <span className="min-w-0 flex-1">
-          <a href={r.url} target="_blank" rel="noreferrer" className="font-medium leading-snug hover:underline">{node.caption ?? r.title}</a>
+          <a href={r.url} target="_blank" rel="noopener noreferrer" className="font-medium leading-snug hover:underline">{node.caption ?? r.title}</a>
           <span className="block text-xs text-muted-foreground">{domainLabel(r.domain)}{r.date ? ` · ${r.date.slice(0, 10)}` : ''}</span>
         </span>
       </figcaption>
@@ -383,7 +380,8 @@ export function List({ node }: { node: Of<'list'> }) {
           </span>
           <span className="flex-1 text-foreground/85"><RichText text={item.text} /></span>
           {item.meta && <span className="shrink-0 text-xs text-muted-foreground">{item.meta}</span>}
-          <SourceLink n={item.source} subject={subjectOf(item.text)} />
+          {/* List rows sit 8–10px apart: tap area 44 wide × 36 tall so neighbours never overlap (list-row rule: ≥44w, ≥30h). */}
+          <SourceLink n={item.source} subject={subjectOf(item.text)} className="after:-inset-y-1" />
         </li>
       ))}
     </ul>
@@ -591,7 +589,7 @@ export function ImageView({ node }: { node: Of<'image'> }) {
       {(node.caption || credit) && (
         <figcaption className="flex items-baseline gap-3 px-3 py-2 text-xs text-muted-foreground">
           {node.caption && <span className="min-w-0 flex-1">{node.caption}</span>}
-          {credit && <a href={node.link ?? ref?.url} target="_blank" rel="noreferrer" className="ml-auto max-w-[60%] shrink-0 truncate text-[11px] opacity-70 hover:opacity-100">{credit}</a>}
+          {credit && <a href={node.link ?? ref?.url} target="_blank" rel="noopener noreferrer" className="ml-auto max-w-[60%] shrink-0 truncate text-[11px] opacity-70 hover:opacity-100">{credit}</a>}
         </figcaption>
       )}
     </figure>
@@ -622,7 +620,7 @@ export function Gallery({ node }: { node: Of<'gallery'> }) {
           {current && <img src={current.thumb} alt={current.title} className="max-h-[70vh] w-full rounded-lg object-contain" />}
           <div className="flex items-center justify-between">
             <Button variant="ghost" size="icon" aria-label="Previous image" onClick={() => setOpen(((open ?? 0) - 1 + items.length) % items.length)}><ChevronLeft /></Button>
-            <a href={current?.url} target="_blank" rel="noreferrer" className="text-xs text-muted-foreground hover:text-foreground">{(current && credits[current.thumb]?.credit) ?? current?.source} ↗</a>
+            <a href={current?.url} target="_blank" rel="noopener noreferrer" className="text-xs text-muted-foreground hover:text-foreground">{(current && credits[current.thumb]?.credit) ?? current?.source} ↗</a>
             <Button variant="ghost" size="icon" aria-label="Next image" onClick={() => setOpen(((open ?? 0) + 1) % items.length)}><ChevronRight /></Button>
           </div>
         </DialogContent>

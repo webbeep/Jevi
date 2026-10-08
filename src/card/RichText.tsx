@@ -40,7 +40,7 @@ function CiteRun({ cites, noLinks }: { cites: Cite[]; noLinks: boolean }) {
   if (cites.length === 1) {
     if (noLinks) return <span title={r.title} className={CITE}>{n}</span>;
     return (
-      <a href={r.url} target="_blank" rel="noreferrer" title={r.title} className={`${CITE} ${LIST_ROW} ${HOVER}`}>
+      <a href={r.url} target="_blank" rel="noopener noreferrer" title={r.title} className={`${CITE} ${LIST_ROW} ${HOVER}`}>
         {n}
       </a>
     );
@@ -65,7 +65,7 @@ function CiteRun({ cites, noLinks }: { cites: Cite[]; noLinks: boolean }) {
       >
         {cites.map((c) => (
           <DropdownMenuItem key={c.n} asChild className="min-h-11">
-            <a href={c.result.url} target="_blank" rel="noreferrer">
+            <a href={c.result.url} target="_blank" rel="noopener noreferrer">
               <span className="inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-sm bg-muted px-1 text-[10px] font-medium text-muted-foreground">{c.n}</span>
               <span className="flex min-w-0 flex-1 flex-col">
                 <span className="truncate text-sm">{c.result.title}</span>

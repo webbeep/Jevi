@@ -1,14 +1,14 @@
 import { type FormEvent, type RefObject, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowUp, CornerDownRight, CornerLeftUp, History, Moon, Pencil, Plus, RotateCw, Search, Shuffle, SlidersHorizontal, Sun, WifiOff, X } from 'lucide-react';
 import type { AnswerCard, CardNode } from '../shared/card';
-import type { SearchResponse, SearchResult } from '../shared/types';
+import type { SearchResponse } from '../shared/types';
 import { api } from './api';
 import { AnswerCardView } from './card/AnswerCardView';
 import { CardContext, type CardContextValue } from './card/context';
 import { Icon } from './card/Icon';
 import { LogoMark, Wordmark } from './Logo';
-import { type LibraryEntry, buildLibrary } from './library';
-import { FaviconStack, Reader, SourcesRail, SourcesSheet } from './Sources';
+import { buildLibrary } from './library';
+import { FaviconStack, SourcesRail, SourcesSheet } from './Sources';
 import { type SessionActions, type Turn, liveBody, scrollToTurn, useSession } from './useSession';
 import { loadSnapshot, normalizeAnswerQuery, saveSnapshot } from '../shared/answerKey';
 import { MANUAL_RETRY_AFTER, OFFLINE_MESSAGE, clearPending, loadPending, savePending } from '../shared/offline';
@@ -108,7 +108,7 @@ function engineLabel(t: Turn): string | undefined {
   return t.plan ? 'Planning the layout…' : undefined;
 }
 
-/** Overlays (sources sheet, reader) get a history entry so the back button closes them instead of leaving the chat. */
+/** The sources sheet gets a history entry so the back button closes it instead of leaving the chat. */
 const overlayOpen = () => (history.state as { overlay?: boolean } | null)?.overlay === true;
 const pushOverlay = () => {
   if (!overlayOpen()) history.pushState({ overlay: true }, '');
@@ -155,32 +155,19 @@ export default function App() {
   const railTurn = [...turns].reverse().find((t) => t.kind === 'search' && t.search?.results.length);
   const library = useMemo(() => buildLibrary(turns), [turns]);
   const [sheet, setSheet] = useState<{ open: boolean; scope?: number }>({ open: false });
-  const [reading, setReading] = useState<LibraryEntry | null>(null);
   const scopeTurn = turns.find((t) => t.id === sheet.scope);
   const overlay = useRef(false);
-  overlay.current = sheet.open || !!reading;
+  overlay.current = sheet.open;
   const shown = useRef(initial.get('q') ?? '');
 
   const openSources = useCallback((scope?: number) => {
     pushOverlay();
     setSheet({ open: true, scope });
   }, []);
-  const read = (e: LibraryEntry) => {
-    pushOverlay();
-    setReading(e);
-  };
-  const libraryRef = useRef(library);
-  libraryRef.current = library;
-  /** Opens a source a card points at in the reader, with whatever the conversation already knows about it. */
-  const readSource = useCallback((result: SearchResult, searchId: number) => {
-    pushOverlay();
-    setReading(libraryRef.current.find((e) => e.result.url === result.url) ?? { result, searchId, citedBy: [] });
-  }, []);
   const closeOverlays = () => {
     setSheet((s) => ({ ...s, open: false }));
-    setReading(null);
   };
-  /** Clears what belongs to the old conversation: open sheets, the reader and the composer's quote. */
+  /** Clears what belongs to the old conversation: the open sources sheet and the composer's quote. */
   const resetUi = () => {
     closeOverlays();
     setChat((n) => n + 1);
@@ -445,7 +432,7 @@ export default function App() {
 
             <div className={cn(SHELL, GRID, 'relative pb-[50vh] pt-5 sm:pt-8')}>
               <main ref={mainRef} className="min-w-0 space-y-8 sm:space-y-10">
-                {turns.map((t, i) => <TurnView key={t.id} turn={t} first={i === 0} search={session.searchOf(t)?.search} actions={session} onSources={openSources} onRead={readSource} />)}
+                {turns.map((t, i) => <TurnView key={t.id} turn={t} first={i === 0} search={session.searchOf(t)?.search} actions={session} onSources={openSources} />)}
 
                 {last?.result && last.result.followups.length > 0 && !busy && (
                   <section className="-mt-2 px-4 animate-in fade-in sm:-mt-4 sm:px-6">
@@ -468,7 +455,7 @@ export default function App() {
               <aside className="hidden lg:block">
                 {library.length > 0 && (
                   <div className="sticky top-[calc(5.5rem-10px)] -mt-2.5 pt-2.5 max-h-[calc(100dvh-7rem+10px)] overflow-y-auto no-scrollbar">
-                    <SourcesRail entries={library} engines={railTurn?.search?.engines ?? []} onRead={read} onAll={() => openSources()} />
+                    <SourcesRail entries={library} engines={railTurn?.search?.engines ?? []} onAll={() => openSources()} />
                   </div>
                 )}
               </aside>
@@ -484,16 +471,6 @@ export default function App() {
               entries={library}
               scope={scopeTurn?.result ? { id: scopeTurn.id, title: scopeTurn.result.card.title } : undefined}
               onClearScope={() => setSheet({ open: true })}
-              onRead={(e) => { setSheet((s) => ({ ...s, open: false })); setReading(e); }}
-            />
-            <Reader
-              result={reading?.result ?? null}
-              query={turns.find((t) => t.id === reading?.searchId)?.question ?? ''}
-              onClose={() => {
-                setReading(null);
-                popOverlay();
-              }}
-              onDigest={(r) => reading && session.digest(r, reading.searchId)}
             />
           </>
         )}
@@ -658,14 +635,13 @@ function OfflineNotice({ filling, partial, reconnects, onRetry }: { filling: boo
   );
 }
 
-const TurnView = memo(function TurnView({ turn, first, search, actions, onSources, onRead }: {
+const TurnView = memo(function TurnView({ turn, first, search, actions, onSources }: {
   turn: Turn;
   first: boolean;
   /** Results of the search this turn builds on. */
   search?: SearchResponse;
   actions: SessionActions;
   onSources: (scope?: number) => void;
-  onRead: (result: SearchResult, searchId: number) => void;
 }) {
   const streaming = !!turn.live?.nodes.some(Boolean);
   const offlinePartial = Boolean(turn.offline && (turn.live?.head || streaming));
@@ -714,8 +690,7 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
       void actions.followup(instruction, id, 'adjust');
     },
     onSources: () => onSources(id),
-    onRead: (r) => onRead(r, turn.searchId),
-  }), [search?.results, search?.images, credits, turn.filling, offlinePartial, actions, id, onSources, onRead, turn.searchId]);
+  }), [search?.results, search?.images, credits, turn.filling, offlinePartial, actions, id, onSources]);
 
   return (
     <section id={`turn-${turn.id}`} data-turn={turn.id} className="scroll-mt-20 space-y-3 animate-in fade-in slide-in-from-bottom-3 duration-500">

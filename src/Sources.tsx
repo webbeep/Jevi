@@ -1,12 +1,9 @@
 import { useEffect, useState } from 'react';
-import { ExternalLink, FileText, LayoutGrid, X } from 'lucide-react';
-import type { EngineStatus, SearchResult } from '../shared/types';
-import { api } from './api';
+import { FileText, X } from 'lucide-react';
+import type { EngineStatus } from '../shared/types';
 import type { LibraryEntry } from './library';
 import { cn } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { Skeleton } from '@/components/ui/skeleton';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 export const favicon = (domain: string) => `https://icons.duckduckgo.com/ip3/${domain}.ico`;
 const shortDomain = (d: string) => d.replace(/^(www|en|m)\./, '');
@@ -35,61 +32,6 @@ export function FaviconStack({ domains, size = 'sm' }: { domains: string[]; size
   );
 }
 
-export function Reader({ result, query, onClose, onDigest }: { result: SearchResult | null; query: string; onClose: () => void; onDigest: (r: SearchResult) => void }) {
-  const desktop = useIsDesktop();
-  const [text, setText] = useState<string>();
-  const [error, setError] = useState<string>();
-
-  useEffect(() => {
-    setError(undefined);
-    setText(result?.content);
-    if (!result || result.content) return;
-    let live = true;
-    api.read(result.url, query, undefined, true)
-      .then((page) => live && setText(page.text))
-      .catch((err) => live && setError(err instanceof Error ? err.message : String(err)));
-    return () => {
-      live = false;
-    };
-  }, [result, query]);
-
-  return (
-    <Sheet open={!!result} onOpenChange={(o) => !o && onClose()}>
-      <SheetContent side={desktop ? 'right' : 'bottom'} className={cn('gap-0 p-0', desktop ? 'w-full sm:max-w-lg' : 'h-[88dvh] rounded-t-2xl')}>
-        {result && (
-          <>
-            <SheetHeader className="border-b p-4 pr-12">
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <img src={favicon(result.domain)} alt="" className="size-4 rounded-sm" />
-                {shortDomain(result.domain)}
-              </div>
-              <SheetTitle className="text-base leading-snug">{result.title}</SheetTitle>
-              <SheetDescription className="sr-only">Readable text of this source</SheetDescription>
-              <div className="flex gap-2 pt-1">
-                <Button size="sm" className="h-8 rounded-lg" onClick={() => { onDigest(result); onClose(); }}><LayoutGrid className="size-3.5" />Make it a card</Button>
-                <Button size="sm" variant="outline" className="h-8 rounded-lg" asChild>
-                  <a href={result.url} target="_blank" rel="noreferrer"><ExternalLink className="size-3.5" />Open site</a>
-                </Button>
-              </div>
-            </SheetHeader>
-            <div className="flex-1 overflow-y-auto px-4 py-4">
-              {error ? (
-                <p className="text-sm text-muted-foreground">{error}. <a className="underline" href={result.url} target="_blank" rel="noreferrer">Open the site</a> instead.</p>
-              ) : !text ? (
-                <div className="space-y-2.5">{Array.from({ length: 8 }, (_, i) => <Skeleton key={i} className="h-3.5" style={{ width: `${95 - (i % 3) * 12}%` }} />)}</div>
-              ) : (
-                <article className="space-y-3 text-[15px] leading-relaxed text-foreground/85">
-                  {text.split('\n').filter((p) => p.trim()).map((p, i) => <p key={i}>{p}</p>)}
-                </article>
-              )}
-            </div>
-          </>
-        )}
-      </SheetContent>
-    </Sheet>
-  );
-}
-
 function FilterToggle({ value, onChange, cited, all }: { value: SourceFilter; onChange: (v: SourceFilter) => void; cited: number; all: number }) {
   return (
     <ToggleGroup type="single" size="sm" value={value} onValueChange={(v) => v && onChange(v as SourceFilter)} className="rounded-lg bg-foreground/[0.05] p-0.5">
@@ -103,10 +45,10 @@ function FilterToggle({ value, onChange, cited, all }: { value: SourceFilter; on
   );
 }
 
-function SourceRow({ entry, onRead, detail = false }: { entry: LibraryEntry; onRead: (e: LibraryEntry) => void; detail?: boolean }) {
+function SourceRow({ entry, detail = false }: { entry: LibraryEntry; detail?: boolean }) {
   const r = entry.result;
   return (
-    <button onClick={() => onRead(entry)} className={cn('flex w-full flex-col gap-1 text-left transition-colors hover:bg-foreground/[0.04]', detail ? 'px-4 py-3' : 'rounded-lg px-2 py-2.5')}>
+    <a href={r.url} target="_blank" rel="noopener noreferrer" className={cn('flex min-h-11 w-full flex-col gap-1 text-left transition-colors hover:bg-foreground/[0.04]', detail ? 'px-4 py-3' : 'rounded-lg px-2 py-2.5')}>
       <span className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
         <img src={favicon(r.domain)} alt="" className="size-3.5 rounded-[3px]" loading="lazy" />
         <span className="truncate">{shortDomain(r.domain)}</span>
@@ -115,12 +57,12 @@ function SourceRow({ entry, onRead, detail = false }: { entry: LibraryEntry; onR
       </span>
       <span className="line-clamp-2 text-[13px] font-medium leading-snug">{r.title}</span>
       {detail && r.snippet && <span className="line-clamp-2 text-xs leading-relaxed text-muted-foreground">{r.snippet}</span>}
-    </button>
+    </a>
   );
 }
 
 /** Desktop side rail: the conversation's sources, cited ones first. */
-export function SourcesRail({ entries, engines, onRead, onAll }: { entries: LibraryEntry[]; engines: EngineStatus[]; onRead: (e: LibraryEntry) => void; onAll: () => void }) {
+export function SourcesRail({ entries, engines, onAll }: { entries: LibraryEntry[]; engines: EngineStatus[]; onAll: () => void }) {
   const cited = entries.filter((e) => e.citedBy.length);
   const [filter, setFilter] = useState<SourceFilter>('all');
   const [touched, setTouched] = useState(false);
@@ -148,7 +90,7 @@ export function SourcesRail({ entries, engines, onRead, onAll }: { entries: Libr
         </div>
       </div>
       <ol className="-mx-2">
-        {shown.map((e) => <li key={e.result.url}><SourceRow entry={e} onRead={onRead} /></li>)}
+        {shown.map((e) => <li key={e.result.url}><SourceRow entry={e} /></li>)}
       </ol>
       {entries.length > shown.length && (
         <button onClick={onAll} className="px-0 text-xs text-muted-foreground transition-colors hover:text-foreground">Show all {entries.length} sources</button>
@@ -158,13 +100,12 @@ export function SourcesRail({ entries, engines, onRead, onAll }: { entries: Libr
 }
 
 /** Every source in the conversation; optionally narrowed to the ones one card cites. */
-export function SourcesSheet({ open, onOpenChange, entries, scope, onClearScope, onRead }: {
+export function SourcesSheet({ open, onOpenChange, entries, scope, onClearScope }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   entries: LibraryEntry[];
   scope?: { id: number; title: string };
   onClearScope: () => void;
-  onRead: (e: LibraryEntry) => void;
 }) {
   const desktop = useIsDesktop();
   const cited = entries.filter((e) => e.citedBy.length);
@@ -193,7 +134,7 @@ export function SourcesSheet({ open, onOpenChange, entries, scope, onClearScope,
           </div>
         </SheetHeader>
         <div className="flex-1 divide-y overflow-y-auto pb-[env(safe-area-inset-bottom)]">
-          {shown.map((e) => <SourceRow key={e.result.url} entry={e} onRead={onRead} detail />)}
+          {shown.map((e) => <SourceRow key={e.result.url} entry={e} detail />)}
           {!shown.length && <p className="p-6 text-center text-sm text-muted-foreground">No cited sources yet.</p>}
         </div>
       </SheetContent>
