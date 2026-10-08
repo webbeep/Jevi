@@ -38,14 +38,16 @@ test('llmLines emits the same trimmed lines however the stream is chunked', asyn
   const frames = [frame({ role: 'assistant', content: '' }), ...pieces.map((s) => frame({ content: s }))];
   const sse = `${frames.map((f) => `data: ${f}\n\n`).join('')}data: [DONE]\n\n`;
   const bytes = new TextEncoder().encode(sse);
+  // The same stream with CRLF line endings must give the same lines.
+  const crlf = new TextEncoder().encode(sse.replace(/\n/g, '\r\n'));
   const real = globalThis.fetch;
   // post() leaves its 60s whole-answer timer armed on success; unref it so the test run does not wait for it.
   const realTimeout = globalThis.setTimeout;
   globalThis.setTimeout = ((fn: () => void, ms?: number) => { const t = realTimeout(fn, ms); t.unref?.(); return t; }) as typeof setTimeout;
   try {
-    for (const size of [1, 7, 64, bytes.length]) {
+    for (const [body, size] of [bytes, crlf].flatMap((b) => [1, 7, 64, b.length].map((n) => [b, n] as const))) {
       globalThis.fetch = (async () =>
-        new Response(new ReadableStream({ start(c) { for (let i = 0; i < bytes.length; i += size) c.enqueue(bytes.slice(i, i + size)); c.close(); } }), { status: 200 })) as typeof fetch;
+        new Response(new ReadableStream({ start(c) { for (let i = 0; i < body.length; i += size) c.enqueue(body.slice(i, i + size)); c.close(); } }), { status: 200 })) as typeof fetch;
       const lines: string[] = [];
       await llmLines({ LLM_API_KEY: 'k', LLM_BASE_URL: 'http://mock', LLM_MODEL: 'm', LLM_ORDER: 'custom' }, 'sys', 'user', 100, (l) => lines.push(l));
       assert.deepEqual(lines, want, `chunk size ${size}`);

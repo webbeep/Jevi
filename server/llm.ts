@@ -213,6 +213,9 @@ export function contentDelta(data: string): string | undefined {
     while (data.charCodeAt(q - 1 - slashes) === 92) slashes++;
     if (slashes % 2 === 0) {
       if (data.charCodeAt(q + 1) !== 125) return undefined;
+      // Without escapes or control characters the JSON string is its own text.
+      const raw = data.slice(open + 1, q);
+      if (!/[\\\u0000-\u001f]/.test(raw)) return raw;
       try {
         return JSON.parse(data.slice(open, q + 1)) as string;
       } catch {
@@ -231,8 +234,20 @@ async function readSse(body: ReadableStream<Uint8Array>, onText: (t: string) => 
   let buf = '';
   const take = (value: string) => {
     buf += value;
-    const events = buf.split(/\r?\n\r?\n/);
-    buf = events.pop() ?? '';
+    let events: string[];
+    if (buf.includes('\r')) {
+      events = buf.split(/\r?\n\r?\n/);
+      buf = events.pop() ?? '';
+    } else {
+      // Same events as the split above when there is no \r, without the regex.
+      events = [];
+      let from = 0;
+      for (let end = buf.indexOf('\n\n'); end >= 0; end = buf.indexOf('\n\n', from)) {
+        events.push(buf.slice(from, end));
+        from = end + 2;
+      }
+      buf = buf.slice(from);
+    }
     for (const event of events) {
       // One-line `data: {...}` events (nearly all) skip the multiline regex; the result is the same string.
       const data = (event.startsWith('data: ') && !/[\r\n]/.test(event) ? event.slice(6) : event.replace(/^data:\s*/gm, '')).trim();
