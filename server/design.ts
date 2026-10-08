@@ -10,6 +10,7 @@ import type { PageText } from './pages';
 import { patternById } from './patterns';
 import { sanitizeCard, sanitizeNodes, type PriceSource } from './sanitize';
 import { clip, type Env } from './util';
+import { VerdictSession } from './verdict';
 
 const GRAMMAR = `Each node is a JSON object with a "type" field.
 LAYOUT
@@ -287,6 +288,16 @@ const MAX_CONTENT_NODES = 8;
 
 const isContent = (n: CardNode) => n.type !== 'actions' && n.type !== 'citations';
 
+/** Runs the verdict gate on every node before it is shown. Picture updates pass through the same function, so a later patch keeps the corrected tile. */
+function bindVerdict(req: DesignRequest, emit: (node: CardNode, index: number) => void): (node: CardNode, index: number) => void {
+  const session = new VerdictSession({ query: req.followup?.question ?? req.query, results: req.search.results, pages: req.pages });
+  return (node, index) => {
+    const { node: next, revisions } = session.offer(node, index);
+    for (const rev of revisions) emit(rev.node, rev.index);
+    emit(next, index);
+  };
+}
+
 /** Streams a designed card from a single call: header first, then each grounded top-level node as soon as it is written. */
 export async function designStream(req: DesignRequest, env: Env, on: DesignEvents): Promise<DesignSummary> {
   const imageCount = Math.min(req.search.images.length, 12);
@@ -296,6 +307,7 @@ export async function designStream(req: DesignRequest, env: Env, on: DesignEvent
   const g = new Grounding(corpusOf(req), chat);
   const polish = new Polisher(textCap(req));
   const pictures = new PictureResolver(env, req.search.images, on.credit, req.query, undefined, req.rowImages && { ...req.rowImages, results: req.search.results });
+  const emitNode = bindVerdict(req, on.node);
   const base = req.followup?.mode === 'refine' && req.followup.baseCard ? `CURRENT CARD\n${JSON.stringify(req.followup.baseCard).slice(0, 12000)}\n\n` : '';
   const user = `${sourcesBlock(req.search, req.pages)}\n\n${base}SKELETON\n${JSON.stringify(patternById(req.pattern).skeleton)}\n\nTASK\n${taskBlock(req)}\n\nQUERY: ${req.followup?.question ?? req.query}`;
 
@@ -330,7 +342,7 @@ export async function designStream(req: DesignRequest, env: Env, on: DesignEvent
             if (contentNodes >= MAX_CONTENT_NODES) return;
             contentNodes++;
           }
-          return pictures.emit(node, index++, on.node);
+          return pictures.emit(node, index++, emitNode);
         }
         case 'dropped':
           removed++;
@@ -396,6 +408,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
   const sources = priceSources(req);
   const g = new Grounding(corpusOf(req));
   const pictures = new PictureResolver(env, req.search.images, on.credit, req.query, undefined, req.rowImages && { ...req.rowImages, results: req.search.results });
+  const emitNode = bindVerdict(req, on.node);
   const polish = new Polisher(textCap(req));
   const shared = `${sourcesBlock(req.search, req.pages, 2800)}\n\nTASK\n${taskBlock(req)}\n- Card regions, top to bottom:\n${regions.map((r, i) => `  R${i + 1}: ${regionPurpose(r)}`).join('\n')}\n  FINISH: header, interactive control, actions, citations, follow-ups`;
   const query = req.followup?.question ?? req.query;
@@ -415,7 +428,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
         const node = emitReady(polish.apply(parsed.node), req.search.results.length === 0);
         if (!node) return;
         contentNodes++;
-        pictures.emit(node, i, on.node);
+        pictures.emit(node, i, emitNode);
       } else if (parsed?.kind === 'dropped') removed++;
     });
   };
@@ -443,7 +456,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
           const node = emitReady(parsed.node, req.search.results.length === 0);
           if (!node) return;
           const order = FINISH_ORDER[node.type];
-          return pictures.emit(node, order === undefined ? regions.length + FINISH_SLOTS + extra++ : regions.length + order, on.node);
+          return pictures.emit(node, order === undefined ? regions.length + FINISH_SLOTS + extra++ : regions.length + order, emitNode);
         }
         case 'dropped':
           removed++;
@@ -488,6 +501,7 @@ function extractive(req: DesignRequest, on: DesignEvents): DesignSummary {
   if (refs.length) body.push({ type: 'citations', refs });
 
   on.head({ title: onTopic && k ? k.title : query, subtitle: patternById(patternId).label });
-  body.forEach((node, i) => on.node(node, i));
+  const emitNode = bindVerdict(req, on.node);
+  body.forEach((node, i) => emitNode(node, i));
   return { engine: 'extractive', removed: 0 };
 }

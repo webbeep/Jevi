@@ -7,10 +7,22 @@ const MAX_ITEMS = 12;
 
 type Raw = Record<string, unknown>;
 
+/** Drops stray markdown the card renderer would show as raw characters. Balanced `**bold**` is flattened too, so a lone `**` cannot leak. */
+export function stripMarkup(s: string): string {
+  let t = s.replace(/^[ \t]*#{1,6}[ \t]+/gm, '').replace(/\*\*|__/g, '');
+  const quotes = t.match(/"/g);
+  if (quotes && quotes.length % 2 === 1) {
+    const i = t.lastIndexOf('"');
+    t = `${t.slice(0, i)}${t.slice(i + 1)}`;
+  }
+  t = t.replace(/[ \t]+\n/g, '\n').trim();
+  return t;
+}
+
 const str = (v: unknown, max = 400): string | undefined => {
   if (typeof v === 'number') return String(v);
   if (typeof v !== 'string') return undefined;
-  const s = v.trim();
+  const s = stripMarkup(v);
   return s ? s.slice(0, max) : undefined;
 };
 const num = (v: unknown): number | undefined => {
