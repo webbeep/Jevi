@@ -1,11 +1,13 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AnswerCard, CardNode, CardResponse, FollowupContext, FollowupIntent, ImageCredit, LayoutPlan } from '../shared/card';
+import { loadSnapshot, normalizeAnswerQuery } from '../shared/answerKey';
 import { cardDigest } from '../shared/digest';
+import { MAX_AUTO_RECONNECTS, OFFLINE_MESSAGE, friendlyError, isConnectionError, reconnectDelay } from '../shared/offline';
 import { billingFromSources, settleCardPrices } from '../shared/pricing';
+import { emptyDoneState } from '../shared/sse-parse';
 import type { SearchResponse, SearchResult } from '../shared/types';
 import { api } from './api';
 import { withBrowserFallback } from './fallback';
-import { emptyDoneState } from '../shared/sse-parse';
 import { StreamError, type StreamBody, type StreamEvent, shouldAutoRetry, stream } from './sse';
 
 export type TurnKind = 'search' | 'answer' | 'digest';
@@ -56,11 +58,52 @@ export interface Turn {
   error?: string;
   /** The failure can be tried again from the same turn. */
   retryable?: boolean;
+  /** The failure was a dropped connection; auto-reconnect is pending and the partial stays up. */
+  offline?: boolean;
+  /** How many auto-reconnect attempts have failed for this turn. */
+  reconnects?: number;
+  /** Set on the first turn when a snapshot was restored because the network was down. */
+  fromCache?: boolean;
 }
 
 const emptyLive = (): LiveCard => ({ regions: [], nodes: [], raw: [], followups: [], credits: [] });
 const variantKey = (pattern: string | undefined, simple: boolean) => `${pattern ?? ''}|${simple ? 1 : 0}`;
-const errMsg = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+function browserOffline(): boolean {
+  return typeof navigator !== 'undefined' && navigator.onLine === false;
+}
+
+function connectionLost(err: unknown, userAborted: boolean): boolean {
+  const offline = browserOffline();
+  if (isConnectionError(err, userAborted, offline)) return true;
+  return offline && err instanceof StreamError && (err.reason === 'cut' || err.reason === 'network');
+}
+
+function loadCachedTurns(question: string): Turn[] | undefined {
+  const read = (store: Storage): Turn[] | undefined => {
+    try {
+      return loadSnapshot<Turn[]>(store, question);
+    } catch {
+      return undefined;
+    }
+  };
+  let cached: Turn[] | undefined;
+  try {
+    cached = read(sessionStorage);
+  } catch {
+    cached = undefined;
+  }
+  if (!cached) {
+    try {
+      cached = read(localStorage);
+    } catch {
+      cached = undefined;
+    }
+  }
+  if (!Array.isArray(cached) || cached.length === 0) return undefined;
+  if (!cached.every((t) => !!t && typeof t.id === 'number' && typeof t.question === 'string' && typeof t.kind === 'string')) return undefined;
+  return cached;
+}
 
 /** Billing basis is settled here per node, not on the worker. Stray prices are settled across the card (`settleCardPrices`). */
 function settleBilling(node: CardNode, results: SearchResult[]): CardNode {
@@ -112,6 +155,10 @@ export function useSession() {
   const epoch = useRef(0);
   const controllers = useRef(new Map<number, AbortController>());
   const bodies = useRef(new Map<number, StreamBody>());
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const reconnectDebounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const restoreRef = useRef<(incoming: Turn[]) => void>(() => {});
+  const retryRef = useRef<(id: number) => void>(() => {});
 
   const commit = useCallback((fn: (prev: Turn[]) => Turn[]) => {
     ref.current = fn(ref.current);
@@ -149,7 +196,7 @@ export function useSession() {
    * Streams `body` into turn `id`, event by event. A follow-up stream can be
    * re-routed mid-flight: to an existing card (redesign) or into a new search.
    */
-  const run = useCallback(async (id: number, body: StreamBody) => {
+  const run = useCallback(async (id: number, body: StreamBody, opts?: { retry?: boolean }) => {
     bodies.current.set(id, body);
     controllers.current.get(id)?.abort();
     const controller = new AbortController();
@@ -157,7 +204,15 @@ export function useSession() {
     const mine = epoch.current;
     const alive = () => mine === epoch.current && !controller.signal.aborted;
     let route = id;
-    let sawContent = false;
+    const prior = get(id);
+    let sawContent = Boolean(opts?.retry && prior?.live && (prior.live.head || prior.live.nodes.some(Boolean)));
+    let resetLive = Boolean(opts?.retry);
+
+    const takeLive = (t: Turn): LiveCard => {
+      if (!resetLive) return t.live ?? emptyLive();
+      resetLive = false;
+      return emptyLive();
+    };
 
     const onEvent = (e: StreamEvent) => {
       if (!alive()) return;
@@ -198,14 +253,14 @@ export function useSession() {
         case 'thinking':
           return update(route, { thinking: true });
         case 'layout':
-          return update(route, (t) => ({ live: { ...(t.live ?? emptyLive()), regions: e.data } }));
+          return update(route, (t) => ({ live: { ...takeLive(t), regions: e.data } }));
         case 'head':
           sawContent = true;
-          return update(route, (t) => ({ live: { ...(t.live ?? emptyLive()), head: e.data } }));
+          return update(route, (t) => ({ live: { ...takeLive(t), head: e.data } }));
         case 'node':
           sawContent = true;
           return update(route, (t) => {
-            const live = t.live ?? emptyLive();
+            const live = takeLive(t);
             const results = ref.current.find((x) => x.id === t.searchId)?.search?.results ?? [];
             return { live: placeNode(live, e.data.index, e.data.node, t.question, results), thinking: false, version: live.nodes.some(Boolean) ? t.version : t.version + 1 };
           });
@@ -214,7 +269,7 @@ export function useSession() {
         case 'done':
           return update(route, (t) => {
             if (!t.live?.nodes.some(Boolean)) {
-              return { live: undefined, filling: false, status: undefined, thinking: false, ...emptyDoneState(Boolean(t.result)) };
+              return { live: undefined, filling: false, status: undefined, thinking: false, offline: undefined, reconnects: undefined, ...emptyDoneState(Boolean(t.result)) };
             }
             const result: CardResponse = {
               card: { title: t.live.head?.title ?? t.question, ...t.live.head, body: liveBody(t.live, false), credits: t.live.credits },
@@ -225,7 +280,7 @@ export function useSession() {
               ms: e.data.ms,
               via: e.data.via,
             };
-            return { result, variants: { ...t.variants, [variantKey(t.pattern, t.simple)]: result }, live: undefined, filling: false, status: undefined, thinking: false, error: undefined, retryable: undefined };
+            return { result, variants: { ...t.variants, [variantKey(t.pattern, t.simple)]: result }, live: undefined, filling: false, status: undefined, thinking: false, error: undefined, retryable: undefined, offline: undefined, reconnects: undefined };
           });
         case 'error':
           throw new StreamError(e.data.message, 'server', e.data.retryable ?? true);
@@ -240,7 +295,7 @@ export function useSession() {
       let attempt = 0;
       for (;;) {
         try {
-          await stream(body, onEvent, controller.signal, attempt > 0 ? { retry: true } : undefined);
+          await stream(body, onEvent, controller.signal, opts?.retry || attempt > 0 ? { retry: true } : undefined);
           break;
         } catch (err) {
           if (!shouldAutoRetry(err, attempt, sawContent) || !alive()) throw err;
@@ -253,8 +308,29 @@ export function useSession() {
         }
       }
     } catch (err) {
-      if (alive()) update(route, { filling: false, status: undefined, live: undefined, thinking: false, error: errMsg(err), retryable: err instanceof StreamError ? err.retryable : false });
-      throw err;
+      let restored = false;
+      if (alive() && connectionLost(err, controller.signal.aborted)) {
+        const turn = get(route);
+        const firstSearch = turn?.kind === 'search' && ref.current[0]?.id === turn.id;
+        const cached = firstSearch ? loadCachedTurns(turn.question) : undefined;
+        if (cached) {
+          restored = true;
+          restoreRef.current(cached.map((t, i) => (i === 0 ? { ...t, fromCache: true } : t)));
+        } else {
+          update(route, (t) => ({
+            filling: false,
+            thinking: false,
+            status: undefined,
+            offline: true,
+            retryable: true,
+            error: OFFLINE_MESSAGE,
+            reconnects: opts?.retry ? (t.reconnects ?? 0) + 1 : (t.reconnects ?? 0),
+          }));
+        }
+      } else if (alive()) {
+        update(route, { filling: false, status: undefined, live: undefined, thinking: false, offline: undefined, reconnects: undefined, error: friendlyError(err), retryable: err instanceof StreamError ? err.retryable : false });
+      }
+      if (!restored) throw err;
     } finally {
       controller.abort();
       if (controllers.current.get(id) === controller) controllers.current.delete(id);
@@ -275,24 +351,35 @@ export function useSession() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [update, run]);
 
-  const runSearchTurn = useCallback(async (id: number, query: string) => {
-    update(id, { kind: 'search', question: query, searchId: id, filling: true, plan: undefined, search: undefined, result: undefined, live: undefined, error: undefined });
+  const runSearchTurn = useCallback(async (id: number, query: string, opts?: { retry?: boolean }) => {
+    const keep = Boolean(opts?.retry && get(id)?.offline);
+    if (keep) update(id, { kind: 'search', question: query, searchId: id, filling: true, thinking: false, status: undefined });
+    else update(id, { kind: 'search', question: query, searchId: id, filling: true, plan: undefined, search: undefined, result: undefined, live: undefined, error: undefined, offline: undefined, reconnects: undefined });
     try {
-      await run(id, { kind: 'search', query, freshness: 'any', context: memory(id) || undefined });
+      await run(id, { kind: 'search', query, freshness: 'any', context: memory(id) || undefined }, opts?.retry ? { retry: true } : undefined);
     } catch {
       const turn = get(id);
-      if (!turn || turn.search?.results.length) return;
-      const rescued = await withBrowserFallback(turn.search ?? { query, freshness: 'any', results: [], images: [], discussions: [], engines: [] });
-      if (!rescued.results.length) return;
-      const plan = turn.plan ?? (await api.plan(query));
-      update(id, { search: rescued, plan, pattern: plan.pattern, error: undefined });
-      await design(id, { pattern: plan.pattern });
+      if (turn?.offline) return;
+      try {
+        if (!turn || turn.search?.results.length) return;
+        const rescued = await withBrowserFallback(turn.search ?? { query, freshness: 'any', results: [], images: [], discussions: [], engines: [] });
+        if (!rescued.results.length) return;
+        const plan = turn.plan ?? (await api.plan(query));
+        update(id, { search: rescued, plan, pattern: plan.pattern, error: undefined, offline: undefined });
+        await design(id, { pattern: plan.pattern });
+      } catch {
+        /* browser fallback and plan both fail without a connection; the turn already shows an error */
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [update, run, design]);
 
   const clear = useCallback(() => {
     epoch.current++;
+    if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+    reconnectTimer.current = undefined;
+    if (reconnectDebounce.current) clearTimeout(reconnectDebounce.current);
+    reconnectDebounce.current = undefined;
     controllers.current.forEach((c) => c.abort());
     controllers.current.clear();
     commit(() => []);
@@ -301,19 +388,35 @@ export function useSession() {
   /** Replays a finished conversation (same-tab reload) without starting a search. */
   const restore = useCallback((incoming: Turn[]) => {
     epoch.current++;
+    if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+    reconnectTimer.current = undefined;
+    if (reconnectDebounce.current) clearTimeout(reconnectDebounce.current);
+    reconnectDebounce.current = undefined;
     controllers.current.forEach((c) => c.abort());
     controllers.current.clear();
     for (const turn of incoming) if (turn.id > nextId) nextId = turn.id;
     commit(() => incoming.map((t) => ({ ...t, filling: false, live: undefined, thinking: false, status: undefined })));
   }, [commit]);
+  restoreRef.current = restore;
 
   const search = useCallback((query: string, opts: { reset: boolean }) => {
     const q = query.trim();
     if (!q) return;
     if (opts.reset) {
+      const first = ref.current[0];
+      if (first?.offline && normalizeAnswerQuery(q) === normalizeAnswerQuery(first.question)) {
+        retryRef.current(first.id);
+        return;
+      }
       clear();
       window.scrollTo({ top: 0 });
       requestAnimationFrame(() => window.scrollTo({ top: 0 }));
+    } else {
+      const last = ref.current[ref.current.length - 1];
+      if (last?.offline && normalizeAnswerQuery(q) === normalizeAnswerQuery(last.question)) {
+        retryRef.current(last.id);
+        return;
+      }
     }
     const id = add({ kind: 'search', question: q, filling: true });
     if (!opts.reset) scrollToTurn(id);
@@ -327,9 +430,15 @@ export function useSession() {
    */
   const followup = useCallback(async (question: string, fromId?: number, intent?: FollowupIntent) => {
     const q = question.trim();
+    if (!q) return;
+    const last = ref.current[ref.current.length - 1];
+    if (last?.offline && normalizeAnswerQuery(q) === normalizeAnswerQuery(last.question)) {
+      retryRef.current(last.id);
+      return;
+    }
     const from = fromId ? get(fromId) : [...ref.current].reverse().find((t) => t.result || t.search);
     const ctx = searchOf(from) ?? [...ref.current].reverse().find((t) => t.search);
-    if (!q || !ctx?.search) return;
+    if (!ctx?.search) return;
     const base = intent === 'adjust' && from?.result ? { id: from.id, title: from.result.card.title, card: from.result.card } : undefined;
     const id = add({ kind: intent === 'search' ? 'search' : 'answer', question: q, searchId: ctx.id, filling: true, origin: intent, base, pattern: base ? from?.pattern : undefined });
     scrollToTurn(id);
@@ -369,7 +478,7 @@ export function useSession() {
       };
       if (mine === epoch.current) update(id, (t) => ({ result: { card, followups: [], engine: 'extractive', pagesRead: 1, removed: 0, ms: 0 }, version: t.version + 1, filling: false }));
     } catch (err) {
-      if (mine === epoch.current) update(id, { filling: false, error: errMsg(err) });
+      if (mine === epoch.current) update(id, { filling: false, error: friendlyError(err) });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [add, update]);
@@ -386,17 +495,68 @@ export function useSession() {
   }, [update, design]);
 
   const retry = useCallback((id: number) => {
+    if (controllers.current.has(id)) return;
     const turn = get(id);
     if (!turn) return;
     if (turn.kind === 'search') {
-      void runSearchTurn(id, turn.question);
+      void runSearchTurn(id, turn.question, turn.offline ? { retry: true } : undefined);
       return;
     }
     const body = bodies.current.get(id);
     if (!body) return;
-    update(id, { error: undefined, result: undefined, live: undefined, filling: true, status: undefined, thinking: false, retryable: undefined });
+    if (turn.offline) {
+      update(id, { filling: true, status: undefined, thinking: false });
+      void run(id, body, { retry: true }).catch(() => undefined);
+      return;
+    }
+    update(id, { error: undefined, result: undefined, live: undefined, filling: true, status: undefined, thinking: false, retryable: undefined, offline: undefined, reconnects: undefined });
     void run(id, body).catch(() => undefined);
   }, [run, runSearchTurn, update]);
+  retryRef.current = retry;
+
+  const offlineKey = turns.map((t) => `${t.id}:${t.offline ? 1 : 0}:${t.filling ? 1 : 0}:${t.reconnects ?? 0}`).join(',');
+  useEffect(() => {
+    const kick = () => {
+      for (const t of ref.current) {
+        if (t.offline && !t.filling) retry(t.id);
+      }
+    };
+    const onTrigger = () => {
+      if (reconnectDebounce.current) clearTimeout(reconnectDebounce.current);
+      reconnectDebounce.current = setTimeout(() => {
+        reconnectDebounce.current = undefined;
+        kick();
+      }, 500);
+    };
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && navigator.onLine) onTrigger();
+    };
+    window.addEventListener('online', onTrigger);
+    document.addEventListener('visibilitychange', onVisible);
+
+    if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+    reconnectTimer.current = undefined;
+    const due = ref.current.filter((t) => t.offline && !t.filling && (t.reconnects ?? 0) < MAX_AUTO_RECONNECTS);
+    if (due.length > 0 && navigator.onLine) {
+      const wait = reconnectDelay(due[0].reconnects ?? 0);
+      reconnectTimer.current = setTimeout(() => {
+        reconnectTimer.current = undefined;
+        if (!navigator.onLine) return;
+        for (const t of ref.current) {
+          if (t.offline && !t.filling && (t.reconnects ?? 0) < MAX_AUTO_RECONNECTS) retry(t.id);
+        }
+      }, wait);
+    }
+
+    return () => {
+      window.removeEventListener('online', onTrigger);
+      document.removeEventListener('visibilitychange', onVisible);
+      if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+      reconnectTimer.current = undefined;
+      if (reconnectDebounce.current) clearTimeout(reconnectDebounce.current);
+      reconnectDebounce.current = undefined;
+    };
+  }, [offlineKey, retry]);
 
   const pin = useCallback((id: number, node: CardNode) => update(id, (t) => ({ pins: [...t.pins, node] })), [update]);
   const setPattern = useCallback((id: number, pattern: string) => switchView(id, pattern, get(id)?.simple ?? false), [switchView]);

@@ -1,5 +1,5 @@
 import { type FormEvent, type RefObject, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowUp, CornerDownRight, CornerLeftUp, History, Moon, Pencil, Plus, RotateCw, Search, Shuffle, SlidersHorizontal, Sun, X } from 'lucide-react';
+import { ArrowUp, CornerDownRight, CornerLeftUp, History, Moon, Pencil, Plus, RotateCw, Search, Shuffle, SlidersHorizontal, Sun, WifiOff, X } from 'lucide-react';
 import type { AnswerCard, CardNode } from '../shared/card';
 import type { SearchResponse, SearchResult } from '../shared/types';
 import { api } from './api';
@@ -11,6 +11,7 @@ import { type LibraryEntry, buildLibrary } from './library';
 import { FaviconStack, Reader, SourcesRail, SourcesSheet } from './Sources';
 import { type SessionActions, type Turn, liveBody, scrollToTurn, useSession } from './useSession';
 import { loadSnapshot, normalizeAnswerQuery, saveSnapshot } from '../shared/answerKey';
+import { MANUAL_RETRY_AFTER, OFFLINE_MESSAGE, clearPending, loadPending, savePending } from '../shared/offline';
 import { RECENT_KEY, clearHistory, readHistory, recordAsk } from '../shared/personal';
 import { placeholderExamples } from '../shared/starters';
 import { useSuggestions } from './useSuggestions';
@@ -41,17 +42,29 @@ const TAGLINE = 'Ask anything. Get answers you can compare, tweak and keep.';
 
 function readAnswerCache(query: string): Turn[] | undefined {
   try {
-    return loadSnapshot<Turn[]>(sessionStorage, query);
+    const hit = loadSnapshot<Turn[]>(sessionStorage, query);
+    if (hit) return hit;
+  } catch {
+    /* private mode */
+  }
+  try {
+    return loadSnapshot<Turn[]>(localStorage, query);
   } catch {
     return undefined;
   }
 }
 
 function writeAnswerCache(query: string, turns: Turn[]) {
+  const saved = turns.map((t) => (t.fromCache ? { ...t, fromCache: undefined } : t));
   try {
-    saveSnapshot(sessionStorage, query, turns);
+    saveSnapshot(sessionStorage, query, saved);
   } catch {
     /* private mode */
+  }
+  try {
+    saveSnapshot(localStorage, query, saved);
+  } catch {
+    /* quota or private mode */
   }
 }
 
@@ -177,6 +190,7 @@ export default function App() {
     const query = q.trim();
     if (!query) return;
     shown.current = query;
+    savePending(localStorage, query);
     setRecents(pushRecent(query));
     recordAsk(localStorage, query);
     setHistRev((n) => n + 1);
@@ -195,6 +209,7 @@ export default function App() {
     resetUi();
     setInput('');
     shown.current = '';
+    clearPending(localStorage);
     history.pushState(null, '', '/');
   };
 
@@ -206,6 +221,14 @@ export default function App() {
     };
     const q = initial.get('q');
     if (q) openQuery(q);
+    else {
+      const pending = loadPending(localStorage);
+      if (pending) {
+        shown.current = pending;
+        history.pushState(null, '', `?${new URLSearchParams({ q: pending })}`);
+        openQuery(pending);
+      }
+    }
     const onPop = () => {
       if (overlay.current) return closeOverlays();
       const next = new URLSearchParams(location.search).get('q') ?? '';
@@ -222,10 +245,11 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (busy) return;
     const first = turns[0];
+    if (first?.kind === 'search' && first.result) clearPending(localStorage);
+    if (busy) return;
     if (!first || first.kind !== 'search' || !first.result) return;
-    if (turns.some((t) => t.error)) return;
+    if (turns.some((t) => t.error || t.offline)) return;
     const query = shown.current;
     if (!query) return;
     if (normalizeAnswerQuery(first.question) !== normalizeAnswerQuery(query)) return;
@@ -609,6 +633,31 @@ function Composer({ actions, topic, mainRef }: { actions: SessionActions; topic:
   );
 }
 
+function OfflineNotice({ filling, partial, reconnects, onRetry }: { filling: boolean; partial: boolean; reconnects?: number; onRetry: () => void }) {
+  return (
+    <div data-testid="offline-notice" role="status" aria-live="polite" className="flex flex-wrap items-center gap-3 rounded-xl border border-dashed px-4 py-3 text-sm text-muted-foreground">
+      <WifiOff className="size-4 shrink-0" aria-hidden />
+      <p className="min-w-0 flex-1 leading-snug">
+        {filling ? 'Reconnecting…' : OFFLINE_MESSAGE}{' '}
+        <span>{partial ? "We'll pick up where it stopped when you're back online." : "We'll send it when you're back online."}</span>
+      </p>
+      {(reconnects ?? 0) >= MANUAL_RETRY_AFTER && (
+        <button
+          type="button"
+          data-testid="retry"
+          onClick={onRetry}
+          disabled={filling}
+          aria-busy={filling || undefined}
+          className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-2 rounded-md px-4 text-foreground transition-colors hover:bg-foreground/5 disabled:opacity-50"
+        >
+          <RotateCw className="size-4" />
+          Retry
+        </button>
+      )}
+    </div>
+  );
+}
+
 const TurnView = memo(function TurnView({ turn, first, search, actions, onSources, onRead }: {
   turn: Turn;
   first: boolean;
@@ -619,18 +668,20 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
   onRead: (result: SearchResult, searchId: number) => void;
 }) {
   const streaming = !!turn.live?.nodes.some(Boolean);
+  const offlinePartial = Boolean(turn.offline && (turn.live?.head || streaming));
   const card: AnswerCard = useMemo(() => {
     const skeleton = turn.plan?.skeleton ?? { title: turn.question, body: LOADING };
     const live = turn.live;
     let base: AnswerCard;
-    if (live && streaming) {
-      const more = turn.filling && !live.regions.length ? [{ type: 'slot' as const, hint: 'more', shape: 'block' as const }] : [];
-      base = { ...skeleton, ...live.head, body: [...liveBody(live, turn.filling), ...more] };
+    if (live && (streaming || offlinePartial)) {
+      const fillingNow = offlinePartial ? false : turn.filling;
+      const more = fillingNow && !live.regions.length ? [{ type: 'slot' as const, hint: 'more', shape: 'block' as const }] : [];
+      base = { ...skeleton, ...live.head, body: [...liveBody(live, fillingNow), ...more] };
     } else if (turn.result) base = turn.result.card;
     else base = { ...skeleton, ...live?.head, body: live?.regions.length ? live.regions : skeleton.body };
     if (!turn.result && !live?.head && turn.kind !== 'search') base = { ...base, title: turn.question };
     return turn.pins.length ? { ...base, body: [...base.body, { type: 'section', title: 'Pinned by you', icon: 'pin', children: turn.pins }] } : base;
-  }, [streaming, turn.live, turn.result, turn.plan, turn.question, turn.kind, turn.pins, turn.filling]);
+  }, [streaming, offlinePartial, turn.live, turn.result, turn.plan, turn.question, turn.kind, turn.pins, turn.filling]);
 
   const credits = useMemo(() => {
     const out: Record<string, { credit: string; link: string }> = {};
@@ -652,7 +703,7 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
     results: search?.results ?? [],
     images: search?.images ?? [],
     credits,
-    busy: turn.filling,
+    busy: offlinePartial ? false : turn.filling,
     onSearch: (q) => void actions.followup(q, id, 'search'),
     onAsk: (q) => void actions.followup(q, id, 'ask'),
     onRefine: (instruction) => {
@@ -664,7 +715,7 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
     },
     onSources: () => onSources(id),
     onRead: (r) => onRead(r, turn.searchId),
-  }), [search?.results, search?.images, credits, turn.filling, actions, id, onSources, onRead, turn.searchId]);
+  }), [search?.results, search?.images, credits, turn.filling, offlinePartial, actions, id, onSources, onRead, turn.searchId]);
 
   return (
     <section id={`turn-${turn.id}`} data-turn={turn.id} className="scroll-mt-20 space-y-3 animate-in fade-in slide-in-from-bottom-3 duration-500">
@@ -684,7 +735,30 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
         </div>
       )}
 
-      {turn.error && !turn.result ? (
+      {(offlinePartial || !(turn.error && !turn.result)) && (
+        <>
+          {turn.fromCache && <p data-testid="cache-note" className="text-xs text-muted-foreground">Saved answer · you're offline</p>}
+          <CardContext.Provider value={context}>
+            <AnswerCardView
+              card={card}
+              version={`${turn.id}-${turn.version}`}
+              filling={offlinePartial ? false : turn.filling}
+              streaming={offlinePartial ? false : streaming}
+              status={offlinePartial ? undefined : (turn.status ?? (turn.thinking && !streaming ? 'Thinking it through…' : undefined))}
+              pattern={turn.pattern}
+              alternatives={turn.kind === 'digest' ? [] : turn.plan?.alternatives ?? []}
+              engine={engineLabel(turn)}
+              onPattern={(p) => actions.setPattern(id, p)}
+              simple={turn.simple}
+              onSimple={(v) => actions.setSimple(id, v)}
+              onRegenerate={() => actions.redesign(id)}
+            />
+          </CardContext.Provider>
+        </>
+      )}
+      {turn.offline ? (
+        <OfflineNotice filling={turn.filling} partial={Boolean(turn.live?.head || turn.live?.nodes.some(Boolean))} reconnects={turn.reconnects} onRetry={() => actions.retry(id)} />
+      ) : turn.error && !turn.result ? (
         <div className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
           <p>{turn.error}</p>
           {turn.retryable && (
@@ -694,24 +768,7 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
             </button>
           )}
         </div>
-      ) : (
-        <CardContext.Provider value={context}>
-          <AnswerCardView
-            card={card}
-            version={`${turn.id}-${turn.version}`}
-            filling={turn.filling}
-            streaming={streaming}
-            status={turn.status ?? (turn.thinking && !streaming ? 'Thinking it through…' : undefined)}
-            pattern={turn.pattern}
-            alternatives={turn.kind === 'digest' ? [] : turn.plan?.alternatives ?? []}
-            engine={engineLabel(turn)}
-            onPattern={(p) => actions.setPattern(id, p)}
-            simple={turn.simple}
-            onSimple={(v) => actions.setSimple(id, v)}
-            onRegenerate={() => actions.redesign(id)}
-          />
-        </CardContext.Provider>
-      )}
+      ) : null}
     </section>
   );
 });
