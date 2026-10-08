@@ -1,6 +1,7 @@
 import { DEEP_PAGES, routeExtras, routeOf } from './router';
 import { serperImages } from './cascade';
 import { publicEvent } from './publicPayload';
+import { mentionsAny } from './imageGate';
 import type { RowImagePlan } from './pictures';
 import type { AnswerCard, FollowupContext, FollowupIntent, LayoutPlan } from '../shared/card';
 import type { EngineStatus, Freshness, ImageResult, SearchResponse } from '../shared/types';
@@ -97,7 +98,8 @@ function imageBoost(pattern: string, search: SearchResponse, env: Env, scope: As
   if (search.images.some((i) => i.license === 'source') || !search.results.length) return undefined;
   // Only when Serper served this search. Cap reached (or Serper skipped/dead): no /images call and no other image provider; og:image or nothing.
   if (!search.engines.some((e) => e.name === 'serper' && e.ok)) return undefined;
-  return serperImages(query, env, scope.eval ? 'eval' : 'prod', () => { scope.ledger.imageCalls = 1; });
+  // T443: card-level pictures must mention the subject; a wrong picture is worse than none.
+  return serperImages(query, env, scope.eval ? 'eval' : 'prod', () => { scope.ledger.imageCalls = 1; }).then((imgs) => imgs.filter((i) => mentionsAny(query, i)));
 }
 
 /** How many pages to read and how long to wait for them before designing. At most five pages per ask. */

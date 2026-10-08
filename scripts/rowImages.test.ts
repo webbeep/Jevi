@@ -4,7 +4,7 @@ import type { CardNode } from '../shared/card.ts';
 import type { ImageResult, SearchResult } from '../shared/types.ts';
 import { fillRowImages, rowEntity } from '../server/rowImages.ts';
 
-const res = (url: string, image?: string): SearchResult => ({ title: url, url, snippet: '', domain: new URL(url).hostname, engines: ['serper'], image });
+const res = (url: string, image?: string, title = url): SearchResult => ({ title, url, snippet: '', domain: new URL(url).hostname, engines: ['serper'], image });
 const pic = (title: string, thumb: string): ImageResult => ({ url: 'https://p.com/' + title, thumb, title, source: 'p.com', license: 'source' });
 
 describe('T442 row and tile pictures', () => {
@@ -14,7 +14,7 @@ describe('T442 row and tile pictures', () => {
   });
 
   test('own source picture first, then one card search matched by name, then og:image of an unshared source', async () => {
-    const results = [res('https://a.com/1', 'https://a.com/peterson.jpg'), res('https://b.com/2'), res('https://c.com/3'), res('https://d.com/rank')];
+    const results = [res('https://a.com/1', 'https://a.com/peterson.jpg', 'Darryn Peterson shines for Jazz'), res('https://b.com/2'), res('https://c.com/3', undefined, 'Caleb Wilson Bulls debut'), res('https://d.com/rank')];
     const list: CardNode = {
       type: 'list',
       style: 'media',
@@ -71,5 +71,29 @@ describe('T442 stat tiles', () => {
     const out = await fillRowImages(nodes, { results: [], pool: [], cardImages: async () => [pic('Steph Curry Warriors preseason', 'https://img.com/steph.jpg')] });
     assert.equal((out.nodes[0] as Extract<CardNode, { type: 'stat' }>).image, 'https://img.com/steph.jpg');
     assert.equal((out.nodes[1] as Extract<CardNode, { type: 'stat' }>).image, undefined);
+  });
+});
+
+import { accepts, targetFor } from '../server/imageGate.ts';
+
+describe('T443 image relevance gate', () => {
+  const img = (title: string, url = 'https://x.com/p', thumb = 'https://x.com/p.jpg') => ({ title, url, thumb });
+  test('attribute tiles never get a photo', () => {
+    assert.equal(targetFor('Role', 'Senior Software Engineer').kind, 'none');
+    assert.equal(targetFor('Location', 'New York, NY').kind, 'none');
+    assert.equal(accepts(targetFor('Role', 'Senior Software Engineer'), img('Senior software engineer playing guitar')), false);
+  });
+  test('org tiles need the org\'s own site', () => {
+    const t = targetFor('Education', 'The Cooper Union');
+    assert.deepEqual(t, { kind: 'org', entity: 'The Cooper Union' });
+    assert.equal(accepts(t, img('Classroom with students', 'https://openverse.org/x', 'https://live.staticflickr.com/1.jpg')), false);
+    assert.equal(accepts(t, img('', 'https://cooper.edu/', 'https://cooper.edu/og.jpg')), true);
+    assert.equal(accepts(targetFor('Company', 'BlueFlame AI'), img('Office building', 'https://commons.wikimedia.org/x', 'https://upload.wikimedia.org/b.jpg')), false);
+    assert.equal(accepts(targetFor('Company', 'BlueFlame AI'), img('', 'https://www.blueflame.ai/', 'https://www.blueflame.ai/logo.png')), true);
+  });
+  test('people need every name token', () => {
+    assert.equal(accepts({ kind: 'named', entity: 'Ray Lee' }, img('Ray Lee - BlueFlame AI | LinkedIn')), true);
+    assert.equal(accepts({ kind: 'named', entity: 'Ray Lee' }, img('Lee Kuan Yew')), false);
+    assert.equal(accepts(targetFor('Steph', '10 pts'), img('Steph Curry hits three')), true);
   });
 });

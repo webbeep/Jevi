@@ -1,5 +1,6 @@
 import type { CardNode } from '../shared/card';
-import { fitsEntity, isComposite } from '../shared/imagematch';
+import { isComposite } from '../shared/imagematch';
+import { type PicTarget, accepts, hostNames, nameLike, pageNames, targetFor } from './imageGate';
 import type { ImageResult, SearchResult } from '../shared/types';
 
 /**
@@ -23,9 +24,12 @@ export interface RowImageDeps {
 
 interface Slot {
   entity: string;
+  target: PicTarget;
   source?: number;
-  /** og:image fallback allowed (rows, and name-like tiles). */
+  /** og:image fallback allowed (rows and tiles; never stats). */
   ogOk: boolean;
+  /** Org tiles: the org's own site among the results. */
+  officialSite?: string;
   src?: string;
 }
 
@@ -43,23 +47,34 @@ export function rowEntity(text: string): string {
   return head.split(' ').slice(0, 6).join(' ').trim();
 }
 
-/** "Lendeborg", "Steph Curry", "OKC Thunder": 1–4 words, each capitalised or a number. */
-const nameLike = (s: string) => /^(?:[A-Z0-9][\w.'’&-]*)(?:\s+[A-Z0-9][\w.'’&-]*){0,3}$/.test(s.trim());
 
 const blankTile = (n: Extract<CardNode, { type: 'tile' }>) => !n.imageSrc && n.imageRef === undefined && !n.imageQuery;
 const blankItem = (i: Extract<CardNode, { type: 'list' }>['items'][number]) => !i.imageSrc && i.imageRef === undefined && !i.imageQuery;
 
 function slotsOf(node: CardNode, out: Slot[]): void {
   switch (node.type) {
-    case 'stat':
-      // Stat tiles carry no source: only a picture that names them (pool or the card search), never og:image.
-      if (!node.image && nameLike(node.label)) out.push({ entity: node.label, ogOk: false });
+    case 'stat': {
+      // Stat tiles carry no source: only a gated picture that names them, never og:image.
+      if (node.image) return;
+      const target = targetFor(node.label, node.value);
+      out.push({ entity: target.entity, target, ogOk: false });
       return;
-    case 'tile':
-      if (blankTile(node)) out.push({ entity: node.label, source: node.source, ogOk: nameLike(node.label) });
+    }
+    case 'tile': {
+      if (!blankTile(node)) return;
+      const target = targetFor(node.label, node.value);
+      out.push({ entity: target.entity, target, source: node.source, ogOk: true });
       return;
+    }
     case 'list':
-      if (node.style === 'media') for (const item of node.items) if (blankItem(item)) out.push({ entity: rowEntity(item.text), source: item.source, ogOk: true });
+      if (node.style === 'media') {
+        for (const item of node.items) {
+          if (!blankItem(item)) continue;
+          const entity = rowEntity(item.text);
+          const target: PicTarget = nameLike(entity) ? { kind: 'named', entity } : { kind: 'none', entity: '' };
+          out.push({ entity, target, source: item.source, ogOk: true });
+        }
+      }
       return;
     case 'stack':
     case 'grid':
@@ -78,7 +93,7 @@ function slotsOf(node: CardNode, out: Slot[]): void {
 function apply(node: CardNode, slots: Slot[], at: { i: number }): CardNode {
   switch (node.type) {
     case 'stat': {
-      if (node.image || !nameLike(node.label)) return node;
+      if (node.image) return node;
       const s = slots[at.i++];
       return s?.src ? { ...node, image: s.src } : node;
     }
@@ -117,11 +132,10 @@ export function hasBlankPictures(node: CardNode): boolean {
   return out.length > 0;
 }
 
-/** Best unused picture that names this entity and only this entity. */
-function pick(entity: string, images: ImageResult[], siblings: string[], used: Set<string>): ImageResult | undefined {
-  if (!entity) return undefined;
-  const rivals = siblings.filter((s) => s !== entity);
-  return images.find((img) => https(img.thumb) && !used.has(img.thumb) && !isComposite(img) && fitsEntity(entity, img, rivals));
+/** Best unused picture that passes the T443 relevance gate for this slot. */
+function pick(target: PicTarget, images: ImageResult[], used: Set<string>): ImageResult | undefined {
+  if (target.kind === 'none') return undefined;
+  return images.find((img) => https(img.thumb) && !used.has(img.thumb) && !isComposite(img) && accepts(target, img));
 }
 
 /** Fills blank tiles and media rows across the card's nodes. Returns the patched nodes (same order) and the calls spent. */
@@ -132,44 +146,54 @@ export async function fillRowImages(nodes: CardNode[], deps: RowImageDeps, used:
     return s;
   });
   const all = perNode.flat();
-  if (!all.length) return { nodes, changed: nodes.map(() => false), imageCalls: 0, og: 0 };
-  const siblings = all.map((s) => s.entity).filter(Boolean);
+  const live = all.filter((s) => s.target.kind !== 'none');
+  if (!live.length) return { nodes, changed: nodes.map(() => false), imageCalls: 0, og: 0 };
   const take = (s: Slot, src: string) => {
     s.src = src;
     used.add(src);
   };
 
-  // 1. Zero calls: the row's own source picture, then pooled pictures that name it.
-  for (const s of all) {
+  // 1. Zero calls: the row's own source picture (when that page names it), then gated pooled pictures.
+  //    Orgs: a result on the org's own site (its picture or og:image), else nothing.
+  for (const s of live) {
     const own = s.source ? deps.results[s.source - 1] : undefined;
-    const ownPic = own ? (own.image ?? deps.pool.find((p) => p.url === own.url)?.thumb) : undefined;
-    if (https(ownPic) && !used.has(ownPic)) {
-      take(s, ownPic);
-      continue;
+    if (s.target.kind === 'org') {
+      const site = deps.results.find((r) => hostNames(s.target.entity, r.url));
+      if (site && https(site.image) && !used.has(site.image)) {
+        take(s, site.image);
+        continue;
+      }
+      if (site) s.officialSite = site.url;
+    } else if (own && pageNames(s.target, own)) {
+      const ownPic = own.image ?? deps.pool.find((p) => p.url === own.url)?.thumb;
+      if (https(ownPic) && !used.has(ownPic)) {
+        take(s, ownPic);
+        continue;
+      }
     }
-    const pooled = pick(s.entity, deps.pool, siblings, used);
+    const pooled = pick(s.target, deps.pool, used);
     if (pooled) take(s, pooled.thumb);
   }
 
   // 2. At most one picture search for the card, matched to rows by name.
   let imageCalls = 0;
-  if (all.some((s) => !s.src) && deps.cardImages) {
+  if (live.some((s) => !s.src) && deps.cardImages) {
     const found = await deps.cardImages();
     imageCalls = found.length ? 1 : 0;
-    for (const s of all) {
+    for (const s of live) {
       if (s.src) continue;
-      const hit = pick(s.entity, found, siblings, used);
+      const hit = pick(s.target, found, used);
       if (hit) take(s, hit.thumb);
     }
   }
 
   // 2b. Free per-name lookups (Wikipedia first) for name-like rows still blank, at most 6, ~2s.
   if (deps.lookup) {
-    const want = all.filter((s) => !s.src && nameLike(s.entity)).slice(0, 6);
+    const want = live.filter((s) => !s.src && s.target.kind === 'named').slice(0, 6);
     const found = await Promise.all(want.map((s) => Promise.race([deps.lookup!(s.entity).catch(() => [] as ImageResult[]), new Promise<ImageResult[]>((r) => setTimeout(() => r([]), 2000))])));
     want.forEach((s, i) => {
       if (s.src) return;
-      const hit = pick(s.entity, found[i], siblings, used);
+      const hit = pick(s.target, found[i], used);
       if (hit) take(s, hit.thumb);
     });
   }
@@ -179,13 +203,21 @@ export async function fillRowImages(nodes: CardNode[], deps: RowImageDeps, used:
   if (deps.og) {
     // A source page shared by several rows (a rankings article) has one picture that fits none of them in particular.
     const perSource = new Map<number, number>();
-    for (const s of all) if (s.source) perSource.set(s.source, (perSource.get(s.source) ?? 0) + 1);
-    const want = all.filter((s) => !s.src && s.ogOk && s.source && perSource.get(s.source) === 1 && deps.results[s.source - 1]).slice(0, deps.ogMax ?? 6);
+    for (const s of live) if (s.source) perSource.set(s.source, (perSource.get(s.source) ?? 0) + 1);
+    // Orgs: og:image of their own site. Named rows: og:image of their own unshared source page when that page names them.
+    const want = live
+      .filter((s) => !s.src && s.ogOk)
+      .flatMap((s) => {
+        if (s.target.kind === 'org') return s.officialSite ? [{ s, url: s.officialSite }] : [];
+        const own = s.source ? deps.results[s.source - 1] : undefined;
+        return own && perSource.get(s.source!) === 1 && pageNames(s.target, own) ? [{ s, url: own.url }] : [];
+      })
+      .slice(0, deps.ogMax ?? 6);
     og = want.length;
-    const pics = await Promise.all(want.map((s) => deps.og!(deps.results[s.source! - 1]!.url)));
-    want.forEach((s, i) => {
+    const pics = await Promise.all(want.map((w) => deps.og!(w.url)));
+    want.forEach((w, i) => {
       const src = pics[i];
-      if (https(src) && !used.has(src)) take(s, src);
+      if (https(src) && !used.has(src)) take(w.s, src);
     });
   }
 

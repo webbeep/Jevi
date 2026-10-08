@@ -2,7 +2,8 @@ import type { CardNode, ImageCredit } from '../shared/card';
 import { fileWords, fitsEntity, isComposite, namesSibling, rankForEntity, splitEntities } from '../shared/imagematch';
 import type { ImageResult } from '../shared/types';
 import { findImages } from './images';
-import { fillRowImages, hasBlankPictures, type RowImageDeps } from './rowImages';
+import { type PicTarget, accepts, mentions, mentionsAny, nameLike, targetFor } from './imageGate';
+import { fillRowImages, hasBlankPictures, rowEntity, type RowImageDeps } from './rowImages';
 import type { Env } from './util';
 
 type Emit = (node: CardNode, index: number) => void;
@@ -47,6 +48,7 @@ export class PictureResolver {
   /** T442: latest version of every emitted node, so blank tiles/rows can be filled once the card is complete. */
   private readonly latest = new Map<number, { node: CardNode; emit: Emit }>();
   private readonly rows?: RowImagePlan & { results: RowImageDeps['results'] };
+  private readonly subject: string;
 
   constructor(env: Env, pool: ImageResult[], onCredit: (credit: ImageCredit) => void, query?: string, find: FindImages = findImages, rows?: RowImagePlan & { results: RowImageDeps['results'] }) {
     this.env = env;
@@ -54,6 +56,7 @@ export class PictureResolver {
     this.onCredit = onCredit;
     this.find = find;
     this.rows = rows;
+    this.subject = query ?? '';
     for (const name of splitEntities(query ?? '')) this.note(name);
   }
 
@@ -116,30 +119,58 @@ export class PictureResolver {
    * Drop an imageRef that isn't this item. A fitting pooled photo replaces it;
    * otherwise the node keeps its icon and is not looked up remotely.
    */
-  private place(entity: string, imageRef?: number, imageQuery?: string): { imageRef?: number; imageQuery?: string; imageSrc?: string } {
+  private place(entity: string, imageRef?: number, imageQuery?: string, target?: PicTarget): { imageRef?: number; imageQuery?: string; imageSrc?: string } {
+    // T443: attribute tiles (role, location, date…) never get a photo; the client shows the icon.
+    if (target?.kind === 'none') return { imageRef: undefined, imageQuery: undefined, imageSrc: undefined };
+    const gate = (img: ImageResult) => !target || accepts(target, img);
     if (imageRef === undefined) return { imageRef, imageQuery };
     const img = this.pool[imageRef];
-    if (img?.thumb && !this.used.has(img.thumb) && !this.refConflicts(entity, img)) {
+    if (img?.thumb && !this.used.has(img.thumb) && !this.refConflicts(entity, img) && gate(img)) {
       this.used.add(img.thumb);
       return { imageRef, imageQuery };
     }
-    if (!img?.thumb) return { imageRef, imageQuery };
-    const fit = rankForEntity(entity, this.pool, this.siblings(), this.used);
-    if (!fit) return { imageRef: undefined, imageQuery: undefined };
+    const fit = this.pool.find((p) => p.thumb && !this.used.has(p.thumb) && !isComposite(p) && gate(p));
+    if (!fit) return { imageRef: undefined, imageQuery: target?.kind === 'named' ? imageQuery : undefined };
     return { imageRef: undefined, imageQuery: undefined, imageSrc: this.take(fit).src };
+  }
+
+  /** T443 target for a node's picture. */
+  private static tileTarget(n: { label: string; value?: string; imageQuery?: string }): PicTarget {
+    return targetFor(n.label, n.value, n.imageQuery);
+  }
+
+  private static itemTarget(i: { text: string; imageQuery?: string }): PicTarget {
+    const entity = i.imageQuery && nameLike(i.imageQuery) ? i.imageQuery : rowEntity(i.text);
+    return nameLike(entity) ? { kind: 'named', entity } : { kind: 'none', entity: '' };
   }
 
   private vet(node: CardNode): CardNode {
     switch (node.type) {
       case 'tile':
-        return { ...node, ...this.place(node.label, node.imageRef, node.imageQuery) };
+        return { ...node, ...this.place(node.label, node.imageRef, node.imageQuery, PictureResolver.tileTarget(node)) };
       case 'profile':
-        return { ...node, ...this.place(node.name, node.imageRef, node.imageQuery) };
+        return { ...node, ...this.place(node.name, node.imageRef, node.imageQuery, { kind: 'named', entity: node.name }) };
+      case 'stat': {
+        // A designer-supplied stat picture must pass the gate on its own URL; attribute stats never keep one.
+        if (!node.image) return node;
+        const t = targetFor(node.label, node.value);
+        return accepts(t, { title: '', url: node.image, thumb: node.image }) ? node : { ...node, image: undefined };
+      }
       case 'list':
         return {
           ...node,
-          items: node.items.map((item) => ({ ...item, ...this.place(itemEntity(item.text), item.imageRef, item.imageQuery) })),
+          items: node.items.map((item) => ({ ...item, ...this.place(itemEntity(item.text), item.imageRef, item.imageQuery, PictureResolver.itemTarget(item)) })),
         };
+      case 'gallery': {
+        // T443: card-level pictures must mention the card subject.
+        const refs = node.refs.filter((r) => { const img = this.pool[r]; return !!img && mentionsAny(this.subject, img); });
+        return { ...node, refs };
+      }
+      case 'image': {
+        if (node.ref === undefined) return node;
+        const img = this.pool[node.ref];
+        return img && mentionsAny(node.caption ? `${this.subject} ${node.caption}` : this.subject, img) ? node : { ...node, ref: undefined, query: node.query ?? node.caption };
+      }
       case 'stack':
       case 'grid':
       case 'section':
@@ -162,19 +193,22 @@ export class PictureResolver {
     return allowGeneric || fitsEntity(query, img, siblings);
   }
 
-  private async one(query: string, allowGeneric = false): Promise<Pic | undefined> {
-    const pooled = this.fromPool(query);
+  private async one(query: string, allowGeneric = false, target?: PicTarget): Promise<Pic | undefined> {
+    // T443 gate: named items need their name in the picture; free-form images need the subject's main token.
+    const gate = (img: ImageResult) => (target ? accepts(target, img) : mentions(query, img));
+    const pooledRaw = this.fromPool(query);
+    const pooled = pooledRaw && gate(pooledRaw) ? pooledRaw : this.pool.find((p) => p.thumb && !this.used.has(p.thumb) && !isComposite(p) && gate(p));
     if (pooled) return this.take(pooled);
-    if (this.lookupsLeft-- <= 0) return undefined;
+    if (target?.kind === 'none' || this.lookupsLeft-- <= 0) return undefined;
     const found = await this.find(query, this.env, 3, allowGeneric);
-    const pick = found.find((img) => this.accepts(query, img, allowGeneric));
+    const pick = found.find((img) => this.accepts(query, img, allowGeneric) && gate(img));
     return pick && this.take(pick);
   }
 
   private async many(query: string, n: number): Promise<Pic[]> {
     if (this.lookupsLeft-- <= 0) return [];
     const found = await this.find(query, this.env, n, true);
-    return found.filter((img) => !this.used.has(img.thumb) && !isComposite(img)).map((img) => this.take(img));
+    return found.filter((img) => !this.used.has(img.thumb) && !isComposite(img) && mentions(query, img)).map((img) => this.take(img));
   }
 
   private static needs(node: CardNode): boolean {
@@ -197,12 +231,13 @@ export class PictureResolver {
       case 'tile':
       case 'profile': {
         if (!node.imageQuery || node.imageRef !== undefined) return node;
-        const pic = await this.one(node.imageQuery);
+        const target: PicTarget = node.type === 'tile' ? PictureResolver.tileTarget(node) : { kind: 'named', entity: node.name };
+        const pic = await this.one(node.imageQuery, false, target);
         return { ...node, imageQuery: undefined, imageSrc: pic?.src };
       }
       case 'list': {
         const items = await Promise.all(
-          node.items.map(async (i) => (i.imageQuery && i.imageRef === undefined ? { ...i, imageQuery: undefined, imageSrc: (await this.one(i.imageQuery))?.src } : i)),
+          node.items.map(async (i) => (i.imageQuery && i.imageRef === undefined ? { ...i, imageQuery: undefined, imageSrc: (await this.one(i.imageQuery, false, PictureResolver.itemTarget(i)))?.src } : i)),
         );
         return { ...node, items };
       }
