@@ -1,0 +1,274 @@
+{
+ "source": "org/zo/research/validation/h2h/zo/p06/d-r1-stream1.sse (zo2 @54aa917, 2026-10-07; node events only, in arrival order)",
+ "query": "Kindle Paperwhite vs Kobo Clara BW for reading, which should I buy and what do they cost?",
+ "nodes": [
+  {
+   "index": 0,
+   "node": {
+    "type": "grid",
+    "cols": 2,
+    "children": [
+     {
+      "type": "tile",
+      "label": "Kindle Paperwhite",
+      "value": "$159.99",
+      "sub": "7-inch, 16GB, 12 weeks battery",
+      "imageQuery": "Kindle Paperwhite 2024 eReader",
+      "active": false,
+      "source": 5
+     },
+     {
+      "type": "tile",
+      "label": "Kobo Clara BW",
+      "value": "$159.99",
+      "sub": "6-inch, 16GB, library borrowing on device",
+      "imageQuery": "Kobo Clara BW eReader",
+      "active": false,
+      "source": 5
+     }
+    ],
+    "gap": "md"
+   }
+  },
+  {
+   "index": 0,
+   "node": {
+    "type": "grid",
+    "cols": 2,
+    "children": [
+     {
+      "type": "tile",
+      "label": "Kindle Paperwhite",
+      "value": "$159.99",
+      "sub": "7-inch, 16GB, 12 weeks battery",
+      "active": false,
+      "source": 5,
+      "imageSrc": "https://target.scene7.com/is/image/Target/GUEST_8608ea59-7cd0-4700-9575-7624d4dc5a89"
+     },
+     {
+      "type": "tile",
+      "label": "Kobo Clara BW",
+      "value": "$159.99",
+      "sub": "6-inch, 16GB, library borrowing on device",
+      "active": false,
+      "source": 5,
+      "imageSrc": "https://boredom-at-work.com/_astro/02-kindle-paperwhite-vs-kobo-clara.a5XGqjOd.webp"
+     }
+    ],
+    "gap": "md"
+   }
+  },
+  {
+   "index": 3,
+   "node": {
+    "type": "choices",
+    "options": [
+     {
+      "label": "Library books",
+      "prompt": "Kindle Paperwhite vs Kobo Clara BW for library borrowing",
+      "selected": false
+     },
+     {
+      "label": "Kindle Unlimited",
+      "prompt": "Kindle Paperwhite vs Kobo Clara BW for Kindle Unlimited subscribers",
+      "selected": false
+     },
+     {
+      "label": "Price",
+      "prompt": "Kindle Paperwhite vs Kobo Clara BW cheapest price comparison",
+      "selected": false
+     },
+     {
+      "label": "Screen size",
+      "prompt": "Kindle Paperwhite vs Kobo Clara BW screen size and reading comfort",
+      "selected": false
+     }
+    ],
+    "label": "What matters most?"
+   }
+  },
+  {
+   "index": 1,
+   "node": {
+    "type": "table",
+    "columns": [
+     "Kindle Paperwhite",
+     "Kobo Clara BW"
+    ],
+    "rows": [
+     [
+      "Price (16GB)",
+      "$159.99 [5]",
+      "$159.99 [5]"
+     ],
+     [
+      "Screen",
+      "7-inch, 300 PPI [2][4]",
+      "6-inch, 300 PPI [4][5]"
+     ],
+     [
+      "Weight",
+      "~205g [4]",
+      "~174g [4]"
+     ],
+     [
+      "Storage",
+      "16GB [5]",
+      "16GB [5]"
+     ],
+     [
+      "Rating",
+      "4.6 (23,294 ratings) [2]",
+      "4.6 (646 ratings) [2]"
+     ],
+     [
+      "Library books",
+      "Loan finishes on Amazon's website [2]",
+      "Borrow on the reader itself [2][5]"
+     ],
+     [
+      "Store & extras",
+      "Kindle store, Kindle Unlimited, Audible [2][4]",
+      "Kobo store, Kobo Plus, EPUB support [2][4]"
+     ],
+     [
+      "Battery",
+      "Up to 12 weeks [2]",
+      "—"
+     ],
+     [
+      "Waterproof",
+      "IPX8 [4]",
+      "IPX8 [4]"
+     ]
+    ],
+    "highlight": 0
+   }
+  },
+  {
+   "index": 2,
+   "node": {
+    "type": "stack",
+    "children": [
+     {
+      "type": "callout",
+      "text": "Both rate 4.6 [2]. Same 16GB price of $159.99 [5], so it comes down to where your books live.",
+      "title": "Buy the Paperwhite for Amazon books; the Clara BW for library loans",
+      "tone": "primary",
+      "icon": "award"
+     },
+     {
+      "type": "grid",
+      "cols": 2,
+      "children": [
+       {
+        "type": "tile",
+        "label": "Kindle Paperwhite",
+        "value": "$159.99",
+        "sub": "7-inch · 300 PPI · 16GB · 12 weeks battery",
+        "icon": "book-open",
+        "imageQuery": "Kindle Paperwhite 2024 eReader",
+        "active": false,
+        "source": 5
+       },
+       {
+        "type": "tile",
+        "label": "Kobo Clara BW",
+        "value": "$159.99",
+        "sub": "6-inch · 300 PPI · 16GB · library loans on device",
+        "icon": "library",
+        "imageQuery": "Kobo Clara BW eReader",
+        "active": false,
+        "source": 5
+       }
+      ]
+     }
+    ],
+    "direction": "col",
+    "gap": "md",
+    "wrap": false
+   }
+  },
+  {
+   "index": 2,
+   "node": {
+    "type": "stack",
+    "children": [
+     {
+      "type": "callout",
+      "text": "Both rate 4.6 [2]. Same 16GB price of $159.99 [5], so it comes down to where your books live.",
+      "title": "Buy the Paperwhite for Amazon books; the Clara BW for library loans",
+      "tone": "primary",
+      "icon": "award"
+     },
+     {
+      "type": "grid",
+      "cols": 2,
+      "children": [
+       {
+        "type": "tile",
+        "label": "Kindle Paperwhite",
+        "value": "$159.99",
+        "sub": "7-inch · 300 PPI · 16GB · 12 weeks battery",
+        "icon": "book-open",
+        "active": false,
+        "source": 5
+       },
+       {
+        "type": "tile",
+        "label": "Kobo Clara BW",
+        "value": "$159.99",
+        "sub": "6-inch · 300 PPI · 16GB · library loans on device",
+        "icon": "library",
+        "active": false,
+        "source": 5,
+        "imageSrc": "https://beforeyoubuyguide.com/wp-content/uploads/2026/08/post-kindle-paperwhite-vs-kobo-clara-bw.jpg"
+       }
+      ]
+     }
+    ],
+    "direction": "col",
+    "gap": "md",
+    "wrap": false
+   }
+  },
+  {
+   "index": 4,
+   "node": {
+    "type": "actions",
+    "items": [
+     {
+      "label": "Library borrowing detail",
+      "query": "How does Kobo Clara BW library borrowing work vs Kindle Paperwhite",
+      "icon": "library",
+      "kind": "ask"
+     },
+     {
+      "label": "2026 Kindle lineup",
+      "query": "Amazon 2026 Kindle Paperwhite and Colorsoft prices and specs",
+      "icon": "list",
+      "kind": "search"
+     },
+     {
+      "label": "Compare Clara Colour",
+      "query": "Kobo Clara BW vs Kobo Clara Colour for reading",
+      "icon": "palette",
+      "kind": "search"
+     }
+    ]
+   }
+  },
+  {
+   "index": 5,
+   "node": {
+    "type": "citations",
+    "refs": [
+     2,
+     3,
+     5,
+     7
+    ]
+   }
+  }
+ ]
+}

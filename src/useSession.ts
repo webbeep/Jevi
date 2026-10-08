@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import type { AnswerCard, CardNode, CardResponse, FollowupContext, FollowupIntent, ImageCredit, LayoutPlan } from '../shared/card';
 import { cardDigest } from '../shared/digest';
-import { billingFromSources, isPlanQuery, stripPricesDeep } from '../shared/pricing';
+import { billingFromSources, settleCardPrices } from '../shared/pricing';
 import type { SearchResponse, SearchResult } from '../shared/types';
 import { api } from './api';
 import { withBrowserFallback } from './fallback';
@@ -14,8 +14,10 @@ export interface LiveCard {
   head?: Omit<AnswerCard, 'body'>;
   /** Placeholder regions being filled in parallel (empty for single-call designs). */
   regions: CardNode[];
-  /** Designed nodes by position; parallel regions may arrive out of order. */
+  /** Designed nodes by position; parallel regions may arrive out of order. Prices settled across the whole card. */
   nodes: (CardNode | undefined)[];
+  /** Nodes as they arrived (billing basis settled, no prices removed), so prices can be re-settled when the pricing table lands. */
+  raw: (CardNode | undefined)[];
   followups: string[];
   credits: ImageCredit[];
 }
@@ -56,12 +58,12 @@ export interface Turn {
   retryable?: boolean;
 }
 
-const emptyLive = (): LiveCard => ({ regions: [], nodes: [], followups: [], credits: [] });
+const emptyLive = (): LiveCard => ({ regions: [], nodes: [], raw: [], followups: [], credits: [] });
 const variantKey = (pattern: string | undefined, simple: boolean) => `${pattern ?? ''}|${simple ? 1 : 0}`;
 const errMsg = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
-/** Billing basis and stray dollar amounts are settled here, not on the worker. */
-function settleNode(node: CardNode, query: string, results: SearchResult[]): CardNode {
+/** Billing basis is settled here per node, not on the worker. Stray prices are settled across the card (`settleCardPrices`). */
+function settleBilling(node: CardNode, results: SearchResult[]): CardNode {
   const fix = (n: CardNode): CardNode => {
     if (n.type === 'pricing') {
       return {
@@ -79,9 +81,17 @@ function settleNode(node: CardNode, query: string, results: SearchResult[]): Car
     if ('children' in n) return { ...n, children: n.children.map(fix) };
     return n;
   };
-  const priced = fix(node);
-  if (!isPlanQuery(query) || priced.type === 'pricing') return priced;
-  return stripPricesDeep(priced);
+  return fix(node);
+}
+
+/**
+ * Puts one streamed node into the live card. Prices are re-settled over every node each time,
+ * because the pricing table usually streams in after the hero that repeats its price.
+ */
+export function placeNode(live: LiveCard, index: number, node: CardNode, query: string, results: SearchResult[]): LiveCard {
+  const raw = [...live.raw];
+  raw[index] = settleBilling(node, results);
+  return { ...live, raw, nodes: settleCardPrices(raw, query) };
 }
 
 /** The body to show right now: designed nodes where ready, placeholders for regions still being designed. */
@@ -196,10 +206,8 @@ export function useSession() {
           sawContent = true;
           return update(route, (t) => {
             const live = t.live ?? emptyLive();
-            const nodes = [...live.nodes];
             const results = ref.current.find((x) => x.id === t.searchId)?.search?.results ?? [];
-            nodes[e.data.index] = settleNode(e.data.node, t.question, results);
-            return { live: { ...live, nodes }, thinking: false, version: live.nodes.some(Boolean) ? t.version : t.version + 1 };
+            return { live: placeNode(live, e.data.index, e.data.node, t.question, results), thinking: false, version: live.nodes.some(Boolean) ? t.version : t.version + 1 };
           });
         case 'followups':
           return update(route, (t) => ({ live: { ...(t.live ?? emptyLive()), followups: e.data } }));

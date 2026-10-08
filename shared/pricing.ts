@@ -137,31 +137,91 @@ export function isPlanQuery(query: string): boolean {
   return /\b(pric\w*|plans?|costs?|cheap\w*|seats?|billing|per\s+seat|per\s+user|vs|versus|invoic\w*|help\s*desk|subscription)\b|under\s+\$|\/\s?seat|\/\s?user/i.test(query);
 }
 
-const PRICE_TOKEN = /(?<![\w£€])(?:US)?\$\s?\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?(?:\s?[kK]\b)?/g;
+const PRICE_TOKEN = /(?<![\w£€])(?:US)?\$\s?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?(?:\s?[kK]\b)?/g;
 const BUDGET_PRE = /(under|below|less than|fewer than|≤|<=|<|up to|max(?:imum)?|budget(?: of)?|cap of|within|over|above|more than)\s*$/i;
 
-/** Drop dollar amounts that are not a budget constraint ("under $50"). */
-export function stripStrayPrices(text: string): string {
+/** The number a "$1,299.99" / "US$7" / "$5k" token stands for. */
+function tokenAmount(token: string): number | undefined {
+  const m = /((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?)\s?([kK])?/.exec(token);
+  if (!m) return undefined;
+  const n = Number(m[1].replace(/,/g, '')) * (m[2] ? 1000 : 1);
+  return Number.isFinite(n) ? roundMoney(n) : undefined;
+}
+
+/**
+ * Drop dollar amounts that are not a budget constraint ("under $50").
+ * Amounts in `keep` (sourced prices from the card's pricing table) stay.
+ */
+export function stripStrayPrices(text: string, keep: readonly number[] = []): string {
   const stripped = text.replace(PRICE_TOKEN, (m, offset) => {
     const pre = text.slice(Math.max(0, offset - 24), offset);
-    return BUDGET_PRE.test(pre) ? m : '';
+    if (BUDGET_PRE.test(pre)) return m;
+    const amount = tokenAmount(m);
+    return amount !== undefined && keep.includes(amount) ? m : '';
   });
+  if (stripped === text) return text;
   return stripped.replace(/[ \t]{2,}/g, ' ').replace(/\s+([,.;:])/g, '$1').replace(/\(\s*\)/g, '').trim();
 }
 
 const STRIP_SKIP = new Set(['type', 'icon', 'href', 'url', 'src', 'query', 'prompt', 'imageQuery', 'sourceUrl', 'credit', 'image', 'imageSrc']);
+const VALUE_NODES = new Set(['hero', 'stat', 'tile']);
 
-/** Remove stray dollar amounts from every node except pricing. */
-export function stripPricesDeep<T>(value: T): T {
-  if (typeof value === 'string') return stripStrayPrices(value) as T;
-  if (Array.isArray(value)) return value.map((item) => stripPricesDeep(item)) as T;
+/**
+ * Remove stray dollar amounts from every node except pricing.
+ * A hero/stat/tile whose whole value was a stray price shows "—" with no unit,
+ * so the card never shows a bare "/user/mo".
+ */
+export function stripPricesDeep<T>(value: T, keep: readonly number[] = []): T {
+  if (typeof value === 'string') return stripStrayPrices(value, keep) as T;
+  if (Array.isArray(value)) return value.map((item) => stripPricesDeep(item, keep)) as T;
   if (!value || typeof value !== 'object') return value;
-  if ((value as { type?: string }).type === 'pricing') return value;
+  const type = (value as { type?: string }).type;
+  if (type === 'pricing') return value;
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-    out[k] = STRIP_SKIP.has(k) ? v : stripPricesDeep(v);
+    out[k] = STRIP_SKIP.has(k) ? v : stripPricesDeep(v, keep);
+  }
+  const before = (value as { value?: unknown }).value;
+  if (type && VALUE_NODES.has(type) && typeof before === 'string' && out.value !== before && !/\d/.test(String(out.value))) {
+    out.value = '—';
+    delete out.unit;
   }
   return out as T;
+}
+
+/** Sourced amounts in every pricing node of a card: the prices that show with a source link and an as-of date. */
+export function pricingTableAmounts(nodes: readonly unknown[]): number[] {
+  const found = new Set<number>();
+  const walk = (v: unknown) => {
+    if (Array.isArray(v)) return v.forEach(walk);
+    if (!v || typeof v !== 'object') return;
+    const node = v as { type?: string; plans?: { prices?: Price[] }[] };
+    if (node.type === 'pricing') {
+      for (const plan of node.plans ?? []) {
+        for (const p of plan.prices ?? []) {
+          if (p.amount != null && Number.isFinite(p.amount) && p.sourceUrl?.trim()) found.add(roundMoney(p.amount));
+        }
+      }
+      return;
+    }
+    Object.values(v).forEach(walk);
+  };
+  walk(nodes);
+  return [...found];
+}
+
+/**
+ * Prices on a plan question's card, settled across every node (they stream in any order).
+ * Once the card has a pricing table with sourced prices, a dollar amount outside the table
+ * stays only if it repeats one of those sourced, dated table prices; any other amount is
+ * stray and is removed. Until a sourced table exists there is nothing to move prices to,
+ * so nothing is removed (product questions like "X vs Y, what do they cost?" keep their prices).
+ */
+export function settleCardPrices<T>(nodes: readonly (T | undefined)[], query: string): (T | undefined)[] {
+  if (!isPlanQuery(query)) return [...nodes];
+  const keep = pricingTableAmounts(nodes);
+  if (!keep.length) return [...nodes];
+  return nodes.map((n) => (n === undefined ? n : stripPricesDeep(n, keep)));
 }
 
 /** "Oct 7, 2026" from an ISO fetch date. Anything else without a real date is omitted. */

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { billingFromSources, billingNearAmount, inferSeats, isPlanQuery, monthlyTotal, priceAsOf, stripPricesDeep, stripStrayPrices, type Price } from '../shared/pricing.ts';
+import { readFileSync } from 'node:fs';
+import { billingFromSources, billingLabel, billingNearAmount, inferSeats, isPlanQuery, monthlyTotal, priceAsOf, priceForBasis, publishedLabel, settleCardPrices, stripPricesDeep, stripStrayPrices, type Price } from '../shared/pricing.ts';
 
 const WS = 'https://workspace.google.com/pricing';
 const LINEAR = 'https://linear.app/pricing';
@@ -117,6 +118,108 @@ test('plan questions drop dollar amounts outside the pricing node', () => {
       { type: 'pricing', plans: [{ name: 'Starter', prices: [{ amount: 14 }] }] },
     ],
   });
-  assert.equal(card.children[0].value, '/mo');
+  assert.equal(card.children[0].value, '—');
+  assert.equal('unit' in card.children[0], false);
   assert.equal(card.children[1].plans[0].prices[0].amount, 14);
+});
+
+// Recorded zo2 @54aa917 streams from Product Insights' head-to-head (node events in arrival order).
+type Recorded = { query: string; nodes: { index: number; node: any }[] };
+const recorded = (name: string): Recorded => JSON.parse(readFileSync(new URL(`./fixtures/h2h-${name}-nodes.json`, import.meta.url), 'utf8'));
+
+/** Replays node events the way useSession.placeNode does: raw nodes by index, prices re-settled over the whole card each time. */
+function replay(rec: Recorded, upTo = rec.nodes.length) {
+  const raw: any[] = [];
+  let shown: any[] = [];
+  for (const { index, node } of rec.nodes.slice(0, upTo)) {
+    raw[index] = node;
+    shown = settleCardPrices(raw, rec.query);
+  }
+  return shown;
+}
+const dollars = (v: unknown) => JSON.stringify(v).match(/\$\s?\d[\d,]*(?:\.\d+)?/g) ?? [];
+
+test('P05 recorded: pricing card keeps table prices, as-of and source, and the hero/stat repeats of those prices', () => {
+  const rec = recorded('p05');
+  assert.equal(isPlanQuery(rec.query), true);
+  const shown = replay(rec);
+  const [lead, explain, facts, table] = shown;
+  // Pricing table: sourced amount, source link and as-of date all survive.
+  assert.equal(table.type, 'pricing');
+  const annual = priceForBasis(table.plans[0].prices, 'annual')!;
+  assert.equal(publishedLabel(annual), '$7 per seat / month');
+  assert.equal(billingLabel(annual.billing), 'billed annually');
+  assert.equal(annual.sourceUrl, 'https://truehost.com/google-workspace-business-pricing/');
+  assert.equal(annual.asOf, 'Sep 30, 2026');
+  assert.equal(monthlyTotal(annual, table.seats), 35);
+  assert.equal(publishedLabel(priceForBasis(table.plans[0].prices, 'monthly')!), '$8.40 per seat / month');
+  // Before the fix these were stripped to "" and showed a bare "/user/mo".
+  assert.equal(lead.children[0].type, 'hero');
+  assert.equal(lead.children[0].value, '$7');
+  assert.equal(lead.children[0].unit, '/user/mo');
+  assert.equal(lead.children[1].children[0].value, '$8.40');
+  assert.equal(explain.children[1].items[0].value, '$7.00 per user/month');
+  assert.match(explain.children[2].text, /^\$7 is an introductory price/);
+  assert.equal(facts.children[0].children[0].value, '$7');
+  assert.equal(facts.children[0].children[1].value, '$8.40');
+});
+
+test('P05 recorded: true stray prices outside the pricing table are still removed', () => {
+  const rec = recorded('p05');
+  const stray = {
+    type: 'stack',
+    children: [
+      { type: 'stat', label: 'Business Standard', value: '$14', unit: '/user/mo' },
+      { type: 'text', text: 'Standard is $14 and Plus is $22, so 5 seats cost $35/mo on Starter. Keep it under $50.' },
+    ],
+  };
+  const shown = settleCardPrices([...rec.nodes.map((n) => n.node), stray], rec.query);
+  const settled = shown[shown.length - 1] as typeof stray;
+  assert.equal(settled.children[0].value, '—');
+  assert.equal('unit' in settled.children[0], false);
+  assert.equal(settled.children[1].text, 'Standard is and Plus is, so 5 seats cost /mo on Starter. Keep it under $50.');
+  // Every dollar amount left outside the pricing table is a sourced table price ($7, $8.40) or a budget.
+  const outside = shown.filter((n: any) => n.type !== 'pricing');
+  for (const d of dollars(outside)) assert.ok(['$7', '$7.00', '$8.40', '$50'].includes(d), `unexpected price outside the table: ${d}`);
+});
+
+test('P05 recorded: prices show while streaming and settle once the pricing table arrives', () => {
+  const rec = recorded('p05');
+  const pricingAt = rec.nodes.findIndex((n) => n.node.type === 'pricing');
+  const early = replay(rec, pricingAt);
+  assert.equal(early[0].children[0].value, '$7');
+  assert.equal(replay(rec)[0].children[0].value, '$7');
+});
+
+test('P06 / P10 recorded: product questions with no pricing table keep every price', () => {
+  for (const name of ['p06', 'p10']) {
+    const rec = recorded(name);
+    assert.equal(isPlanQuery(rec.query), true, `${name} reads as a plan question`);
+    const raw: any[] = [];
+    for (const { index, node } of rec.nodes) raw[index] = node;
+    assert.equal(raw.some((n) => n?.type === 'pricing'), false);
+    const shown = settleCardPrices(raw, rec.query);
+    assert.deepEqual(shown, raw, `${name} prices were stripped with no pricing table to hold them`);
+    assert.ok(dollars(shown).length > 0);
+  }
+  const p06 = settleCardPrices(recorded('p06').nodes.map((n) => n.node), recorded('p06').query) as any[];
+  assert.match(JSON.stringify(p06), /Same 16GB price of \$159\.99/);
+});
+
+test('an unsourced pricing row does not license prices elsewhere', () => {
+  const nodes = [
+    { type: 'hero', value: '$9', unit: '/mo', label: 'Starter' },
+    { type: 'pricing', plans: [{ name: 'Starter', prices: [{ amount: 9, currency: 'USD', unit: 'seat', period: 'month', billing: 'monthly' }] }] },
+    { type: 'pricing', plans: [{ name: 'Pro', prices: [{ amount: 20, currency: 'USD', unit: 'seat', period: 'month', billing: 'monthly', sourceUrl: 'https://example.com/pricing' }] }] },
+  ];
+  const shown = settleCardPrices(nodes, 'Example plans pricing') as any[];
+  assert.equal(shown[0].value, '—');
+  assert.deepEqual(shown[1], nodes[1]);
+});
+
+test('stray-price matching reads whole amounts', () => {
+  assert.equal(stripStrayPrices('Pro is $1299.99 today', [1299.99]), 'Pro is $1299.99 today');
+  assert.equal(stripStrayPrices('Pro is $1,299.99 today', [1299.99]), 'Pro is $1,299.99 today');
+  assert.equal(stripStrayPrices('Pro is $1299.99 today'), 'Pro is today');
+  assert.equal(stripStrayPrices('No prices here.'), 'No prices here.');
 });

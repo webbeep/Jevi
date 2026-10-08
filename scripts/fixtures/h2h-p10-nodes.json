@@ -1,0 +1,217 @@
+{
+ "source": "org/zo/research/validation/h2h/zo/p10/d-r1-stream1.sse (zo2 @54aa917, 2026-10-07; node events only, in arrival order)",
+ "query": "Recommend an HDMI 2.1 switch with 3 inputs that supports 4K 120Hz, with exact model numbers and prices",
+ "nodes": [
+  {
+   "index": 0,
+   "node": {
+    "type": "stack",
+    "children": [
+     {
+      "type": "hero",
+      "value": "avedio links 3×1",
+      "label": "Editor's Choice · 3 inputs",
+      "caption": "4K@120Hz / 8K@60Hz · 48Gbps · aluminum build · HDMI cable included",
+      "icon": "trophy",
+      "tone": "primary"
+     },
+     {
+      "type": "grid",
+      "cols": 3,
+      "children": [
+       {
+        "type": "stat",
+        "label": "Inputs",
+        "value": "3",
+        "icon": "git-branch"
+       },
+       {
+        "type": "stat",
+        "label": "Bandwidth",
+        "value": "48",
+        "unit": "Gbps",
+        "icon": "gauge"
+       },
+       {
+        "type": "stat",
+        "label": "Max",
+        "value": "4K@120",
+        "icon": "monitor"
+       }
+      ]
+     },
+     {
+      "type": "text",
+      "text": "Picked over OREI and UGREEN for reliability in home theater testing — no flicker, no handshake dropouts, no silent fall to 4K@60Hz [1].",
+      "tone": "muted",
+      "size": "sm"
+     }
+    ],
+    "direction": "col",
+    "gap": "md",
+    "wrap": false
+   }
+  },
+  {
+   "index": 2,
+   "node": {
+    "type": "section",
+    "children": [
+     {
+      "type": "list",
+      "items": [
+       {
+        "text": "**48Gbps** — full HDMI 2.1; 40Gbps units quietly cap you at 4K@60Hz [1][4]"
+       },
+       {
+        "text": "**VRR + ALLM** — needed for PS5 and Xbox Series X at 4K@120Hz [3][4]"
+       },
+       {
+        "text": "**3 inputs** — 2-in-1-out boxes can't take console + PC + streamer [3]"
+       },
+       {
+        "text": "**Certified 48Gbps cables both ends** — or 4K@120Hz drops out [5]"
+       },
+       {
+        "text": "**HDCP 2.3** — keeps Netflix, Disney+ and disc players working [5]"
+       }
+      ],
+      "style": "check"
+     }
+    ],
+    "title": "What to look for",
+    "icon": "search-check"
+   }
+  },
+  {
+   "index": 3,
+   "node": {
+    "type": "choices",
+    "options": [
+     {
+      "label": "2 inputs",
+      "prompt": "Recommend an HDMI 2.1 switch with 2 inputs that supports 4K 120Hz, with exact model numbers and prices",
+      "selected": false
+     },
+     {
+      "label": "3 inputs",
+      "prompt": "Recommend an HDMI 2.1 switch with 3 inputs that supports 4K 120Hz, with exact model numbers and prices",
+      "selected": true
+     },
+     {
+      "label": "4 inputs",
+      "prompt": "Recommend an HDMI 2.1 switch with 4 inputs that supports 4K 120Hz, with exact model numbers and prices",
+      "selected": false
+     }
+    ],
+    "label": "Ports needed"
+   }
+  },
+  {
+   "index": 1,
+   "node": {
+    "type": "list",
+    "items": [
+     {
+      "text": "**avedio links 3×1 HDMI 2.1 Switch** — Editor's Choice: 3 ports, 4K@120Hz/8K@60Hz, aluminum build, HDMI cable included [1][4]",
+      "meta": "3 ports · 48Gbps",
+      "imageQuery": "avedio links 3 in 1 out HDMI 2.1 switch",
+      "source": 1
+     },
+     {
+      "text": "**UGREEN 8K 3-in-1-Out HDMI 2.1 Switch** — premium build with full VRR support and remote; 4K@240Hz [3]",
+      "meta": "3 ports · VRR",
+      "imageQuery": "UGREEN 8K 3 in 1 out HDMI 2.1 switch",
+      "source": 3
+     },
+     {
+      "text": "**OREI 8K 3-Port HDMI 2.1 Switch** — 48Gbps VRR/ALLM/QFT, Dolby Vision/Atmos, metal housing [4]",
+      "meta": "3 ports · 48Gbps",
+      "imageQuery": "OREI 8K 3 port HDMI 2.1 switch",
+      "source": 4
+     },
+     {
+      "text": "**Philips 2-Device HDMI 2.1 Switch** — only 2 inputs, so it can't cover three devices; 8K@60Hz/4K@120Hz, 48Gbps [5]",
+      "meta": "$9.99 · 2 ports",
+      "imageQuery": "Philips 2 device HDMI 2.1 switch",
+      "source": 5
+     }
+    ],
+    "style": "media"
+   }
+  },
+  {
+   "index": 4,
+   "node": {
+    "type": "actions",
+    "items": [
+     {
+      "label": "Cheapest 3-in 4K 120Hz switch",
+      "query": "cheapest HDMI 2.1 switch 3 in 1 out 4K 120Hz price",
+      "icon": "tag",
+      "kind": "search"
+     },
+     {
+      "label": "Best for PS5 and Xbox",
+      "query": "best HDMI 2.1 switch for PS5 and Xbox Series X 4K 120Hz VRR",
+      "icon": "gamepad-2",
+      "kind": "search"
+     },
+     {
+      "label": "Show 4-input switches",
+      "query": "Recommend an HDMI 2.1 switch with 4 inputs that supports 4K 120Hz, with exact model numbers and prices",
+      "icon": "plus",
+      "kind": "refine"
+     },
+     {
+      "label": "Do I need 48Gbps cables?",
+      "query": "Do HDMI 2.1 switches need certified 48Gbps cables for 4K 120Hz?",
+      "icon": "cable",
+      "kind": "ask"
+     }
+    ]
+   }
+  },
+  {
+   "index": 5,
+   "node": {
+    "type": "citations",
+    "refs": [
+     1,
+     3,
+     4,
+     5
+    ]
+   }
+  },
+  {
+   "index": 1,
+   "node": {
+    "type": "list",
+    "items": [
+     {
+      "text": "**avedio links 3×1 HDMI 2.1 Switch** — Editor's Choice: 3 ports, 4K@120Hz/8K@60Hz, aluminum build, HDMI cable included [1][4]",
+      "meta": "3 ports · 48Gbps",
+      "source": 1
+     },
+     {
+      "text": "**UGREEN 8K 3-in-1-Out HDMI 2.1 Switch** — premium build with full VRR support and remote; 4K@240Hz [3]",
+      "meta": "3 ports · VRR",
+      "source": 3
+     },
+     {
+      "text": "**OREI 8K 3-Port HDMI 2.1 Switch** — 48Gbps VRR/ALLM/QFT, Dolby Vision/Atmos, metal housing [4]",
+      "meta": "3 ports · 48Gbps",
+      "source": 4
+     },
+     {
+      "text": "**Philips 2-Device HDMI 2.1 Switch** — only 2 inputs, so it can't cover three devices; 8K@60Hz/4K@120Hz, 48Gbps [5]",
+      "meta": "$9.99 · 2 ports",
+      "source": 5
+     }
+    ],
+    "style": "media"
+   }
+  }
+ ]
+}

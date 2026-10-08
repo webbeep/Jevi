@@ -1,0 +1,264 @@
+{
+ "source": "org/zo/research/validation/h2h/zo/p05/d-r1-stream1.sse (zo2 @54aa917, 2026-10-07; node events only, in arrival order)",
+ "query": "Find the official source for Google Workspace Business Starter pricing and quote the price",
+ "nodes": [
+  {
+   "index": 0,
+   "node": {
+    "type": "stack",
+    "children": [
+     {
+      "type": "hero",
+      "value": "$7",
+      "unit": "/user/mo",
+      "label": "Business Starter · annual plan",
+      "caption": "Google's published US list price, September 2026 [5]",
+      "icon": "tag",
+      "tone": "primary"
+     },
+     {
+      "type": "stack",
+      "children": [
+       {
+        "type": "stat",
+        "label": "Flexible billing",
+        "value": "$8.40",
+        "unit": "/user/mo",
+        "icon": "calendar",
+        "trend": "up"
+       },
+       {
+        "type": "stat",
+        "label": "Storage per user",
+        "value": "30",
+        "unit": "GB",
+        "icon": "hard-drive"
+       },
+       {
+        "type": "stat",
+        "label": "Meet participants",
+        "value": "100",
+        "icon": "video"
+       }
+      ],
+      "direction": "row",
+      "gap": "sm",
+      "wrap": false
+     },
+     {
+      "type": "text",
+      "text": "Official pricing page: **workspace.google.com/pricing** — confirm today's number there before you commit [3][5].",
+      "tone": "muted",
+      "size": "sm"
+     }
+    ],
+    "direction": "col",
+    "gap": "sm",
+    "wrap": false
+   }
+  },
+  {
+   "index": 1,
+   "node": {
+    "type": "stack",
+    "children": [
+     {
+      "type": "text",
+      "text": "Google charges **per user, per month** — the price depends on the billing choice, not the team size. Annual commitment costs less; flexible billing costs 20% more [3][5].",
+      "size": "md"
+     },
+     {
+      "type": "keyvalue",
+      "items": [
+       {
+        "label": "Annual commitment",
+        "value": "$7.00 per user/month",
+        "icon": "calendar-check"
+       },
+       {
+        "label": "Flexible (monthly)",
+        "value": "$8.40 per user/month",
+        "icon": "calendar-days"
+       },
+       {
+        "label": "Storage",
+        "value": "30 GB pooled per user",
+        "icon": "hard-drive"
+       },
+       {
+        "label": "Meet",
+        "value": "100 participants",
+        "icon": "video"
+       }
+      ]
+     },
+     {
+      "type": "callout",
+      "text": "$7 is an introductory price for new customers: first 20 users, 12 months. Google does not publish the rate after that [4].",
+      "title": "Introductory rate",
+      "tone": "warning",
+      "icon": "info"
+     }
+    ],
+    "direction": "col",
+    "gap": "md",
+    "wrap": false
+   }
+  },
+  {
+   "index": 2,
+   "node": {
+    "type": "section",
+    "children": [
+     {
+      "type": "grid",
+      "cols": 3,
+      "children": [
+       {
+        "type": "stat",
+        "label": "Annual plan",
+        "value": "$7",
+        "unit": "/user/mo",
+        "icon": "calendar-check"
+       },
+       {
+        "type": "stat",
+        "label": "Flexible plan",
+        "value": "$8.40",
+        "unit": "/user/mo",
+        "icon": "calendar-days"
+       },
+       {
+        "type": "stat",
+        "label": "Storage",
+        "value": "30",
+        "unit": "GB pooled",
+        "icon": "hard-drive"
+       }
+      ]
+     },
+     {
+      "type": "text",
+      "text": "Flexible billing costs 20% more than annual; Google says annual plans save 16% [3]. Gemini is bundled into every Business plan since January 2025 [5].",
+      "tone": "muted",
+      "size": "sm"
+     },
+     {
+      "type": "list",
+      "items": [
+       {
+        "text": "Business Starter caps at 300 users; Enterprise has no min or max [5]"
+       },
+       {
+        "text": "30 GB pooled per person covers Drive and Gmail [4]"
+       },
+       {
+        "text": "No meeting recording; Meet holds 100 participants [4]"
+       }
+      ],
+      "style": "bullet"
+     }
+    ],
+    "title": "Good to know",
+    "icon": "info"
+   }
+  },
+  {
+   "index": 3,
+   "node": {
+    "type": "pricing",
+    "label": "Business Starter — published per-user price",
+    "seats": 5,
+    "min": 1,
+    "max": 50,
+    "billing": "annual",
+    "plans": [
+     {
+      "name": "Business Starter",
+      "prices": [
+       {
+        "currency": "USD",
+        "unit": "seat",
+        "period": "month",
+        "billing": "annual",
+        "sourceUrl": "https://truehost.com/google-workspace-business-pricing/",
+        "asOf": "Sep 30, 2026",
+        "amount": 7
+       },
+       {
+        "currency": "USD",
+        "unit": "seat",
+        "period": "month",
+        "billing": "monthly",
+        "sourceUrl": "https://truehost.com/google-workspace-business-pricing/",
+        "asOf": "Sep 30, 2026",
+        "amount": 8.4
+       },
+       {
+        "currency": "USD",
+        "unit": "seat",
+        "period": "month",
+        "billing": "annual",
+        "sourceUrl": "https://www.flamingo.run/blog/google-workspace-pricing",
+        "asOf": "Sep 30, 2026",
+        "amount": 7
+       },
+       {
+        "currency": "USD",
+        "unit": "seat",
+        "period": "month",
+        "billing": "monthly",
+        "sourceUrl": "https://www.flamingo.run/blog/google-workspace-pricing",
+        "asOf": "Sep 30, 2026",
+        "amount": 8.4
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "index": 4,
+   "node": {
+    "type": "actions",
+    "items": [
+     {
+      "label": "Compare all four plans",
+      "query": "Compare Google Workspace Business Starter, Standard, Plus and Enterprise pricing side by side",
+      "icon": "table",
+      "kind": "refine"
+     },
+     {
+      "label": "Annual vs flexible billing",
+      "query": "How much more does flexible monthly billing cost than annual billing for Google Workspace Business Starter?",
+      "icon": "repeat",
+      "kind": "ask"
+     },
+     {
+      "label": "What Starter includes",
+      "query": "What storage, Meet participants and endpoint management does Google Workspace Business Starter include?",
+      "icon": "list",
+      "kind": "ask"
+     },
+     {
+      "label": "Introductory rate details",
+      "query": "Google Workspace Business Starter introductory price first 20 users 12 months",
+      "icon": "percent",
+      "kind": "search"
+     }
+    ]
+   }
+  },
+  {
+   "index": 5,
+   "node": {
+    "type": "citations",
+    "refs": [
+     3,
+     5,
+     4
+    ]
+   }
+  }
+ ]
+}
