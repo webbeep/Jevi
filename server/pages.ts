@@ -169,7 +169,7 @@ export async function pageText(url: string, env: Env, timeoutMs = 9000, maxChars
 export async function collectPages(
   results: SearchResult[],
   env: Env,
-  opts: { count: number; need: number; budgetMs: number },
+  opts: { count: number; need: number; budgetMs: number; minReady?: number },
   late?: Promise<LateExtras>,
   scope?: AskScope,
 ): Promise<PageText[]> {
@@ -177,8 +177,11 @@ export async function collectPages(
   const need = Math.min(count, opts.need);
   // Only sources the designer is shown (numbered 1-12) are worth reading.
   const numbered = results.slice(0, 12).map((r, i) => ({ r, n: i + 1 }));
+  // SPD-C2 (t457): an engine's short extract (LangSearch ~1–3k chars) leaves out DOIs, years and prices,
+  // so precise asks (`minReady`) read those pages too and keep the extract only as the fallback.
+  const minReady = Math.max(MIN_TEXT, opts.minReady ?? MIN_TEXT);
   const ready: PageText[] = numbered
-    .filter(({ r }) => r.content && r.content.length >= MIN_TEXT)
+    .filter(({ r }) => r.content && r.content.length >= minReady)
     .slice(0, count)
     .map(({ r, n }) => ({ n, url: r.url, text: r.content! }));
   if (ready.length >= need) return ready;
@@ -188,7 +191,7 @@ export async function collectPages(
   const missing = numbered.filter(({ r, n }) => !have.has(n) && !seen.has(r.domain) && seen.add(r.domain)).slice(0, count - ready.length);
   const fromLate = async (url: string) => {
     const text = (await late)?.content.get(normalizeUrl(url));
-    if (!text || text.length < MIN_TEXT) throw new Error('no late content');
+    if (!text || text.length < minReady) throw new Error('no late content');
     return text;
   };
 
@@ -213,5 +216,10 @@ export async function collectPages(
         });
     }
   });
+  // A page that could not be read in time keeps the engine's extract, as before SPD-C2.
+  for (const { r, n } of numbered) {
+    if (pages.length >= count) break;
+    if (r.content && r.content.length >= MIN_TEXT && !pages.some((p) => p.n === n)) pages.push({ n, url: r.url, text: r.content });
+  }
   return pages.slice(0, count).sort((a, b) => a.n - b.n);
 }
