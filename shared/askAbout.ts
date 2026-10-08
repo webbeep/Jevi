@@ -213,10 +213,13 @@ export function entityOf(title: string | undefined): string | undefined {
   // A topic title ("Best apples for pie", "2026 NBA preseason", "How to …") is not a thing to ask about by name.
   const words = t.split(' ');
   if (/^\d/.test(t) || TOPIC_START.test(words[0]) || words.length > 5) return undefined;
+  // "Warriors Preseason 2026 Results", "NBA Scores Tonight": a topic, not a name (T453 ship probe).
+  if (words.some((w) => /^(19|20)\d{2}$/.test(w) || TOPIC_WORD.test(w))) return undefined;
   if (words.filter((w) => isLowerWord(w) && !SMALL.has(w)).length >= 2) return undefined;
   return t;
 }
 
+const TOPIC_WORD = /^(results?|scores?|schedule|standings|preseason|season|playoffs?|highlights|recap|news|stats|statistics|rankings?|odds|picks|predictions?|vs\.?|tonight|today|week|weekend|guide|comparison|review|reviews|deals?|prices?)$/i;
 const TOPIC_START = /^(best|top|cheapest|latest|new|how|why|when|where|which|what|who|should|is|are|can|do|does|ways|tips|guide|list|ranking)$/i;
 const SMALL = new Set(['of', 'the', 'and', 'for', 'de', 'la', 'del', 'von', 'van', 'to', 'in', 'on', 'at', '&']);
 

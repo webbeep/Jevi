@@ -83,6 +83,9 @@ test('entityOf takes the subject of a card title', () => {
   assert.equal(entityOf('BlueFlame AI'), 'BlueFlame AI');
   assert.equal(entityOf('What is BlueFlame AI?'), 'BlueFlame AI');
   assert.equal(entityOf('Who is Ray Lee'), 'Ray Lee');
+  assert.equal(entityOf('Warriors Preseason 2026 Results'), undefined);
+  assert.equal(entityOf('NBA Scores Tonight'), undefined);
+  assert.equal(entityOf('iPhone 17 Pro'), 'iPhone 17 Pro');
   assert.equal(entityOf('BlueFlame AI — agents for alternative investments'), 'BlueFlame AI');
   assert.equal(entityOf('BlueFlame AI: agents for funds'), 'BlueFlame AI');
   assert.equal(entityOf('BlueFlame AI (company)'), 'BlueFlame AI');
@@ -90,7 +93,7 @@ test('entityOf takes the subject of a card title', () => {
   assert.equal(entityOf(undefined), undefined);
   assert.equal(entityOf('x'.repeat(81)), undefined);
   assert.equal(entityOf('Bank of America'), 'Bank of America');
-  assert.equal(entityOf('NBA Preseason fixture'), 'NBA Preseason fixture');
+  assert.equal(entityOf('NBA Preseason fixture'), undefined, 'T453 ship: season/topic words make it a topic');
   // topic titles are not entities
   assert.equal(entityOf('Best apples for apple pie'), undefined);
   assert.equal(entityOf('2026 NBA preseason'), undefined);
