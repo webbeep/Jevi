@@ -236,8 +236,48 @@ function serperDate(raw: string | undefined, now = Date.now()): string | undefin
   return Number.isNaN(parsed) ? undefined : new Date(parsed).toISOString();
 }
 
+type SerperPic = { title?: string; link?: string; imageUrl?: string; source?: string };
+
+const httpsOnly = (u?: string): u is string => !!u && /^https:\/\//i.test(u);
+
+/** Pictures Serper already returned (knowledge graph, top stories, inline images): zero extra calls. */
+function serperPics(list: (SerperPic | undefined)[]): ImageResult[] {
+  return list.flatMap((p) => {
+    if (!p || !httpsOnly(p.imageUrl) || !httpsOnly(p.link)) return [];
+    const source = domainOf(p.link);
+    return [{ url: p.link, thumb: p.imageUrl, title: clip(p.title ?? '', 140), source, license: 'source' as const, credit: source }];
+  });
+}
+
+/**
+ * One Serper /images call for a picture card whose search came back without publisher pictures.
+ * Counts against the Serper daily cap (same bucket). Never throws; https originals only.
+ */
+export async function serperImages(query: string, env: Env, bucket: CapBucket, onCall?: () => void, timeoutMs = 2500): Promise<ImageResult[]> {
+  if (!hasKey(env, 'SERPER_API_KEY') || engineDead('serper')) return [];
+  if (!(await takeSlot(env, 'serper', bucket))) return [];
+  onCall?.();
+  try {
+    const data = await fetchJson<{ images?: SerperPic[] }>(
+      'https://google.serper.dev/images',
+      { method: 'POST', headers: { 'X-API-KEY': env.SERPER_API_KEY!, 'Content-Type': 'application/json' }, body: JSON.stringify({ q: query.slice(0, 200), num: 10 }) },
+      timeoutMs,
+    );
+    return serperPics(data.images ?? []).slice(0, 8);
+  } catch (err) {
+    const failure = failureOf(err);
+    if (failure.dead) rememberDead('serper');
+    return [];
+  }
+}
+
 async function serperSearch(q: Query, env: Env): Promise<{ hits: WebHit[]; images: ImageResult[] }> {
-  const data = await fetchJson<{ organic?: { title: string; link: string; snippet?: string; date?: string; imageUrl?: string }[] }>(
+  const data = await fetchJson<{
+    organic?: { title: string; link: string; snippet?: string; date?: string; imageUrl?: string }[];
+    knowledgeGraph?: { title?: string; imageUrl?: string; website?: string; descriptionLink?: string };
+    topStories?: SerperPic[];
+    images?: SerperPic[];
+  }>(
     'https://google.serper.dev/search',
     {
       method: 'POST',
@@ -256,9 +296,13 @@ async function serperSearch(q: Query, env: Env): Promise<{ hits: WebHit[]; image
       url: r.link,
       snippet: clip(r.snippet ?? '', 320),
       date: serperDate(r.date),
-      image: r.imageUrl,
+      image: httpsOnly(r.imageUrl) ? r.imageUrl : undefined,
     })),
-    images: [],
+    images: serperPics([
+      data.knowledgeGraph ? { title: data.knowledgeGraph.title, imageUrl: data.knowledgeGraph.imageUrl, link: data.knowledgeGraph.website ?? data.knowledgeGraph.descriptionLink } : undefined,
+      ...(data.topStories ?? []),
+      ...(data.images ?? []),
+    ]),
   };
 }
 
@@ -312,7 +356,8 @@ const TRIP_REASONS = new Set(['payment', 'quota', 'unavailable', 'credit']);
 
 export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUntil?: (promise: Promise<unknown>) => void, bucket: CapBucket = 'prod'): Promise<CascadeResult> {
   const skips = await loadSkips(env);
-  const blocked = (name: string) => engineDead(name) || (skips[name] ?? 0) > Date.now();
+  const forced = (name: string) => (ledger.force === 'serper-off' && name === 'serper') || (ledger.force === 'degraded' && KEYED.has(name as SearchEngine));
+  const blocked = (name: string) => forced(name) || engineDead(name) || (skips[name] ?? 0) > Date.now();
   const noteFailure = async (name: SearchEngine, failure: { dead: boolean; reason: string }, grantBonus: boolean) => {
     if (failure.dead) rememberDead(name);
     if (TRIP_REASONS.has(failure.reason)) await tripSkip(env, name, failure.reason, waitUntil);

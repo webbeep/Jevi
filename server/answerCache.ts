@@ -1,7 +1,7 @@
 import { ANSWER_TTL_S, answerCacheUrl } from '../shared/answerKey';
 import { type Send, sseResponse } from './sse';
 import type { StreamRequest } from './stream';
-import { cacheBypass } from './token';
+import { cacheBypass, testForce } from './token';
 import type { Env } from './util';
 
 export interface CacheLike {
@@ -64,6 +64,8 @@ export async function serveStream(o: {
       };
       await o.run(wrapped);
       if (o.request.headers.get('x-zo-retry') === '1') return;
+      // Forced QA faults never write a cache.
+      if (testForce(o.request, o.env)) return;
       const last = frames.at(-1);
       if (!sawDone || sawError || !sawNode || extractive || !last?.startsWith('event: done\n')) return;
       const put = cache

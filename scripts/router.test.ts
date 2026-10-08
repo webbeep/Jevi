@@ -26,3 +26,25 @@ describe('intent router', () => {
     assert.deepEqual(estimateCost(l), { calls: 4, costUsd: 0.0034 });
   });
 });
+
+import { testForce, cacheBypass } from '../server/token.ts';
+import { permitted } from '../server/images.ts';
+
+describe('QA force flag and image hygiene', () => {
+  const env = { ZO_TEST_TOKEN: 'tok' } as unknown as Parameters<typeof testForce>[1];
+  const req = (h: Record<string, string>) => new Request('https://zo.page/api/stream', { headers: h });
+  test('force flag needs a valid test token and always bypasses caches', () => {
+    assert.equal(testForce(req({ 'x-zo-test-force': 'serper-off', 'x-zo-test-token': 'tok' }), env), 'serper-off');
+    assert.equal(testForce(req({ 'x-zo-test-force': 'degraded', 'x-zo-test-token': 'tok' }), env), 'degraded');
+    assert.equal(testForce(req({ 'x-zo-test-force': 'degraded', 'x-zo-test-token': 'nope' }), env), undefined);
+    assert.equal(testForce(req({ 'x-zo-test-force': 'degraded' }), env), undefined);
+    assert.equal(testForce(req({ 'x-zo-test-force': 'degraded', 'x-zo-test-token': '' }), {} as typeof env), undefined);
+    assert.equal(testForce(req({ 'x-zo-test-force': 'other', 'x-zo-test-token': 'tok' }), env), undefined);
+    assert.equal(cacheBypass(req({ 'x-zo-test-force': 'degraded', 'x-zo-test-token': 'tok' }), env), true);
+    assert.equal(cacheBypass(req({ 'x-zo-test-force': 'degraded', 'x-zo-test-token': 'bad' }), env), false);
+  });
+  test('only https pictures pass', () => {
+    const img = (thumb: string) => ({ url: 'https://a.com/x', thumb, title: 't', source: 'a.com', license: 'source' as const });
+    assert.deepEqual(permitted([img('http://a.com/p.jpg'), img('https://a.com/p.jpg'), img('data:image/png;base64,xx')], {} as never).map((i) => i.thumb), ['https://a.com/p.jpg']);
+  });
+});

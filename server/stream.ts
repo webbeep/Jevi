@@ -1,4 +1,5 @@
 import { DEEP_PAGES, routeExtras, routeOf } from './router';
+import { serperImages } from './cascade';
 import type { AnswerCard, FollowupContext, FollowupIntent, LayoutPlan } from '../shared/card';
 import type { EngineStatus, Freshness, ImageResult, SearchResponse } from '../shared/types';
 import { rewriteQuery } from './ai';
@@ -14,7 +15,7 @@ import { entityQuery, relaxQuery } from './queryClean';
 import { type LateExtras, searchWithLate } from './search';
 import type { Send } from './sse';
 import { extraQueries, understand } from './understand';
-import { cacheBypass, validTestToken } from './token';
+import { cacheBypass, testForce, validTestToken } from './token';
 import type { Env } from './util';
 
 export interface CardOnScreen {
@@ -62,6 +63,17 @@ interface DesignArgs {
   intent?: string;
   /** Deep route: read 3–5 pages (~4s each) and ground on them. */
   deep?: boolean;
+  /** Pictures from the one extra Serper /images call, when this picture card had none. */
+  boost?: Promise<ImageResult[]>;
+}
+
+/** Card types that show pictures. Only these may spend the extra Serper /images call. */
+const PICTURE_PATTERNS = new Set(['visual', 'profile', 'spotlight', 'ranked', 'briefing']);
+
+function imageBoost(pattern: string, search: SearchResponse, env: Env, scope: AskScope, query: string): Promise<ImageResult[]> | undefined {
+  if (!PICTURE_PATTERNS.has(pattern) || scope.ledger.force) return undefined;
+  if (search.images.some((i) => i.license === 'source') || !search.results.length) return undefined;
+  return serperImages(query, env, scope.eval ? 'eval' : 'prod', () => { scope.ledger.imageCalls = 1; });
 }
 
 /** How many pages to read and how long to wait for them before designing. At most five pages per ask. */
@@ -81,12 +93,13 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
 
   // Page preview images and images from engines that answered late are often the most relevant ones.
   const lateImages = late ? await Promise.race([late.then((l) => l.images), new Promise<ImageResult[]>((r) => setTimeout(() => r([]), 150))]) : [];
+  const boosted = req.boost ? await Promise.race([req.boost, new Promise<ImageResult[]>((r) => setTimeout(() => r([]), 1500))]) : [];
   const pageImgs = pages.filter((p) => p.image).map((p) => {
     const source = req.search.results[p.n - 1]?.domain ?? '';
     return { url: p.url, thumb: p.image!, title: req.search.results[p.n - 1]?.title ?? '', source, license: 'source' as const, credit: source };
   });
   const seen = new Set(req.search.images.map((i) => i.thumb));
-  const extra = permitted([...pageImgs, ...lateImages], env).filter((i) => i.thumb && !seen.has(i.thumb) && seen.add(i.thumb));
+  const extra = permitted([...boosted, ...pageImgs, ...lateImages], env).filter((i) => i.thumb && !seen.has(i.thumb) && seen.add(i.thumb));
   if (extra.length) {
     const images = newSearch ? [...extra, ...req.search.images].slice(0, 16) : [...req.search.images, ...extra].slice(0, 24);
     req = { ...req, search: { ...req.search, images } };
@@ -190,7 +203,8 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
 
   send('search', results);
   const plan = await planned;
-  await design(send, env, { query, pattern: plan.pattern, depth: plan.depth, readPages: plan.readPages || deep, search: results, context, intent: u?.intent, deep }, started, scope, late);
+  const boost = imageBoost(plan.pattern, results, env, scope, query);
+  await design(send, env, { query, pattern: plan.pattern, depth: plan.depth, readPages: plan.readPages || deep, search: results, context, intent: u?.intent, deep, boost }, started, scope, late);
 }
 
 /**
@@ -267,8 +281,10 @@ export interface StreamOpts {
 
 export async function runStream(req: StreamRequest, env: Env, send: Send, opts?: StreamOpts): Promise<void> {
   const started = Date.now();
+  const ledger = newLedger();
+  ledger.force = opts?.request ? testForce(opts.request, env) : undefined;
   const scope: AskScope = {
-    ledger: newLedger(),
+    ledger,
     bypass: opts?.request ? cacheBypass(opts.request, env) : false,
     waitUntil: opts?.waitUntil,
     eval: opts?.request ? validTestToken(opts.request.headers.get('x-zo-test-token'), env.ZO_TEST_TOKEN) : false,

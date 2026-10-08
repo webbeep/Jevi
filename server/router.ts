@@ -53,5 +53,7 @@ export function estimateCost(ledger: CallLedger): { calls: number; costUsd: numb
     cost += n * (COST_USD[name] ?? 0);
   }
   for (const [name, n] of Object.entries(ledger.pages)) cost += n * (COST_USD[name] ?? 0);
+  calls += ledger.imageCalls ?? 0;
+  cost += (ledger.imageCalls ?? 0) * COST_USD.serper;
   return { calls, costUsd: Math.round(cost * 10000) / 10000 };
 }

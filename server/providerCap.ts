@@ -66,3 +66,32 @@ export async function takeSlot(env: Env, provider: string, bucket: CapBucket, no
     return !failClosed;
   }
 }
+
+export interface ProviderUsage {
+  used: number;
+  cap: number | null;
+}
+
+/** Today's (UTC) counts and caps per capped provider and bucket, for /api/health. Counts only, never keys. */
+export async function usageToday(env: Env, now = Date.now()): Promise<Record<string, Record<CapBucket, ProviderUsage>> | undefined> {
+  const db = d1(env);
+  if (!db) return undefined;
+  const day = new Date(now).toISOString().slice(0, 10);
+  const out: Record<string, Record<CapBucket, ProviderUsage>> = {};
+  const providers = new Set(Object.keys(DEFAULT_CAPS));
+  let rows: { provider: string; bucket: CapBucket; count: number }[] = [];
+  try {
+    rows = (await db.prepare('SELECT provider, bucket, count FROM provider_usage WHERE day = ?1').bind(day).all<{ provider: string; bucket: CapBucket; count: number }>()).results ?? [];
+  } catch {
+    return undefined;
+  }
+  for (const r of rows) providers.add(r.provider);
+  for (const p of providers) {
+    const used = (b: CapBucket) => Number(rows.find((r) => r.provider === p && r.bucket === b)?.count ?? 0);
+    out[p] = {
+      prod: { used: used('prod'), cap: capFor(env, p, 'prod') ?? null },
+      eval: { used: used('eval'), cap: capFor(env, p, 'eval') ?? null },
+    };
+  }
+  return out;
+}

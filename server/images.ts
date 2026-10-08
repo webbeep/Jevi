@@ -15,7 +15,8 @@ const GENERIC_PREVIEW = /logo|fallback|placeholder|default|favicon|sprite|share[
 
 /** Drops pictures the deployment's image policy does not allow, and publisher previews that are just branding. */
 export function permitted(images: ImageResult[], env: Env): ImageResult[] {
-  return images.filter((i) => i.license !== 'source' || (allowsSourceImages(env) && !GENERIC_PREVIEW.test(i.thumb.split('#')[0])));
+  // Never hotlink anything that isn't https.
+  return images.filter((i) => /^https:\/\//i.test(i.thumb) && (i.license !== 'source' || (allowsSourceImages(env) && !GENERIC_PREVIEW.test(i.thumb.split('#')[0]))));
 }
 
 const licenseLabel = (short?: string) => (short ? stripHtml(short).replace(/^cc-/i, 'CC ').trim() : '');

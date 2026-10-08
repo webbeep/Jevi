@@ -24,6 +24,10 @@ export interface CallLedger {
   empty?: string;
   /** Intent route for this ask (server log only). */
   route?: 'quick' | 'deep';
+  /** QA fault injection (valid test token only): skip Serper, or every keyed engine. */
+  force?: 'serper-off' | 'degraded';
+  /** Extra Serper /images calls for this card (0 or 1). */
+  imageCalls?: number;
 }
 
 export interface AskScope {
@@ -139,6 +143,8 @@ export function logAsk(ledger: CallLedger, served?: string): void {
     fellThrough: ledger.fellThrough,
     ...(served ? { served } : {}),
     ...(ledger.route ? { route: ledger.route } : {}),
+    ...(ledger.force ? { force: ledger.force } : {}),
+    ...(ledger.imageCalls ? { imageCalls: ledger.imageCalls } : {}),
     ...estimateCost(ledger),
     ...(ledger.empty ? { empty: ledger.empty } : {}),
   }));

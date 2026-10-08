@@ -20,8 +20,22 @@ export function validTestToken(presented: string | null | undefined, expected: s
   return timingSafeEqualStr(presented ?? '', expected);
 }
 
-/** QA cache bypass: `x-zo-no-cache: 1` is honored only with a valid test token. */
+export type TestForce = 'serper-off' | 'degraded';
+
+/**
+ * QA-only fault injection: `x-zo-test-force: serper-off | degraded`, honored only with a valid
+ * `x-zo-test-token`. serper-off skips Serper for the ask; degraded skips every keyed engine
+ * (Wikipedia/backup only). Forced requests bypass every cache read and write.
+ */
+export function testForce(request: Request, env: Env): TestForce | undefined {
+  const raw = request.headers.get('x-zo-test-force')?.trim().toLowerCase();
+  if (raw !== 'serper-off' && raw !== 'degraded') return undefined;
+  return validTestToken(request.headers.get('x-zo-test-token'), env.ZO_TEST_TOKEN) ? raw : undefined;
+}
+
+/** QA cache bypass: `x-zo-no-cache: 1` (or a forced test fault) is honored only with a valid test token. */
 export function cacheBypass(request: Request, env: Env): boolean {
+  if (testForce(request, env)) return true;
   if (request.headers.get('x-zo-no-cache') !== '1') return false;
   return validTestToken(request.headers.get('x-zo-test-token'), env.ZO_TEST_TOKEN);
 }
