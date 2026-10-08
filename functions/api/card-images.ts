@@ -1,11 +1,15 @@
+import type { CardNode } from '../../shared/card';
+import type { SearchResult } from '../../shared/types';
+import { findImages } from '../../server/images';
 import { ogImageOf } from '../../server/pages';
-import { rowEntity } from '../../server/rowImages';
+import { fillRowImages, rowEntity } from '../../server/rowImages';
 import { Env, errorJson, json } from '../../server/util';
 
 /**
  * T442 refill for old threads: POST { items: [{ name, source? }] } → { images: (string | null)[] } in the same order.
  * Not an ask: no free-use count, no Serper call (the daily cap stays for real asks). Each item with its own
- * https source page (not shared with another item) gets that page's og:image, ~2s per page, at most 8 pages.
+ * https source page (not shared with another item) gets that page's og:image (~2s, at most 8 pages);
+ * name-like items still blank get a free Wikipedia/Commons/Openverse lookup.
  * Responses are edge-cached for a day by request body.
  */
 const MAX_ITEMS = 12;
@@ -16,7 +20,7 @@ interface Item {
   source?: unknown;
 }
 
-export const onRequestPost: PagesFunction<Env> = async ({ request, waitUntil }) => {
+export const onRequestPost: PagesFunction<Env> = async ({ request, env, waitUntil }) => {
   let body: { items?: Item[] };
   try {
     body = (await request.json()) as { items?: Item[] };
@@ -37,17 +41,13 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, waitUntil }) 
   const hit = await cache.match(cacheKey);
   if (hit) return hit;
 
-  const perSource = new Map<string, number>();
-  for (const i of items) if (i.source) perSource.set(i.source, (perSource.get(i.source) ?? 0) + 1);
-  let budget = MAX_OG;
-  const used = new Set<string>();
-  const images = await Promise.all(
-    items.map(async (i) => {
-      if (!i.source || perSource.get(i.source) !== 1 || budget-- <= 0) return null;
-      return (await ogImageOf(i.source, 2000)) ?? null;
-    }),
-  );
-  const unique = images.map((src) => (src && !used.has(src) && used.add(src) ? src : null));
+  // Same filler as live cards, minus the Serper call: og:image of each item's own unshared source, then free name lookups.
+  const urls = [...new Set(items.flatMap((i) => (i.source ? [i.source] : [])))];
+  const results: SearchResult[] = urls.map((url) => ({ title: '', url, snippet: '', domain: '', engines: [] }));
+  const node: CardNode = { type: 'list', style: 'media', items: items.map((i) => ({ text: i.name || ' ', source: i.source ? urls.indexOf(i.source) + 1 : undefined })) };
+  const filled = await fillRowImages([node], { results, pool: [], og: (url) => ogImageOf(url, 2000), ogMax: MAX_OG, lookup: (name) => findImages(name, env, 3, false) });
+  const out = filled.nodes[0] as Extract<CardNode, { type: 'list' }>;
+  const unique = out.items.map((i) => i.imageSrc ?? null);
   const res = json({ images: unique }, 200, { 'cache-control': 'public, max-age=86400' });
   waitUntil(cache.put(cacheKey, res.clone()));
   return res;

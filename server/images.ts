@@ -11,7 +11,10 @@ const TIMEOUT_MS = 3000;
 export const allowsSourceImages = (env: Env) => env.IMAGE_POLICY !== 'open';
 
 /** Site-wide publisher previews (logos, placeholders, icons) say nothing about the subject. */
-const GENERIC_PREVIEW = /logo|fallback|placeholder|default|favicon|sprite|share[-_]?image|social[-_]?(card|share)|\bicons?\b|blank|spacer|\.(gif|svg|ico)(\?|$)/i;
+const GENERIC_PREVIEW = /logo|fallback|placeholder|default|favicon|\bfav\b|apple-touch|sprite|share[-_]?image|social[-_]?(card|share)|\bicons?\b|blank|spacer|\.(gif|svg|ico)(\?|$)/i;
+
+/** A site-wide preview (logo, favicon, placeholder) rather than a picture of the subject. */
+export const isGenericPreview = (url: string) => GENERIC_PREVIEW.test(url.split('#')[0]);
 
 /** Drops pictures the deployment's image policy does not allow, and publisher previews that are just branding. */
 export function permitted(images: ImageResult[], env: Env): ImageResult[] {

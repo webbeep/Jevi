@@ -4,6 +4,7 @@ import type { AskScope } from './budget';
 import { engineDead, failureOf, rememberDead } from './budget';
 import { loadSkips, tripSkip } from './engineSkip';
 import { readPage } from './htmlcap';
+import { isGenericPreview } from './images';
 import { type LateExtras, normalizeUrl } from './search';
 import { HttpStatusError, type Env, stripHtml } from './util';
 
@@ -58,7 +59,7 @@ export async function ogImageOf(url: string, timeoutMs = 2000): Promise<string |
     if (!res.ok || !res.headers.get('content-type')?.includes('html')) return undefined;
     const { head, body } = await readPage(res);
     const image = ogImage(head || body.slice(0, 20_000), res.url || url);
-    return image && /^https:\/\//i.test(image) ? image : undefined;
+    return image && /^https:\/\//i.test(image) && !isGenericPreview(image) ? image : undefined;
   } catch {
     return undefined;
   }

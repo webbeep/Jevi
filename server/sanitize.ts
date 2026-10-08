@@ -93,7 +93,8 @@ function sanitizeNode(raw: unknown, imageCount: number, depth: number, ctx?: { s
     case 'stat': {
       const label = str(n.label, 60);
       const value = str(n.value, 40);
-      return label && value ? { type, label, value, unit: str(n.unit, 20), icon: icon(n.icon), delta: str(n.delta, 30), trend: oneOf(n.trend, ['up', 'down', 'flat'] as const) } : undefined;
+      const image = str(n.image, 500);
+      return label && value ? { type, label, value, unit: str(n.unit, 20), icon: icon(n.icon), delta: str(n.delta, 30), trend: oneOf(n.trend, ['up', 'down', 'flat'] as const), image: image && /^https:\/\//i.test(image) ? image : undefined } : undefined;
     }
     case 'tile': {
       const label = str(n.label, 60);

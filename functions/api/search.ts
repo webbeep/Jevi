@@ -1,5 +1,6 @@
 import type { Freshness } from '../../shared/types';
 import { newLedger } from '../../server/budget';
+import { publicSearch } from '../../server/publicPayload';
 import { search } from '../../server/search';
 import { cacheBypass, testForce, validTestToken } from '../../server/token';
 import { Env, errorJson, json } from '../../server/util';
@@ -16,7 +17,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env, waitUntil
   const bypass = cacheBypass(request, env);
   const evalAsk = validTestToken(request.headers.get('x-zo-test-token'), env.ZO_TEST_TOKEN);
   const cache = caches.default;
-  const cacheKey = new Request(`${url.origin}/api/search?q=${encodeURIComponent(q.toLowerCase())}&freshness=${freshness}&v=2`);
+  const cacheKey = new Request(`${url.origin}/api/search?q=${encodeURIComponent(q.toLowerCase())}&freshness=${freshness}&v=3`);
   if (!bypass) {
     const cached = await cache.match(cacheKey);
     if (cached) return cached;
@@ -26,7 +27,9 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env, waitUntil
     const ledger = newLedger();
     ledger.force = testForce(request, env);
     const data = await search({ q, freshness, count: 20 }, env, { ledger, bypass, eval: evalAsk, waitUntil: (p) => waitUntil(p) });
-    const res = json(data, 200, { 'cache-control': bypass ? 'no-store' : 'public, max-age=600' });
+    // Provider names only for valid test-token callers (QA), and those responses are never edge-cached.
+    if (evalAsk) return json(data, 200, { 'cache-control': 'no-store' });
+    const res = json(publicSearch(data), 200, { 'cache-control': bypass ? 'no-store' : 'public, max-age=600' });
     if (!bypass && data.results.length && !(data as { degraded?: boolean }).degraded) waitUntil(cache.put(cacheKey, res.clone()));
     return res;
   } catch (err) {

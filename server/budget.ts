@@ -30,6 +30,8 @@ export interface CallLedger {
   imageCalls?: number;
   /** T442: tiles/rows that got a picture after design, and og:image fetches spent. */
   rowPics?: { filled: number; og: number };
+  /** Model that wrote the card (server log only). */
+  via?: string;
 }
 
 export interface AskScope {
@@ -148,6 +150,7 @@ export function logAsk(ledger: CallLedger, served?: string): void {
     ...(ledger.force ? { force: ledger.force } : {}),
     ...(ledger.imageCalls ? { imageCalls: ledger.imageCalls } : {}),
     ...(ledger.rowPics ? { rowPics: ledger.rowPics } : {}),
+    ...(ledger.via ? { via: ledger.via } : {}),
     ...estimateCost(ledger),
     ...(ledger.empty ? { empty: ledger.empty } : {}),
   }));

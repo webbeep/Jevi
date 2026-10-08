@@ -1,5 +1,6 @@
 import { DEEP_PAGES, routeExtras, routeOf } from './router';
 import { serperImages } from './cascade';
+import { publicEvent } from './publicPayload';
 import type { RowImagePlan } from './pictures';
 import type { AnswerCard, FollowupContext, FollowupIntent, LayoutPlan } from '../shared/card';
 import type { EngineStatus, Freshness, ImageResult, SearchResponse } from '../shared/types';
@@ -303,9 +304,15 @@ export interface StreamOpts {
   waitUntil?: (promise: Promise<unknown>) => void;
 }
 
-export async function runStream(req: StreamRequest, env: Env, send: Send, opts?: StreamOpts): Promise<void> {
+export async function runStream(req: StreamRequest, env: Env, rawSend: Send, opts?: StreamOpts): Promise<void> {
   const started = Date.now();
   const ledger = newLedger();
+  // Provider and model names never reach the client (t432); the model goes to the server log.
+  const send: Send = (event, data) => {
+    const out = publicEvent(event, data);
+    if (out.via) ledger.via = out.via;
+    rawSend(event, out.data);
+  };
   ledger.force = opts?.request ? testForce(opts.request, env) : undefined;
   const scope: AskScope = {
     ledger,

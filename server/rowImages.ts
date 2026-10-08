@@ -15,6 +15,8 @@ export interface RowImageDeps {
   /** The card's single picture search (shared with the T436 boost); resolves [] when not allowed. */
   cardImages?: () => Promise<ImageResult[]>;
   og?: (url: string) => Promise<string | undefined>;
+  /** Free per-name picture lookup (Wikipedia, Commons, Openverse; 0 paid calls), tried for name-like rows before og:image. */
+  lookup?: (entity: string) => Promise<ImageResult[]>;
   /** Most og:image fetches per card. */
   ogMax?: number;
 }
@@ -159,6 +161,17 @@ export async function fillRowImages(nodes: CardNode[], deps: RowImageDeps, used:
       const hit = pick(s.entity, found, siblings, used);
       if (hit) take(s, hit.thumb);
     }
+  }
+
+  // 2b. Free per-name lookups (Wikipedia first) for name-like rows still blank, at most 6, ~2s.
+  if (deps.lookup) {
+    const want = all.filter((s) => !s.src && nameLike(s.entity)).slice(0, 6);
+    const found = await Promise.all(want.map((s) => Promise.race([deps.lookup!(s.entity).catch(() => [] as ImageResult[]), new Promise<ImageResult[]>((r) => setTimeout(() => r([]), 2000))])));
+    want.forEach((s, i) => {
+      if (s.src) return;
+      const hit = pick(s.entity, found[i], siblings, used);
+      if (hit) take(s, hit.thumb);
+    });
   }
 
   // 3. The row's source page og:image, a few in parallel with a short timeout.
