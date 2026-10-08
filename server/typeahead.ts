@@ -4,6 +4,7 @@
  * so the client can fall back to history and starters.
  */
 import { normalizePrefix } from '../shared/typeahead.ts';
+import { canSpend, charge, charsToTokens, estimateNeurons, neuronsFromResponse, releaseBudget } from './aiBudget.ts';
 import { isQuotaError, markWorkersAiQuota, nextUtcMidnight, workersAiQuotaDown } from './aiQuota.ts';
 import type { Env } from './util';
 
@@ -152,21 +153,33 @@ export async function suggestTypeahead(q: string, env: Env): Promise<TypeaheadRe
   if (Date.now() < aiDownUntil || workersAiQuotaDown()) return none(t0, 'ai cooling down');
 
   const model = env.TYPEAHEAD_MODEL || DEFAULT_MODEL;
+  const messages = [
+    { role: 'system', content: 'You complete everyday search queries. Reply with exactly 5 lines, no numbering, no quotes, no extra prose.' },
+    { role: 'user', content: `Return 5 short everyday search-query completions that start with or extend this prefix. One per line, no numbering.\nPrefix: ${prefix}` },
+  ];
+  const maxOut = 60;
+  const est = estimateNeurons(model, charsToTokens(messages[0].content.length + messages[1].content.length), maxOut);
+  if (!(await canSpend(env, est))) {
+    if (workersAiQuotaDown()) return none(t0, '4006: neuron cap');
+    return none(t0, 'ai budget');
+  }
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let held = est;
   try {
     const raced = await Promise.race([
       ai.run(model, {
-        messages: [
-          { role: 'system', content: 'You complete everyday search queries. Reply with exactly 5 lines, no numbering, no quotes, no extra prose.' },
-          { role: 'user', content: `Return 5 short everyday search-query completions that start with or extend this prefix. One per line, no numbering.\nPrefix: ${prefix}` },
-        ],
-        max_tokens: 60,
+        messages,
+        max_tokens: maxOut,
         temperature: 0.2,
       }).then((v) => ({ ok: true as const, v })).catch((e: unknown) => ({ ok: false as const, why: `error: ${e instanceof Error ? e.message : String(e)}` })),
       new Promise<{ ok: false; why: string }>((resolve) => {
         timer = setTimeout(() => resolve({ ok: false, why: 'timeout' }), AI_TIMEOUT_MS);
       }),
     ]);
+    // The run is already in flight on timeout, so count the ceiling either way.
+    const billed = raced.ok ? neuronsFromResponse(model, raced.v, est) : est;
+    charge(env, billed, held);
+    held = 0;
     if (!raced.ok) {
       markAiDown(raced.why);
       return none(t0, raced.why);
@@ -178,6 +191,7 @@ export async function suggestTypeahead(q: string, env: Env): Promise<TypeaheadRe
     await writeEdgeCache(prefix, suggestions);
     return { suggestions, source: 'ai', ms: Date.now() - t0 };
   } catch (e) {
+    if (held) releaseBudget(held);
     return none(t0, `error: ${e instanceof Error ? e.message : String(e)}`);
   } finally {
     if (timer) clearTimeout(timer);

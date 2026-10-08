@@ -1,5 +1,6 @@
 import { applyGate } from '../../server/auth/gate';
 import type { Freshness, SearchResponse } from '../../shared/types';
+import { bindAiWaitUntil } from '../../server/aiBudget';
 import { serveStream } from '../../server/answerCache';
 import { type StreamRequest, runStream } from '../../server/stream';
 import { Env, errorJson, json, readJson } from '../../server/util';
@@ -63,5 +64,6 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env, waitUnti
   }
   if (!body) return stamp(errorJson('Invalid request', 400), gate.headers);
   const req = body;
+  bindAiWaitUntil(env, waitUntil);
   return stamp(await serveStream({ request, env, req, run: (send) => runStream(req, env, send), waitUntil }), gate.headers);
 };

@@ -1,3 +1,4 @@
+import { canSpend, charge, charsToTokens, estimateNeurons, neuronsFromResponse } from './aiBudget.ts';
 import { isQuotaError, markWorkersAiQuota, workersAiQuotaDown } from './aiQuota.ts';
 import type { Env } from './util';
 
@@ -167,7 +168,18 @@ function parseObject<T>(text: string): T {
   }
 }
 
-async function jsonFrom<T>(p: Provider, system: string, user: string, maxTokens: number): Promise<T> {
+function budgetRefusal(): ProviderError {
+  return new ProviderError(workersAiQuotaDown() ? '4006: daily neuron cap' : 'Workers AI budget unavailable', workersAiQuotaDown() ? 86_400_000 : 30_000);
+}
+
+/** Reserves the worst-case neuron cost. Null means do not call the model. */
+async function reserveWorkersAi(env: Env, model: string, inChars: number, maxOut: number): Promise<number | null> {
+  const est = estimateNeurons(model, charsToTokens(inChars), maxOut);
+  if (!(await canSpend(env, est))) return null;
+  return est;
+}
+
+async function jsonFrom<T>(env: Env, p: Provider, system: string, user: string, maxTokens: number): Promise<T> {
   switch (p.kind) {
     case 'http': {
       const deepseek = p.id === 'deepseek';
@@ -184,8 +196,20 @@ async function jsonFrom<T>(p: Provider, system: string, user: string, maxTokens:
       return parseObject<T>(data.choices?.[0]?.message?.content ?? '');
     }
     case 'binding': {
-      const out = (await deadline(p.ai.run(p.model, { messages: messages(system, trimForWorkersAi(user, p.maxChars)), max_tokens: Math.min(maxTokens + 500, 1500), temperature: 0.4 }), 25_000, p.label)) as { response?: unknown };
-      return typeof out.response === 'object' && out.response ? (out.response as T) : parseObject<T>(String(out.response ?? ''));
+      const userTrim = trimForWorkersAi(user, p.maxChars);
+      const maxOut = Math.min(maxTokens + 500, 1500);
+      const est = await reserveWorkersAi(env, p.model, system.length + userTrim.length, maxOut);
+      if (est === null) throw budgetRefusal();
+      let hold = est;
+      try {
+        const out = (await deadline(p.ai.run(p.model, { messages: messages(system, userTrim), max_tokens: maxOut, temperature: 0.4 }), 25_000, p.label)) as { response?: unknown };
+        charge(env, neuronsFromResponse(p.model, out, est), hold);
+        hold = 0;
+        return typeof out.response === 'object' && out.response ? (out.response as T) : parseObject<T>(String(out.response ?? ''));
+      } catch (err) {
+        if (hold) charge(env, hold, hold);
+        throw err;
+      }
     }
     default: {
       const unreachable: never = p;
@@ -280,7 +304,7 @@ async function readSse(body: ReadableStream<Uint8Array>, onText: (t: string) => 
   }
 }
 
-async function streamFrom(p: Provider, system: string, user: string, maxTokens: number, think: boolean, onText: (t: string) => void, onReasoning: () => void): Promise<void> {
+async function streamFrom(env: Env, p: Provider, system: string, user: string, maxTokens: number, think: boolean, onText: (t: string) => void, onReasoning: () => void): Promise<void> {
   switch (p.kind) {
     case 'http': {
       const deepseek = p.id === 'deepseek';
@@ -296,10 +320,24 @@ async function streamFrom(p: Provider, system: string, user: string, maxTokens: 
       return readSse(res.body, onText, onReasoning);
     }
     case 'binding': {
-      const out = await deadline(p.ai.run(p.model, { messages: messages(system, trimForWorkersAi(user, p.maxChars)), max_tokens: Math.min(maxTokens + 500, 1500), temperature: 0.4, stream: true }), 15_000, p.label);
-      if (out instanceof ReadableStream) return deadline(readSse(out as ReadableStream<Uint8Array>, onText, onReasoning), 60_000, p.label);
-      onText(String((out as { response?: unknown }).response ?? ''));
-      return;
+      const userTrim = trimForWorkersAi(user, p.maxChars);
+      const maxOut = Math.min(maxTokens + 500, 1500);
+      const est = await reserveWorkersAi(env, p.model, system.length + userTrim.length, maxOut);
+      if (est === null) throw budgetRefusal();
+      let hold = est;
+      try {
+        const out = await deadline(p.ai.run(p.model, { messages: messages(system, userTrim), max_tokens: maxOut, temperature: 0.4, stream: true }), 15_000, p.label);
+        // A stream has no usage object; charge the pre-call ceiling (input chars/4 + max_tokens).
+        const billed = out instanceof ReadableStream ? est : neuronsFromResponse(p.model, out, est);
+        charge(env, billed, hold);
+        hold = 0;
+        if (out instanceof ReadableStream) return deadline(readSse(out as ReadableStream<Uint8Array>, onText, onReasoning), 60_000, p.label);
+        onText(String((out as { response?: unknown }).response ?? ''));
+        return;
+      } catch (err) {
+        if (hold) charge(env, hold, hold);
+        throw err;
+      }
     }
     default: {
       const unreachable: never = p;
@@ -329,7 +367,7 @@ export async function llmJson<T>(env: Env, system: string, user: string, maxToke
   let last: unknown;
   for (const p of candidates(env)) {
     try {
-      return await jsonFrom<T>(p, system, user, maxTokens);
+      return await jsonFrom<T>(env, p, system, user, maxTokens);
     } catch (err) {
       fail(p, err);
       last = err;
@@ -366,7 +404,7 @@ export async function llmLines(
       }
     };
     try {
-      await streamFrom(p, system, user, maxTokens, !!opts.think, (t) => {
+      await streamFrom(env, p, system, user, maxTokens, !!opts.think, (t) => {
         text += t;
         // `text` holds no newline between flushes, so a delta without one cannot finish a line.
         // Skipping the split here keeps a long line from being re-split on every token (quadratic CPU).

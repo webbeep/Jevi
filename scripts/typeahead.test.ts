@@ -1,13 +1,21 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { beforeEach, test } from 'node:test';
+import { resetAiBudgetState } from '../server/aiBudget.ts';
+import { resetWorkersAiQuota } from '../server/aiQuota.ts';
 import { parseAiLines, suggestTypeahead } from '../server/typeahead.ts';
 import type { Env } from '../server/util.ts';
+import { openBudgetDb } from './memoryBudgetDb.ts';
 import {
   createDebouncer,
   matchLocal,
   mergeSuggestions,
   normalizePrefix,
 } from '../shared/typeahead.ts';
+
+beforeEach(() => {
+  resetAiBudgetState();
+  resetWorkersAiQuota();
+});
 
 test('normalizePrefix trims, lowercases, collapses spaces, and clips to 80', () => {
   assert.equal(normalizePrefix('  Best   Wireless\tEarbuds  '), 'best wireless earbuds');
@@ -73,6 +81,7 @@ test('parseAiLines strips numbering, quotes, and bullets, and drops empties and 
 test('suggestTypeahead returns AI lines, then serves the isolate cache', async () => {
   let calls = 0;
   const env = {
+    DB: openBudgetDb(),
     AI: {
       async run() {
         calls += 1;
@@ -89,21 +98,21 @@ test('suggestTypeahead returns AI lines, then serves the isolate cache', async (
 });
 
 test('suggestTypeahead returns none when AI is off, errors, or times out', async () => {
-  const off = await suggestTypeahead('quark disabled zz', { TYPEAHEAD: 'off', AI: { async run() { throw new Error('should not run'); } } } as Env);
+  const off = await suggestTypeahead('quark disabled zz', { TYPEAHEAD: 'off', DB: openBudgetDb(), AI: { async run() { throw new Error('should not run'); } } } as Env);
   assert.equal(off.source, 'none');
   assert.deepEqual(off.suggestions, []);
 
   // Timeout first: an error starts a cooldown that would skip the AI call.
-  const timed = await suggestTypeahead('quark timeout zz', { AI: { run: () => new Promise(() => {}) } } as Env);
+  const timed = await suggestTypeahead('quark timeout zz', { DB: openBudgetDb(), AI: { run: () => new Promise(() => {}) } } as Env);
   assert.equal(timed.source, 'none');
   assert.ok(timed.ms >= 700);
 
-  const failed = await suggestTypeahead('quark explode zz', { AI: { async run() { throw new Error('4006: you have used up your daily free allocation of 10,000 neurons'); } } } as Env);
+  const failed = await suggestTypeahead('quark explode zz', { DB: openBudgetDb(), AI: { async run() { throw new Error('4006: you have used up your daily free allocation of 10,000 neurons'); } } } as Env);
   assert.equal(failed.source, 'none');
   assert.match(failed.reason ?? '', /4006/);
 
   let calls = 0;
-  const after = await suggestTypeahead('quark after quota zz', { AI: { async run() { calls++; return { response: 'a\nb\nc' }; } } } as Env);
+  const after = await suggestTypeahead('quark after quota zz', { DB: openBudgetDb(), AI: { async run() { calls++; return { response: 'a\nb\nc' }; } } } as Env);
   assert.equal(after.source, 'none');
   assert.equal(after.reason, 'ai cooling down');
   assert.equal(calls, 0, 'quota error skips AI until the daily reset');

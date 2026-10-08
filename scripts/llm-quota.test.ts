@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict';
 import { afterEach, test } from 'node:test';
+import { resetAiBudgetState } from '../server/aiBudget.ts';
 import { isQuotaError, nextUtcMidnight, resetWorkersAiQuota, workersAiQuotaDown } from '../server/aiQuota.ts';
 import { hasLlm, llmJson, trimForWorkersAi } from '../server/llm.ts';
 import type { Env } from '../server/util.ts';
+import { openBudgetDb } from './memoryBudgetDb.ts';
 
 const realNow = Date.now;
 
 afterEach(() => {
   resetWorkersAiQuota();
+  resetAiBudgetState();
   Date.now = realNow;
 });
 
@@ -40,6 +43,7 @@ test('a neuron quota error hides Workers AI until the next UTC midnight', async 
   Date.now = () => fixed;
   let calls = 0;
   const env = {
+    DB: openBudgetDb(),
     AI: {
       async run() {
         calls += 1;
@@ -60,6 +64,7 @@ test('a non-quota binding error does not trip the daily quota flag', async () =>
   resetWorkersAiQuota();
   let calls = 0;
   const env = {
+    DB: openBudgetDb(),
     AI: {
       async run() {
         calls += 1;
@@ -79,6 +84,7 @@ test('the binding defaults to the 8b model and a user message within 4000 chars'
   let model = '';
   let user = '';
   const env = {
+    DB: openBudgetDb(),
     AI: {
       async run(m: string, input: { messages?: { role?: string; content?: string }[] }) {
         model = m;
