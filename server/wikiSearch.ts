@@ -93,30 +93,3 @@ export async function fetchWikiDisambiguation(name: string): Promise<WikiHit | n
   return null;
 }
 
-
-/** REST summary lead image (keyless, 0 Serper) for a kept en.wikipedia.org/wiki/<Title> row. */
-export async function fetchWikiLeadImage(pageUrl: string): Promise<{ title: string; description?: string; thumb: string; url: string } | null> {
-  const m = /^https:\/\/en\.wikipedia\.org\/wiki\/([^#?]+)/i.exec(pageUrl);
-  if (!m) return null;
-  let title: string;
-  try {
-    title = decodeURIComponent(m[1]!);
-  } catch {
-    return null;
-  }
-  if (/\(disambiguation\)/i.test(title)) return null;
-  try {
-    const data = await fetchJsonCapped<WikiSummary & { description?: string; thumbnail?: { source?: string } }>(
-      `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`,
-      { headers: { 'User-Agent': WIKI_UA, Accept: 'application/json' } },
-      2500,
-      WIKI_BODY_CAP,
-    );
-    if (data.type === 'disambiguation') return null;
-    const thumb = data.thumbnail?.source;
-    if (!thumb || !/^https:\/\//i.test(thumb)) return null;
-    return { title: data.title ?? title.replace(/_/g, ' '), description: data.description, thumb, url: data.content_urls?.desktop?.page ?? pageUrl };
-  } catch {
-    return null;
-  }
-}

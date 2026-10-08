@@ -7,7 +7,6 @@ import {
   matchesEntity,
   priorEntity,
   resolveEntity,
-  disambiguationEntries,
   contextTerms,
   hasFullPersonName,
   personSourceOk,
@@ -360,41 +359,4 @@ test('spam *.web.app random subdomains are blocked; named hosts are not', () => 
   assert.equal(isBlockedHost('https://x7k9m2qp1ab.web.app/'), true);
   assert.equal(isBlockedHost('https://docs.web.app/guide'), false);
   assert.equal(isBlockedHost('https://my-app.web.app/'), false);
-});
-
-describe('entity3 clean choice labels (GATE-c234daf)', () => {
-  const ray = [
-    { title: 'Ray Lee - Co-founder & CEO at Raycon', url: 'https://www.linkedin.com/in/rayleeny', snippet: 'Co-founder & CEO at Raycon Inc. New York' },
-    { title: 'Ray Lee', url: 'https://filmfreeway.com/RayLeeProducer', snippet: 'Ray Lee, an Associate Professor and film director based in Kuala Lumpur' },
-    { title: 'Ray Lee/4.0 - NoPixel Wiki - Fandom', url: 'https://nopixel.fandom.com/wiki/Ray_Lee/4.0', snippet: 'Ray Lee is a Deputy State Marshal for the San Andreas State Marshals' },
-    { title: 'Ray Lee', url: 'https://en.wikipedia.org/wiki/Ray_Lee', snippet: 'Raymond Maurice Lee is an English former footballer who played as a right winger for Arsenal.' },
-  ];
-  test('location takes "in", org takes "of"/"at", bare org is "Linked to", fandom never seeds', () => {
-    const d = resolveEntity('Who is Ray Lee', ray, { pattern: 'profile' });
-    assert.equal(d.kind, 'choices');
-    const labels = d.kind === 'choices' ? d.choices.map((c) => c.descriptor) : [];
-    assert.ok(labels.includes('CEO of Raycon'), labels.join(' | '));
-    assert.ok(labels.includes('Director in Kuala Lumpur'), labels.join(' | '));
-    assert.ok(labels.includes('Linked to Arsenal'), labels.join(' | '));
-    for (const l of labels) {
-      assert.ok(l.length <= 40, l);
-      assert.ok(!/San Andreas/i.test(l), l);
-      assert.ok(!/\bof (Kuala Lumpur|Los Angeles)\b/.test(l), l);
-      assert.ok(!/\bU\.S$/.test(l), l);
-      assert.ok(!/\b(CEO|Coach|Founder|Player)\b.*\b(CEO|Coach|Founder|Player)\b/.test(l), `mashed: ${l}`);
-    }
-  });
-  test('a clipped "U.S" is dropped, never shown; trailing clause after ". " is cut', () => {
-    const d = resolveEntity('Who is David Kim', [
-      { title: 'David Kim', url: 'https://www.stimson.org/ppl/david-kim/', snippet: 'David Y. Kim is an analyst with the Stimson Center. He formerly worked as a political appointee at the U.S. ...' },
-      { title: 'David Kim', url: 'https://www.imdb.com/name/nm4148095/', snippet: 'David Kim. Actor: Bleeding Iowa. David Sung-Joon Kim grew up in Los Angeles training in martial arts.' },
-    ], { pattern: 'profile' });
-    const labels = d.kind === 'choices' ? d.choices.map((c) => c.descriptor) : [];
-    for (const l of labels) assert.ok(!/U\.S$/.test(l) && !/\.\s\w/.test(l), l);
-  });
-  test('Wikipedia disambiguation gloss gives the clean role', () => {
-    const row = { title: 'David Kim', url: 'https://en.wikipedia.org/wiki/David_Kim', snippet: 'David Kim may refer to: David Kim (violinist), American violinist; David Kim (restaurateur), American businessman and CEO of Baja Fresh.' };
-    const labels = disambiguationEntries(row, 'David Kim').map((e) => e.label);
-    assert.deepEqual(labels.slice(0, 2), ['Violinist', 'Restaurateur']);
-  });
 });

@@ -1,5 +1,5 @@
 import { nameLike, tokens, type EntityHint } from './imageGate';
-import { isBlockedHost, isFictionHost } from './spamHosts';
+import { isBlockedHost } from './spamHosts';
 
 /**
  * T444 entity disambiguation for people/profile asks.
@@ -205,7 +205,7 @@ const ROLE1 = new Set([
   'architect', 'pharmacist', 'therapist', 'surgeon', 'pilot', 'astronaut', 'journalist', 'reporter', 'editor',
   'producer', 'entrepreneur', 'investor', 'banker', 'economist', 'historian', 'activist', 'politician',
   'diplomat', 'sheriff', 'clerk', 'violinist', 'guitarist', 'drummer', 'composer', 'dancer', 'poet',
-  'novelist', 'scholar', 'restaurateur', 'businessman', 'businesswoman', 'dean', 'principal', 'quarterback', 'pitcher', 'chairman', 'spokesperson',
+  'novelist', 'scholar', 'dean', 'principal', 'quarterback', 'pitcher', 'chairman', 'spokesperson',
   'nurse', 'librarian', 'pastor', 'rabbi', 'monk', 'chief', 'king', 'queen', 'prince', 'princess',
 ]);
 
@@ -213,8 +213,7 @@ const ROLE1 = new Set([
 function canonRole(matched: string): { display: string; core: string } {
   const low = matched.toLowerCase();
   const core = low === 'mayoral' ? 'mayor' : low === 'presidential' ? 'president' : low;
-  const display = /^(ceo|cto|cfo|coo)$/i.test(core) ? core.toUpperCase()
-    : core.split(' ').map((w) => w[0]!.toUpperCase() + w.slice(1)).join(' ');
+  const display = core.split(' ').map((w) => w[0]!.toUpperCase() + w.slice(1)).join(' ');
   return { display, core };
 }
 
@@ -505,62 +504,33 @@ function cleanPhrase(s: string, max = 28): string {
   const out: string[] = [];
   const seen = new Set<string>();
   for (const w of words) {
-    const k = low(w.replace(/\./g, ''));
+    const k = low(w);
     if (seen.has(k)) continue;
     // Drop role words that leaked into an org capture ("USATF CEO Max" → keep org head).
-    if (ROLE1.has(low(w)) || ROLE2.some((r) => low(w) === r.split(' ')[0])) continue;
+    if (ROLE1.has(k) || ROLE2.some((r) => k === r.split(' ')[0])) continue;
     seen.add(k);
     out.push(w);
     if (out.join(' ').length >= max) break;
   }
-  let joined = out.join(' ');
-  // Never leave a clipped abbreviation ("U.S" / "U.").
-  if (/\b[A-Z]\.$/.test(joined) || /\bU\.S$/.test(joined)) {
-    const parts = joined.split(/\s+/);
-    parts.pop();
-    joined = parts.join(' ');
-  }
+  const joined = out.join(' ');
   return joined.length > max ? `${joined.slice(0, max - 1).trim()}…` : joined;
 }
 
-function describe(top: { role?: string; org?: string; location?: string; label?: string }, rows: EntityRow[], name: string): string {
-  // Wikipedia disambiguation gloss is usually the cleanest one-liner.
-  const wikiLabel = (top.label ?? '').trim().replace(/\s+/g, ' ');
-  if (wikiLabel && wikiLabel.length >= 3 && wikiLabel.length <= 40) {
-    // Reject mashed labels ("Coach at USATF CEO Max").
-    if (!/\b(CEO|Founder|Coach|Player|Director|Author)\b.*\b(CEO|Founder|Coach|Player|Director|Author)\b/i.test(wikiLabel)) {
-      return title(wikiLabel).slice(0, 40);
-    }
-  }
+function describe(top: { role?: string; org?: string; location?: string }, rows: EntityRow[], name: string): string {
   const role = top.role ? title(top.role) : '';
-  let org = top.org ? cleanPhrase(top.org) : '';
-  let loc = top.location ? cleanPhrase(top.location, 20) : '';
-  // A bare city captured as org → location ("Actor in Los Angeles").
-  if (org && !loc && /^(Los Angeles|New York|London|Chicago|Paris|Tokyo|Kuala Lumpur|San Francisco|Austin|Boston|Seattle|Portland|Philadelphia)$/i.test(org)) {
-    loc = org;
-    org = '';
-  }
+  const org = top.org ? cleanPhrase(top.org) : '';
+  const loc = top.location ? cleanPhrase(top.location, 20) : '';
   let raw = '';
-  // Drop trailing clause after ". " ("Sweeney Todd. Other Broadway" → "Sweeney Todd"), but keep "U.S. Bank".
-  if (org && /\.\s+/.test(org) && !/^U\.S\.\b/i.test(org)) org = org.split(/\.\s+/)[0]!.trim();
-  org = org.replace(/[.,;:]+$/g, '').trim();
-  loc = loc.replace(/[.,;:]+$/g, '').trim();
-  // Creative roles: prefer "Actor in Los Angeles" over "Actor at Show-Name".
-  if (role && org && loc && /^(actor|actress|director|writer|author|producer|professor)$/i.test(role)) {
-    raw = `${role} in ${loc}`;
-  } else if (role && org) raw = /^(ceo|cto|cfo|coo|founder|president|chairman)$/i.test(role) ? `${role} of ${org}` : `${role} at ${org}`;
-  else if (role && loc) raw = `${role} in ${loc}`;
+  if (role && org) raw = /^(ceo|cto|cfo|coo|founder|president|director|chairman)$/i.test(role) ? `${role} of ${org}` : `${role} at ${org}`;
+  else if (role && loc) raw = `${role} of ${loc}`;
   else if (role) raw = role;
-  else if (org) {
-    raw = `Linked to ${org}`;
-    if (raw.length > 40) raw = org;
-  } else if (loc) {
-    raw = `Based in ${loc}`;
-    if (raw.length > 40) raw = loc;
-  } else {
+  else if (org) raw = org;
+  else if (loc) raw = loc;
+  else {
     const cls = extractSignals(rows[0]!, name).domainClass;
     raw = CLASS_LABEL[cls] ?? hostOf(rows[0]!.url);
   }
+  // Final length + token dedupe across the whole string.
   const parts = raw.split(/\s+/).filter(Boolean);
   const seen = new Set<string>();
   const kept: string[] = [];
@@ -617,19 +587,15 @@ export function disambiguationEntries(row: EntityRow, name: string): { role?: st
   const paren = new RegExp(`${name.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\s*\\(([^)]{2,40})\\)`, 'gi');
   for (const m of text.matchAll(paren)) {
     const inside = title(m[1] ?? '');
-    if (/^disambiguation$/i.test(inside)) continue;
     const parts = inside.split(/,|\/|;/).map((s) => s.trim()).filter(Boolean);
     let role: string | undefined;
     let org: string | undefined;
     for (const p of parts) {
       const pl = low(p);
       if (!role && (ROLE1.has(pl) || ROLE2.some((r) => pl.includes(r)))) role = canonRole(pl).display;
-      else if (!role && parts.length === 1 && /^[a-z][a-z-]{2,24}$/.test(pl) && /(ist|er|or|ian|ant|eur|man|woman)$/.test(pl)) {
-        role = canonRole(pl).display;
-      } else if (!org && !ROLE1.has(pl)) org = p;
+      else if (!org) org = p;
     }
-    // Prefer clean wiki gloss as label when we have role (or short inside).
-    push(role && !org ? role : inside, role, org);
+    push(inside, role, org);
   }
   // "Name, role at Org" / "Name – role"
   const dash = new RegExp(`${name.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\s*[,–—-]\\s*([^.;\\n]{3,50})`, 'gi');
@@ -637,20 +603,8 @@ export function disambiguationEntries(row: EntityRow, name: string): { role?: st
     const rest = title(m[1] ?? '');
     if (/\bmay refer to\b/i.test(rest)) continue;
     const at = /\b(.+?)\s+(?:at|of|for)\s+(.+)$/i.exec(rest);
-    if (at) {
-      const rPart = title(at[1]!);
-      const oPart = title(at[2]!);
-      // Drop leading nationality adjectives from role ("American Businessman" → Businessman).
-      const rToks = rPart.split(/\s+/);
-      const rCore = rToks.filter((w) => !/^(american|british|english|canadian|australian|french|german|chinese|japanese|korean|indian)$/i.test(w));
-      const roleGuess = rCore.find((w) => ROLE1.has(low(w)));
-      push(roleGuess ? `${canonRole(roleGuess).display}${oPart ? ' of ' + cleanPhrase(oPart, 18) : ''}`.slice(0, 40) : rest.slice(0, 40),
-        roleGuess ? canonRole(roleGuess).display : undefined, oPart);
-    } else {
-      const toks = rest.split(/\s+/);
-      const roleTok = toks.find((w) => ROLE1.has(low(w)) || ROLE2.some((r) => low(w).includes(r.split(' ')[0]!)));
-      push(roleTok ? canonRole(roleTok).display : rest.slice(0, 40), roleTok ? canonRole(roleTok).display : undefined, undefined);
-    }
+    if (at) push(rest, title(at[1]!), title(at[2]!));
+    else push(rest, ROLE1.has(low(rest.split(/\s+/)[0] ?? '')) ? canonRole(rest.split(/\s+/)[0]!).display : undefined, undefined);
   }
   return out.slice(0, 6);
 }
@@ -668,8 +622,6 @@ export function resolveEntity(
     .map((row, i) => ({ row, i }))
     .filter(({ row }) => {
       if (isBlockedHost(row.url)) return false;
-      // Game wikis / fandom never seed person choices (live: "Player at San Andreas State").
-      if (!opts?.prior && isFictionHost(row.url)) return false;
       // Picked-choice follow-up: prior already chose the person — keep full-name hits even when
       // the new query's org/role context is missing from a page (else → no_sources).
       if (opts?.prior) return hasFullPersonName(opts.prior.name, row) || hasFullPersonName(name, row);
@@ -719,7 +671,7 @@ export function resolveEntity(
     if (entries.length >= 2) {
       const choices: EntityChoice[] = entries.slice(0, 4).map((e) => ({
         name,
-        descriptor: describe({ role: e.role, org: e.org, location: e.location, label: e.label }, [rows[disambig[0]!]!], name) || e.label.slice(0, 40),
+        descriptor: describe({ role: e.role, org: e.org, location: e.location }, [rows[disambig[0]!]!], name) || e.label,
         query: choiceQuery(name, { role: e.role, org: e.org, location: e.location }),
         id: slugOf(name, e.role, e.org, e.location) || slugOf(name, e.label),
       }));

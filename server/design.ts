@@ -11,8 +11,6 @@ import { patternById } from './patterns';
 import { sanitizeCard, sanitizeNodes, type PriceSource } from './sanitize';
 import { clip, type Env } from './util';
 import { VerdictSession } from './verdict';
-import { accepts, targetFor } from './imageGate';
-import { personSubject } from './entity';
 
 const GRAMMAR = `Each node is a JSON object with a "type" field.
 LAYOUT
@@ -493,16 +491,6 @@ function extractive(req: DesignRequest, on: DesignEvents): DesignSummary {
 
   if (onTopic && k && ['profile', 'visual', 'explainer', 'answer'].includes(patternId)) {
     body.push({ type: 'profile', name: k.title, subtitle: k.description, imageRef: imageRef >= 0 ? imageRef : undefined });
-  } else if (patternId === 'profile' && req.rowImages?.hintFor) {
-    // Single-entity person card without a knowledge panel: header with the chosen person's photo,
-    // only when a pooled picture passes the same image gate (never a namesake's).
-    const name = personSubject(query);
-    const hint = name ? req.rowImages.hintFor(name) : undefined;
-    if (name && hint) {
-      const target = targetFor(hint.name ?? name, '', undefined, { hintFor: req.rowImages.hintFor });
-      const ref = search.images.findIndex((img) => accepts(target, img));
-      if (ref >= 0) body.push({ type: 'profile', name: hint.name ?? name, imageRef: ref });
-    }
   }
   if (cands[0]) body.push({ type: 'text', text: cands[0].text, size: 'lg' });
   if (stats.length >= 2) body.push({ type: 'grid', cols: 2, children: stats.map((s) => ({ type: 'stat', label: clip(s.label, 60), value: s.value })) });
