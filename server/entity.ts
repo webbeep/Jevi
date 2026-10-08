@@ -804,6 +804,11 @@ export function entityHintFor(entity: Entity, query = ''): (label: string) => En
   // t451: only an ask that names the org itself ("Raycon CEO") makes the photo carry that org word.
   const askToks = tokens(query);
   const strict = orgToks.some((t) => t.length >= 3 && !['inc', 'llc', 'ltd', 'corp', 'the', 'and', 'company'].includes(t) && askToks.includes(t));
+  // EN3: a picked choice / person+descriptor ask ("David Kim C2 Founder") makes the photo carry the org (else the
+  // descriptor) word or come from the entity's domains; otherwise no photo (live risk: violinist photo on the C2 card).
+  const askCtx = query ? contextTerms(query, entity.name) : [];
+  const nonRole = askCtx.filter((t) => !ROLE1.has(t));
+  const needCtx = askCtx.length ? [...new Set([...(org ? [org] : []), ...(org || nonRole.length ? nonRole : askCtx)])] : [];
   return (label: string) => {
     const lt = tokens(label);
     if (!lt.length) return undefined;
@@ -814,6 +819,7 @@ export function entityHintFor(entity: Entity, query = ''): (label: string) => En
     if (!nameLike(label)) return undefined;
     if ((surname && lt.includes(surname)) || (key && lt.includes(key))) {
       // Person: their photo must also name the chosen org (or come from its domains), never a namesake's.
+      if (needCtx.length) return { name: entity.name, aliases: entity.aliases, domains: entity.domains, context: needCtx, strict: true, requireContext: true };
       return { name: entity.name, aliases: entity.aliases, domains: entity.domains, ...(org ? { context: [org], ...(strict ? { strict: true } : {}) } : {}) };
     }
     return undefined;
