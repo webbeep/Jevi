@@ -856,6 +856,9 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
     return turn.pins.length ? { ...base, body: [...base.body, { type: 'section', title: 'Pinned by you', icon: 'pin', children: turn.pins }] } : base;
   }, [streaming, offlinePartial, turn.live, turn.result, turn.plan, turn.question, turn.kind, turn.pins, turn.filling]);
 
+  // The header is showing the question / plan skeleton, not the final title.
+  const provisional = !turn.result && !turn.live?.head;
+
   const credits = useMemo(() => {
     const out: Record<string, { credit: string; link: string }> = {};
     (search?.images ?? []).forEach((i) => (out[i.thumb] = { credit: i.credit ?? i.source, link: i.url }));
@@ -949,6 +952,7 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
               onRegenerate={() => actions.redesign(id)}
               onRetry={() => actions.retry(id)}
               toolbar={!turn.filling && !offlinePartial && turn.result ? <SaveButton query={turn.question} title={card.title} card={card} /> : undefined}
+              provisional={provisional}
             />
           </CardContext.Provider>}
           {choices && !turn.filling && <WhichOne choices={choices} onPick={(text) => void actions.followup(text, id, 'search')} />}

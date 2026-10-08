@@ -24,7 +24,7 @@ import { useCard } from './context';
 import { Icon } from './Icon';
 import { Nodes } from './render';
 
-export function AnswerCardView({ card, version, filling, streaming, status, pattern, alternatives, onPattern, simple, onSimple, onRegenerate, onRetry, toolbar }: {
+export function AnswerCardView({ card, version, filling, streaming, status, pattern, alternatives, onPattern, simple, onSimple, onRegenerate, onRetry, toolbar, provisional = false }: {
   card: AnswerCard;
   /** Changes whenever a fresh design starts, replaying the entrance animation. */
   version: string;
@@ -41,6 +41,8 @@ export function AnswerCardView({ card, version, filling, streaming, status, patt
   onRegenerate: () => void;
   onRetry: () => void;
   toolbar?: ReactNode;
+  /** The title is still the question / plan skeleton, so the header keeps a stable height. */
+  provisional?: boolean;
 }) {
   const { results, onSources } = useCard();
   const [toast, setToast] = useState<string | null>(null);
@@ -83,8 +85,12 @@ export function AnswerCardView({ card, version, filling, streaming, status, patt
           {filling && !card.icon ? <LogoMark className="size-4 animate-pulse" /> : <Icon name={card.icon} fallback="layout-grid" className="size-4 text-foreground/80 sm:size-[18px]" />}
         </div>
         <div className="min-w-0 flex-1 self-center">
-          <h2 className="text-balance text-[16.5px] font-semibold leading-[1.3] tracking-[-0.02em] sm:text-[17px]">{card.title}</h2>
-          {filling && !card.subtitle ? <Skeleton className="mt-1 h-3 w-32" /> : card.subtitle && <p className="mt-0.5 text-pretty text-[13px] leading-snug text-muted-foreground">{card.subtitle}</p>}
+          <h2 className={cn('text-balance text-[16.5px] font-semibold leading-[1.3] tracking-[-0.02em] sm:text-[17px]', provisional && 'line-clamp-1')}>{card.title}</h2>
+          {filling && !card.subtitle ? (
+            <div aria-hidden className="mt-0.5 flex h-[1.375em] items-center text-[13px]"><Skeleton className="h-3 w-32" /></div>
+          ) : card.subtitle && (
+            <p className={cn('mt-0.5 text-pretty text-[13px] leading-snug text-muted-foreground', provisional && 'line-clamp-1')}>{card.subtitle}</p>
+          )}
         </div>
         <div className="flex shrink-0 items-center">
           {toolbar}
