@@ -15,12 +15,15 @@ import type { Env } from '../server/util.ts';
 const SECRET = 'test-session-secret-32chars!!';
 const IP = '203.0.113.44';
 
-function mem() {
+function mem(opts?: { window?: boolean }) {
   const db = new DatabaseSync(':memory:');
   db.exec(`
     CREATE TABLE usage (day TEXT NOT NULL, subject_key TEXT NOT NULL, count INTEGER NOT NULL, PRIMARY KEY (day, subject_key));
     CREATE TABLE events (id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, props_json TEXT, created_at TEXT NOT NULL, subject_key TEXT);
   `);
+  if (opts?.window !== false) {
+    db.exec(`CREATE TABLE retry_window (key TEXT PRIMARY KEY, ts INTEGER, n INTEGER NOT NULL DEFAULT 0);`);
+  }
   const d1 = {
     prepare(sql: string) {
       return {
@@ -39,6 +42,18 @@ function mem() {
           };
         },
       };
+    },
+    async batch(statements: Array<{ all: () => Promise<{ results: unknown[] }> }>) {
+      db.exec('BEGIN');
+      try {
+        const results = [];
+        for (const statement of statements) results.push(await statement.all());
+        db.exec('COMMIT');
+        return results;
+      } catch (err) {
+        db.exec('ROLLBACK');
+        throw err;
+      }
     },
   };
   return { db, env: { DB: d1, SESSION_SECRET: SECRET, IP_HASH_SALT: 'salt-not-the-ip' } as unknown as Env };
@@ -386,6 +401,166 @@ test('logout deletes the session row and clears the cookie', async () => {
   assert.equal(res.status, 204);
   assert.match(res.headers.get('set-cookie') || '', /zo_sess=/);
   assert.equal((db.prepare('SELECT COUNT(*) AS n FROM session').get() as { n: number }).n, 0);
+});
+
+const WHEN = new Date('2026-10-07T12:00:00Z');
+const LATER = new Date('2026-10-07T12:01:01Z');
+
+function ask(headers: Record<string, string>, query: string, retry = false) {
+  const h: Record<string, string> = { ...headers, 'content-type': 'application/json' };
+  if (retry) h['x-zo-retry'] = '1';
+  return new Request('http://127.0.0.1/api/stream', { method: 'POST', headers: h, body: JSON.stringify({ query }) });
+}
+
+function deviceCount(db: DatabaseSync): number {
+  return usageRows(db).find((r) => r.subject_key.startsWith('d:'))?.count ?? 0;
+}
+
+test('retry within 60s of the same normalized query is uncounted', async () => {
+  const { db, env } = mem();
+  env.AUTH_ENABLED = 'true';
+  const headers = { cookie: await cookie(), 'CF-Connecting-IP': IP };
+  const first = await applyGate(ask(headers, '  How   Long to Boil an Egg '), env, WHEN, nobody);
+  const retry = await applyGate(ask(headers, 'how long to boil an egg', true), env, new Date(WHEN.getTime() + 59_000), nobody);
+  assert.equal(first.ok, true);
+  assert.equal(retry.ok, true);
+  if (retry.ok) assert.equal(retry.headers?.['X-ZO-Used'], '1');
+  assert.equal(deviceCount(db), 1);
+  const windowRows = db.prepare('SELECT n FROM retry_window').all() as { n: number }[];
+  assert.equal(windowRows.length, 1);
+  assert.equal(windowRows[0]?.n, 1);
+});
+
+test('retry after 61s is counted', async () => {
+  const { db, env } = mem();
+  env.AUTH_ENABLED = 'true';
+  const headers = { cookie: await cookie(), 'CF-Connecting-IP': IP };
+  const staleAt = WHEN.getTime() - 11 * 60_000;
+  db.prepare('INSERT INTO retry_window (key, ts, n) VALUES (?, ?, 0)').run('stale-row', staleAt);
+  await applyGate(ask(headers, 'boil an egg'), env, WHEN, nobody);
+  const retry = await applyGate(ask(headers, 'boil an egg', true), env, LATER, nobody);
+  assert.equal(retry.ok, true);
+  if (retry.ok) assert.equal(retry.headers?.['X-ZO-Used'], '2');
+  assert.equal(deviceCount(db), 2);
+  assert.equal((db.prepare(`SELECT COUNT(*) AS c FROM retry_window WHERE key = 'stale-row'`).get() as { c: number }).c, 0);
+});
+
+test('retry with a different query is counted', async () => {
+  const { db, env } = mem();
+  env.AUTH_ENABLED = 'true';
+  const headers = { cookie: await cookie(), 'CF-Connecting-IP': IP };
+  await applyGate(ask(headers, 'boil an egg'), env, WHEN, nobody);
+  const retry = await applyGate(ask(headers, 'boil a potato', true), env, WHEN, nobody);
+  assert.equal(retry.ok, true);
+  if (retry.ok) assert.equal(retry.headers?.['X-ZO-Used'], '2');
+  assert.equal(deviceCount(db), 2);
+});
+
+test('retry with no prior counted ask is counted', async () => {
+  const { db, env } = mem();
+  env.AUTH_ENABLED = 'true';
+  const headers = { cookie: await cookie(), 'CF-Connecting-IP': IP };
+  const retry = await applyGate(ask(headers, 'boil an egg', true), env, WHEN, nobody);
+  assert.equal(retry.ok, true);
+  if (retry.ok) assert.equal(retry.headers?.['X-ZO-Used'], '1');
+  assert.equal(deviceCount(db), 1);
+});
+
+test('the 4th retry inside the window is counted', async () => {
+  const { db, env } = mem();
+  env.AUTH_ENABLED = 'true';
+  const headers = { cookie: await cookie(), 'CF-Connecting-IP': IP };
+  await applyGate(ask(headers, 'boil an egg'), env, WHEN, nobody);
+  const used: string[] = [];
+  for (let i = 0; i < 4; i++) {
+    const decision = await applyGate(ask(headers, 'boil an egg', true), env, new Date(WHEN.getTime() + i * 1000), nobody);
+    assert.equal(decision.ok, true);
+    if (decision.ok) used.push(decision.headers?.['X-ZO-Used'] ?? '');
+  }
+  assert.deepEqual(used, ['1', '1', '1', '2']);
+  assert.equal(deviceCount(db), 2);
+});
+
+test('a different device retrying the same query is counted', async () => {
+  const { db, env } = mem();
+  env.AUTH_ENABLED = 'true';
+  const first = { cookie: await cookie(), 'CF-Connecting-IP': IP };
+  const other = { cookie: `zo_dev=${encodeURIComponent(await signDevice('b'.repeat(32), SECRET))}`, 'CF-Connecting-IP': IP };
+  await applyGate(ask(first, 'boil an egg'), env, WHEN, nobody);
+  const retry = await applyGate(ask(other, 'boil an egg', true), env, WHEN, nobody);
+  assert.equal(retry.ok, true);
+  if (retry.ok) assert.equal(retry.headers?.['X-ZO-Used'], '1');
+  const devices = usageRows(db).filter((r) => r.subject_key.startsWith('d:'));
+  assert.equal(devices.length, 2);
+  assert.equal(devices.every((r) => r.count === 1), true);
+  const moved = await applyGate(ask({ ...first, 'CF-Connecting-IP': '203.0.113.99' }, 'boil an egg', true), env, WHEN, nobody);
+  assert.equal(moved.ok, true);
+  if (moved.ok) assert.equal(moved.headers?.['X-ZO-Used'], '2');
+});
+
+test('a missing retry window counts the ask', async () => {
+  const { db, env } = mem({ window: false });
+  env.AUTH_ENABLED = 'true';
+  const headers = { cookie: await cookie(), 'CF-Connecting-IP': IP };
+  const first = await applyGate(ask(headers, 'boil an egg'), env, WHEN, nobody);
+  const retry = await applyGate(ask(headers, 'boil an egg', true), env, WHEN, nobody);
+  assert.equal(first.ok, true);
+  assert.equal(retry.ok, true);
+  if (first.ok) assert.equal(first.headers?.['X-ZO-Used'], '1');
+  if (retry.ok) assert.equal(retry.headers?.['X-ZO-Used'], '2');
+  assert.equal(deviceCount(db), 2);
+
+  const broken = {
+    prepare() {
+      throw new Error('db down');
+    },
+  };
+  const down = await applyGate(
+    ask({ cookie: headers.cookie }, 'boil an egg', true),
+    { DB: broken, AUTH_ENABLED: 'true', SESSION_SECRET: SECRET, IP_HASH_SALT: 'salt-not-the-ip' } as unknown as Env,
+    WHEN,
+    nobody,
+  );
+  assert.equal(down.ok, true);
+});
+
+test('signed-in retries use the user id window', async () => {
+  const { db, env } = mem();
+  env.AUTH_ENABLED = 'true';
+  env.GATE_SIGNED_PER_DAY = '10';
+  const headers = { cookie: await cookie(), 'CF-Connecting-IP': IP };
+  const otherDevice = { cookie: `zo_dev=${encodeURIComponent(await signDevice('c'.repeat(32), SECRET))}`, 'CF-Connecting-IP': IP };
+  const askAs = (h: Record<string, string>, query: string, retry: boolean, who: () => Promise<ZoUser | null> = signed) =>
+    applyGate(ask(h, query, retry), env, WHEN, who);
+
+  const first = await askAs(headers, '  Train   times ', false);
+  const same = await askAs(headers, 'train times', true);
+  const otherCookie = await askAs(otherDevice, 'train times', true);
+  assert.equal(first.ok && same.ok && otherCookie.ok, true);
+  if (same.ok) assert.equal(same.headers?.['X-ZO-Used'], '1');
+  if (otherCookie.ok) assert.equal(otherCookie.headers?.['X-ZO-Used'], '1');
+  assert.equal(usageRows(db).find((r) => r.subject_key === 'u:user-1')?.count, 1);
+  assert.equal(usageRows(db).some((r) => r.subject_key.startsWith('d:')), false);
+
+  const different = await askAs(headers, 'bus times', true);
+  assert.equal(different.ok, true);
+  if (different.ok) assert.equal(different.headers?.['X-ZO-Used'], '2');
+
+  const fresh = await askAs(headers, 'tide chart', false);
+  assert.equal(fresh.ok, true);
+  const used: string[] = [];
+  for (let i = 0; i < 4; i++) {
+    const decision = await askAs(headers, 'tide chart', true);
+    assert.equal(decision.ok, true);
+    if (decision.ok) used.push(decision.headers?.['X-ZO-Used'] ?? '');
+  }
+  assert.deepEqual(used, ['3', '3', '3', '4']);
+
+  const user2 = async (): Promise<ZoUser> => ({ id: 'user-2', email: 'b@b.c', name: 'B', avatar: null, anonymous: false });
+  const theirs = await applyGate(ask(headers, 'tide chart', true), env, WHEN, user2);
+  assert.equal(theirs.ok, true);
+  if (theirs.ok) assert.equal(theirs.headers?.['X-ZO-Used'], '1');
+  assert.equal(usageRows(db).find((r) => r.subject_key === 'u:user-2')?.count, 1);
 });
 
 test('stream and middleware module graphs do not import better-auth', () => {

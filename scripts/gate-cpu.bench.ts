@@ -1,6 +1,6 @@
 /**
- * Times applyGate with a fake D1. The hot path is one HMAC (zo_dev), one SHA-256 (IP),
- * and one upsert. Better Auth is not constructed.
+ * Times applyGate with a fake D1. The hot path is one HMAC (zo_dev), two SHA-256
+ * (IP and the question), and one D1 batch. Better Auth is not constructed.
  *
  *   node --experimental-strip-types scripts/gate-cpu.bench.ts
  */
@@ -42,6 +42,11 @@ function fakeDb() {
           };
         },
       };
+    },
+    async batch(statements: Array<{ all: () => Promise<unknown> }>) {
+      const results = [];
+      for (const statement of statements) results.push(await statement.all());
+      return results;
     },
   };
 }

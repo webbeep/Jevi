@@ -53,15 +53,26 @@ function stamp(res: Response, headers?: Record<string, string>): Response {
   return res;
 }
 
+/** Question text the gate hashes. Follow-ups ask `question`; search and design ask `query`. */
+function asked(body: StreamRequest | null): string {
+  if (!body || typeof body !== 'object') return '';
+  if (body.kind === 'followup') return typeof body.question === 'string' ? body.question : '';
+  if (body.kind === 'search' || body.kind === 'design') return typeof body.query === 'string' ? body.query : '';
+  return '';
+}
+
 export const onRequestPost: PagesFunction<Env> = async ({ request, env, waitUntil }) => {
-  const gate = await applyGate(request, env);
-  if (!gate.ok) return json(gate.body, 401);
-  let body: StreamRequest | undefined;
+  let raw: StreamRequest | null = null;
   try {
-    body = clean(await readJson<StreamRequest>(request));
+    raw = await readJson<StreamRequest>(request);
   } catch (err) {
+    const gate = await applyGate(request, env, new Date(), undefined, '');
+    if (!gate.ok) return json(gate.body, 401);
     return stamp(errorJson(err, 400), gate.headers);
   }
+  const gate = await applyGate(request, env, new Date(), undefined, asked(raw));
+  if (!gate.ok) return json(gate.body, 401);
+  const body = clean(raw);
   if (!body) return stamp(errorJson('Invalid request', 400), gate.headers);
   const req = body;
   bindAiWaitUntil(env, waitUntil);

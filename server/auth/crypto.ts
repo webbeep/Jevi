@@ -52,8 +52,16 @@ export async function hmacVerifyB64(secret: string, data: string, signatureB64: 
   return crypto.subtle.verify('HMAC', await hmacKey(secret), bytes, enc.encode(data));
 }
 
+function hexDigest(digest: ArrayBuffer): string {
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** SHA-256 hex of the exact bytes. No salt. */
+export async function sha256Hex(value: string): Promise<string> {
+  return hexDigest(await crypto.subtle.digest('SHA-256', enc.encode(value)));
+}
+
 /** Salted SHA-256 hex. The raw IP is an input only and is not part of the result. */
 export async function saltedHash(salt: string, value: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', enc.encode(`${salt}:${value}`));
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  return hexDigest(await crypto.subtle.digest('SHA-256', enc.encode(`${salt}:${value}`)));
 }
