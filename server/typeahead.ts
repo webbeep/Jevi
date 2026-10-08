@@ -148,6 +148,8 @@ export async function suggestTypeahead(q: string, env: Env): Promise<TypeaheadRe
   }
 
   if (env.TYPEAHEAD === 'off') return none(t0, 'off');
+  // _middleware sets WORKERS_AI=off on local hosts: skip at once instead of waiting out the AI timeout.
+  if (env.WORKERS_AI === 'off') return none(t0, 'workers ai off');
   const ai = (env as Record<string, unknown>).AI as AiBinding | undefined;
   if (!ai || typeof ai.run !== 'function') return none(t0, 'no binding');
   if (Date.now() < aiDownUntil || workersAiQuotaDown()) return none(t0, 'ai cooling down');
