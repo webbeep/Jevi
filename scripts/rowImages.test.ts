@@ -72,6 +72,25 @@ describe('T442 stat tiles', () => {
     assert.equal((out.nodes[0] as Extract<CardNode, { type: 'stat' }>).image, 'https://img.com/steph.jpg');
     assert.equal((out.nodes[1] as Extract<CardNode, { type: 'stat' }>).image, undefined);
   });
+
+  test('t444: every filled picture reports its source page as a credit (card search and og:image)', async () => {
+    const credits: { src: string; link: string }[] = [];
+    const nodes: CardNode[] = [
+      { type: 'stat', label: 'Steph', value: '10 pts' },
+      { type: 'list', style: 'media', items: [{ text: 'Caleb Wilson — Bulls', source: 2 }] },
+    ];
+    await fillRowImages(nodes, {
+      results: [res('https://n.com/1', undefined, 'Steph Curry scores 10 points in preseason'), res('https://c.com/3', undefined, 'Caleb Wilson Bulls debut')],
+      pool: [],
+      cardImages: async () => [pic('Steph Curry Warriors preseason', 'https://img.com/steph.jpg')],
+      og: async () => 'https://c.com/wilson.jpg',
+      onCredit: (c) => credits.push({ src: c.src, link: c.link }),
+    });
+    assert.deepEqual(credits, [
+      { src: 'https://img.com/steph.jpg', link: 'https://p.com/Steph Curry Warriors preseason' },
+      { src: 'https://c.com/wilson.jpg', link: 'https://c.com/3' },
+    ]);
+  });
 });
 
 import { accepts, targetFor } from '../server/imageGate.ts';

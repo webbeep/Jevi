@@ -1,4 +1,4 @@
-import type { CardNode } from '../shared/card';
+import type { CardNode, ImageCredit } from '../shared/card';
 import { isComposite } from '../shared/imagematch';
 import { type EntityHint, type GateContext, type PicTarget, accepts, hostNames, namedTarget, pageNames, targetFor } from './imageGate';
 import type { ImageResult, SearchResult } from '../shared/types';
@@ -22,6 +22,8 @@ export interface RowImageDeps {
   ogMax?: number;
   /** t444 hook (Backend patch-entity): disambiguated name/aliases/domains for an entity. */
   hintFor?: (entity: string) => EntityHint | undefined;
+  /** t444: every filled picture reports the page it came from, so the client can show its tap-to-source credit. */
+  onCredit?: (credit: ImageCredit) => void;
 }
 
 /** Result titles + snippets: proper-noun evidence for one-word labels. */
@@ -154,10 +156,14 @@ export async function fillRowImages(nodes: CardNode[], deps: RowImageDeps, used:
   const all = perNode.flat();
   const live = all.filter((s) => s.target.kind !== 'none');
   if (!live.length) return { nodes, changed: nodes.map(() => false), imageCalls: 0, og: 0 };
-  const take = (s: Slot, src: string) => {
+  const hostOf = (u: string) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return ''; } };
+  const take = (s: Slot, src: string, from?: { url?: string; credit?: string; source?: string; license?: ImageResult['license'] }) => {
     s.src = src;
     used.add(src);
+    const link = from?.url;
+    if (deps.onCredit && link && https(link)) deps.onCredit({ src, link, credit: from?.credit ?? from?.source ?? hostOf(link), license: from?.license ?? 'source' });
   };
+  const credit = (img: ImageResult) => ({ url: img.url, credit: img.credit, source: img.source, license: img.license });
 
   // 1. Zero calls: the row's own source picture (when that page names it), then gated pooled pictures.
   //    Orgs: a result on the org's own site (its picture or og:image), else nothing.
@@ -166,19 +172,19 @@ export async function fillRowImages(nodes: CardNode[], deps: RowImageDeps, used:
     if (s.target.kind === 'org') {
       const site = deps.results.find((r) => hostNames(s.target.entity, r.url));
       if (site && https(site.image) && !used.has(site.image)) {
-        take(s, site.image);
+        take(s, site.image, { url: site.url });
         continue;
       }
       if (site) s.officialSite = site.url;
     } else if (own && pageNames(s.target, own)) {
       const ownPic = own.image ?? deps.pool.find((p) => p.url === own.url)?.thumb;
       if (https(ownPic) && !used.has(ownPic)) {
-        take(s, ownPic);
+        take(s, ownPic, { url: own.url });
         continue;
       }
     }
     const pooled = pick(s.target, deps.pool, used);
-    if (pooled) take(s, pooled.thumb);
+    if (pooled) take(s, pooled.thumb, credit(pooled));
   }
 
   // 2. At most one picture search for the card, matched to rows by name.
@@ -189,7 +195,7 @@ export async function fillRowImages(nodes: CardNode[], deps: RowImageDeps, used:
     for (const s of live) {
       if (s.src) continue;
       const hit = pick(s.target, found, used);
-      if (hit) take(s, hit.thumb);
+      if (hit) take(s, hit.thumb, credit(hit));
     }
   }
 
@@ -200,7 +206,7 @@ export async function fillRowImages(nodes: CardNode[], deps: RowImageDeps, used:
     want.forEach((s, i) => {
       if (s.src) return;
       const hit = pick(s.target, found[i], used);
-      if (hit) take(s, hit.thumb);
+      if (hit) take(s, hit.thumb, credit(hit));
     });
   }
 
@@ -223,7 +229,7 @@ export async function fillRowImages(nodes: CardNode[], deps: RowImageDeps, used:
     const pics = await Promise.all(want.map((w) => deps.og!(w.url)));
     want.forEach((w, i) => {
       const src = pics[i];
-      if (https(src) && !used.has(src)) take(w.s, src);
+      if (https(src) && !used.has(src)) take(w.s, src, { url: w.url });
     });
   }
 

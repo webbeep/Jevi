@@ -294,7 +294,7 @@ export class PictureResolver {
     if (!this.rows || !this.latest.size) return;
     try {
       const entries = [...this.latest.entries()];
-      const filled = await fillRowImages(entries.map(([, e]) => e.node), { lookup: (entity) => this.find(entity, this.env, 3, false), ...this.rows, pool: this.pool }, this.used);
+      const filled = await fillRowImages(entries.map(([, e]) => e.node), { lookup: (entity) => this.find(entity, this.env, 3, false), ...this.rows, pool: this.pool, onCredit: this.onCredit }, this.used);
       let count = 0;
       entries.forEach(([index, e], i) => {
         if (!filled.changed[i]) return;

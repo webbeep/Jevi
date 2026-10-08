@@ -120,10 +120,22 @@ export function StatView({ node }: { node: Of<'stat'> }) {
             </div>
           )}
         </div>
-        {img && <img src={img} alt={plain(node.label)} loading="lazy" decoding="async" width={36} height={36} className="size-9 shrink-0 rounded-full bg-muted object-cover" onError={onImgError} />}
+        {img && (
+          <span className="relative shrink-0">
+            <img src={img} alt={plain(node.label)} loading="lazy" decoding="async" width={36} height={36} className="size-9 rounded-full bg-muted object-cover" onError={onImgError} />
+            <PhotoCredit src={img} className="-bottom-2.5 left-1/2 -translate-x-1/2" />
+          </span>
+        )}
       </div>
     </div>
   );
+}
+
+/** The page a picture came from: its credit, else the pooled image or the search result that carries it. */
+function usePictureLink(src: string | undefined): string | undefined {
+  const { credits, images, results } = useCard();
+  if (!src) return undefined;
+  return credits[src]?.link ?? images.find((i) => i.thumb === src)?.url ?? results.find((r) => r.image === src)?.url;
 }
 
 /** Only https pictures may be shown; anything else (or a missing one) is dropped. */
@@ -201,8 +213,7 @@ function hostOf(url?: string): string {
  * Never drafts a question.
  */
 function PhotoCredit({ src, className }: { src: string | undefined; className?: string }) {
-  const { credits } = useCard();
-  const link = src ? credits[src]?.link : undefined;
+  const link = usePictureLink(src);
   const domain = domainLabel(hostOf(link));
   if (!link || !domain || !/^https?:\/\//i.test(link)) return null;
   const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
@@ -656,7 +667,8 @@ export function ImageView({ node }: { node: Of<'image'> }) {
   const { images, busy } = useCard();
   const ref = node.ref !== undefined ? images[node.ref] : undefined;
   const src = node.src ?? ref?.thumb;
-  const credit = useCredit(src);
+  const link = usePictureLink(src);
+  const credit = useCredit(src) ?? domainLabel(hostOf(node.link ?? link));
   const aspect = node.aspect === 'square' ? 'aspect-square' : node.aspect === 'tall' ? 'aspect-[3/4]' : 'aspect-video';
   if (!src) return node.query && busy ? <Skeleton className={cn('w-full rounded-xl', aspect)} /> : null;
   return (
@@ -665,7 +677,7 @@ export function ImageView({ node }: { node: Of<'image'> }) {
       {(node.caption || credit) && (
         <figcaption className="flex items-baseline gap-3 px-3 py-2 text-xs text-muted-foreground">
           {node.caption && <span className="min-w-0 flex-1">{node.caption}</span>}
-          {credit && <a href={node.link ?? ref?.url} target="_blank" rel="noopener noreferrer" className="ml-auto max-w-[60%] shrink-0 truncate text-[11px] opacity-70 hover:opacity-100">{credit}</a>}
+          {credit && <a href={node.link ?? ref?.url ?? link} target="_blank" rel="noopener noreferrer" className="ml-auto max-w-[60%] shrink-0 truncate text-[11px] opacity-70 hover:opacity-100">{credit}</a>}
         </figcaption>
       )}
     </figure>
