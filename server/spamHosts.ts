@@ -33,6 +33,20 @@ export function isSpamWebApp(host: string): boolean {
   return false;
 }
 
+/** Game wikis / fandom / fiction dumps — fine as search hits, never choice seeds (GTA "San Andreas"). */
+const FICTION_HOST =
+  /(^|\.)(fandom\.com|wikia\.com|gamepedia\.com|giantbomb\.com|ign\.com\/wikis|nopixel|roblox|minecraft\.fandom|gta\.?wiki|wikipedia\.org\/wiki\/List_of)($|\/)/i;
+
+export function isFictionHost(url: string): boolean {
+  if (!url) return false;
+  const host = hostOfUrl(url);
+  if (host && /(?:^|\.)(fandom\.com|wikia\.com|gamepedia\.com|giantbomb\.com|nopixel\.wiki)$/i.test(host)) return true;
+  if (/\bfandom\.com\b/i.test(url) || /\bwikia\.com\b/i.test(url)) return true;
+  // Path markers for role-play / game character pages.
+  if (/\/(?:wiki\/)?(?:Ray_Lee\/|characters?\/|npc\/)/i.test(url) && /fandom|nopixel|gta|roblox/i.test(url)) return true;
+  return false;
+}
+
 export function isBlockedHost(url: string): boolean {
   if (!url) return false;
   const host = hostOfUrl(url);

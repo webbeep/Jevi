@@ -2,7 +2,7 @@ import { DEEP_PAGES, routeExtras, routeOf } from './router';
 import { serperImages } from './cascade';
 import { publicEvent } from './publicPayload';
 import { contextTerms, entityContextLine, entityHintFor, isDisambiguationPage, isPersonAsk, personSubject, priorEntity, resolveEntity } from './entity';
-import { fetchWikiDisambiguation } from './wikiSearch';
+import { fetchWikiDisambiguation, fetchWikiLeadImage } from './wikiSearch';
 import { type EntityHint, mentionsAny } from './imageGate';
 import type { RowImagePlan } from './pictures';
 import type { AnswerCard, FollowupContext, FollowupIntent, LayoutPlan } from '../shared/card';
@@ -311,17 +311,43 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   let designContext = context;
   let entityHint: ((entity: string) => EntityHint | undefined) | undefined;
   let boostQuery = query;
+  let pattern = plan.pattern;
   if (decision.kind === 'single') {
     scope.ledger.entity = { kind: 'single', id: decision.entity.id, dropped: decision.dropped.length };
     console.log(JSON.stringify({ zo: 'entity', kind: 'single', id: decision.entity.id, kept: decision.kept.length, dropped: decision.dropped.length }));
     results = { ...results, results: decision.kept.map((i) => results.results[i]!).filter(Boolean) };
     designContext = [entityContextLine(decision.entity), context].filter(Boolean).join('\n');
     entityHint = entityHintFor(decision.entity, query);
-    boostQuery = decision.entity.name;
+    // Name + the asker's own context ("Ray Lee BlueFlame AI") pulls that person's photos, not a namesake's.
+    boostQuery = contextTerms(query).length ? query : decision.entity.name;
+    // Person singles must be profile cards so image boost + row pictures run (Lead GATE: David Kim / BlueFlame had 0 imgs on answer pattern).
+    if (pattern !== 'profile') {
+      pattern = 'profile';
+      send('plan', { ...plan, pattern });
+    }
+    // The kept Wikipedia article's own lead image (keyless, 0 Serper). It still goes through the image gate:
+    // title/source carry the article title + snippet, so the chosen person's name/org must be on it.
+    const wikiRow = results.results.find((r) => /^https:\/\/en\.wikipedia\.org\/wiki\//i.test(r.url) && !isDisambiguationPage(r));
+    if (wikiRow && !results.images.some((i) => i.url === wikiRow.url)) {
+      const lead = await fetchWikiLeadImage(wikiRow.url).catch(() => null);
+      if (lead) {
+        scope.ledger.search.wikipedia += 1;
+        const pic: ImageResult = {
+          url: lead.url,
+          thumb: lead.thumb,
+          title: lead.title,
+          source: [lead.description, wikiRow.snippet].filter(Boolean).join(' — ').slice(0, 300),
+          license: 'source',
+          credit: 'wikipedia.org',
+        };
+        results = { ...results, images: [pic, ...results.images] };
+        console.log(JSON.stringify({ zo: 'entity', wikiLeadImage: true, title: lead.title }));
+      }
+    }
   }
   send('search', results);
-  const boost = imageBoost(plan.pattern, results, env, scope, boostQuery);
-  await design(send, env, { query, pattern: plan.pattern, depth: plan.depth, readPages: plan.readPages || deep, search: results, context: designContext, intent: u?.intent, deep, boost, entityHint }, started, scope, late);
+  const boost = imageBoost(pattern, results, env, scope, boostQuery);
+  await design(send, env, { query, pattern, depth: plan.depth, readPages: plan.readPages || deep, search: results, context: designContext, intent: u?.intent, deep, boost, entityHint }, started, scope, late);
 }
 
 /**

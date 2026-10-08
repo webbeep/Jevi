@@ -171,3 +171,18 @@ describe('t444 entity context: no namesake photos', () => {
     assert.equal(targetFor('Points', '', undefined, { hintFor }).kind, 'none');
   });
 });
+
+describe('entity3 single-entity pictures', () => {
+  const c2 = () => ({ name: 'David Kim', domains: ['c2educate.com'], context: ['C2 Education'] });
+  test('Wikimedia file named David_Kim.jpg passes on the single-entity card', () => {
+    const t = targetFor('David Kim', '', undefined, { hintFor: () => ({ name: 'David Kim', context: ['Philadelphia Orchestra'] }) });
+    assert.equal(accepts(t, { title: '', url: 'https://commons.wikimedia.org/wiki/File:David_Kim.jpg', thumb: 'https://upload.wikimedia.org/wikipedia/commons/1/19/David_Kim.jpg' }), true);
+  });
+  test('the kept Wikipedia lead image (title + snippet as source) passes on the picked C2 card', () => {
+    const t = targetFor('David Kim', '', undefined, { hintFor: c2 });
+    assert.equal(accepts(t, { title: 'David J. Kim', url: 'https://en.wikipedia.org/wiki/David_J._Kim', thumb: 'https://thumb.wikimedia.org/wikipedia/commons/thumb/1/19/David_Kim.jpg/330px-David_Kim.jpg', source: 'American businessman — David Jhoon Kim is the former CEO and co-founder of C2 Education Centers' }), true);
+  });
+  test('role / stat tiles stay icons even with the full name', () => {
+    assert.equal(accepts(targetFor('Role', 'David Kim'), { title: 'David Kim', url: 'https://x.org/David_Kim', thumb: 'https://x.org/David_Kim.jpg' }), false);
+  });
+});
