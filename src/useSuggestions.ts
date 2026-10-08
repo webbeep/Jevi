@@ -1,49 +1,59 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { personalizedStarters } from '../shared/personal';
+import {
+  canShuffle,
+  pickShown,
+  type Suggestion,
+} from '../shared/starters';
 
-export interface Suggestion {
-  text: string;
-  icon: string;
-}
+export type { Suggestion };
 
-const STORAGE_KEY = 'zo:suggestions';
-
-const DEFAULTS: Suggestion[] = [
-  { text: 'Plan a 3-day Tokyo trip on a budget', icon: 'map' },
-  { text: 'iPhone 17 or Pixel 10 for photos?', icon: 'smartphone' },
-  { text: 'Dinner ideas with chicken and rice', icon: 'chef-hat' },
-  { text: 'Explain how mortgages work', icon: 'graduation-cap' },
-  { text: '8-week plan to run my first 10K', icon: 'footprints' },
-  { text: 'Is now a good time to buy a TV?', icon: 'tv' },
-];
-
-function stored(): Suggestion[] | undefined {
+function load(width: number): { items: Suggestion[]; personalized: boolean } {
   try {
-    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null') as Suggestion[] | null;
-    return parsed?.length ? parsed : undefined;
+    if (typeof localStorage === 'undefined') return { items: pickShown(width), personalized: false };
+    return personalizedStarters(localStorage, width);
   } catch {
-    return undefined;
+    return { items: pickShown(width), personalized: false };
   }
 }
 
 /**
- * Starter prompts: shown instantly from the last generated set (or defaults on a
- * first visit), then refreshed from the server for this and the next visit.
+ * Home starters. Cold start is the curated Strategy set. Once this device has
+ * ask history, the list is the on-device ranking (no network). Shuffle stays
+ * off until the pool rule is met.
  */
-export function useSuggestions(): Suggestion[] {
-  const [items, setItems] = useState<Suggestion[]>(() => stored() ?? DEFAULTS);
+export function useSuggestions(): {
+  items: Suggestion[];
+  shuffle: () => void;
+  shuffleEnabled: boolean;
+  personalized: boolean;
+  refresh: () => void;
+} {
+  const [width, setWidth] = useState(() => (typeof window !== 'undefined' ? window.innerWidth : 1280));
+  const [rev, setRev] = useState(0);
+  const [state, setState] = useState(() => load(typeof window !== 'undefined' ? window.innerWidth : 1280));
 
   useEffect(() => {
-    const hadStored = !!stored();
-    fetch('/api/suggestions')
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
-      .then(({ suggestions }: { suggestions: Suggestion[] }) => {
-        if (!suggestions?.length) return;
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(suggestions));
-        // Swap in fresh ideas only on a first visit; returning visitors see them next time instead of a list changing under their cursor.
-        if (!hadStored) setItems(suggestions);
-      })
-      .catch(() => undefined);
+    const onResize = () => setWidth(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  return items;
+  useEffect(() => {
+    setState(load(width));
+  }, [width, rev]);
+
+  const refresh = useCallback(() => setRev((n) => n + 1), []);
+  const shuffleEnabled = canShuffle() && !state.personalized;
+
+  const shuffle = useCallback(() => {
+    if (!shuffleEnabled) return;
+    setState((prev) => {
+      const exclude = new Set(prev.items.map((p) => p.id));
+      const next = pickShown(width, Math.random, exclude);
+      return { items: next.length ? next : pickShown(width), personalized: false };
+    });
+  }, [shuffleEnabled, width]);
+
+  return { items: state.items, shuffle, shuffleEnabled, personalized: state.personalized, refresh };
 }

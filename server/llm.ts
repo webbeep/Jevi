@@ -1,3 +1,4 @@
+import { isQuotaError, markWorkersAiQuota, workersAiQuotaDown } from './aiQuota.ts';
 import type { Env } from './util';
 
 /**
@@ -42,7 +43,21 @@ const DEFS: ProviderDef[] = [
   { id: 'custom', label: 'Custom', keyVar: 'LLM_API_KEY', baseVar: 'LLM_BASE_URL', modelVar: 'LLM_MODEL', base: '', model: '' },
 ];
 
-const WORKERS_AI = { id: 'workers-ai', label: 'Workers AI', model: '@cf/meta/llama-3.3-70b-instruct-fp8-fast' };
+const WORKERS_AI = { id: 'workers-ai', label: 'Workers AI', model: '@cf/meta/llama-3.1-8b-instruct-fast' };
+const WORKERS_AI_DEFAULT_CHARS = 4000;
+
+/** Keep the head (sources, most relevant first) and the tail (TASK + QUERY) inside `cap`. */
+export function trimForWorkersAi(user: string, cap: number): string {
+  if (user.length <= cap) return user;
+  const tail = user.slice(-Math.min(1600, Math.floor(cap * 0.4)));
+  const head = user.slice(0, cap - tail.length - 3);
+  return `${head}\n…\n${tail}`;
+}
+
+function workersAiMaxChars(env: Env): number {
+  const n = Number(env.WORKERS_AI_MAX_CHARS);
+  return Number.isFinite(n) && n >= 1000 ? n : WORKERS_AI_DEFAULT_CHARS;
+}
 
 interface WorkersAiBinding {
   run(model: string, input: Record<string, unknown>): Promise<unknown>;
@@ -50,7 +65,7 @@ interface WorkersAiBinding {
 
 type Provider =
   | { kind: 'http'; id: string; label: string; base: string; key: string; model: string; extra: ProviderDef['extra'] }
-  | { kind: 'binding'; id: string; label: string; ai: WorkersAiBinding; model: string };
+  | { kind: 'binding'; id: string; label: string; ai: WorkersAiBinding; model: string; maxChars: number };
 
 function providers(env: Env): Provider[] {
   const all: Provider[] = DEFS.flatMap((d): Provider[] => {
@@ -60,8 +75,8 @@ function providers(env: Env): Provider[] {
     return key && base && model ? [{ kind: 'http', id: d.id, label: d.label, base: base.replace(/\/$/, ''), key, model, extra: d.extra }] : [];
   });
   const ai = (env as Record<string, unknown>).AI as WorkersAiBinding | undefined;
-  if (ai && typeof ai.run === 'function' && env.WORKERS_AI !== 'off') {
-    all.push({ kind: 'binding', id: WORKERS_AI.id, label: WORKERS_AI.label, ai, model: env.WORKERS_AI_MODEL || WORKERS_AI.model });
+  if (ai && typeof ai.run === 'function' && env.WORKERS_AI !== 'off' && !workersAiQuotaDown()) {
+    all.push({ kind: 'binding', id: WORKERS_AI.id, label: WORKERS_AI.label, ai, model: env.WORKERS_AI_MODEL || WORKERS_AI.model, maxChars: workersAiMaxChars(env) });
   }
   const order = env.LLM_ORDER?.split(',').map((s) => s.trim()).filter(Boolean);
   if (!order?.length) return all;
@@ -82,8 +97,10 @@ const isDown = (p: Provider) => (downUntil.get(p.id) ?? 0) > Date.now();
 const markDown = (p: Provider, ms: number) => downUntil.set(p.id, Date.now() + ms);
 
 class ProviderError extends Error {
-  constructor(message: string, readonly cooldownMs: number) {
+  readonly cooldownMs: number;
+  constructor(message: string, cooldownMs: number) {
     super(message);
+    this.cooldownMs = cooldownMs;
   }
 }
 
@@ -167,7 +184,7 @@ async function jsonFrom<T>(p: Provider, system: string, user: string, maxTokens:
       return parseObject<T>(data.choices?.[0]?.message?.content ?? '');
     }
     case 'binding': {
-      const out = (await deadline(p.ai.run(p.model, { messages: messages(system, user), max_tokens: maxTokens + 500, temperature: 0.4 }), 25_000, p.label)) as { response?: unknown };
+      const out = (await deadline(p.ai.run(p.model, { messages: messages(system, trimForWorkersAi(user, p.maxChars)), max_tokens: Math.min(maxTokens + 500, 1500), temperature: 0.4 }), 25_000, p.label)) as { response?: unknown };
       return typeof out.response === 'object' && out.response ? (out.response as T) : parseObject<T>(String(out.response ?? ''));
     }
     default: {
@@ -177,19 +194,69 @@ async function jsonFrom<T>(p: Provider, system: string, user: string, maxTokens:
   }
 }
 
+const CONTENT_DELTA = '"delta":{"content":"';
+
+/**
+ * The text of a frame whose delta is exactly `{"content":"…"}`, the shape of almost every token frame.
+ * Reads just that JSON string instead of parsing the whole frame. Anything else (role or reasoning
+ * deltas, Workers AI `response`, odd layouts) returns undefined and takes the full JSON.parse path.
+ * The needle cannot occur inside a JSON string value, where quotes are escaped.
+ */
+export function contentDelta(data: string): string | undefined {
+  const at = data.indexOf(CONTENT_DELTA);
+  if (at < 0 || data.charCodeAt(0) !== 123 || data.charCodeAt(data.length - 1) !== 125) return undefined;
+  const open = at + CONTENT_DELTA.length - 1;
+  for (let i = open + 1; ; ) {
+    const q = data.indexOf('"', i);
+    if (q < 0) return undefined;
+    let slashes = 0;
+    while (data.charCodeAt(q - 1 - slashes) === 92) slashes++;
+    if (slashes % 2 === 0) {
+      if (data.charCodeAt(q + 1) !== 125) return undefined;
+      // Without escapes or control characters the JSON string is its own text.
+      const raw = data.slice(open + 1, q);
+      if (!/[\\\u0000-\u001f]/.test(raw)) return raw;
+      try {
+        return JSON.parse(data.slice(open, q + 1)) as string;
+      } catch {
+        return undefined;
+      }
+    }
+    i = q + 1;
+  }
+}
+
 /** Parses an SSE body into text deltas; `onReasoning` fires on hidden-reasoning deltas. */
 async function readSse(body: ReadableStream<Uint8Array>, onText: (t: string) => void, onReasoning: () => void): Promise<void> {
-  const reader = body.pipeThrough(new TextDecoderStream()).getReader();
+  // Decoding in place instead of piping through a TextDecoderStream saves a stream hop per network chunk.
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
   let buf = '';
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
+  const take = (value: string) => {
     buf += value;
-    const events = buf.split(/\r?\n\r?\n/);
-    buf = events.pop() ?? '';
+    let events: string[];
+    if (buf.includes('\r')) {
+      events = buf.split(/\r?\n\r?\n/);
+      buf = events.pop() ?? '';
+    } else {
+      // Same events as the split above when there is no \r, without the regex.
+      events = [];
+      let from = 0;
+      for (let end = buf.indexOf('\n\n'); end >= 0; end = buf.indexOf('\n\n', from)) {
+        events.push(buf.slice(from, end));
+        from = end + 2;
+      }
+      buf = buf.slice(from);
+    }
     for (const event of events) {
-      const data = event.replace(/^data:\s*/gm, '').trim();
+      // One-line `data: {...}` events (nearly all) skip the multiline regex; the result is the same string.
+      const data = (event.startsWith('data: ') && !/[\r\n]/.test(event) ? event.slice(6) : event.replace(/^data:\s*/gm, '')).trim();
       if (!data || data === '[DONE]') continue;
+      const fast = contentDelta(data);
+      if (fast !== undefined) {
+        if (fast) onText(fast);
+        continue;
+      }
       try {
         const obj = JSON.parse(data) as { response?: string; choices?: { delta?: { content?: string; reasoning_content?: string; reasoning?: string } }[] };
         const delta = obj.choices?.[0]?.delta;
@@ -200,6 +267,16 @@ async function readSse(body: ReadableStream<Uint8Array>, onText: (t: string) => 
         // keep-alive or partial frame
       }
     }
+  };
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) {
+      const tail = decoder.decode();
+      if (tail) take(tail);
+      break;
+    }
+    const text = decoder.decode(value, { stream: true });
+    if (text) take(text);
   }
 }
 
@@ -219,7 +296,7 @@ async function streamFrom(p: Provider, system: string, user: string, maxTokens: 
       return readSse(res.body, onText, onReasoning);
     }
     case 'binding': {
-      const out = await deadline(p.ai.run(p.model, { messages: messages(system, user), max_tokens: maxTokens + 500, temperature: 0.4, stream: true }), 15_000, p.label);
+      const out = await deadline(p.ai.run(p.model, { messages: messages(system, trimForWorkersAi(user, p.maxChars)), max_tokens: Math.min(maxTokens + 500, 1500), temperature: 0.4, stream: true }), 15_000, p.label);
       if (out instanceof ReadableStream) return deadline(readSse(out as ReadableStream<Uint8Array>, onText, onReasoning), 60_000, p.label);
       onText(String((out as { response?: unknown }).response ?? ''));
       return;
@@ -232,7 +309,9 @@ async function streamFrom(p: Provider, system: string, user: string, maxTokens: 
 }
 
 function fail(p: Provider, err: unknown) {
-  const cooldown = err instanceof ProviderError ? err.cooldownMs : localFailure(String(err)) ? 0 : 30_000;
+  const message = `${err instanceof Error ? err.message : ''} ${String(err)}`;
+  if (p.kind === 'binding' && isQuotaError(message)) markWorkersAiQuota();
+  const cooldown = err instanceof ProviderError ? err.cooldownMs : localFailure(message) ? 0 : 30_000;
   if (cooldown) markDown(p, cooldown);
   console.error(`LLM ${p.label} failed`, err instanceof Error ? err.message : err);
 }
@@ -289,7 +368,9 @@ export async function llmLines(
     try {
       await streamFrom(p, system, user, maxTokens, !!opts.think, (t) => {
         text += t;
-        flush(false);
+        // `text` holds no newline between flushes, so a delta without one cannot finish a line.
+        // Skipping the split here keeps a long line from being re-split on every token (quadratic CPU).
+        if (t.includes('\n')) flush(false);
       }, () => {
         if (thinking) return;
         thinking = true;

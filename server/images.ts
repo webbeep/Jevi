@@ -1,9 +1,11 @@
+import { isComposite, matchScore, matches } from '../shared/imagematch';
 import type { ImageResult } from '../shared/types';
 import { stripHtml } from '../shared/text';
 import { type Env, UA, domainOf, fetchJson, hedge } from './util';
 
+export { matchScore, matches };
+
 const TIMEOUT_MS = 3000;
-const STOP = new Set(['the', 'and', 'for', 'with', 'photo', 'image', 'picture', 'of', 'in', 'a', 'an', 'on', 'at', 'to']);
 
 /** Publisher preview images are allowed unless the deployment opts into open-licensed pictures only. */
 export const allowsSourceImages = (env: Env) => env.IMAGE_POLICY !== 'open';
@@ -14,37 +16,6 @@ const GENERIC_PREVIEW = /logo|fallback|placeholder|default|favicon|sprite|share[
 /** Drops pictures the deployment's image policy does not allow, and publisher previews that are just branding. */
 export function permitted(images: ImageResult[], env: Env): ImageResult[] {
   return images.filter((i) => i.license !== 'source' || (allowsSourceImages(env) && !GENERIC_PREVIEW.test(i.thumb.split('#')[0])));
-}
-
-/** Significant words of an image query, used to check that a found picture is of that exact item. */
-function keywords(query: string): string[] {
-  return query.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 1 && !STOP.has(w));
-}
-
-/** Share of the item's words that the picture's title mentions (0-1). */
-export function matchScore(query: string, title: string): number {
-  const words = keywords(query);
-  if (!words.length) return 1;
-  const t = title.toLowerCase();
-  return words.filter((w) => t.includes(w)).length / words.length;
-}
-
-/** The name part of an item ("Altra Torin 9" in "Altra Torin 9 running shoe"): capitalized words and model numbers. */
-function core(query: string): string[] {
-  return query.split(/\s+/).map((w) => w.replace(/[^\p{L}\p{N}]/gu, '')).filter((w) => w && !STOP.has(w.toLowerCase()) && (/^\p{Lu}/u.test(w) || /\d/.test(w))).map((w) => w.toLowerCase());
-}
-
-const hasWord = (text: string, w: string) => (w.length <= 3 ? new RegExp(`(^|[^a-z0-9])${w}([^a-z0-9]|$)`).test(text) : text.includes(w));
-
-/**
- * A picture counts as specific when its title names the item: every word of its
- * name (brand, model, number) when the query has one, otherwise most of its words.
- */
-export function matches(query: string, title: string): boolean {
-  const name = core(query);
-  const t = title.toLowerCase();
-  if (name.length) return name.every((w) => hasWord(t, w));
-  return matchScore(query, title) >= (keywords(query).length <= 2 ? 1 : 0.6);
 }
 
 const licenseLabel = (short?: string) => (short ? stripHtml(short).replace(/^cc-/i, 'CC ').trim() : '');
@@ -237,15 +208,16 @@ function cached(key: string, find: () => Promise<ImageResult[]>): Promise<ImageR
 /**
  * Finds up to `n` pictures of the exact item named by `query`. Sources are raced
  * with a short stagger; a source only wins when its pictures' titles name the
- * item, best match first. With `allowGeneric` (topic imagery such as a gallery
- * of "Kyoto in autumn") any relevant open or stock picture is acceptable.
+ * item, best match first. Comparison and collage pictures are skipped. With
+ * `allowGeneric` (topic imagery such as a gallery of "Kyoto in autumn") any
+ * relevant open or stock picture is acceptable.
  */
 export function findImages(query: string, env: Env, n = 1, allowGeneric = false): Promise<ImageResult[]> {
-  const key = `${env.IMAGE_POLICY ?? 'source'}|${query.toLowerCase().trim()}|${n}|${allowGeneric ? 'g' : 's'}`;
+  const key = `v2|${env.IMAGE_POLICY ?? 'source'}|${query.toLowerCase().trim()}|${n}|${allowGeneric ? 'g' : 's'}`;
   return cached(key, async () => {
     const tasks = sources(env).map((s) => async () => {
       const found = (await s.run(query, n)).filter((img) => img.thumb);
-      const fitting = allowGeneric && !s.specificOnly ? found : found.filter((img) => matches(query, img.title));
+      const fitting = (allowGeneric && !s.specificOnly ? found : found.filter((img) => matches(query, img.title))).filter((img) => !isComposite(img));
       const ranked = fitting.map((img) => ({ img, score: matchScore(query, img.title) })).sort((a, b) => b.score - a.score).map((x) => x.img);
       if (!ranked.length) throw new Error(`${s.name}: no matching picture`);
       return ranked.slice(0, n);

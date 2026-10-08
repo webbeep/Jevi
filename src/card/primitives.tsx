@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useState } from 'react';
-import { ArrowUpRight, Check, ChevronLeft, ChevronRight, Copy, MessageCircle, Minus, Play, Star, ThumbsDown, ThumbsUp, TrendingDown, TrendingUp } from 'lucide-react';
+import { ArrowUpRight, BookOpen, Check, ChevronLeft, ChevronRight, Copy, MessageCircle, Minus, Play, Star, ThumbsDown, ThumbsUp, TrendingDown, TrendingUp } from 'lucide-react';
 import type { CardNode, Tone } from '../../shared/card';
 import type { SearchResult } from '../../shared/types';
 import { cn } from '@/lib/utils';
@@ -72,7 +72,7 @@ export function Hero({ node }: { node: Of<'hero'> }) {
     <div className="flex min-w-0 flex-col">
       {node.label && <span className="zo-label">{plain(node.label)}</span>}
       <div className="flex items-start gap-3">
-        <span className={cn('text-[52px] font-semibold leading-[0.95] tracking-[-0.045em] sm:text-[64px]', node.value.length > 14 && 'text-[32px] leading-tight tracking-[-0.03em] sm:text-[40px]', TONE_TEXT[node.tone === 'primary' || !node.tone ? 'default' : node.tone])}>
+        <span className={cn('text-[52px] font-semibold leading-[0.95] tracking-[-0.045em] sm:text-[64px]', node.value.length > 8 && node.value.length <= 14 && 'text-[36px] leading-[1.05] tracking-[-0.035em] sm:text-[64px] sm:leading-[0.95] sm:tracking-[-0.045em]', node.value.length > 14 && 'text-[32px] leading-tight tracking-[-0.03em] sm:text-[40px]', TONE_TEXT[node.tone === 'primary' || !node.tone ? 'default' : node.tone])}>
           <span className="tabular-nums">{plain(value)}</span>
           {node.unit && <span className="ml-1 align-top text-xl font-normal tracking-[-0.02em] text-muted-foreground sm:text-2xl">{node.unit}</span>}
         </span>
@@ -124,6 +124,12 @@ function usePicture(src: string | undefined, ref: number | undefined): string | 
   return src ?? (ref !== undefined ? images[ref]?.thumb : undefined);
 }
 
+/** Drops a src that failed to load; a different src is tried again. */
+function useLoadable(src: string | undefined): [string | undefined, () => void] {
+  const [failed, setFailed] = useState<string | undefined>(undefined);
+  return [src === failed ? undefined : src, () => setFailed(src)];
+}
+
 /** The search result a source number points at, if it exists. */
 function useSource(n: number | undefined) {
   const { results } = useCard();
@@ -134,17 +140,16 @@ function useSource(n: number | undefined) {
 const subjectOf = (text: string) => plain(text).replace(/\*\*/g, '').split(/\s[—–-]\s|:\s/)[0].trim().slice(0, 80);
 
 /**
- * What to do with a source an item points at: ask about it in the conversation, or leave for the site.
+ * What to do with a source an item points at: read it here, ask about it in the conversation, or leave for the site.
  * `children` is the trigger (a whole row or tile); without it, a small button is shown.
  */
 function SourceMenu({ result: r, subject, children, className }: { result: SearchResult; subject: string; children?: ReactNode; className?: string }) {
-  const { onAsk, busy } = useCard();
-  const topic = subject || r.title;
+  const { onRead, onAsk } = useCard();
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         {children ?? (
-          <button type="button" title={`${r.title} — ${r.domain}`} aria-label={`Options for ${subject || r.domain}`} className={cn('flex size-7 shrink-0 items-center justify-center self-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground', className)}>
+          <button type="button" title={`${r.title} — ${r.domain}`} aria-label={`Options for ${subject || r.domain}`} className={cn("relative flex size-7 shrink-0 items-center justify-center self-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground after:absolute after:-inset-2 after:content-['']", className)}>
             <ChevronRight className="size-4" />
           </button>
         )}
@@ -154,7 +159,10 @@ function SourceMenu({ result: r, subject, children, className }: { result: Searc
           <img src={`https://icons.duckduckgo.com/ip3/${r.domain}.ico`} alt="" className="size-3.5 rounded-sm" />
           <span className="truncate">{domainLabel(r.domain)}</span>
         </DropdownMenuLabel>
-        <DropdownMenuItem disabled={busy} onSelect={() => onAsk(`Tell me more about ${topic}, based on ${domainLabel(r.domain)}`)}>
+        <DropdownMenuItem onSelect={() => onRead(r)}>
+          <BookOpen />Read it here
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => onAsk(`Tell me more about ${subject || r.title}, based on ${domainLabel(r.domain)}`)}>
           <MessageCircle /><span className="truncate">Ask about {subject || 'this'}</span>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
@@ -274,7 +282,7 @@ export function Links({ node }: { node: Of<'links'> }) {
 
 export function Tile({ node }: { node: Of<'tile'> }) {
   const { onAsk, busy } = useCard();
-  const img = usePicture(node.imageSrc, node.imageRef);
+  const [img, onImgError] = useLoadable(usePicture(node.imageSrc, node.imageRef));
   const credit = useCredit(img);
   const pending = !img && !!node.imageQuery && busy;
   const link = useSource(node.source);
@@ -289,7 +297,7 @@ export function Tile({ node }: { node: Of<'tile'> }) {
       )}
     >
       {img ? (
-        <img src={img} alt={node.label} title={credit} loading="lazy" className="mb-1 aspect-square w-full max-w-24 rounded-lg bg-muted object-cover animate-in fade-in" onError={(e) => ((e.target as HTMLElement).style.display = 'none')} />
+        <img src={img} alt={node.label} title={credit} loading="lazy" className="mb-1 aspect-square w-full max-w-24 rounded-lg bg-muted object-cover animate-in fade-in" onError={onImgError} />
       ) : pending ? (
         <Skeleton className="mb-1 aspect-square w-full max-w-24 rounded-lg" />
       ) : null}
@@ -318,9 +326,9 @@ export function KeyValue({ node }: { node: Of<'keyvalue'> }) {
 
 function MediaThumb({ item, index }: { item: Of<'list'>['items'][number]; index: number }) {
   const { busy } = useCard();
-  const img = usePicture(item.imageSrc, item.imageRef);
+  const [img, onImgError] = useLoadable(usePicture(item.imageSrc, item.imageRef));
   const credit = useCredit(img);
-  if (img) return <img src={img} alt="" title={credit} loading="lazy" className="size-12 shrink-0 rounded-lg bg-muted object-cover animate-in fade-in sm:size-14" onError={(e) => ((e.target as HTMLElement).style.visibility = 'hidden')} />;
+  if (img) return <img src={img} alt="" title={credit} loading="lazy" className="size-12 shrink-0 rounded-lg bg-muted object-cover animate-in fade-in sm:size-14" onError={onImgError} />;
   if (item.imageQuery && busy) return <Skeleton className="size-12 shrink-0 rounded-lg sm:size-14" />;
   return (
     <span className="flex size-12 shrink-0 items-center justify-center rounded-lg bg-muted text-sm font-semibold text-muted-foreground sm:size-14">
@@ -329,19 +337,32 @@ function MediaThumb({ item, index }: { item: Of<'list'>['items'][number]; index:
   );
 }
 
+function MediaRow({ item, index }: { item: Of<'list'>['items'][number]; index: number }) {
+  const r = useSource(item.source);
+  const { onAsk } = useCard();
+  const button = (
+    <button type="button" onClick={r ? undefined : () => onAsk(`Tell me more about ${subjectOf(item.text)}`)} className="flex w-full items-center gap-3 p-2.5 text-left transition-colors hover:bg-foreground/[0.03] data-[state=open]:bg-foreground/[0.04] sm:p-3">
+      <MediaThumb item={item} index={index} />
+      <span className="flex min-w-0 flex-1 flex-col items-start gap-1 text-sm leading-snug">
+        <RichText text={item.text} inline noLinks />
+        {item.meta && <span className="rounded-md bg-muted px-2 py-0.5 text-xs font-medium leading-snug tabular-nums sm:hidden">{item.meta}</span>}
+      </span>
+      {item.meta && <span className="hidden max-w-[40%] shrink-0 rounded-md bg-muted px-2 py-0.5 text-right text-xs font-medium leading-snug tabular-nums sm:inline">{item.meta}</span>}
+      <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+    </button>
+  );
+  return (
+    <li>
+      {r ? <SourceMenu result={r} subject={subjectOf(item.text)}>{button}</SourceMenu> : button}
+    </li>
+  );
+}
+
 function MediaList({ node }: { node: Of<'list'> }) {
   return (
     <ul className="divide-y rounded-xl border bg-card">
       {node.items.map((item, i) => (
-        <li key={i} className="flex items-center gap-3 p-2.5 sm:p-3">
-          <MediaThumb item={item} index={i} />
-          <span className="flex min-w-0 flex-1 flex-col items-start gap-1 text-sm leading-snug">
-            <RichText text={item.text} inline />
-            {item.meta && <span className="rounded-md bg-muted px-2 py-0.5 text-xs font-medium leading-snug tabular-nums sm:hidden">{item.meta}</span>}
-          </span>
-          {item.meta && <span className="hidden max-w-[40%] shrink-0 rounded-md bg-muted px-2 py-0.5 text-right text-xs font-medium leading-snug tabular-nums sm:inline">{item.meta}</span>}
-          <SourceLink n={item.source} subject={subjectOf(item.text)} />
-        </li>
+        <MediaRow key={i} item={item} index={i} />
       ))}
     </ul>
   );
@@ -539,7 +560,7 @@ export function CodeView({ node }: { node: Of<'code'> }) {
         <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-muted-foreground">{node.lang ?? 'code'}</span>
         <CopyButton text={node.code} />
       </div>
-      <pre className="no-scrollbar overflow-x-auto px-3.5 py-3 font-mono text-[12.5px] leading-relaxed sm:text-[13px]"><code>{node.code}</code></pre>
+      <pre className="no-scrollbar overflow-x-auto overscroll-x-contain px-3.5 py-3 font-mono text-[12.5px] leading-relaxed sm:text-[13px]"><code>{node.code}</code></pre>
     </div>
   );
 }
@@ -633,7 +654,7 @@ export function Profile({ node }: { node: Of<'profile'> }) {
 }
 
 export function Actions({ node }: { node: Of<'actions'> }) {
-  const { onSearch, onAsk, onRefine, busy } = useCard();
+  const { onSearch, onAsk, onRefine } = useCard();
   const run = (a: Of<'actions'>['items'][number]) => {
     switch (a.kind ?? 'search') {
       case 'refine': return onRefine(a.query);
@@ -646,9 +667,9 @@ export function Actions({ node }: { node: Of<'actions'> }) {
     }
   };
   return (
-    <div className="flex flex-wrap gap-2">
+    <div className="flex flex-wrap gap-x-2 gap-y-3">
       {node.items.map((a) => (
-        <Button key={a.label} variant={a.kind === 'refine' ? 'secondary' : 'outline'} size="sm" className="rounded-full" disabled={busy && a.kind === 'refine'} onClick={() => run(a)}>
+        <Button key={a.label} variant={a.kind === 'refine' ? 'secondary' : 'outline'} size="sm" className="relative rounded-full after:absolute after:inset-x-0 after:-inset-y-[7px] after:content-['']" onClick={() => run(a)}>
           <Icon name={a.icon} fallback={a.kind === 'refine' ? 'wand-sparkles' : a.kind === 'ask' ? 'message-circle' : 'search'} className="size-3.5" />{a.label}
         </Button>
       ))}

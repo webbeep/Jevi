@@ -3,10 +3,52 @@ import { cn } from "@/lib/utils"
 import { CheckIcon, ChevronRightIcon, CircleIcon } from "lucide-react"
 import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui"
 
+const DropdownMenuContext = React.createContext<{
+  open: boolean
+  setOpen: (next: boolean) => void
+  triggerRef: React.RefObject<HTMLElement | null>
+}>({
+  open: false,
+  setOpen: () => {},
+  triggerRef: { current: null },
+})
+
 function DropdownMenu({
+  open: openProp,
+  defaultOpen,
+  onOpenChange,
+  modal = false,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
-  return <DropdownMenuPrimitive.Root data-slot="dropdown-menu" {...props} />
+  const [internal, setInternal] = React.useState(defaultOpen ?? false)
+  const triggerRef = React.useRef<HTMLElement | null>(null)
+  const open = openProp ?? internal
+  const setOpen = React.useCallback((next: boolean) => {
+    if (openProp === undefined) setInternal(next)
+    onOpenChange?.(next)
+  }, [openProp, onOpenChange])
+
+  React.useEffect(() => {
+    if (!open) return
+    const yAtOpen = window.scrollY
+    const onScroll = () => {
+      if (Math.abs(window.scrollY - yAtOpen) > 8) setOpen(false)
+    }
+    window.addEventListener("scroll", onScroll, { passive: true })
+    return () => window.removeEventListener("scroll", onScroll)
+  }, [open, setOpen])
+
+  return (
+    <DropdownMenuContext.Provider value={{ open, setOpen, triggerRef }}>
+      <DropdownMenuPrimitive.Root
+        data-slot="dropdown-menu"
+        open={open}
+        onOpenChange={setOpen}
+        modal={modal}
+        {...props}
+      />
+    </DropdownMenuContext.Provider>
+  )
 }
 
 function DropdownMenuPortal({
@@ -18,12 +60,37 @@ function DropdownMenuPortal({
 }
 
 function DropdownMenuTrigger({
+  onPointerDown,
+  onClick,
+  ref,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Trigger>) {
+  const pointer = React.useRef("mouse")
+  const wasOpen = React.useRef(false)
+  const menu = React.useContext(DropdownMenuContext)
   return (
     <DropdownMenuPrimitive.Trigger
       data-slot="dropdown-menu-trigger"
       {...props}
+      ref={(node) => {
+        menu.triggerRef.current = node
+        if (typeof ref === "function") ref(node)
+        else if (ref) ref.current = node
+      }}
+      onPointerDown={(e) => {
+        onPointerDown?.(e)
+        pointer.current = e.pointerType
+        if (e.pointerType !== "mouse") {
+          // Snapshot before the document pointerdown dismisses an open menu.
+          wasOpen.current = menu.open
+          e.preventDefault()
+        }
+      }}
+      onClick={(e) => {
+        onClick?.(e)
+        if (pointer.current !== "mouse") menu.setOpen(!wasOpen.current)
+        pointer.current = "mouse"
+      }}
     />
   )
 }
@@ -31,8 +98,12 @@ function DropdownMenuTrigger({
 function DropdownMenuContent({
   className,
   sideOffset = 4,
+  onInteractOutside,
+  onCloseAutoFocus,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Content>) {
+  const menu = React.useContext(DropdownMenuContext)
+  const interactedOutside = React.useRef(false)
   return (
     <DropdownMenuPrimitive.Portal>
       <DropdownMenuPrimitive.Content
@@ -43,6 +114,24 @@ function DropdownMenuContent({
           className
         )}
         {...props}
+        onInteractOutside={(e) => {
+          onInteractOutside?.(e)
+          // The trigger is outside the content. Let its own toggle decide so a tap
+          // closes an open menu, and a tap during exit does not dismiss the menu just opened.
+          if (e.target instanceof Node && menu.triggerRef.current?.contains(e.target)) {
+            e.preventDefault()
+          } else {
+            interactedOutside.current = true
+          }
+        }}
+        onCloseAutoFocus={(e) => {
+          onCloseAutoFocus?.(e)
+          if (e.defaultPrevented) return
+          // Radix focuses the trigger without preventScroll, which yanks the page back after a scroll-close.
+          e.preventDefault()
+          if (!interactedOutside.current) menu.triggerRef.current?.focus({ preventScroll: true })
+          interactedOutside.current = false
+        }}
       />
     </DropdownMenuPrimitive.Portal>
   )

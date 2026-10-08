@@ -1,5 +1,9 @@
 import type { AnswerCard, CardNode, FollowupContext, FollowupIntent, ImageCredit, LayoutPlan } from '../shared/card';
+import { parseSseFrames, StreamError } from '../shared/sse-parse';
 import type { Freshness, ImageResult, SearchResponse } from '../shared/types';
+
+export { StreamError, shouldAutoRetry } from '../shared/sse-parse';
+export type { StreamErrorReason } from '../shared/sse-parse';
 
 export type StreamBody =
   | { kind: 'search'; query: string; freshness: Freshness; context?: string }
@@ -22,31 +26,44 @@ export type StreamEvent =
   | { event: 'node'; data: { index: number; node: CardNode } }
   | { event: 'followups'; data: string[] }
   | { event: 'done'; data: { engine: 'composed' | 'reasoning' | 'extractive'; removed: number; pagesRead: number; ms: number; via?: string } }
-  | { event: 'error'; data: { message: string } };
+  | { event: 'error'; data: { message: string; retryable?: boolean } };
+
+function httpError(status: number, message: string): StreamError {
+  const retryable = status === 429 || status >= 500;
+  return new StreamError(message, 'http', retryable);
+}
 
 /** POSTs to the streaming endpoint and calls `onEvent` for every Server-Sent Event as it arrives. */
-export async function stream(body: StreamBody, onEvent: (e: StreamEvent) => void, signal?: AbortSignal): Promise<void> {
-  const res = await fetch('/api/stream', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal });
+export async function stream(body: StreamBody, onEvent: (e: StreamEvent) => void, signal?: AbortSignal, opts?: { retry?: boolean }): Promise<void> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (opts?.retry) headers['x-zo-retry'] = '1';
+  let res: Response;
+  try {
+    res = await fetch('/api/stream', { method: 'POST', headers, body: JSON.stringify(body), signal });
+  } catch (err) {
+    if (signal?.aborted) throw err;
+    if (err instanceof TypeError) throw new StreamError(err.message || 'Network error', 'network', true);
+    throw err;
+  }
   if (!res.ok || !res.body) {
     const err = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(err.error ?? `Request failed (${res.status})`);
+    const message = err.error ?? `Request failed (${res.status})`;
+    if (res.ok) throw new StreamError('The answer was cut off.', 'cut', true);
+    throw httpError(res.status, message);
   }
   const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
   let buffer = '';
-  let finished = false;
+  let cut = true;
   try {
     for (;;) {
       const { value, done } = await reader.read();
       if (done) break;
       buffer += value;
-      const frames = buffer.split('\n\n');
-      buffer = frames.pop() ?? '';
-      for (const frame of frames) {
-        const event = frame.match(/^event: (.*)$/m)?.[1];
-        const data = frame.match(/^data: (.*)$/m)?.[1];
-        if (!event || !data) continue;
-        if (event === 'done' || event === 'error') finished = true;
-        onEvent({ event, data: JSON.parse(data) } as StreamEvent);
+      const parsed = parseSseFrames(buffer);
+      buffer = parsed.rest;
+      if (!parsed.cut) cut = false;
+      for (const frame of parsed.events) {
+        onEvent({ event: frame.event, data: JSON.parse(frame.data) } as StreamEvent);
       }
     }
   } finally {
@@ -54,5 +71,5 @@ export async function stream(body: StreamBody, onEvent: (e: StreamEvent) => void
     reader.cancel().catch(() => undefined);
   }
   // A worker that hit a platform limit just closes the stream; without this the card would spin forever.
-  if (!finished && !signal?.aborted) throw new Error('The answer was cut off. Please try again.');
+  if (cut && !signal?.aborted) throw new StreamError('The answer was cut off.', 'cut', true);
 }

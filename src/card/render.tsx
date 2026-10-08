@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Icon } from './Icon';
-import { AccordionNode, Choices, Reveal, Scaler, SliderNode } from './interactive';
+import { AccordionNode, Choices, Pricing, Reveal, Scaler, SliderNode } from './interactive';
 import {
   Actions, Badges, Callout, CodeView, Draft, Gallery, Heading, Hero, ImageView, KeyValue, Links, List, Profile,
   ProgressView, ProsCons, Quote, Rating, SlotView, StatView, Steps, TableView, Text, Tile, Timeline, TONE_TEXT, VideoView,
@@ -13,7 +13,7 @@ import {
 const ChartView = lazy(() => import('./ChartView'));
 
 const GAP: Record<Gap, string> = { sm: 'gap-1.5 sm:gap-2', md: 'gap-2 sm:gap-3', lg: 'gap-3 sm:gap-5' };
-const COLS = { 2: 'grid-cols-2', 3: 'grid-cols-2 sm:grid-cols-3', 4: 'grid-cols-2 sm:grid-cols-4' } as const;
+const COLS = { 2: 'grid-cols-2', 3: 'grid-cols-2 sm:grid-cols-3 max-sm:[&>*:last-child:nth-child(odd)]:col-span-2', 4: 'grid-cols-2 sm:grid-cols-4' } as const;
 const WIDE_COLS = { 2: 'sm:grid-cols-2', 3: 'sm:grid-cols-3', 4: 'sm:grid-cols-2 lg:grid-cols-4' } as const;
 const ALIGN = { start: 'sm:items-start', center: 'sm:items-center', end: 'sm:items-end', between: 'sm:items-center sm:justify-between' } as const;
 
@@ -68,7 +68,7 @@ export function NodeView({ node }: { node: CardNode }): ReactNode {
       const row = node.direction === 'row';
       const compact = row && node.children.every(isCompact);
       return (
-        <div className={cn('flex min-w-0', GAP[node.gap ?? 'md'], compact ? 'no-scrollbar flex-row overflow-x-auto' : row ? cn('flex-col sm:flex-row', ALIGN[node.align ?? 'start'], node.wrap && 'sm:flex-wrap') : 'flex-col')}>
+        <div className={cn('flex min-w-0', GAP[node.gap ?? 'md'], compact ? 'no-scrollbar flex-row overflow-x-auto overscroll-x-contain' : row ? cn('flex-col sm:flex-row', ALIGN[node.align ?? 'start'], node.wrap && 'sm:flex-wrap') : 'flex-col')}>
           {node.children.map((c, i) => <div key={i} className={cn('flex min-w-0 flex-col [&>*]:flex-1', compact ? 'flex-1' : row && 'sm:flex-1')}><NodeView node={c} /></div>)}
         </div>
       );
@@ -90,7 +90,7 @@ export function NodeView({ node }: { node: CardNode }): ReactNode {
     case 'tabs':
       return (
         <Tabs defaultValue="0" className="gap-3">
-          <div className="no-scrollbar w-full overflow-x-auto">
+          <div className="no-scrollbar w-full overflow-x-auto overscroll-x-contain">
             <TabsList className="w-max">
               {node.tabs.map((t, i) => <TabsTrigger key={i} value={String(i)}>{t.label}</TabsTrigger>)}
             </TabsList>
@@ -100,7 +100,7 @@ export function NodeView({ node }: { node: CardNode }): ReactNode {
       );
     case 'scroller':
       return (
-        <div className="no-scrollbar -mx-4 overflow-x-auto px-4 sm:-mx-6 sm:px-6">
+        <div className="no-scrollbar -mx-4 overflow-x-auto overscroll-x-contain px-4 sm:-mx-6 sm:px-6">
           <div className="flex w-max min-w-full gap-2 [&>*]:flex-1">{node.children.map((c, i) => <NodeView key={i} node={c} />)}</div>
         </div>
       );
@@ -137,6 +137,7 @@ export function NodeView({ node }: { node: CardNode }): ReactNode {
     case 'choices': return <Choices node={node} />;
     case 'slider': return <SliderNode node={node} />;
     case 'scaler': return <Scaler node={node} />;
+    case 'pricing': return <Pricing node={node} />;
     case 'accordion': return <AccordionNode node={node} />;
     case 'reveal': return <Reveal node={node} />;
     default: {

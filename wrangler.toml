@@ -5,3 +5,7 @@ compatibility_date = "2026-09-01"
 # Cloudflare Workers AI: keyless last-resort language model when every keyed provider is down.
 [ai]
 binding = "AI"
+
+# Workers Paid (active 2026-10-08): CPU per request. Paid default is 30,000 ms; set explicitly so the 10 ms Free cap can't come back silently.
+[limits]
+cpu_ms = 30000

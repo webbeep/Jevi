@@ -111,6 +111,7 @@ function groundNode(node: CardNode, g: Grounding): CardNode | undefined {
       return { ...node, facts: node.facts?.filter((f) => g.ok(f.value)) };
     case 'choices':
     case 'slider':
+    case 'pricing':
       return node;
     case 'scaler': {
       const items = node.items.filter((i) => g.ok(i.amount));

@@ -1,5 +1,5 @@
 import { type FormEvent, type RefObject, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowUp, CornerDownRight, CornerLeftUp, Moon, Plus, Search, SlidersHorizontal, Sun, X } from 'lucide-react';
+import { ArrowUp, CornerDownRight, CornerLeftUp, History, Moon, Pencil, Plus, RotateCw, Search, Shuffle, SlidersHorizontal, Sun, X } from 'lucide-react';
 import type { AnswerCard, CardNode } from '../shared/card';
 import type { SearchResponse } from '../shared/types';
 import { api } from './api';
@@ -10,7 +10,11 @@ import { LogoMark, Wordmark } from './Logo';
 import { type LibraryEntry, buildLibrary } from './library';
 import { FaviconStack, Reader, SourcesRail, SourcesSheet } from './Sources';
 import { type SessionActions, type Turn, liveBody, scrollToTurn, useSession } from './useSession';
+import { loadSnapshot, normalizeAnswerQuery, saveSnapshot } from '../shared/answerKey';
+import { RECENT_KEY, clearHistory, readHistory, recordAsk } from '../shared/personal';
+import { placeholderExamples } from '../shared/starters';
 import { useSuggestions } from './useSuggestions';
+import { clearTypeaheadClientCache, useTypeahead } from './useTypeahead';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -30,6 +34,44 @@ type QuoteMode = (typeof QUOTE_MODES)[number]['id'];
 interface Quote {
   text: string;
   turnId: number;
+}
+
+
+const TAGLINE = 'Ask anything. Get answers you can compare, tweak and keep.';
+
+function readAnswerCache(query: string): Turn[] | undefined {
+  try {
+    return loadSnapshot<Turn[]>(sessionStorage, query);
+  } catch {
+    return undefined;
+  }
+}
+
+function writeAnswerCache(query: string, turns: Turn[]) {
+  try {
+    saveSnapshot(sessionStorage, query, turns);
+  } catch {
+    /* private mode */
+  }
+}
+
+function readRecents(): string[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]') as unknown;
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string' && x.trim().length > 0) : [];
+  } catch {
+    return [];
+  }
+}
+
+function pushRecent(q: string): string[] {
+  const next = [q, ...readRecents().filter((r) => r.toLowerCase() !== q.toLowerCase())].slice(0, 3);
+  try {
+    localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+  } catch {
+    /* ignore quota */
+  }
+  return next;
 }
 
 function useTheme() {
@@ -66,11 +108,33 @@ export default function App() {
   const initial = useMemo(() => new URLSearchParams(location.search), []);
   const [dark, setDark] = useTheme();
   const { turns, actions: session } = useSession();
-  const suggestions = useSuggestions();
+  const { items: suggestions, shuffle, shuffleEnabled, personalized, refresh } = useSuggestions();
+  const [recents, setRecents] = useState<string[]>(() => (typeof window !== 'undefined' ? readRecents() : []));
+  const [histRev, setHistRev] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [phExamples] = useState(() => placeholderExamples());
+  const [phIndex, setPhIndex] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => setPhIndex((i) => (i + 1) % phExamples.length), 4000);
+    return () => window.clearInterval(id);
+  }, [phExamples.length]);
   const [input, setInput] = useState(initial.get('q') ?? '');
   const [chat, setChat] = useState(0);
   const mainRef = useRef<HTMLDivElement>(null);
   const home = turns.length === 0;
+  const fillFromTypeahead = useCallback((text: string) => {
+    setInput(text);
+    inputRef.current?.focus();
+  }, []);
+  const typeahead = useTypeahead(home ? input : '', fillFromTypeahead, histRev);
+  const historyCount = useMemo(() => {
+    try {
+      return readHistory(localStorage).length;
+    } catch {
+      return 0;
+    }
+  }, [histRev]);
+  const hasHistory = recents.length > 0 || historyCount > 0;
   const root = turns[0];
   const last = [...turns].reverse().find((t) => t.result);
   const busy = turns.some((t) => t.filling);
@@ -106,8 +170,17 @@ export default function App() {
     const query = q.trim();
     if (!query) return;
     shown.current = query;
+    setRecents(pushRecent(query));
+    recordAsk(localStorage, query);
+    setHistRev((n) => n + 1);
+    refresh();
+    typeahead.close();
     history.pushState(null, '', `?${new URLSearchParams({ q: query })}`);
     session.search(query, { reset: true });
+  };
+
+  const editStarter = (text: string) => {
+    setInput(text);
   };
 
   const newChat = () => {
@@ -119,8 +192,13 @@ export default function App() {
   };
 
   useEffect(() => {
+    const openQuery = (q: string) => {
+      const cached = readAnswerCache(q);
+      if (cached) session.restore(cached);
+      else session.search(q, { reset: true });
+    };
     const q = initial.get('q');
-    if (q) session.search(q, { reset: true });
+    if (q) openQuery(q);
     const onPop = () => {
       if (overlay.current) return closeOverlays();
       const next = new URLSearchParams(location.search).get('q') ?? '';
@@ -128,7 +206,7 @@ export default function App() {
       if (next === shown.current) return;
       shown.current = next;
       resetUi();
-      if (next) session.search(next, { reset: true });
+      if (next) openQuery(next);
       else session.clear();
     };
     window.addEventListener('popstate', onPop);
@@ -136,9 +214,30 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (busy) return;
+    const first = turns[0];
+    if (!first || first.kind !== 'search' || !first.result) return;
+    if (turns.some((t) => t.error)) return;
+    const query = shown.current;
+    if (!query) return;
+    if (normalizeAnswerQuery(first.question) !== normalizeAnswerQuery(query)) return;
+    writeAnswerCache(query, turns);
+  }, [turns, busy]);
+
   const onSearchSubmit = (e: FormEvent) => {
     e.preventDefault();
+    typeahead.close();
     startSearch(input);
+  };
+
+  const wipeHistory = () => {
+    clearHistory(localStorage);
+    clearTypeaheadClientCache();
+    setRecents([]);
+    setHistRev((n) => n + 1);
+    refresh();
+    typeahead.close();
   };
 
   return (
@@ -151,36 +250,144 @@ export default function App() {
             <header className="flex h-14 items-center justify-end px-3 sm:px-5">
               <ThemeToggle dark={dark} onToggle={() => setDark(!dark)} />
             </header>
-            <main className="relative mx-auto flex w-full max-w-[640px] flex-col px-4 pb-16 pt-[12dvh] sm:pt-[18dvh]">
+            <main className="relative mx-auto flex w-full max-w-[640px] flex-col px-4 pb-16 pt-[10dvh] sm:pt-[16dvh]">
               <h1 className="flex justify-center">
                 <Wordmark className="text-[40px] sm:text-[48px]" />
                 <span className="sr-only">ZO</span>
               </h1>
-              <form onSubmit={onSearchSubmit} className="group relative mt-8 sm:mt-10">
+              <p className="mx-auto mt-3 max-w-[22rem] text-center text-[14px] leading-snug text-muted-foreground sm:mt-4 sm:max-w-none sm:text-[15px]">
+                {TAGLINE}
+              </p>
+              <form onSubmit={onSearchSubmit} className={cn('group relative mt-6 sm:mt-8', typeahead.open && 'z-20')}>
                 <Search className="pointer-events-none absolute left-5 top-1/2 size-[18px] -translate-y-1/2 text-muted-foreground" />
                 <Input
+                  ref={inputRef}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  placeholder="Ask anything"
+                  onKeyDown={typeahead.onKeyDown}
+                  onFocus={typeahead.onFocus}
+                  onBlur={typeahead.onBlur}
+                  placeholder={phExamples[phIndex]}
                   aria-label="Ask anything"
+                  aria-autocomplete="list"
+                  aria-expanded={typeahead.open}
+                  aria-controls={typeahead.listId}
+                  aria-activedescendant={typeahead.activeId}
+                  role="combobox"
                   enterKeyHint="send"
+                  autoComplete="off"
                   autoFocus
                   className="h-14 rounded-2xl border-input bg-card pl-12 pr-14 text-base shadow-card transition-shadow focus-visible:shadow-float focus-visible:ring-0 md:text-base"
                 />
                 <Button type="submit" size="icon" className="absolute right-2 top-1/2 size-10 -translate-y-1/2 rounded-xl" disabled={!input.trim()} aria-label="Send">
                   <ArrowUp className="size-4" />
                 </Button>
+                {typeahead.open && (
+                  <ul id={typeahead.listId} role="listbox" className="absolute left-0 right-0 top-full z-20 mt-2 max-w-full overflow-hidden rounded-2xl border bg-card shadow-float">
+                    {typeahead.rows.map((row, i) => (
+                      <li key={`${row.source}-${row.text}`} id={`${typeahead.listId}-opt-${i}`} role="option" aria-selected={i === typeahead.active}>
+                        <button
+                          type="button"
+                          tabIndex={-1}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => typeahead.pick(row.text)}
+                          className={cn(
+                            'flex min-h-11 w-full min-w-0 items-center gap-3 px-4 text-left text-[14px] leading-snug text-foreground/80 hover:bg-foreground/[0.04] hover:text-foreground',
+                            i === typeahead.active && 'bg-foreground/[0.04] text-foreground',
+                          )}
+                        >
+                          {row.source === 'history' ? <History className="size-4 shrink-0 text-muted-foreground" /> : <Search className="size-4 shrink-0 text-muted-foreground" />}
+                          <span className="min-w-0 flex-1 break-words">{row.text}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </form>
-              <ul className="mt-6 grid gap-0.5 sm:mt-8 sm:grid-cols-2 sm:gap-x-4">
-                {suggestions.slice(0, 6).map((s, i) => (
-                  <li key={s.text} className={cn('animate-in fade-in fill-mode-backwards duration-500', i >= 4 && 'hidden sm:block')} style={{ animationDelay: `${i * 40}ms` }}>
-                    <button onClick={() => startSearch(s.text)} className="flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left text-[14px] leading-snug text-foreground/75 transition-colors hover:bg-foreground/[0.04] hover:text-foreground">
-                      <Icon name={s.icon} fallback="sparkles" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-                      <span className="line-clamp-2">{s.text}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
+              {recents.length > 0 && (
+                <div className="mt-5 sm:mt-6">
+                  <div className="mb-1.5 flex items-center justify-between gap-2 px-1">
+                    <h2 className="zo-label">Recent</h2>
+                    {hasHistory && (
+                      <button
+                        type="button"
+                        onClick={wipeHistory}
+                        className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl px-3 text-[13px] text-muted-foreground transition-colors hover:bg-foreground/[0.04] hover:text-foreground"
+                      >
+                        Clear history
+                      </button>
+                    )}
+                  </div>
+                  <ul className="flex flex-col gap-1">
+                    {recents.slice(0, 3).map((r, i) => (
+                      <li key={r} className={cn(i >= 2 && 'hidden sm:block')}>
+                        <button
+                          type="button"
+                          onClick={() => startSearch(r)}
+                          className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[14px] leading-snug text-foreground/70 transition-colors hover:bg-foreground/[0.04] hover:text-foreground"
+                        >
+                          <RotateCw className="size-4 shrink-0 text-muted-foreground" />
+                          <span className="min-w-0 flex-1 break-words">{r}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <div className="mt-5 sm:mt-6">
+                <div className="mb-1.5 flex items-center justify-between gap-2 px-1">
+                  <div className="min-w-0">
+                    <h2 className="zo-label">Try one</h2>
+                    {personalized && <p className="text-[11px] leading-snug text-muted-foreground">Personalized from this device</p>}
+                  </div>
+                  <div className="flex shrink-0 items-center">
+                    {hasHistory && recents.length === 0 && (
+                      <button
+                        type="button"
+                        onClick={wipeHistory}
+                        className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl px-3 text-[13px] text-muted-foreground transition-colors hover:bg-foreground/[0.04] hover:text-foreground"
+                      >
+                        Clear history
+                      </button>
+                    )}
+                    {shuffleEnabled && (
+                      <button
+                        type="button"
+                        onClick={shuffle}
+                        aria-label="Shuffle suggestions"
+                        className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-xl px-2 text-[12px] text-muted-foreground transition-colors hover:bg-foreground/[0.04] hover:text-foreground"
+                      >
+                        <Shuffle className="size-3.5" />
+                        Shuffle
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <ul className="flex flex-col gap-1 sm:grid sm:grid-cols-2 sm:gap-x-3 sm:gap-y-1">
+                  {suggestions.map((s, i) => (
+                    <li key={s.id} className="animate-in fade-in fill-mode-backwards duration-500" style={{ animationDelay: `${i * 40}ms` }}>
+                      <div className="flex min-h-11 items-stretch gap-0.5 rounded-xl hover:bg-foreground/[0.04]">
+                        <button
+                          type="button"
+                          onClick={() => startSearch(s.text)}
+                          className="flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[14px] leading-snug text-foreground/80 transition-colors hover:text-foreground"
+                        >
+                          <Icon name={s.icon} fallback="sparkles" className="size-4 shrink-0 text-muted-foreground" />
+                          <span className="min-w-0 flex-1 break-words">{s.text}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => editStarter(s.text)}
+                          aria-label={`Edit: ${s.text}`}
+                          className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:text-foreground"
+                        >
+                          <Pencil className="size-3.5" />
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             </main>
           </>
         ) : (
@@ -229,7 +436,7 @@ export default function App() {
 
               <aside className="hidden lg:block">
                 {library.length > 0 && (
-                  <div className="sticky top-[5.5rem] max-h-[calc(100dvh-7rem)] overflow-y-auto no-scrollbar">
+                  <div className="sticky top-[calc(5.5rem-10px)] -mt-2.5 pt-2.5 max-h-[calc(100dvh-7rem+10px)] overflow-y-auto no-scrollbar">
                     <SourcesRail entries={library} engines={railTurn?.search?.engines ?? []} onRead={read} onAll={() => openSources()} />
                   </div>
                 )}
@@ -354,9 +561,9 @@ function Composer({ actions, topic, mainRef }: { actions: SessionActions; topic:
   };
 
   return (
-    <div className="fixed inset-x-0 bottom-0 z-30 bg-gradient-to-t from-background via-background/85 to-transparent pb-[calc(env(safe-area-inset-bottom)+12px)] pt-10">
+    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 bg-gradient-to-t from-background via-background/85 to-transparent pb-[calc(env(safe-area-inset-bottom)+12px)] pt-10">
       <div className={cn(SHELL, GRID)}>
-        <form onSubmit={send} className="overflow-hidden rounded-2xl border border-input bg-popover shadow-float">
+        <form onSubmit={send} className="pointer-events-auto overflow-hidden rounded-2xl border border-input bg-popover shadow-float">
           {quote && (
             <div className="space-y-2 border-b px-3 pb-2.5 pt-3 animate-in fade-in slide-in-from-bottom-1">
               <div className="flex items-start gap-2">
@@ -366,7 +573,7 @@ function Composer({ actions, topic, mainRef }: { actions: SessionActions; topic:
                   <X className="size-3.5" />
                 </button>
               </div>
-              <ToggleGroup type="single" size="sm" value={quoteMode} onValueChange={(v) => v && setQuoteMode(v as QuoteMode)} className="no-scrollbar w-full justify-start overflow-x-auto">
+              <ToggleGroup type="single" size="sm" value={quoteMode} onValueChange={(v) => v && setQuoteMode(v as QuoteMode)} className="no-scrollbar w-full justify-start overflow-x-auto overscroll-x-contain">
                 {QUOTE_MODES.map((m) => (
                   <ToggleGroupItem key={m.id} value={m.id} title={m.hint} className="h-7 shrink-0 rounded-lg px-2.5 text-xs data-[state=on]:bg-foreground/[0.08] data-[state=on]:text-foreground">
                     <Icon name={m.icon} className="size-3.5" />
@@ -425,6 +632,14 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
   }, [search?.images, turn.live?.credits, card.credits]);
 
   const id = turn.id;
+  const pendingRefine = useRef<string | null>(null);
+  useEffect(() => {
+    if (!turn.filling && pendingRefine.current) {
+      const value = pendingRefine.current;
+      pendingRefine.current = null;
+      void actions.followup(value, id, 'adjust');
+    }
+  }, [turn.filling, actions, id]);
   const context: CardContextValue = useMemo(() => ({
     results: search?.results ?? [],
     images: search?.images ?? [],
@@ -432,7 +647,13 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
     busy: turn.filling,
     onSearch: (q) => void actions.followup(q, id, 'search'),
     onAsk: (q) => void actions.followup(q, id, 'ask'),
-    onRefine: (instruction) => void actions.followup(instruction, id, 'adjust'),
+    onRefine: (instruction) => {
+      if (turn.filling) {
+        pendingRefine.current = instruction;
+        return;
+      }
+      void actions.followup(instruction, id, 'adjust');
+    },
     onSources: () => onSources(id),
   }), [search?.results, search?.images, credits, turn.filling, actions, id, onSources]);
 
@@ -455,7 +676,15 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
       )}
 
       {turn.error && !turn.result ? (
-        <div className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">{turn.error}</div>
+        <div className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
+          <p>{turn.error}</p>
+          {turn.retryable && (
+            <button type="button" data-testid="retry" onClick={() => actions.retry(id)} className="mx-auto mt-4 inline-flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-md px-4 text-foreground transition-colors hover:bg-foreground/5">
+              <RotateCw className="size-4" />
+              Retry
+            </button>
+          )}
+        </div>
       ) : (
         <CardContext.Provider value={context}>
           <AnswerCardView

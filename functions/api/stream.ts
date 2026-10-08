@@ -1,5 +1,5 @@
 import type { Freshness, SearchResponse } from '../../shared/types';
-import { sseResponse } from '../../server/sse';
+import { serveStream } from '../../server/answerCache';
 import { type StreamRequest, runStream } from '../../server/stream';
 import { Env, errorJson, readJson } from '../../server/util';
 
@@ -45,7 +45,7 @@ function clean(body: StreamRequest | null): StreamRequest | undefined {
   }
 }
 
-export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
+export const onRequestPost: PagesFunction<Env> = async ({ request, env, waitUntil }) => {
   let body: StreamRequest | undefined;
   try {
     body = clean(await readJson<StreamRequest>(request));
@@ -54,5 +54,5 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   }
   if (!body) return errorJson('Invalid request', 400);
   const req = body;
-  return sseResponse((send) => runStream(req, env, send));
+  return serveStream({ request, env, req, run: (send) => runStream(req, env, send), waitUntil });
 };

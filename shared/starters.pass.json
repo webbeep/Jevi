@@ -1,0 +1,11 @@
+{
+  "gate": "renders its intended rich card node (STARTERS-v2.md), answer completes, no cut-off",
+  "probedAt": "2026-10-07",
+  "source": "org/eng/zo/STARTERS-v2.md (Strategy) + org/eng/zo/STARTERS-V2-U.md (verification)",
+  "passing": [
+    { "id": "v2-earbuds-100", "text": "best wireless earbuds under $100", "group": "broad", "card": "list", "runs": [] },
+    { "id": "v2-airfryer-instantpot", "text": "air fryer vs Instant Pot for a small kitchen", "group": "broad", "card": "table", "runs": [] },
+    { "id": "v2-wine-stain", "text": "how to get a red wine stain out of a carpet", "group": "broad", "card": "steps", "runs": [] },
+    { "id": "v2-lease-buy-car", "text": "should I lease or buy my next car", "group": "broad", "card": "proscons", "runs": [] }
+  ]
+}
