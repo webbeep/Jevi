@@ -11,7 +11,7 @@ import { rewriteQuery } from './ai';
 import { designParallel, designStream } from './design';
 import { permitted } from './images';
 import { hasLlm } from './llm';
-import { collectPages, ogImageOf, type PageText, storePageText } from './pages';
+import { collectPages, ogImageOf } from './pages';
 import { MADE_PATTERNS } from './patterns';
 import { planLayout } from './plan';
 import type { AskScope, CallLedger } from './budget';
@@ -23,7 +23,8 @@ import type { Send } from './sse';
 import { extraQueries, understand } from './understand';
 import { cacheBypass, testForce, validTestToken } from './token';
 import type { Env } from './util';
-import { vendorPageTargets } from '../shared/vendorPrice';
+import { readVendorPages, type VendorRow } from './vendorPages';
+import { brandsIn, formatUsd, vendorBuyUrl } from '../shared/vendorPrice';
 import { isStoreProductAsk } from '../shared/pricing';
 
 export interface CardOnScreen {
@@ -124,50 +125,56 @@ function applyRelevance(query: string, response: SearchResponse, ledger: CallLed
 }
 
 /**
- * A shopping ask reads manufacturer product pages (keyless Jina — Apple/Sony HTML is a JS
- * shell with no price). Covers every brand in the ask (up to 3), injecting a canonical URL
- * when the SERP missed the store page so "From $X" still reaches reconcile.
+ * V5: vendor rows are merged into the results once, before the search event. A row whose URL
+ * is already a result takes that result's place (title, snippet, content); the rest are
+ * inserted after the first two results so the designer sees them inside the top 12. A row
+ * never overwrites a different URL's place.
  */
-async function storePage(req: DesignArgs, env: Env, pages: PageText[], scope: AskScope): Promise<{ pages: PageText[]; content: SearchResult[] } | undefined> {
-  if (req.followup || !isStoreProductAsk(req.query)) return undefined;
-  const targets = vendorPageTargets(req.query, req.search.results);
-  if (!targets.length) return undefined;
-  const results = [...req.search.results];
-  const slots: { target: { url: string; domain: string }; n: number }[] = [];
-  for (const target of targets) {
-    let n = results.findIndex((r) => {
-      try {
-        const a = new URL(r.url); const b = new URL(target.url);
-        return a.hostname.replace(/^www\./, '') === b.hostname.replace(/^www\./, '')
-          && (a.pathname === b.pathname
-            || a.pathname.startsWith(b.pathname.replace(/\/$/, ''))
-            || b.pathname.startsWith(a.pathname.replace(/\/$/, '')));
-      } catch { return false; }
-    });
-    if (n < 0) {
-      const row = { title: target.domain, url: target.url, snippet: '', domain: target.domain, engines: ['web'] as string[] };
-      if (results.length < 12) { results.push(row); n = results.length - 1; }
-      else {
-        // Distinct slots near the end so Air + Pro (or AirPods + Sony) do not overwrite each other.
-        n = 11 - slots.length;
-        if (n < 0) n = 11;
-        results[n] = row;
-      }
+function mergeVendorRows(results: SearchResult[], rows: readonly VendorRow[]): SearchResult[] {
+  const out = [...results];
+  const fresh: VendorRow[] = [];
+  for (const row of rows) {
+    const at = out.findIndex((r) => rowKey(r.url) === rowKey(row.url));
+    if (at >= 0) {
+      out[at] = { ...out[at]!, title: row.title, snippet: row.snippet, content: row.content };
+      continue;
     }
-    if (n >= 0 && n <= 11) slots.push({ target, n });
+    const { vendor: _vendor, ...plain } = row;
+    fresh.push(plain as VendorRow);
   }
-  const added: PageText[] = [];
-  await Promise.all(slots.map(async ({ target, n }) => {
-    if (results[n]!.content && /\$[\d,]/.test(results[n]!.content!)) return;
-    if (pages.some((p) => p.n === n + 1 && /\$[\d,]/.test(p.text))) return;
-    const text = await storePageText(target.url, env, scope).catch(() => undefined);
-    if (!text || !/\$[\d,]/.test(text)) return;
-    results[n] = { ...results[n]!, content: text, url: target.url, domain: target.domain };
-    added.push({ n: n + 1, url: results[n]!.url, text });
-    console.log(JSON.stringify({ zo: 'vendor', page: target.url, chars: text.length, hasFrom: /from\s*\$/i.test(text) }));
-  }));
-  if (!added.length) return undefined;
-  return { pages: added, content: results };
+  if (fresh.length) out.splice(Math.min(2, out.length), 0, ...fresh);
+  return out;
+}
+
+/** Host without www plus path without a trailing slash: the same page is the same row. */
+function rowKey(url: string): string {
+  try {
+    const u = new URL(url);
+    return `${u.hostname.replace(/^www\./, '')}${u.pathname.replace(/\/$/, '')}`.toLowerCase();
+  } catch {
+    return url.toLowerCase();
+  }
+}
+
+/** 1-based result index of every vendor row in the merged list. */
+function vendorIndexes(results: readonly SearchResult[], rows: readonly VendorRow[]): number[] {
+  return rows.map((row) => results.findIndex((r) => rowKey(r.url) === rowKey(row.url)) + 1);
+}
+
+/**
+ * One context line naming each product's store price and the source number to cite, so the
+ * designer shows the price instead of writing "prices not in sources".
+ */
+function storePriceHint(rows: readonly VendorRow[], at: readonly number[]): string | undefined {
+  const named = rows
+    .map((row, i) => {
+      const price = row.vendor;
+      if (!price || !(at[i]! > 0)) return undefined;
+      return `${price.product} ${price.from ? 'From ' : ''}${formatUsd(price.amount)} [${at[i]}]`;
+    })
+    .filter((part): part is string => !!part);
+  if (!named.length) return undefined;
+  return `OFFICIAL STORE PRICES (cite these source numbers for prices): ${named.join('; ')}. Show these prices; do not say prices are missing for these products.`;
 }
 
 async function design(send: Send, env: Env, req: DesignArgs, started: number, scope: AskScope, late?: Promise<LateExtras>) {
@@ -180,13 +187,9 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   // Conversation turns reason from what is already known; everything else reads pages first.
   const chat = req.followup?.mode === 'chat';
   const budget = chat ? { count: 3, need: 0, budgetMs: 0 } : req.deep ? DEEP_PAGES : pageBudget(req.readPages);
-  // V3: read vendor pages first (keyless Jina) so "From $X" is on the hit before design/reconcile.
-  const before = req.search.results;
-  const store = await storePage(req, env, [], scope);
-  if (store) req = { ...req, search: { ...req.search, results: store.content } };
   const collected = await collectPages(req.search.results, env, budget, late, scope);
-  const pages = store ? [...store.pages, ...collected.filter((p) => !store.pages.some((s) => s.n === p.n))] : collected;
-  const fresh = pages.filter((p) => !before[p.n - 1]?.content);
+  const pages = collected;
+  const fresh = pages.filter((p) => !req.search.results[p.n - 1]?.content);
   if (fresh.length) send('pages', fresh.map(({ n, url, text }) => ({ n, url, text })));
 
   // Page preview images and images from engines that answered late are often the most relevant ones.
@@ -226,6 +229,10 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
  */
 async function searchAndDesign(send: Send, env: Env, query: string, freshness: Freshness, context: string | undefined, started: number, scope: AskScope, rewritten = false) {
   const understood = rewritten ? Promise.resolve(undefined) : understand(query, env, context);
+  // V5: the manufacturer's own buy pages are read while understand and the search run — their
+  // URLs are canonical, so they need no SERP hits. Every compared product gets its own page.
+  const storeAsk = isStoreProductAsk(query);
+  const vendorRead = storeAsk ? readVendorPages(query, [], env, scope).catch(() => [] as VendorRow[]) : undefined;
   const planned = understood.then((u) => planLayout(query, env, { intent: u?.intent })).then((plan) => {
     send('plan', plan);
     return plan;
@@ -319,6 +326,16 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     send('done', { engine: 'extractive', removed: 0, pagesRead: 0, ms: Date.now() - started, choices: decision.choices });
     return;
   }
+  // V5: a product with no canonical buy page (Kindle, Kobo, iPhone) still gets its vendor page,
+  // now from the SERP hits; brands already read are skipped.
+  let vendorRows: VendorRow[] = [];
+  if (vendorRead) {
+    const read = await vendorRead;
+    const done = brandsIn(query).filter((b) => vendorBuyUrl(b.id, query)).map((b) => b.id);
+    const more = brandsIn(query).some((b) => !done.includes(b.id));
+    const second = more ? await readVendorPages(query, results.results.map((r) => ({ domain: r.domain, url: r.url })), env, scope, done).catch(() => [] as VendorRow[]) : [];
+    vendorRows = [...read, ...second];
+  }
   let designContext = context;
   let entityHint: ((entity: string) => EntityHint | undefined) | undefined;
   let boostQuery = query;
@@ -330,15 +347,18 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     entityHint = entityHintFor(decision.entity, query);
     boostQuery = decision.entity.name;
   }
-  // V3: enrich store pages before the search event so vendor content indices exist on the client.
-  if (isStoreProductAsk(query)) {
-    const store = await storePage({ query, search: results, followup: undefined, pattern: plan.pattern, depth: plan.depth, readPages: false } as DesignArgs, env, [], scope);
-    if (store) {
-      results = { ...results, results: store.content };
-      send('pages', store.pages.map(({ n, url, text }) => ({ n, url, text })));
-    }
+  // V5: the vendor buy pages become sources of this search, inside the top 12 the designer sees.
+  let vendorAt: number[] = [];
+  if (vendorRows.length) {
+    const merged = mergeVendorRows(results.results, vendorRows);
+    vendorAt = vendorIndexes(merged, vendorRows);
+    results = { ...results, results: merged };
+    const hint = storePriceHint(vendorRows, vendorAt);
+    if (hint) designContext = [hint, designContext].filter(Boolean).join('\n');
   }
   send('search', results);
+  // The pages event rides the final indices, so it goes out after the search event.
+  if (vendorRows.length) send('pages', vendorRows.map((row, i) => ({ n: vendorAt[i]!, url: row.url, text: row.content })).filter((p) => p.n > 0));
   const boost = imageBoost(plan.pattern, results, env, scope, boostQuery);
   await design(send, env, { query, pattern: plan.pattern, depth: plan.depth, readPages: plan.readPages || deep, search: results, context: designContext, intent: u?.intent, deep, boost, entityHint }, started, scope, late);
 }
@@ -366,7 +386,7 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
 
   // A search button on a card: always resolve it against the conversation ("apple varieties" → "best apples for apple pie").
   if (req.intent === 'search') {
-    const query = req.question.trim();
+    const query = await rewriteQuery(req.original, req.question, env, context, from?.title).catch(() => req.question);
     send('rewrite', { query });
     await searchAndDesign(send, env, query, 'any', context, started, scope, true);
     return;

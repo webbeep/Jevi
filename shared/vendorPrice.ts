@@ -40,13 +40,21 @@ const PRICE_TOKEN = /(?<![\w£€])(?:US)?\$\s?(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{
 const BUDGET_PRE = /(under|below|less than|fewer than|≤|<=|<|up to|max(?:imum)?|budget(?: of)?|cap of|within|over|above|more than)\s*$/i;
 /** "From $1,199", "Starting at $599", "Starts at", "Starting from". */
 const FROM_PRE = /\b(?:from|starting (?:at|from)|starts? at|beginning at|priced from)\s*$/i;
-/** Not a list price: monthly plans, trade-in credit, discounts, education or refurbished prices. */
-const NOT_LIST_PRE = /\b(?:trade[- ]?in|save|saving|off|credit|was|reg\.?|regularly|education|edu|student|refurbished|monthly|per month|up to)\s*(?:of\s*)?$/i;
+/**
+ * Not a list price: monthly plans, trade-in credit, discounts, education or refurbished
+ * prices, and the "list $Y" half of a store's own sale line (the sale amount wins).
+ */
+const NOT_LIST_PRE = /\b(?:trade[- ]?in|save|saving|off|credit|was|reg\.?|regularly|education|edu|student|refurbished|monthly|per month|up to|list)\s*(?:of\s*)?$/i;
 const NOT_LIST_POST = /^\s*(?:\/\s*mo\b|\/\s*month|per month|a month|mo\.|monthly|off\b|savings|credit|with (?:eligible )?trade|after trade|in credit|back\b)/i;
+/** A store price outside this range is a plan, an accessory or a parse error. */
+const AMOUNT_MIN = 1;
+const AMOUNT_MAX = 20000;
 /** How far after a product name a price still belongs to it. */
 const NEAR = 220;
 /** Store sites to look in with one call. Serper counts each as the same call. */
 const MAX_SITES = 3;
+/** Vendor buy pages read for one ask (each brand gets its own page). */
+const MAX_TARGETS = 4;
 const FLAG_NOTE = 'differs from vendor';
 
 export interface VendorHit {
@@ -67,6 +75,19 @@ export interface VendorPrice {
   source: number;
   /** The page said "From" / "Starting at". */
   from: boolean;
+  /** The store's own list price, when the amount is a sale price. */
+  was?: number;
+}
+
+/** A price read off a vendor page (server/vendorPages.ts), with the page's product name. */
+export interface StorePrice {
+  name?: string;
+  amount: number;
+  from: boolean;
+  /** The list price the page states next to a sale amount. */
+  was?: number;
+  /** Which part of the page stated it (server log only). */
+  via?: 'ld' | 'datalayer';
 }
 
 /** Shown on a tile, hero or table row when a retailer amount is more than 5% off the vendor price. */
@@ -226,10 +247,80 @@ function urlOwnsBrand(url: string, id: string): boolean {
   if (id === 'ipad-pro') return /ipad[_-]?pro/.test(path);
   if (id === 'ipad-air') return /ipad[_-]?air/.test(path);
   if (id === 'airpods') return /airpods/.test(path);
-  if (id === 'sony') return /wf-?1000xm|sony/.test(path);
+  if (id === 'sony') return /w[fh]-?1000xm\d|sony/.test(path);
   if (id === 'bose') return /quietcomfort|bose/.test(path);
   const b = BRANDS.find((x) => x.id === id);
   return !!b && b.re.test(path.replace(/[-_/]/g, ' '));
+}
+
+/**
+ * The manufacturer's own BUY page for a product named in the question, model-specific
+ * (the marketing page carries no price). Undefined rather than a guess: a page that
+ * prices a sibling product writes the wrong "From $X" into the wrong row.
+ */
+export function vendorBuyUrl(id: string, query: string): string | undefined {
+  if (id === 'ipad-pro') return 'https://www.apple.com/shop/buy-ipad/ipad-pro';
+  if (id === 'ipad-air') return 'https://www.apple.com/shop/buy-ipad/ipad-air';
+  if (id === 'ipad') return 'https://www.apple.com/shop/buy-ipad/ipad';
+  if (id === 'airpods') {
+    if (/airpods\s*pro/i.test(query)) return 'https://www.apple.com/shop/buy-airpods/airpods-pro-3';
+    if (/airpods\s*max/i.test(query)) return 'https://www.apple.com/shop/buy-airpods/airpods-max';
+    if (/airpods\s*4/i.test(query)) return 'https://www.apple.com/shop/buy-airpods/airpods-4';
+    return undefined;
+  }
+  if (id === 'sony') {
+    if (/wf-?1000xm5/i.test(query)) return 'https://electronics.sony.com/audio/headphones/truly-wireless-earbuds/p/wf1000xm5-b';
+    if (/wh-?1000xm5/i.test(query)) return 'https://electronics.sony.com/audio/headphones/headband/p/wh1000xm5-b';
+    if (/wh-?1000xm6/i.test(query)) return 'https://electronics.sony.com/audio/headphones/headband/p/wh1000xm6-b';
+    return undefined;
+  }
+  if (id === 'bose') {
+    if (!/ultra/i.test(query)) return undefined;
+    // Earbuds first: a Sony WF model in the same ask is the earbud SKU, a WH model the headphone one.
+    if (/\b(ear ?buds|buds)\b/i.test(query) || /wf-?1000xm\d/i.test(query)) return 'https://www.bose.com/p/earbuds/bose-quietcomfort-ultra-earbuds-2nd-gen/QCUE2-HEADPHONEIN.html';
+    if (/\bheadphones?\b/i.test(query) || /wh-?1000xm\d/i.test(query)) return 'https://www.bose.com/p/headphones/bose-quietcomfort-ultra-headphones-2nd-gen/QCUH2-HEADPHONEARN.html';
+    return undefined;
+  }
+  if (id === 'kobo' && /clara\s?bw/i.test(query)) return 'https://us.kobobooks.com/products/kobo-clara-bw';
+  return undefined;
+}
+
+/** A vendor page to read for one product of this ask. */
+export interface VendorTarget {
+  id: string;
+  url: string;
+  /** Host without www. */
+  domain: string;
+}
+
+/**
+ * The buy page to read for every product of this ask: the canonical vendor BUY page when
+ * there is one, else a SERP hit on the vendor's domain whose path owns that product.
+ * Each compared product gets its own page, so no sibling's price lands in its row.
+ */
+export function vendorPageTargets(query: string, hits: readonly { domain: string; url: string }[]): VendorTarget[] {
+  const out: VendorTarget[] = [];
+  const seen = new Set<string>();
+  const add = (id: string, url: string, domain: string) => {
+    const key = url.toLowerCase().replace(/\/$/, '');
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ id, url, domain });
+  };
+  for (const b of brandsIn(query)) {
+    const buy = vendorBuyUrl(b.id, query);
+    if (buy) {
+      try {
+        add(b.id, buy, new URL(buy).hostname.replace(/^www\./, ''));
+      } catch {
+        /* ignore */
+      }
+      continue;
+    }
+    const pathHit = hits.find((h) => b.domains.some((d) => sameHost(h.domain, d)) && urlOwnsBrand(h.url, b.id));
+    if (pathHit) add(b.id, pathHit.url, pathHit.domain.replace(/^www\./, ''));
+  }
+  return out.slice(0, MAX_TARGETS);
 }
 
 /** The price each product's own store page states, with the result to cite. */
@@ -258,13 +349,39 @@ export function vendorPrices(query: string, hits: readonly VendorHit[]): VendorP
         }
       }
       if (!found) return;
-      const next: VendorPrice = { id: b.id, name: b.name, amount: found.amount, domain: hit.domain.replace(/^www\./, ''), source: i + 1, from: found.from };
+      const was = storeLineWas(hit);
+      const next: VendorPrice = {
+        id: b.id,
+        name: b.name,
+        amount: found.amount,
+        domain: hit.domain.replace(/^www\./, ''),
+        source: i + 1,
+        from: found.from,
+        // A store's own sale line carries its list price; the sale amount stays the price.
+        ...(was !== undefined && was > found.amount ? { was } : {}),
+      };
       // A "From" price on a later vendor result beats a bare amount on an earlier one.
       if (!best || (!best.from && next.from)) best = next;
     });
     if (best) out.push(best);
   }
   return out;
+}
+
+/**
+ * The list price a store's own price line states ("... (official store sale price; list $399.99)").
+ * Read from the line's start, so a "$399.99" elsewhere in the page is never taken as the list price.
+ */
+function storeLineWas(hit: VendorHit): number | undefined {
+  for (const part of [hit.snippet, hit.content]) {
+    if (!part) continue;
+    const line = part.split('\n')[0] ?? '';
+    const m = /\blist\s+(?:US)?\$\s?(\d[\d,]*(?:\.\d{1,2})?)/i.exec(line);
+    if (!m) continue;
+    const n = num(m[1]!);
+    if (amountOk(n)) return n;
+  }
+  return undefined;
 }
 
 function productIn(text: string, query: string): string | undefined {
@@ -336,6 +453,11 @@ function vendorLabel(price: VendorPrice): string {
   return `${price.from ? 'From ' : ''}${formatUsd(price.amount)}`;
 }
 
+/** "Sale · list $Y" for a store amount that is a sale price (the vendor page stated both). */
+function saleNote(price: VendorPrice): string | undefined {
+  return price.was && price.was > price.amount ? `Sale · list ${formatUsd(price.was)}` : undefined;
+}
+
 const SKIP = new Set(['actions', 'choices', 'citations', 'links', 'code', 'draft', 'slider', 'scaler', 'pricing']);
 const FINISH = new Set(['citations', 'actions', 'links', 'followups']);
 
@@ -355,11 +477,82 @@ function retailerLine(original: string, a: Amount, price: VendorPrice): { line: 
   return { line, flag };
 }
 
+/** A table row that carries prices. */
+const PRICE_ROW = /\b(?:price|cost|msrp)\b/i;
+/** A table cell that says "no price" instead of naming one. */
+const EMPTY_CELL = /^\s*(?:—|–|-|n\/a|not listed)?\s*$/i;
+/**
+ * Copy that says the sources carry no price. Once a price is on the card it contradicts
+ * what the person is looking at, so it is dropped (V5 P07/P08).
+ */
+const MISSING_PRICE = /\b(?:prices?|pricing|costs?)\b[^.]{0,60}\b(?:not|n't|no|missing|unavailable|absent)\b[^.]{0,40}\bsources?\b|\bno (?:current )?prices?\b[^.]{0,40}\bsources?\b|\bsources?\b[^.]{0,40}\b(?:don't|do not|doesn't|does not|never)\b[^.]{0,30}\b(?:list|state|give|include|mention)\b[^.]{0,30}\bprices?\b/i;
+
+/** A price row cell that names no price at all. */
+function missingCell(cell: string): boolean {
+  return EMPTY_CELL.test(cell) || MISSING_PRICE.test(cell);
+}
+
+/** True when a tile, hero or table cell of this card shows a dollar amount. */
+function showsPrice(nodes: readonly unknown[]): boolean {
+  for (const node of nodes) {
+    const rec = asRecord(node);
+    if (!rec) continue;
+    const type = typeOf(rec);
+    if (type === 'tile' || type === 'hero') {
+      if (typeof rec.value === 'string' && rec.value.includes('$')) return true;
+    } else if (type === 'table') {
+      const rows = Array.isArray(rec.rows) ? rec.rows : [];
+      for (const row of rows) if (Array.isArray(row) && row.some((c) => typeof c === 'string' && c.includes('$'))) return true;
+    } else if (Array.isArray(rec.children) && showsPrice(rec.children)) return true;
+  }
+  return false;
+}
+
+/** Sentences of a text node that claim the sources have no price. */
+function dropMissingSentences(text: string): string {
+  const kept = text.split(/(?<=[.!?])\s+/).filter((s) => s && !MISSING_PRICE.test(s));
+  return kept.join(' ').replace(/ {2,}/g, ' ').trim();
+}
+
+/**
+ * Drops the "prices not in sources" copy from a card that shows prices: the whole callout
+ * node, and the matching sentences of a text node.
+ */
+/** A dropped node keeps its slot as an empty stack: `undefined` would read as a region still being designed. */
+const DROPPED = { type: 'stack', children: [] } as const;
+
+function dropMissingPriceCopy<T>(nodes: readonly (T | undefined)[]): (T | undefined)[] {
+  return nodes.map((node) => dropMissingNode(node)).map((node, i) => (node === undefined && nodes[i] !== undefined ? DROPPED as unknown as T : node));
+}
+
+function dropMissingNode<T>(node: T | undefined): T | undefined {
+  const rec = asRecord(node);
+    if (!rec) return node;
+    const type = typeOf(rec);
+    if (type === 'callout') {
+      const title = typeof rec.title === 'string' ? rec.title : '';
+      const text = typeof rec.text === 'string' ? rec.text : '';
+      return MISSING_PRICE.test(title) || MISSING_PRICE.test(text) ? undefined : node;
+    }
+    if (type === 'text' && typeof rec.text === 'string') {
+      const next = dropMissingSentences(rec.text);
+      if (next === rec.text) return node;
+      return next ? ({ ...rec, text: next } as T) : undefined;
+    }
+    if (Array.isArray(rec.children)) {
+      const children = (rec.children as unknown[]).map((c) => dropMissingNode(c)).filter((c) => c !== undefined);
+      return { ...rec, children } as T;
+    }
+    return node;
+}
+
 /**
  * V3: every product keeps its retailer prices, the vendor's own price is the main price
  * (cited to the vendor page), and a >5% difference is flagged where the price is shown.
  * Vendor prices the card never showed are added as one "Store prices" key-value block
  * before the citations, once every streamed node is in.
+ * V5: a price row's empty cell fills from the vendor price, and once any price is on the
+ * card the "prices not in sources" copy (callout or sentence) is dropped.
  */
 export function reconcileProductPrices<T>(nodes: readonly (T | undefined)[], query: string, hits: readonly VendorHit[] = []): (T | undefined)[] {
   const list = vendorPrices(query, hits);
@@ -397,12 +590,13 @@ export function reconcileProductPrices<T>(nodes: readonly (T | undefined)[], que
     const { line, flag } = retailerLine(value, a, price);
     const same = Math.abs(a.amount - price.amount) < 0.5 || !plausibleRetail(a.amount, price.amount);
     const sub = typeof rec.sub === 'string' && rec.sub.trim() ? rec.sub.trim() : '';
+    const nextSub = [same ? '' : (sub ? `${sub} · ${line}` : line), saleNote(price)].filter(Boolean).join(' · ');
     const out: Record<string, unknown> = {
       ...rec,
       value: vendorLabel(price),
       source: price.source,
       vendorTrue: true,
-      ...(same ? {} : { sub: sub ? `${sub} · ${line}` : line }),
+      ...(nextSub ? { sub: nextSub } : {}),
     };
     if (flag) out.priceFlag = flag;
     return out;
@@ -419,7 +613,7 @@ export function reconcileProductPrices<T>(nodes: readonly (T | undefined)[], que
     placed.add(price.id);
     const { line, flag } = retailerLine(value, a, price);
     const same = Math.abs(a.amount - price.amount) < 0.5 || !plausibleRetail(a.amount, price.amount);
-    const vendorLine = `${price.domain} [${price.source}]${same ? '' : ` · ${line}`}`;
+    const vendorLine = [saleNote(price), `${price.domain} [${price.source}]${same ? '' : ` · ${line}`}`].filter(Boolean).join(' · ');
     const out: Record<string, unknown> = { ...rec, value: vendorLabel(price), vendorTrue: true, caption: caption ? `${vendorLine} · ${caption}` : vendorLine };
     if (flag) out.priceFlag = flag;
     return out;
@@ -433,12 +627,19 @@ export function reconcileProductPrices<T>(nodes: readonly (T | undefined)[], que
       if (!Array.isArray(row)) return row;
       const cells = row.map((c) => String(c));
       const offset = cells.length === columns.length + 1 ? 1 : 0;
+      const isPriceRow = PRICE_ROW.test(cells[0] ?? '');
       let meta: { domain: string; vendorTrue: boolean; note?: string; flag?: PriceFlag } = { domain: '', vendorTrue: false };
       const rewritten = cells.map((cell, i) => {
         const header = i >= offset ? columns[i - offset] ?? '' : '';
         const product = productIn(`${header} ${cells[0] ?? ''}`, query) ?? productIn(cell, query);
         const price = product ? prices.get(product) : undefined;
         const a = firstAmount(cell);
+        // V5: a price row's "—" / "n/a" cell fills with the vendor price when that column names a product that has one.
+        if (price && !a && isPriceRow && missingCell(cell)) {
+          placed.add(price.id);
+          meta = { domain: price.domain, vendorTrue: true };
+          return `${vendorLabel(price)} [${price.source}]`;
+        }
         if (!price || !a || cell.includes(`[${price.source}]`)) return annotateText(cell, query, prices, placed);
         placed.add(price.id);
         const flag = priceFlag(a.amount, price.amount);
@@ -457,15 +658,20 @@ export function reconcileProductPrices<T>(nodes: readonly (T | undefined)[], que
   const settled: (T | undefined)[] = nodes.map((n) => (n === undefined ? undefined : visit(n) as T));
   const missing = list.filter((p) => !placed.has(p.id));
   const complete = settled.length > 0 && settled.every((n) => n !== undefined);
-  if (!missing.length || !complete) return settled;
-  const block = {
-    type: 'keyvalue',
-    vendorPrices: true,
-    items: missing.map((p) => ({ label: `${p.name} · ${p.domain}`, value: `${vendorLabel(p)} [${p.source}]`, icon: 'store' })),
-  } as unknown as T;
-  const at = settled.findIndex((n) => FINISH.has(typeOf(asRecord(n as unknown) ?? {})));
-  const out: (T | undefined)[] = [...settled];
-  out.splice(at < 0 ? out.length : at, 0, block);
+  let out: (T | undefined)[] = [...settled];
+  let blocked = false;
+  if (missing.length && complete) {
+    const block = {
+      type: 'keyvalue',
+      vendorPrices: true,
+      items: missing.map((p) => ({ label: `${p.name} · ${p.domain}`, value: `${vendorLabel(p)} [${p.source}]`, icon: 'store' })),
+    } as unknown as T;
+    const at = out.findIndex((n) => FINISH.has(typeOf(asRecord(n as unknown) ?? {})));
+    out.splice(at < 0 ? out.length : at, 0, block);
+    blocked = true;
+  }
+  // V5: once the card shows a price, "Prices not in sources" copy contradicts what is on screen.
+  if (blocked || placed.size > 0 || showsPrice(out)) out = dropMissingPriceCopy(out);
   return out;
 }
 
@@ -543,55 +749,143 @@ export function vendorSiteQuery(query: string, extras: readonly string[] = []): 
 
 /** The first result that sits on one of this question's official domains. */
 
-/** Canonical product URLs when the SERP has no official page (keyless Jina can still read them). */
-const CANONICAL: { id: string; url: string }[] = [
-  { id: 'ipad-pro', url: 'https://www.apple.com/ipad-pro/' },
-  { id: 'ipad-air', url: 'https://www.apple.com/shop/buy-ipad/ipad-air' },
-  { id: 'airpods', url: 'https://www.apple.com/airpods-pro/' },
-  { id: 'iphone', url: 'https://www.apple.com/iphone/' },
-  { id: 'macbook', url: 'https://www.apple.com/macbook-pro/' },
-  { id: 'sony', url: 'https://electronics.sony.com/audio/headphones/all-headphones/p/wf1000xm5' },
-  { id: 'bose', url: 'https://www.bose.com/p/earbuds/quietcomfort-ultra-earbuds/QCEB-US.html' },
-  { id: 'kindle', url: 'https://www.amazon.com/kindle-paperwhite' },
-  { id: 'kobo', url: 'https://www.kobo.com/us/en/ereaders' },
-  { id: 'workspace', url: 'https://workspace.google.com/pricing' },
-];
+function amountOk(n: number): boolean {
+  return Number.isFinite(n) && n >= AMOUNT_MIN && n <= AMOUNT_MAX;
+}
 
-/** Official product page URLs to read for this shopping ask (SERP hits first, then canonical). */
-export function vendorPageTargets(query: string, hits: readonly { domain: string; url: string }[]): { url: string; domain: string }[] {
-  const brands = brandsIn(query);
-  const out: { url: string; domain: string }[] = [];
-  const seen = new Set<string>();
-  const add = (url: string, domain: string) => {
-    const key = url.toLowerCase().replace(/\/$/, '');
-    if (seen.has(key)) return;
-    seen.add(key);
-    out.push({ url, domain });
+function num(raw: string): number {
+  return Number(raw.replace(/,/g, ''));
+}
+
+const LD_SCRIPT = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
+
+/** JSON-LD script bodies of an HTML page, attribute order aside. */
+function ldJsonBlocks(html: string): string[] {
+  const out: string[] = [];
+  for (const m of html.matchAll(LD_SCRIPT)) {
+    if (!/\btype\s*=\s*["']application\/ld\+json["']/i.test(m[1] ?? '')) continue;
+    out.push(m[2] ?? '');
+  }
+  return out;
+}
+
+/** Product nodes of a parsed JSON-LD document (`@graph` and arrays included). */
+function ldProducts(value: unknown): Record<string, unknown>[] {
+  const out: Record<string, unknown>[] = [];
+  const walk = (v: unknown) => {
+    if (Array.isArray(v)) {
+      v.forEach(walk);
+      return;
+    }
+    const rec = asRecord(v);
+    if (!rec) return;
+    const type = rec['@type'];
+    const types = Array.isArray(type) ? type.map((t) => String(t)) : typeof type === 'string' ? [type] : [];
+    if (types.some((t) => t === 'Product' || t === 'ProductGroup')) out.push(rec);
+    if (rec['@graph'] !== undefined) walk(rec['@graph']);
   };
-  for (const b of brands) {
-    // Prefer the canonical store URL for Apple tablets (SERP /ipad-air/ marketing pages often lack From).
-    // Otherwise a SERP hit whose path owns this product; never a generic apple.com/ipad/ sibling mix.
-    const canon = CANONICAL.find((c) => c.id === b.id);
-    if (canon && (b.id === 'ipad-air' || b.id === 'ipad-pro' || b.id === 'airpods')) {
-      try {
-        add(canon.url, new URL(canon.url).hostname.replace(/^www\./, ''));
-        continue;
-      } catch { /* fall through */ }
-    }
-    const pathHit = hits.find((h) => b.domains.some((d) => sameHost(h.domain, d)) && urlOwnsBrand(h.url, b.id));
-    if (pathHit) {
-      add(pathHit.url, pathHit.domain.replace(/^www\./, ''));
-      continue;
-    }
-    if (canon) {
-      try {
-        add(canon.url, new URL(canon.url).hostname.replace(/^www\./, ''));
-      } catch {
-        /* ignore */
-      }
+  walk(value);
+  return out;
+}
+
+/** USD prices an `offers` value states (single offer, array, or AggregateOffer low/high). */
+function offerPrices(offers: unknown): number[] {
+  const list = Array.isArray(offers) ? offers : [offers];
+  const out: number[] = [];
+  for (const item of list) {
+    const rec = asRecord(item);
+    if (!rec) continue;
+    const currency = typeof rec.priceCurrency === 'string' ? rec.priceCurrency.trim().toUpperCase() : '';
+    if (currency && currency !== 'USD') continue;
+    for (const key of ['price', 'lowPrice', 'highPrice'] as const) {
+      const raw = rec[key];
+      const n = typeof raw === 'number' ? raw : typeof raw === 'string' ? num(raw) : NaN;
+      if (amountOk(n)) out.push(n);
     }
   }
-  return out.slice(0, MAX_SITES);
+  return out;
+}
+
+/** The price a store's HTML states: schema.org JSON-LD first, the analytics data layer second. */
+function fromHtml(raw: string): StorePrice | undefined {
+  for (const block of ldJsonBlocks(raw)) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(block);
+    } catch {
+      continue;
+    }
+    for (const product of ldProducts(parsed)) {
+      const prices = offerPrices(product.offers);
+      if (!prices.length) continue;
+      const name = typeof product.name === 'string' ? product.name.trim() : '';
+      return { ...(name ? { name } : {}), amount: Math.min(...prices), from: new Set(prices).size > 1, via: 'ld' };
+    }
+  }
+  // No Offer JSON-LD (Bose): the analytics data layer carries item_name and price.
+  const layer = /"item_name"\s*:\s*"([^"]{1,200})"[\s\S]{0,600}?"price"\s*:\s*(\d+(?:\.\d+)?)/.exec(raw);
+  if (layer) {
+    const amount = Number(layer[2]);
+    if (amountOk(amount)) return { name: layer[1], amount, from: false, via: 'datalayer' };
+  }
+  return undefined;
+}
+
+/** An amount is only a price when nothing before it says "Save"/"trade-in" and nothing after it says "/mo". */
+function markdownAmount(raw: string, m: RegExpExecArray): number | undefined {
+  const at = m.index ?? 0;
+  const end = at + m[0].length;
+  const pre = raw.slice(Math.max(0, at - 32), at);
+  if (/\b(?:save|saved|saving|trade[- ]?in|off|credit|per month|monthly)\s*$/i.test(pre)) return undefined;
+  const post = raw.slice(end, end + 32);
+  if (/^\s*(?:\/\s*(?:mo|month)|per month|a month|mo\.\b|monthly)/i.test(post)) return undefined;
+  const n = num(m[1] ?? '');
+  return amountOk(n) ? n : undefined;
+}
+
+/** The price a Jina markdown read states: a sale amount (with its list price), else "From $X". */
+function fromMarkdown(raw: string): StorePrice | undefined {
+  const sale = /Sale\s*Price\s*[^\n$]{0,24}?(?:US)?\$\s?(\d[\d,]*(?:\.\d{1,2})?)/i.exec(raw)
+    ?? /Sale\s*Price\s*\n+\s*(?:US)?\$\s?(\d[\d,]*(?:\.\d{1,2})?)/i.exec(raw);
+  if (sale) {
+    const amount = markdownAmount(raw, sale);
+    if (amount !== undefined) {
+      const list = /Original\s*Price\s*~*\s*(?:US)?\$\s?(\d[\d,]*(?:\.\d{1,2})?)/i.exec(raw);
+      const was = list ? num(list[1]!) : NaN;
+      return { amount, from: false, ...(amountOk(was) && was > amount ? { was } : {}) };
+    }
+  }
+  const from = /\b(?:From|Starting at|Starts at)\s*(?:US)?\$\s?(\d[\d,]*(?:\.\d{1,2})?)/i.exec(raw)
+    ?? /\b(?:From|Starting|Starts)\s*\n+\s*(?:US)?\$\s?(\d[\d,]*(?:\.\d{1,2})?)/i.exec(raw);
+  if (from) {
+    const amount = markdownAmount(raw, from);
+    if (amount !== undefined) return { amount, from: true };
+  }
+  return undefined;
+}
+
+/**
+ * The price one vendor page states. HTML: schema.org JSON-LD offers (Apple shop pages),
+ * then the analytics data layer (Bose). Markdown (Jina): a sale price with its list price,
+ * else "From $X". Undefined when the page states no price — never a guess.
+ */
+export function storePriceFromPage(raw: string, kind: 'html' | 'markdown'): StorePrice | undefined {
+  if (!raw) return undefined;
+  return kind === 'html' ? fromHtml(raw) : fromMarkdown(raw);
+}
+
+/**
+ * One line naming the product, its store price and the store, e.g.
+ * `iPad Pro 11-inch (M5): From $1,199 on apple.com (official store price)`.
+ * It starts with the product name so `listPriceFor` picks the amount up for it, and never
+ * claims "Prices not in sources": a card that shows this line has a priced source.
+ */
+export function storePriceLine(p: StorePrice, productName: string, domain: string): string {
+  const brand = BRANDS.find((b) => b.re.test(productName));
+  const named = (p.name ?? '').trim();
+  const head = brand && named && brand.re.test(named) ? named : productName;
+  const note = p.was && p.was > p.amount ? `sale price; list ${formatUsd(p.was)}` : 'price';
+  return `${head}: ${p.from ? 'From ' : ''}${formatUsd(p.amount)} on ${domain} (official store ${note})`;
 }
 
 export function firstOfficial<T extends { domain: string; url: string }>(results: readonly T[], query: string): T | undefined {

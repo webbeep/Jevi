@@ -8,7 +8,8 @@ import { isGenericPreview } from './images';
 import { type LateExtras, normalizeUrl } from './search';
 import { HttpStatusError, type Env, stripHtml } from './util';
 
-const BROWSER_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36';
+/** A browser UA: store pages serve their price markup to browsers and challenge bare fetchers. */
+export const BROWSER_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36';
 const MIN_TEXT = 300;
 /** Jina payment/quota failures skip that reader for ~6h (shared KV ENGINE_SKIP), so asks go straight to direct fetch. */
 const JINA_TRIP = new Set(['payment', 'quota', 'credit']);

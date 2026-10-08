@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { searchPlan, SEARCH_CALL_CAP } from '../server/budget.ts';
+import { newLedger, searchPlan, SEARCH_CALL_CAP, type AskScope } from '../server/budget.ts';
 import { diversify } from '../server/diversify.ts';
 import { isStoreProductAsk, settleCardPrices } from '../shared/pricing.ts';
+import { readVendorPages } from '../server/vendorPages.ts';
 import {
   differsFromVendor, firstOfficial, isProductShopAsk, listPriceFor, officialDomains, plausibleRetail, priceFlag, productWords,
-  stampOfficialPriceCite, vendorPrices, vendorSiteQuery, type VendorHit,
+  stampOfficialPriceCite, storePriceFromPage, storePriceLine, vendorBuyUrl, vendorPageTargets, vendorPrices, vendorSiteQuery,
+  type VendorHit,
 } from '../shared/vendorPrice.ts';
 
 type Node = Record<string, any>;
@@ -177,4 +179,226 @@ test('retailer price >35% off vendor is a different item: no flag, not shown', (
   assert.equal(plausibleRetail(349, 749), false);
   assert.ok(priceFlag(999, 1199));
   assert.equal(priceFlag(999, 1199)?.pct, 17);
+});
+
+// ---- V5: the manufacturer's own buy pages are read per product (P07/P08 live). ----
+/** Apple shop pages serve schema.org JSON-LD in plain HTML (.spike/apple-ipad-pro.ldjson.txt). */
+const APPLE_LD = `<script type="application/ld+json">{"@context":"https://schema.org","@type":"Product","name":"iPad Pro 11-inch (M5)","url":"https://www.apple.com/shop/buy-ipad/ipad-pro","offers":[{"@type":"Offer","priceCurrency":"USD","price":2299},{"@type":"Offer","priceCurrency":"USD","price":1199},{"@type":"Offer","priceCurrency":"USD","price":1399}]}</script>`;
+/** Bose has no Offer JSON-LD: the analytics data layer carries the price (.spike/bose-qcue2.datalayer.txt). */
+const BOSE_LAYER = `<script>window.dataLayer = window.dataLayer || []; var dataLayers = [{"event":"view_item","currency":"USD","ecommerce":{"items":[{"index":0,"item_id":"QCUE2-HEADPHONEIN","item_name":"Bose QuietComfort Ultra Earbuds (2nd Gen)","item_variant":"DEEP PLUM","image_url":"https://assets.bosecreative.com/transform/bb7b1552-1001-446f-bfd5-f7e2c4ee31ee/QCUEII_DeepPlum_Ecomm-Gallery-1-1634x1224?format=avif&quality=95","stock":"out_of_stock","price":299,"discount":0}]}}];</script>`;
+/** Keyless Jina markdown of the Sony store page (.spike/sony-wh1000xm5.jina.md). */
+const SONY_MD = `Title: Sony WH-1000XM5 Premium Wireless Noise Cancelling Headphones | Black
+
+URL Source: https://electronics.sony.com/audio/headphones/headband/p/wh1000xm5-b
+
+Markdown Content:
+*   [About](https://electronics.sony.com/#PDPAboutLink)
+
+Model: WH-1000XM5
+
+Sale Price $198.00
+
+Save $201.99
+
+Original Price~~$399.99~~
+
+Or
+
+Starting
+
+/mo`;
+
+test('storePriceFromPage: Apple JSON-LD, Bose data layer, Sony Jina markdown', () => {
+  assert.deepEqual(storePriceFromPage(APPLE_LD, 'html'), { name: 'iPad Pro 11-inch (M5)', amount: 1199, from: true, via: 'ld' });
+  assert.deepEqual(storePriceFromPage(BOSE_LAYER, 'html'), { name: 'Bose QuietComfort Ultra Earbuds (2nd Gen)', amount: 299, from: false, via: 'datalayer' });
+  assert.deepEqual(storePriceFromPage(SONY_MD, 'markdown'), { amount: 198, from: false, was: 399.99 });
+  // An AggregateOffer's low price is the "From" price.
+  const agg = '<script type="application/ld+json">{"@type":"ProductGroup","name":"Sony WH-1000XM6","offers":{"@type":"AggregateOffer","priceCurrency":"USD","lowPrice":449,"highPrice":499}}</script>';
+  assert.deepEqual(storePriceFromPage(agg, 'html'), { name: 'Sony WH-1000XM6', amount: 449, from: true, via: 'ld' });
+  // A month plan is not the device price, and a page with no price yields nothing.
+  assert.equal(storePriceFromPage('iPad Pro From $1,199 or $99.91/mo. for 12 mo.', 'markdown')?.amount, 1199);
+  assert.equal(storePriceFromPage('<html><body>iPad Pro. Most advanced tech.</body></html>', 'html'), undefined);
+  assert.equal(storePriceFromPage('* Save $201.99\n\nOr Starting /mo', 'markdown'), undefined);
+  assert.equal(storePriceFromPage('', 'html'), undefined);
+  // A non-USD offer is not the US price.
+  assert.equal(storePriceFromPage('<script type="application/ld+json">{"@type":"Product","name":"iPad Air","offers":{"@type":"Offer","priceCurrency":"GBP","price":749}}</script>', 'html'), undefined);
+});
+
+test('storePriceLine names the product, the store price and the store', () => {
+  assert.equal(
+    storePriceLine({ name: 'iPad Pro 11-inch (M5)', amount: 1199, from: true }, 'iPad Pro', 'apple.com'),
+    'iPad Pro 11-inch (M5): From $1,199 on apple.com (official store price)',
+  );
+  assert.equal(
+    storePriceLine({ amount: 198, from: false, was: 399.99 }, 'Sony', 'electronics.sony.com'),
+    'Sony: $198 on electronics.sony.com (official store sale price; list $399.99)',
+  );
+  // A page name for another product never becomes the head of the line.
+  assert.equal(storePriceLine({ name: 'iPad Air', amount: 749, from: true }, 'iPad Pro', 'apple.com'), 'iPad Pro: From $749 on apple.com (official store price)');
+});
+
+test('vendorBuyUrl: every compared product gets its own buy page (P07/P08)', () => {
+  assert.equal(vendorBuyUrl('ipad-pro', P08), 'https://www.apple.com/shop/buy-ipad/ipad-pro');
+  assert.equal(vendorBuyUrl('ipad-air', P08), 'https://www.apple.com/shop/buy-ipad/ipad-air');
+  assert.equal(vendorBuyUrl('ipad', 'iPad price'), 'https://www.apple.com/shop/buy-ipad/ipad');
+  assert.equal(vendorBuyUrl('airpods', P07), 'https://www.apple.com/shop/buy-airpods/airpods-pro-3');
+  assert.equal(vendorBuyUrl('airpods', 'AirPods Max price'), 'https://www.apple.com/shop/buy-airpods/airpods-max');
+  assert.equal(vendorBuyUrl('airpods', 'AirPods 4 price'), 'https://www.apple.com/shop/buy-airpods/airpods-4');
+  assert.equal(vendorBuyUrl('airpods', 'AirPods price'), undefined, 'no model in the ask: no page');
+  assert.equal(vendorBuyUrl('sony', P07), 'https://electronics.sony.com/audio/headphones/truly-wireless-earbuds/p/wf1000xm5-b');
+  assert.equal(vendorBuyUrl('bose', P07), 'https://www.bose.com/p/earbuds/bose-quietcomfort-ultra-earbuds-2nd-gen/QCUE2-HEADPHONEIN.html');
+  assert.equal(vendorBuyUrl('kobo', P06), 'https://us.kobobooks.com/products/kobo-clara-bw');
+  assert.equal(vendorBuyUrl('kindle', P06), undefined);
+  // Headphones over earbuds: a Sony WH model in the ask picks the headphone SKU.
+  const wh = 'Sony WH-1000XM5 vs Bose QC Ultra headphones price';
+  assert.equal(vendorBuyUrl('sony', wh), 'https://electronics.sony.com/audio/headphones/headband/p/wh1000xm5-b');
+  assert.equal(vendorBuyUrl('bose', wh), 'https://www.bose.com/p/headphones/bose-quietcomfort-ultra-headphones-2nd-gen/QCUH2-HEADPHONEARN.html');
+  assert.equal(vendorBuyUrl('sony', 'Sony WH-1000XM6 price'), 'https://electronics.sony.com/audio/headphones/headband/p/wh1000xm6-b');
+  assert.equal(vendorBuyUrl('sony', 'Sony headphones price'), undefined);
+  assert.equal(vendorBuyUrl('bose', 'Bose SoundLink price'), undefined, 'Bose pages are Ultra-only');
+});
+
+test('vendorPageTargets: buy page per product, SERP hit only when there is no buy page', () => {
+  assert.deepEqual(vendorPageTargets(P08, []).map((t) => [t.id, t.url, t.domain]), [
+    ['ipad-air', 'https://www.apple.com/shop/buy-ipad/ipad-air', 'apple.com'],
+    ['ipad-pro', 'https://www.apple.com/shop/buy-ipad/ipad-pro', 'apple.com'],
+  ]);
+  assert.deepEqual(vendorPageTargets(P07, []).map((t) => t.id), ['airpods', 'sony', 'bose']);
+  // A SERP hit never replaces the buy page, and never duplicates it.
+  assert.deepEqual(vendorPageTargets(P08, [{ domain: 'apple.com', url: 'https://www.apple.com/shop/buy-ipad/ipad-air' }]).map((t) => t.url), [
+    'https://www.apple.com/shop/buy-ipad/ipad-air',
+    'https://www.apple.com/shop/buy-ipad/ipad-pro',
+  ]);
+  // No buy page for the Kindle, so its SERP hit on the vendor domain is read instead.
+  assert.deepEqual(vendorPageTargets(P06, P06_HITS.map((h) => ({ domain: h.domain, url: h.url! }))), [
+    { id: 'kobo', url: 'https://us.kobobooks.com/products/kobo-clara-bw', domain: 'us.kobobooks.com' },
+  ]);
+});
+
+test('a store sale price stays the price and the list price rides along', () => {
+  const line = 'Sony: $198 on electronics.sony.com (official store sale price; list $399.99)';
+  const hits: VendorHit[] = [
+    { domain: 'bestbuy.com', url: 'https://www.bestbuy.com/sony', title: 'Sony WH-1000XM5', snippet: 'Sony WH-1000XM5 $228.00 Was $299.99' },
+    { domain: 'electronics.sony.com', url: 'https://electronics.sony.com/audio/headphones/headband/p/wh1000xm5-b', title: 'Sony — official store', snippet: line, content: `${line}\n\nSale Price $198.00` },
+  ];
+  assert.deepEqual(listPriceFor(line, /\bsony\b/i), { amount: 198, from: false }, 'the "list" amount never wins');
+  const prices = vendorPrices('Sony WH-1000XM5 price', hits);
+  assert.deepEqual(prices.map((p) => [p.amount, p.from, p.was]), [[198, false, 399.99]]);
+  const out = settle([{ type: 'tile', label: 'Sony WH-1000XM5', value: '$228 [1]' }, { type: 'citations', refs: [1, 2] }], 'Sony WH-1000XM5 price', hits);
+  const tile = out[0];
+  assert.equal(tile.value, '$198');
+  assert.equal(tile.source, 2);
+  assert.match(tile.sub, /Retailer \$228 \[1\] · 15% above vendor/);
+  assert.match(tile.sub, /Sale · list \$399\.99/);
+  const hero = settle([{ type: 'hero', label: 'Sony WH-1000XM5', value: '$228 [1]' }, { type: 'citations', refs: [1, 2] }], 'Sony WH-1000XM5 price', hits)[0];
+  assert.match(hero.caption, /^Sale · list \$399\.99 · electronics\.sony\.com \[2\] · Retailer \$228 \[1\] · 15% above vendor/);
+});
+
+test('P08: Air and Pro each get their own buy page price, cited (V4 shipped Air only)', () => {
+  const rows: VendorHit[] = [
+    { domain: 'bestbuy.com', url: 'https://www.bestbuy.com/ipad-pro', title: 'iPad Pro 11-inch (M5)', snippet: 'iPad Pro 11-inch Wi-Fi 256GB $999.99 [sale]' },
+    { domain: 'apple.com', url: 'https://www.apple.com/shop/buy-ipad/ipad-air', title: 'iPad Air — official store', snippet: 'iPad Air: From $749 on apple.com (official store price)', content: 'iPad Air: From $749 on apple.com (official store price)' },
+    { domain: 'apple.com', url: 'https://www.apple.com/shop/buy-ipad/ipad-pro', title: 'iPad Pro — official store', snippet: 'iPad Pro 11-inch (M5): From $1,199 on apple.com (official store price)', content: 'iPad Pro 11-inch (M5): From $1,199 on apple.com (official store price)' },
+  ];
+  assert.deepEqual(vendorPrices(P08, rows).map((p) => [p.id, p.amount, p.source]), [['ipad-air', 749, 2], ['ipad-pro', 1199, 3]]);
+  const out = settle([
+    { type: 'tile', label: 'iPad Air', value: '$529 [4]' },
+    { type: 'tile', label: 'iPad Pro', value: '$999.99 [1]' },
+    { type: 'citations', refs: [1, 2, 3] },
+  ], P08, rows);
+  assert.equal(out[0].value, 'From $749');
+  assert.equal(out[0].source, 2);
+  assert.equal(out[1].value, 'From $1,199');
+  assert.equal(out[1].source, 3);
+});
+
+test('P07: a price on the card ends the "prices not in sources" copy', () => {
+  const nodes: Node[] = [
+    { type: 'callout', tone: 'warning', title: 'Prices not in sources', text: 'Prices not in sources for every product.' },
+    { type: 'grid', children: [{ type: 'tile', label: 'AirPods Pro 3', value: '$249 [1]' }] },
+    { type: 'citations', refs: [1, 2, 3, 4] },
+  ];
+  const out = settle(nodes, P07, P07_HITS);
+  assert.equal(out.length, nodes.length);
+  assert.deepEqual(out[0], { type: 'stack', children: [] }, 'the callout is gone (an empty slot, not a pending region)');
+  assert.equal(out[1].children[0].value, '$249');
+  assert.equal(out[1].children[0].source, 2, 'AirPods cites apple.com, not the retailer');
+  // Prose loses the sentence too; the priced sentences stay.
+  const prose = settle([
+    { type: 'text', text: 'Prices not in sources for Sony and Bose. The AirPods Pro 3 are $249 at Best Buy [3].' },
+    { type: 'citations', refs: [1, 2, 3, 4] },
+  ], P07, P07_HITS);
+  assert.equal(prose[0].text, 'The AirPods Pro 3 are $249 at Best Buy [3].');
+});
+
+test('P07 table: a "—" price cell fills with the vendor price of its column', () => {
+  const nodes: Node[] = [
+    { type: 'table', columns: ['AirPods Pro 3', 'Sony WF-1000XM5'], rows: [['Price', '—', '$228 [3]'], ['Battery', '8h', '8h']] },
+    { type: 'citations', refs: [1, 2, 3, 4] },
+  ];
+  const out = settle(nodes, P07, P07_HITS);
+  assert.equal(out[0].rows[0][0], 'Price');
+  assert.equal(out[0].rows[0][1], '$249 [2]', 'the em dash cell fills from the apple.com row');
+  assert.equal(out[0].rows[0][2], '$228 [3]', 'a priced cell keeps its own retailer price');
+  assert.deepEqual(out[0].rows[1], ['Battery', '8h', '8h']);
+  assert.equal(out[0].priceRows[0].vendorTrue, true);
+  assert.equal(out[0].priceRows[0].domain, 'apple.com');
+});
+
+const AIRPODS_LD = `<html><body><script type="application/ld+json">{"@type":"Product","name":"AirPods Pro 3","offers":{"@type":"Offer","priceCurrency":"USD","price":249}}</script><h1>AirPods Pro 3</h1><p>$249 or $20.75/mo. for 12 mo.</p></body></html>`;
+const SONY_JINA = [
+  'Title: Sony WH-1000XM5 Premium Wireless Noise Cancelling Headphones | Black',
+  '',
+  'Sale Price $198.00',
+  '',
+  'Save $201.99',
+  '',
+  'Original Price~~$399.99~~',
+  '',
+  'The WH-1000XM5 headphones rewrite the rules for distraction-free listening, with two processors controlling eight microphones for unprecedented noise cancellation and crystal clear hands-free calling.',
+].join('\n');
+
+test('readVendorPages: JSON-LD directly, Jina for a 403, and no row without a price', async () => {
+  const realFetch = globalThis.fetch;
+  const asked: string[] = [];
+  globalThis.fetch = (async (input: unknown) => {
+    const url = typeof input === 'string' ? input : (input as Request).url;
+    asked.push(url);
+    if (url.startsWith('https://r.jina.ai/')) {
+      // The reader wraps the page URL: the Bose page has no price, so it yields no row.
+      const page = url.slice('https://r.jina.ai/'.length);
+      return new Response(page.includes('bose.com') ? 'Bose QuietComfort Ultra Earbuds (2nd Gen) product page. Features, specifications and reviews, with no price stated anywhere on it at all.'.repeat(4) : SONY_JINA, { headers: { 'content-type': 'text/plain' } });
+    }
+    if (url.includes('airpods-pro-3')) return new Response(AIRPODS_LD, { headers: { 'content-type': 'text/html' } });
+    if (url.includes('electronics.sony.com')) return new Response('Forbidden', { status: 403, headers: { 'content-type': 'text/html' } });
+    return new Response('Nothing here', { status: 404, headers: { 'content-type': 'text/html' } });
+  }) as typeof fetch;
+  try {
+    const ledger = newLedger();
+    const scope: AskScope = { ledger, bypass: false };
+    const rows = await readVendorPages(P07, [], {}, scope);
+    assert.equal(rows.length, 2, 'Bose has no page here (404), AirPods and Sony do');
+    const [airpods, sony] = rows;
+    assert.equal(airpods.title, 'AirPods — official store');
+    assert.equal(airpods.url, 'https://www.apple.com/shop/buy-airpods/airpods-pro-3');
+    assert.equal(airpods.domain, 'apple.com');
+    assert.deepEqual(airpods.engines, ['web']);
+    assert.equal(airpods.snippet, 'AirPods Pro 3: $249 on apple.com (official store price)');
+    assert.match(airpods.content, /^AirPods Pro 3: \$249 on apple\.com \(official store price\)\n\n/);
+    assert.deepEqual(airpods.vendor, { id: 'airpods', product: 'AirPods', amount: 249, from: false });
+    assert.equal(sony.snippet, 'Sony: $198 on electronics.sony.com (official store sale price; list $399.99)');
+    assert.deepEqual(sony.vendor, { id: 'sony', product: 'Sony', amount: 198, from: false, was: 399.99 });
+    // Sony refused the direct fetch, so it was read through the reader (which counts itself).
+    assert.ok(asked.includes('https://r.jina.ai/https://electronics.sony.com/audio/headphones/truly-wireless-earbuds/p/wf1000xm5-b'));
+    assert.equal(ledger.pages.direct, 3);
+    // The store price survives the client-side reconcile on the row the server sent.
+    const shown = settle([{ type: 'tile', label: 'AirPods Pro 3', value: '$249 [1]' }, { type: 'citations', refs: [1, 2, 3] }], P07, [
+      { domain: 'rtings.com', url: 'https://www.rtings.com/x', title: 'Best earbuds', snippet: 'AirPods Pro 3 $249' },
+      ...rows.map((r) => ({ domain: r.domain, url: r.url, title: r.title, snippet: r.snippet, content: r.content })),
+    ]);
+    assert.equal(shown[0].value, '$249');
+    assert.equal(shown[0].source, 2);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });
