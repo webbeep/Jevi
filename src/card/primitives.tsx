@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useId, useRef, useState } from 'react';
+import type { MouseEvent } from 'react';
 import { Check, ChevronLeft, ChevronRight, Copy, Minus, Play, Star, ThumbsDown, ThumbsUp, TrendingDown, TrendingUp } from 'lucide-react';
 import { askQuestion, type AskRef, type Box } from '../../shared/askAbout';
 import type { CardNode, Tone } from '../../shared/card';
@@ -194,6 +195,21 @@ function ItemButton({ ask, askRef, className }: { ask: string; askRef?: AskRef; 
 }
 
 /**
+ * Row tap on the text (T456): row text stays selectable for highlight-to-quote, so a click that lands on the text (not the row
+ * button) is forwarded to the row's ItemButton. Ignores clicks from the row button itself (it sends on its own), chips and cites (they open sources),
+ * and clicks that end a text selection inside the row.
+ */
+function useRowClick() {
+  return (e: MouseEvent<HTMLElement>) => {
+    if ((e.target as Element).closest('a, button')) return;
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed && sel.anchorNode && e.currentTarget.contains(sel.anchorNode)) return;
+    // Forward to the row's ItemButton so the tap goes through the same path (T455 queue id + pulse ring, t447 guard).
+    e.currentTarget.querySelector<HTMLButtonElement>(':scope > button')?.click();
+  };
+}
+
+/**
  * Round chip that opens an item's source in a new tab. 18px visual, 44×44 hit area via ::after.
  * It sits next to (never inside) the item's button, and stops propagation so it never sends a question.
  */
@@ -217,6 +233,12 @@ function SourceChip({ result: r, n, className }: { result: SearchResult; n: numb
     </a>
   );
 }
+
+/**
+ * SourceChip in a list/timeline row (T456): rows are >=44px and flush, so the chip's 44×44 hit box is anchored to the row's top
+ * edge (the chip is static, so its ::after is placed against the li) and centred on the flush-right chip. It never leaves its row.
+ */
+const ROW_CHIP = 'static after:left-auto after:top-0 after:-right-[13px] after:z-[1] after:h-11 after:w-11 after:translate-x-0 after:translate-y-0';
 
 const domainLabel = (d: string) => d.replace(/^(www|en|m)\./, '');
 
@@ -480,28 +502,31 @@ function MediaList({ node }: { node: Of<'list'> }) {
 
 export function List({ node }: { node: Of<'list'> }) {
   const { results, entity } = useCard();
+  const rowClick = useRowClick();
   const style = node.style ?? 'bullet';
   if (style === 'media') return <MediaList node={node} />;
   return (
-    <ul className="space-y-2 sm:space-y-2.5">
+    <ul className="-my-1 sm:-my-[5px]">
       {node.items.map((item, i) => {
         const r = item.source ? results[item.source - 1] : undefined;
         // T453: every box type taps to a natural follow-up (Ricky: lists too); cites/source chip stay tappable above.
         const ask = askQuestion({ kind: 'list', label: plain(item.text), detail: item.meta, entity });
         const ref: AskRef = { label: subjectOf(item.text), value: item.meta, entity, sourceUrl: r?.url, snippet: r?.snippet };
         return (
-          <li key={i} className="relative flex items-start gap-2 text-sm leading-relaxed sm:gap-3">
-            <ItemButton ask={ask} askRef={ref} className={cn('absolute -inset-x-1 -inset-y-[3px] cursor-pointer rounded-md transition-colors hover:bg-foreground/[0.03]')} />
-            <span className="pointer-events-none relative mt-0.5 flex size-5 shrink-0 items-center justify-center">
-              {style === 'number' ? <span className="text-xs font-semibold text-muted-foreground">{i + 1}</span>
-                : style === 'check' ? <Check className="size-4 text-positive" />
-                : style === 'icon' && item.icon ? <Icon name={item.icon} className="text-muted-foreground" />
-                : <span className="size-1.5 rounded-full bg-foreground/40" />}
-            </span>
-            <span className="pointer-events-none relative flex-1 text-foreground/85"><RichText text={item.text} /></span>
-            {item.meta && <span className="pointer-events-none relative shrink-0 text-xs text-muted-foreground">{item.meta}</span>}
-            {/* Rows sit 8–10px apart, so the chip's tap area is clipped to stay clear of neighbours (list-row rule: ≥44w, ≥30h). */}
-            {r && <span className="relative mt-[3px] flex shrink-0"><SourceChip result={r} n={item.source!} className="after:h-[30px]" /></span>}
+          <li key={i} onClick={rowClick} className="group relative flex min-h-11 cursor-pointer py-1 text-sm leading-relaxed sm:py-[5px]">
+            <ItemButton ask={ask} askRef={ref} className="absolute inset-y-0 -inset-x-1 cursor-pointer rounded-md transition-colors group-hover:bg-foreground/[0.03]" />
+            <div className="my-auto flex w-full min-w-0 items-start gap-2 sm:gap-3">
+              <span className="pointer-events-none relative mt-0.5 flex size-5 shrink-0 items-center justify-center">
+                {style === 'number' ? <span className="text-xs font-semibold text-muted-foreground">{i + 1}</span>
+                  : style === 'check' ? <Check className="size-4 text-positive" />
+                  : style === 'icon' && item.icon ? <Icon name={item.icon} className="text-muted-foreground" />
+                  : <span className="size-1.5 rounded-full bg-foreground/40" />}
+              </span>
+              <span className="relative flex-1 text-foreground/85"><RichText text={item.text} /></span>
+              {item.meta && <span className="relative shrink-0 text-xs text-muted-foreground">{item.meta}</span>}
+              {/* Rows are >=44px and flush; the chip's 44×44 hit box is anchored to the row's top (ROW_CHIP), so it stays inside its own row. */}
+              {r && <span className="mt-[3px] flex shrink-0"><SourceChip result={r} n={item.source!} className={ROW_CHIP} /></span>}
+            </div>
           </li>
         );
       })}
@@ -571,22 +596,23 @@ export function TableView({ node }: { node: Of<'table'> }) {
 
 export function Timeline({ node }: { node: Of<'timeline'> }) {
   const { results, entity } = useCard();
+  const rowClick = useRowClick();
   return (
-    <ol className="relative space-y-4 pl-6 before:absolute before:inset-y-1.5 before:left-[5px] before:w-px before:bg-border">
+    <ol className="relative -my-2 pl-6 before:absolute before:inset-y-3.5 before:left-[5px] before:w-px before:bg-border">
       {node.items.map((t, i) => {
         const r = t.source ? results[t.source - 1] : undefined;
         const ask = askQuestion({ kind: 'timeline', label: plain(t.title), when: t.when, entity });
         const ref: AskRef = { label: t.when ? `${t.when}: ${plain(t.title)}` : plain(t.title), value: t.text ? plain(t.text) : undefined, entity, sourceUrl: r?.url, snippet: r?.snippet };
         return (
-          <li key={i} className="relative flex gap-2">
-            <ItemButton ask={ask} askRef={ref} className={cn('absolute -inset-x-1 -inset-y-1 cursor-pointer rounded-md transition-colors hover:bg-foreground/[0.03]')} />
-            <span className="pointer-events-none absolute -left-6 top-1 size-[11px] rounded-full border-2 border-background bg-foreground ring-1 ring-border" />
-            <div className="pointer-events-none relative min-w-0 flex-1">
+          <li key={i} onClick={rowClick} className="group relative flex min-h-11 cursor-pointer gap-2 py-2">
+            <ItemButton ask={ask} askRef={ref} className="absolute inset-y-0 -inset-x-1 cursor-pointer rounded-md transition-colors group-hover:bg-foreground/[0.03]" />
+            <span className="pointer-events-none absolute -left-6 top-3 size-[11px] rounded-full border-2 border-background bg-foreground ring-1 ring-border" />
+            <div className="relative min-w-0 flex-1">
               <div className="text-xs font-semibold tabular-nums text-muted-foreground">{t.when}</div>
               <div className="text-sm font-medium"><RichText text={t.title} inline /></div>
               {t.text && <div className="mt-0.5 text-sm text-muted-foreground"><RichText text={t.text} inline /></div>}
             </div>
-            {r && <span className="relative mt-0.5 flex shrink-0"><SourceChip result={r} n={t.source!} /></span>}
+            {r && <span className="mt-0.5 flex shrink-0"><SourceChip result={r} n={t.source!} className={ROW_CHIP} /></span>}
           </li>
         );
       })}
