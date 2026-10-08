@@ -29,9 +29,9 @@ export function WhichOne({ choices, onPick }: { choices: Disambiguation; onPick:
               }}
               className="flex min-h-11 w-full items-center gap-3 rounded-xl border bg-card px-3.5 py-2.5 text-left transition-colors hover:bg-foreground/[0.03] disabled:cursor-default disabled:opacity-60 aria-pressed:opacity-100 aria-pressed:border-foreground/30 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
             >
-              <span className="min-w-0 flex-1">
-                <span className="block text-sm font-semibold leading-snug">{o.name}</span>
-                {o.descriptor && <span className="block text-[13px] leading-snug text-muted-foreground">{o.descriptor}</span>}
+              <span className="min-w-0 flex-1 space-y-0.5">
+                <span className="block text-sm font-semibold leading-snug text-pretty [overflow-wrap:anywhere] line-clamp-2">{o.name}</span>
+                {o.descriptor && <span className="block text-[13px] leading-snug text-muted-foreground text-pretty [overflow-wrap:anywhere] line-clamp-3">{o.descriptor}</span>}
               </span>
               {picked === i ? <Check className="size-4 shrink-0" /> : <ChevronRight className="size-4 shrink-0 text-muted-foreground" />}
             </button>
