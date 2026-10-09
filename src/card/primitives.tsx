@@ -17,6 +17,7 @@ import { useCard, useCredit } from './context';
 import { Icon } from './Icon';
 import { ICON_NAMES } from './iconNames';
 import { RichText } from './RichText';
+import { GAIN, LOSS, returnColor } from './returnColor';
 
 type Of<T extends CardNode['type']> = Extract<CardNode, { type: T }>;
 
@@ -87,7 +88,7 @@ export function Hero({ node }: { node: Of<'hero'> }) {
       )}
       <div className="flex items-start gap-3">
         <span className={cn('text-[52px] font-semibold leading-[0.95] tracking-[-0.045em] sm:text-[64px]', node.value.length > 8 && node.value.length <= 14 && 'text-[36px] leading-[1.05] tracking-[-0.035em] sm:text-[64px] sm:leading-[0.95] sm:tracking-[-0.045em]', node.value.length > 14 && 'text-[32px] leading-tight tracking-[-0.03em] sm:text-[40px]', TONE_TEXT[node.tone === 'primary' || !node.tone ? 'default' : node.tone])}>
-          <span className="tabular-nums">{plain(value)}</span>
+          <span className="tabular-nums" style={{ color: returnColor(plain(node.value), plain(node.label ?? '')) }}>{plain(value)}</span>
           {node.unit && <span className="ml-1 align-top text-xl font-normal tracking-[-0.02em] text-muted-foreground sm:text-2xl">{node.unit}</span>}
         </span>
         {node.icon && <Icon name={node.icon} className="mt-1 size-10 text-muted-foreground/60 sm:size-12" />}
@@ -117,6 +118,7 @@ export function Text({ node }: { node: Of<'text'> }) {
 export function StatView({ node }: { node: Of<'stat'> }) {
   const { entity } = useCard();
   const Trend = node.trend === 'up' ? TrendingUp : node.trend === 'down' ? TrendingDown : Minus;
+  const deltaColor = node.trend === 'up' ? GAIN : node.trend === 'down' ? LOSS : returnColor(node.delta, 'change');
   const [img, onImgError] = useLoadable(httpsOnly(node.image));
   const label = plain(node.label);
   const value = node.value && plain(node.value);
@@ -133,11 +135,11 @@ export function StatView({ node }: { node: Of<'stat'> }) {
             <span className="truncate" title={label}>{node.label}</span>
           </div>
           <div className="mt-1 flex min-w-0 flex-wrap items-baseline gap-x-1 sm:mt-1.5">
-            <span className="min-w-0 text-[22px] font-semibold tabular-nums tracking-[-0.03em] [overflow-wrap:anywhere] sm:text-[26px]">{plain(node.value)}</span>
+            <span className="min-w-0 text-[22px] font-semibold tabular-nums tracking-[-0.03em] [overflow-wrap:anywhere] sm:text-[26px]" style={{ color: returnColor(`${plain(node.value)}${node.unit === '%' ? '%' : ''}`, label) }}>{plain(node.value)}</span>
             {node.unit && <span className="text-sm text-muted-foreground">{node.unit}</span>}
           </div>
           {node.delta && (
-            <div className={cn('mt-1 inline-flex items-center gap-1 text-xs', node.trend === 'up' ? 'text-positive' : node.trend === 'down' ? 'text-negative' : 'text-muted-foreground')}>
+            <div className={cn('mt-1 inline-flex items-center gap-1 text-xs', !deltaColor && 'text-muted-foreground')} style={{ color: deltaColor }}>
               <Trend className="size-3" />{node.delta}
             </div>
           )}
@@ -435,7 +437,7 @@ export function Tile({ node }: { node: Of<'tile'> }) {
         {link && <span className="-my-[3px] shrink-0"><SourceChip result={link} n={node.source!} /></span>}
       </span>
       {!slot && !img && !pending && isVerdict(node.value) && <Icon name={icon} className="pointer-events-none relative size-[18px] text-foreground/70 sm:size-5" />}
-      {node.value && <span className="pointer-events-none relative max-w-full text-[15px] font-semibold tracking-tight [overflow-wrap:anywhere] sm:text-base">{plain(node.value)}</span>}
+      {node.value && <span className="pointer-events-none relative max-w-full text-[15px] font-semibold tracking-tight [overflow-wrap:anywhere] sm:text-base" style={{ color: returnColor(plain(node.value), label) }}>{plain(node.value)}</span>}
       {node.sub && <span className="pointer-events-none relative text-[11px] leading-tight text-muted-foreground"><RichText text={node.sub} inline noLinks /></span>}
     </div>
   );

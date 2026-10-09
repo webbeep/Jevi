@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import type { CardNode } from '../../shared/card';
+import { GAIN as UP, LOSS as DOWN } from './returnColor';
 import { TICKER_RANGES, type TickerRange, type TickerSeries, priceText, rangeChange } from '../../shared/ticker';
 
 type TickerNode = Extract<CardNode, { type: 'ticker' }>;
 
-const UP = '#00C805';
-const DOWN = '#FF5000';
 /** Today's line keeps moving while the card is open, for a while. */
 const LIVE_REFRESH_MS = 30_000;
 const LIVE_FOR_MS = 10 * 60_000;

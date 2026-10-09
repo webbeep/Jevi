@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { quoteAsk } from '../shared/quoteAsk.ts';
 import { cacheTier } from '../shared/cacheTtl.ts';
+import { GAIN, LOSS, returnColor } from '../src/card/returnColor.ts';
 import { formatPrice, isQuoteRow, quoteRow, tickerNode, type LiveQuote } from '../server/liveQuote.ts';
 
 const symbolOf = (q: string) => {
@@ -111,5 +112,21 @@ describe('tickerNode', () => {
     assert.equal(node?.type, 'ticker');
     assert.equal(node?.type === 'ticker' && node.series.price, 382.7);
     assert.equal(node?.type === 'ticker' && node.feed, 'Yahoo Finance');
+  });
+});
+
+describe('returnColor', () => {
+  test('signed returns take the gain or loss color', () => {
+    assert.equal(returnColor('+0.78%'), GAIN);
+    assert.equal(returnColor('−2.05%'), LOSS);
+    assert.equal(returnColor('-$3.20'), LOSS);
+    assert.equal(returnColor('+636.51', 'Day change'), GAIN);
+  });
+
+  test('plain numbers stay plain', () => {
+    assert.equal(returnColor('-5°C', 'Low'), undefined);
+    assert.equal(returnColor('81,602.41–83,259.63', 'Day range'), undefined);
+    assert.equal(returnColor('82,290.94'), undefined);
+    assert.equal(returnColor('+3', 'Rebounds'), undefined);
   });
 });
