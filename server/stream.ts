@@ -116,9 +116,7 @@ function imageBoost(pattern: string, search: SearchResponse, env: Env, scope: As
 }
 
 /** How many pages to read and how long to wait for them before designing. At most five pages per ask. */
-/** SPD-C2: precise asks treat an engine extract under this many characters as a snippet and read the page. */
-const RICH_TEXT = 2500;
-const pageBudget = (readPages: boolean) => (readPages ? { count: 5, need: 3, budgetMs: 2200, minReady: RICH_TEXT } : { count: 3, need: 2, budgetMs: 1000 });
+const pageBudget = (readPages: boolean) => (readPages ? { count: 5, need: 3, budgetMs: 2200 } : { count: 3, need: 2, budgetMs: 1000 });
 
 /** The model is scored against the person's question, including hits a looser retry brought back. */
 function applyRelevance(query: string, response: SearchResponse, ledger: CallLedger): SearchResponse {
@@ -136,7 +134,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   if (!req.followup && MADE_PATTERNS.has(req.pattern)) req = { ...req, followup: { mode: 'chat', question: req.query } };
   // Conversation turns reason from what is already known; everything else reads pages first.
   const chat = req.followup?.mode === 'chat';
-  const budget = chat ? { count: 3, need: 0, budgetMs: 0 } : req.deep ? { ...DEEP_PAGES, minReady: RICH_TEXT } : pageBudget(req.readPages);
+  const budget = chat ? { count: 3, need: 0, budgetMs: 0 } : req.deep ? DEEP_PAGES : pageBudget(req.readPages);
   const pages = await collectPages(req.search.results, env, budget, late, scope);
   const fresh = pages.filter((p) => !req.search.results[p.n - 1]?.content);
   if (fresh.length) send('pages', fresh.map(({ n, url, text }) => ({ n, url, text })));
