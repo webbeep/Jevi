@@ -211,7 +211,7 @@ function liveQuoteRule(req: DesignRequest): string {
     `- LIVE MARKET DATA: source [1] (${row!.title}) is a quote fetched seconds ago. When the ask is about this price, its live price is THE current price: lead with it in a hero, with the day change as the delta, and cite [1].`,
     '- Every other price in SOURCES is historical. Show one only next to its own date and never call it current, latest, today\'s or an all-time high unless that source says so for that date. Leave out prices that are years old unless the ask is about history.',
     req.ticker
-      ? '- The card ALREADY OPENS with a live price chart showing the current price, the change and an interactive chart with ranges. Do not add a price hero, a price stat or any price chart. Start with the day range and 52-week range as two tiles, then why it is moving today from dated news sources [n], then anything else the ask needs.'
+      ? '- The card ALREADY OPENS with a live price chart showing the current price, the change and an interactive chart with ranges. Do not add a price hero, a price stat or any price chart, and never say a chart, image or price data is missing or unavailable. Drop any chart or image slot in the skeleton. Start with the day range and 52-week range as two tiles, then why it is moving today from dated news sources [n], then anything else the ask needs.'
       : '- The daily closes in [1] make a good line chart; the day and 52-week ranges fit tiles.',
     '- Use news sources for why it is moving, not for the price.',
   ].join('\n');
@@ -227,7 +227,7 @@ function briefRules(req: DesignRequest): string {
     b.stale.length ? `- ${refs(b.stale)} are outdated for this ask: never present their facts or numbers as current; leave them out.` : '',
     b.offTopic.length ? `- ${refs(b.offTopic)} are about something else (another person, product, place or period): never use them.` : '',
     b.conflicts.length ? `- Sources disagree: ${b.conflicts.join(' ')} Trust the live or newest authoritative source and date the figure you show.` : '',
-    b.missing ? `- The sources don't answer: ${b.missing} Say so plainly in one short callout instead of filling the gap.` : '',
+    b.missing && !(req.ticker && CHART_TALK.test(b.missing)) ? `- The sources don't answer: ${b.missing} Say so plainly in one short callout instead of filling the gap.` : '',
   ].filter(Boolean).join('\n');
 }
 
@@ -338,9 +338,17 @@ function parseLine(line: string, g: Grounding, imageCount: number, query: string
   return grounded ? { kind: 'node', node: grounded } : { kind: 'dropped' };
 }
 
-/** The ticker is the card's chart: a model-drawn chart beside it only repeats the price, worse. */
+/** Talk about a chart, image or price series being unavailable — false on a card that opens with the live chart. */
+const CHART_TALK = /\b(chart|graph|image|picture|photo|price (?:data|history|series)|historical (?:data|prices))\b/i;
+const UNAVAILABLE = /\b(no|not|unavailable|missing|isn'?t|aren'?t|couldn'?t|can'?t|cannot|without|lack)\b/i;
+
+/** The ticker is the card's chart: a model-drawn chart beside it only repeats the price, worse, and a note that a chart is missing is wrong. */
 function withoutCharts(node: CardNode | undefined): CardNode | undefined {
   if (!node || node.type === 'chart') return undefined;
+  if (node.type === 'callout' || node.type === 'text') {
+    const said = `${node.type === 'callout' ? node.title ?? '' : ''} ${node.text}`;
+    if (CHART_TALK.test(said) && UNAVAILABLE.test(said)) return undefined;
+  }
   if (node.type === 'tabs') {
     const tabs = node.tabs.map((t) => ({ ...t, children: t.children.map(withoutCharts).filter((c): c is CardNode => !!c) })).filter((t) => t.children.length);
     return tabs.length ? { ...node, tabs } : undefined;

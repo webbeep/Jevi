@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { readBrief, rejectedSources } from '../server/brief.ts';
 import { readReview } from '../server/review.ts';
-import { corpusOf, type DesignRequest } from '../server/design.ts';
+import { corpusOf, gateNode, type DesignRequest } from '../server/design.ts';
 import { Grounding } from '../server/ground.ts';
 
 describe('source brief', () => {
@@ -72,5 +72,25 @@ describe('answer review', () => {
   test('unreadable replies are ignored', () => {
     assert.equal(readReview({ verdict: 'maybe' }, shown), undefined);
     assert.equal(readReview(undefined, shown), undefined);
+  });
+});
+
+describe('ticker cards', () => {
+  const req = {
+    query: 'Btc Usd',
+    pattern: 'answer',
+    depth: 'brief',
+    pages: [],
+    search: { query: 'Btc Usd', freshness: 'any', results: [{ title: 'Bitcoin live price', url: 'https://finance.yahoo.com/quote/BTC-USD', snippet: 'Live price: 82,290.94 USD; day range 81,602.41–83,259.63', domain: 'finance.yahoo.com', engines: ['quote'] }], images: [], engines: [] },
+    ticker: { type: 'ticker', symbol: 'BTC-USD', name: 'Bitcoin', kind: 'crypto', currency: 'USD', feed: 'Yahoo Finance', series: { range: '1D', points: [[1, 1], [2, 2]], base: 1, price: 2, at: '' } },
+  } as unknown as DesignRequest;
+
+  test('a note that the chart is missing never reaches the card', () => {
+    assert.equal(gateNode({ type: 'callout', title: 'No chart image available', text: 'Sources give only a live price snapshot — no accessible BTC/USD chart data.' }, req), undefined);
+    assert.equal(gateNode({ type: 'chart', kind: 'line', data: [{ label: 'a', value: 82290.94 }, { label: 'b', value: 81602.41 }] }, req), undefined);
+  });
+
+  test('other notes stay', () => {
+    assert.ok(gateNode({ type: 'callout', text: 'Crypto trades around the clock, so the day range covers a rolling day.' }, req));
   });
 });

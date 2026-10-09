@@ -198,7 +198,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   const chat = req.followup?.mode === 'chat';
   const budget = chat ? { count: 3, need: 0, budgetMs: 0 } : req.deep ? DEEP_PAGES : pageBudget(req.readPages);
   // The source check runs while pages are read, so it costs little or no extra time.
-  const briefing = newSearch && !chat ? briefSources({ query: req.query, intent: req.intent, context: req.context, results: req.search.results, isLive: isQuoteRow }, env) : undefined;
+  const briefing = newSearch && !chat ? briefSources({ query: req.query, intent: req.intent, context: req.context, results: req.search.results, isLive: isQuoteRow, shown: req.ticker ? 'a live price chart with the current price, today\'s intraday line and 1W to 5Y history from the quote feed' : undefined }, env) : undefined;
   const [pages, brief] = await Promise.all([collectPages(req.search.results, env, budget, late, scope), briefing]);
   if (brief) console.log(JSON.stringify({ zo: 'brief', use: brief.use.length, stale: brief.stale, offTopic: brief.offTopic, conflicts: brief.conflicts.length, missing: !!brief.missing }));
   const fresh = pages.filter((p) => !req.search.results[p.n - 1]?.content);

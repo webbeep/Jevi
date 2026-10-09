@@ -69,7 +69,7 @@ export function rowLine(r: SearchResult, i: number, live: boolean): string {
 }
 
 export async function briefSources(
-  args: { query: string; intent?: string; context?: string; results: SearchResult[]; isLive: (r: SearchResult) => boolean },
+  args: { query: string; intent?: string; context?: string; results: SearchResult[]; isLive: (r: SearchResult) => boolean; shown?: string },
   env: Env,
   timeoutMs = 1800,
 ): Promise<SourceBrief | undefined> {
@@ -80,6 +80,7 @@ export async function briefSources(
     args.context ? `Conversation so far:\n${args.context.slice(0, 1200)}` : '',
     `Asked: ${args.query}`,
     args.intent ? `Read as: ${args.intent}` : '',
+    args.shown ? `Already on the card, outside these results (never "missing"): ${args.shown}` : '',
     `Results:\n${rows.map((r, i) => rowLine(r, i, args.isLive(r))).join('\n')}`,
   ].filter(Boolean).join('\n');
   const call = llmJson<Raw>(env, SYSTEM, user, 400).catch((err) => {
