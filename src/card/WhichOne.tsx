@@ -24,7 +24,7 @@ export function WhichOne({ choices, onPick }: { choices: Disambiguation; onPick:
   };
   const submitOther = () => {
     const extra = detail.trim();
-    if (extra) send(OTHER, `${name} ${extra}`.trim());
+    if (extra) send(OTHER, name ? `${name}, ${extra}` : extra);
   };
   return (
     <section aria-label={choices.prompt ?? 'Which one?'} className="space-y-2 animate-in fade-in">

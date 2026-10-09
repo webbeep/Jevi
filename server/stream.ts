@@ -165,6 +165,12 @@ function applyPickGate(query: string, response: SearchResponse): SearchResponse 
   return { ...response, results: kept };
 }
 
+/** What the ask adds to the person's name: "Ed Chu Bf ai" -> "Bf ai". */
+function askDetail(query: string, subject: string): string {
+  const names = new Set(subject.toLowerCase().split(/\s+/));
+  return query.replace(/^\s*(who\s+is|who\s+was|who's)\s+/i, '').replace(/[?]+\s*$/, '').split(/\s+/).filter((w) => !names.has(w.toLowerCase().replace(/[^a-z'-]/g, ''))).join(' ').replace(/^[,\s-]+/, '').trim();
+}
+
 const WHO_ASK = /^\s*(who\s+is|who\s+was|who's)\b/i;
 
 /** The model's split of the rows into people when it finds at least two; the heuristic choices otherwise. */
@@ -364,13 +370,14 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
       // name ask ("Who is Elon Musk") still gets the LLM knowledge answer instead of this one.
       if (isPersonAsk(query) && subject && (seedRows?.length || distinguishingTerms(query).length > 0)) {
         const label = pickSeeds(query, seedRows ?? []).label;
+        const detail = askDetail(query, subject);
         console.log(JSON.stringify({ zo: 'entity', pickEmpty: true }));
         send('search', { ...results, results: [] });
-        send('head', { title: subject, subtitle: label });
-        send('node', {
-          index: 0,
-          node: { type: 'text', text: `I couldn't find more about ${subject}${label ? ` (${label})` : ''} right now.`, size: 'lg' },
-        });
+        send('head', { title: subject, subtitle: label || detail });
+        const text = detail
+          ? `I couldn't find a page that connects ${subject} to “${detail}”. Try the full name of the company, school or city.`
+          : `I couldn't find more about ${subject}${label ? ` (${label})` : ''} right now.`;
+        send('node', { index: 0, node: { type: 'text', text, size: 'lg' } });
         send('done', { engine: 'extractive', removed: 0, pagesRead: 0, ms: Date.now() - started });
         return;
       }
@@ -557,7 +564,7 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
   if (steer && person) {
     const base = withoutChosen(context);
     if (steer.kind === 'narrow') {
-      const query = `${person} ${steer.detail}`;
+      const query = `${person}, ${steer.detail}`;
       send('rewrite', { query });
       await searchAndDesign(send, env, query, 'any', [`The person means the ${person} connected to ${steer.detail}, not anyone on the earlier cards.`, base].filter(Boolean).join('\n'), started, scope, true);
       return;

@@ -69,6 +69,9 @@ const LEAD_Q = /^(who|what|when|where|why|how)\s+(is|are|was|were|did|does|do)\b
 
 const cleanWord = (w: string) => w.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, '');
 
+/** "Bf", "GE", "JP": a short capitalised abbreviation of a company or school. */
+const ABBREV = /^[A-Z][A-Za-z]$/;
+const NAME_SUFFIX = /^(jr|sr|ii|iv|vi|dr|mr|ms|md)$/i;
 /** Org/product-ish Cap tokens that end a person+org query ("Ray Lee BlueFlame AI"). */
 const ORG_TAIL = /^(ai|ml|io|inc|llc|ltd|corp|co|labs?|technologies|technology|group|studios?|systems?|partners?|associates?)$/i;
 const SPORTS_LEAGUE = /^(nba|nfl|mlb|nhl|ncaa|wnba|mls|pga|ufc|wwe)$/i;
@@ -123,25 +126,34 @@ export function personSubject(query: string): string {
   const hadWho = WHO_IS.test(raw) || ABOUT.test(raw);
   let s = raw.replace(/\?+\s*$/, '').replace(WHO_IS, '').replace(ABOUT, '').replace(LEAD_Q, '').trim();
   if (!s) return '';
-  const words = s.split(/\s+/).map(cleanWord).filter(Boolean);
+  const rawWords = s.split(/\s+/).filter((w) => cleanWord(w));
+  const words = rawWords.map(cleanWord);
   if (!words.length) return '';
   const run: string[] = [];
-  for (const w of words) {
+  let commaEnd = false;
+  for (const [i, w] of words.entries()) {
     // Skip leading Cap interrogatives / common words ("How is…").
     if (!run.length && (COMMON.has(w.toLowerCase()) || /^(how|what|when|where|why|which)$/i.test(w))) continue;
     if (/^[A-Z]/.test(w)) {
       run.push(w);
       if (run.length === 6) break;
+      // "Ed Chu, Montefiore": a comma after a full name ends it; what follows is the detail.
+      if (run.length >= 2 && rawWords[i]!.endsWith(',')) {
+        commaEnd = true;
+        break;
+      }
     } else break;
   }
   // "who is Ed chu": a sloppy-case surname after a capitalised first name still belongs to the name.
-  if (hadWho && run.length && run.length < 3 && words.length <= 4) {
+  if (hadWho && !commaEnd && run.length && run.length < 3 && words.length <= 4) {
     const start = words.indexOf(run[0]!);
-    for (const w of words.slice(start + run.length)) {
+    const from = start + run.length;
+    for (const [k, w] of words.slice(from).entries()) {
       const lw = w.toLowerCase();
       if (run.length >= 3 || !/^[a-z][a-z'-]+$/.test(w) || COMMON.has(lw) || LOWER_STOP.test(lw)) break;
       if (ROLE1.has(lw) || DESCRIPTOR_WORDS.has(lw) || ROLE_TAIL.has(lw) || SPORTS_LEAGUE.test(lw) || ORG_TAIL.test(lw)) break;
       run.push(w[0]!.toUpperCase() + w.slice(1));
+      if (rawWords[from + k]!.endsWith(',')) break;
     }
   }
   if (run.length) {
@@ -152,7 +164,8 @@ export function personSubject(query: string): string {
       const w = run[i]!;
       const lowW = w.toLowerCase();
       // A role or descriptor word ends the name: "John Smith Explorer", "David Kim Violinist".
-      if (looksLikeOrgToken(w) || ROLE1.has(lowW) || DESCRIPTOR_WORDS.has(lowW) || ROLE_TAIL.has(lowW) || /^co-founder$/i.test(w)) {
+      // A two-letter word after a full name is an abbreviation ("Ed Chu Bf ai" = BlueFlame AI), not a surname.
+      if (looksLikeOrgToken(w) || ROLE1.has(lowW) || DESCRIPTOR_WORDS.has(lowW) || ROLE_TAIL.has(lowW) || /^co-founder$/i.test(w) || (ABBREV.test(w) && !NAME_SUFFIX.test(w))) {
         cut = i;
         break;
       }
@@ -184,7 +197,7 @@ export function contextTerms(query: string, name = personSubject(query)): string
     if (SPORTS_LEAGUE.test(w)) continue;
     // Cap tokens after the person name count as context (Raycon, USATF, Stripe) — not only CamelCase/ALLCAPS.
     // Alphanumeric org tokens carry a digit and a letter ("C2") — too short for capCtx, still identity.
-    const capCtx = /^[A-Z]/.test(w) && w.length >= 3 && !/^(Who|What|When|Where|Why|How)$/i.test(w);
+    const capCtx = /^[A-Z]/.test(w) && (w.length >= 3 || (ABBREV.test(w) && !NAME_SUFFIX.test(w))) && !/^(Who|What|When|Where|Why|How)$/i.test(w);
     const alnumCtx = /^[A-Za-z0-9]{2,}$/.test(w) && /[0-9]/.test(w) && /[A-Za-z]/.test(w);
     if (looksLikeOrgToken(w) || ORG_TAIL.test(w) || capCtx || alnumCtx) {
       if (!out.includes(t)) out.push(t);
@@ -302,8 +315,34 @@ export function personSourceOk(query: string, row: EntityRow, name = personSubje
   if (!ctx.length) return true;
   // Only a distinguishing term counts: a picked "Ray Lee Raycon Founder" must name Raycon, not the role.
   const need = distinguishingTerms(query, name);
-  const body = new Set(tokens(`${row.title ?? ''} ${row.snippet ?? ''} ${row.url ?? ''}`));
-  return need.some((t) => body.has(t) || (t.length >= 5 && [...body].some((w) => w.includes(t))));
+  if (!need.length) return true;
+  const raw = `${row.title ?? ''} ${row.snippet ?? ''}`;
+  const body = new Set(tokens(`${raw} ${row.url ?? ''}`));
+  const short = need.some((t) => t.length <= 4) ? initialisms(raw) : new Set<string>();
+  return need.some((t) => body.has(t) || (t.length >= 5 && [...body].some((w) => w.includes(t))) || (t.length <= 4 && short.has(t)));
+}
+
+/** Initials a short detail may stand for: "BlueFlame" and "Blue Flame" both give "bf". */
+export function initialisms(text: string): Set<string> {
+  const out = new Set<string>();
+  const words = text.split(/[^A-Za-z0-9]+/).filter(Boolean);
+  for (const w of words) {
+    const caps = w.match(/[A-Z][a-z0-9]*/g);
+    if (caps && caps.length >= 2 && caps.length <= 4) out.add(caps.map((c) => c[0]).join('').toLowerCase());
+    // "Blueflame" written as one word still reads as "bf": first letter plus a later letter, in order.
+    if (/^[A-Z][a-z]{4,}$/.test(w)) {
+      const lw = w.toLowerCase();
+      for (let k = 2; k < lw.length; k++) out.add(lw[0]! + lw[k]!);
+    }
+  }
+  for (let i = 0; i < words.length; i++) {
+    let acc = '';
+    for (let j = i; j < Math.min(i + 4, words.length) && /^[A-Z]/.test(words[j]!); j++) {
+      acc += words[j]![0]!.toLowerCase();
+      if (acc.length >= 2) out.add(acc);
+    }
+  }
+  return out;
 }
 
 /** SPD3 (t457): "A vs B" / "compare A and B" names two things, so it is never one person to disambiguate. */

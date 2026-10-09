@@ -1016,3 +1016,18 @@ describe('EN4 part 11: one person, never two choices (live Serper "Who is John S
     for (const key of ['ls-obama', 'serper-obama', 'ls-swift']) assert.equal(run(key).kind, 'single', key);
   });
 });
+
+test('a detail typed after a full name stays out of the name and still finds the page', () => {
+  const blueflame: EntityRow = { title: 'About Blueflame AI | Our Mission & Team', url: 'https://www.blueflame.ai/about', snippet: 'Ed Chu, Chief Technology Officer at Blueflame AI, brings decades' };
+  const oncologist: EntityRow = { title: 'Ed Chu - Oncologist', url: 'https://x.org/a', snippet: 'Dr. Ed Chu, cancer center director at Montefiore' };
+  assert.equal(personSubject('Ed Chu Bf ai'), 'Ed Chu');
+  assert.deepEqual(distinguishingTerms('Ed Chu Bf ai'), ['bf']);
+  assert.equal(personSourceOk('Ed Chu Bf ai', blueflame), true);
+  assert.equal(personSourceOk('Ed Chu Bf ai', oncologist), false);
+  assert.equal(personSubject('Ed Chu, Montefiore'), 'Ed Chu');
+  assert.equal(personSubject('who is Ed chu, montefiore'), 'Ed Chu');
+  assert.equal(personSourceOk('Ed Chu, Montefiore', oncologist), true);
+  assert.equal(personSourceOk('Ed Chu, Montefiore', blueflame), false);
+  assert.equal(personSubject('Barack Hussein Obama'), 'Barack Hussein Obama');
+  assert.equal(personSubject('John Smith Jr'), 'John Smith Jr');
+});
