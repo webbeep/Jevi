@@ -2,26 +2,45 @@ import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Line, LineChart, P
 import type { CardNode } from '../../shared/card';
 import { ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart';
 
+function axisText(n: number): string {
+  const abs = Math.abs(n);
+  if (abs >= 1_000_000) return `${(n / 1_000_000).toFixed(abs >= 10_000_000 ? 0 : 1)}M`;
+  if (abs >= 10_000) return `${(n / 1000).toFixed(abs >= 100_000 ? 0 : 1)}k`;
+  return n.toLocaleString('en-US', { maximumFractionDigits: abs >= 100 ? 0 : 2 });
+}
+
 const PALETTE = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)'];
 
 export default function ChartView({ node }: { node: Extract<CardNode, { type: 'chart' }> }) {
   const config = { value: { label: node.unit ?? node.title ?? 'Value', color: 'var(--chart-1)' } } satisfies ChartConfig;
   const axis = <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} fontSize={11} tickFormatter={(v: string) => (v.length > 6 ? v.slice(0, 6) : v)} />;
   const tooltip = <ChartTooltip cursor={false} content={<ChartTooltipContent hideLabel={false} />} />;
+  // Lines and areas show change, so the axis fits the data instead of starting at zero (which flattens prices).
+  const fitted = (
+    <YAxis
+      domain={['auto', 'auto']}
+      tickFormatter={axisText}
+      tickLine={false}
+      axisLine={false}
+      width={48}
+      fontSize={10}
+      tickCount={4}
+    />
+  );
 
   const chart = (() => {
     switch (node.kind) {
       case 'line':
         return (
-          <LineChart data={node.data} margin={{ left: 8, right: 8, top: 8 }}>
-            <CartesianGrid vertical={false} />{axis}{tooltip}
-            <Line dataKey="value" type="monotone" stroke="var(--color-value)" strokeWidth={2} dot={{ r: 3 }} />
+          <LineChart data={node.data} margin={{ left: 0, right: 8, top: 8 }}>
+            <CartesianGrid vertical={false} />{axis}{fitted}{tooltip}
+            <Line dataKey="value" type="monotone" stroke="var(--color-value)" strokeWidth={2} dot={node.data.length <= 12 ? { r: 3 } : false} isAnimationActive={false} />
           </LineChart>
         );
       case 'area':
         return (
-          <AreaChart data={node.data} margin={{ left: 8, right: 8, top: 8 }}>
-            <CartesianGrid vertical={false} />{axis}{tooltip}
+          <AreaChart data={node.data} margin={{ left: 0, right: 8, top: 8 }}>
+            <CartesianGrid vertical={false} />{axis}{fitted}{tooltip}
             <Area dataKey="value" type="monotone" stroke="var(--color-value)" fill="var(--color-value)" fillOpacity={0.15} strokeWidth={2} />
           </AreaChart>
         );

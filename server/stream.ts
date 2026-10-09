@@ -48,7 +48,7 @@ import { type LateExtras, normalizeUrl, searchWithLate } from './search';
 import { scholarlyResults, withScholarly } from './scholarly';
 import { videoResults, withVideos } from './videoSearch';
 import { guessFreshness, preferFresh, staleComplaint, stricter } from './freshness';
-import { isQuoteRow, liveQuote, quoteRow } from './liveQuote';
+import { isQuoteRow, liveQuote, quoteRow, tickerNode } from './liveQuote';
 import { splitPeople } from './peopleSplit';
 import { personSteer, threadPerson, topicOnly, withoutChosen } from './personSteer';
 import type { Send } from './sse';
@@ -110,6 +110,8 @@ interface DesignArgs {
   boost?: Promise<ImageResult[]>;
   /** T444: disambiguated person/org for the T443 image gate (never loosens it). */
   entityHint?: (entity: string) => EntityHint | undefined;
+  /** A price card's lead: the live price and chart, built from the quote feed. */
+  ticker?: CardNode;
 }
 
 /**
@@ -573,7 +575,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   }
   send('search', results);
   const boost = imageBoost(pattern, results, env, scope, boostQuery);
-  await design(send, env, { query, pattern, depth: plan.depth, readPages: plan.readPages || deep || fromSeeds, search: results, context: designContext, intent: u?.intent, deep, boost, entityHint }, started, scope, late);
+  await design(send, env, { query, pattern, depth: plan.depth, readPages: plan.readPages || deep || fromSeeds, search: results, context: designContext, intent: u?.intent, deep, boost, entityHint, ticker: quote ? tickerNode(quote) : undefined }, started, scope, late);
 }
 
 /**

@@ -106,6 +106,8 @@ export interface DesignRequest {
   rowImages?: RowImagePlan;
   /** Which sources answer the goal as of today, judged before designing. */
   brief?: SourceBrief;
+  /** Server-built lead (live price and chart) the card opens with; the model designs what follows. */
+  ticker?: CardNode;
 }
 
 export interface DesignEvents {
@@ -208,7 +210,10 @@ function liveQuoteRule(req: DesignRequest): string {
   return [
     `- LIVE MARKET DATA: source [1] (${row!.title}) is a quote fetched seconds ago. When the ask is about this price, its live price is THE current price: lead with it in a hero, with the day change as the delta, and cite [1].`,
     '- Every other price in SOURCES is historical. Show one only next to its own date and never call it current, latest, today\'s or an all-time high unless that source says so for that date. Leave out prices that are years old unless the ask is about history.',
-    '- The daily closes in [1] make a good line chart; the day and 52-week ranges fit tiles. Use news sources for why it is moving, not for the price.',
+    req.ticker
+      ? '- The card ALREADY OPENS with a live price chart showing the current price, the change and an interactive chart with ranges. Do not add a price hero, a price stat or any price chart. Start with the day range and 52-week range as two tiles, then why it is moving today from dated news sources [n], then anything else the ask needs.'
+      : '- The daily closes in [1] make a good line chart; the day and 52-week ranges fit tiles.',
+    '- Use news sources for why it is moving, not for the price.',
   ].join('\n');
 }
 
@@ -377,6 +382,10 @@ export async function designStream(req: DesignRequest, env: Env, on: DesignEvent
   let headSent = false;
   let index = 0;
   let contentNodes = 0;
+  if (req.ticker) {
+    on.node(req.ticker, index++);
+    contentNodes++;
+  }
   let removed = 0;
   let via: string | undefined;
   let lines = 0;

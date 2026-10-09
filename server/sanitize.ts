@@ -248,6 +248,8 @@ function sanitizeNode(raw: unknown, imageCount: number, depth: number, ctx?: { s
       return refs.length ? { type, refs } : undefined;
     }
     case 'slot':
+    // Only the server builds tickers, from a quote feed.
+    case 'ticker':
       return undefined;
     default: {
       // Model output may contain types outside the grammar; they are dropped at runtime.

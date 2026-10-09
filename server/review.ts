@@ -63,7 +63,9 @@ function cardText(head: Omit<AnswerCard, 'body'> | undefined, nodes: Map<number,
   let used = 0;
   for (const [index, node] of [...nodes].sort((a, b) => a[0] - b[0])) {
     if (node.type === 'actions' || node.type === 'citations' || node.type === 'gallery' || node.type === 'image' || node.type === 'video') continue;
-    const json = JSON.stringify(node).slice(0, NODE_CHARS);
+    const json = node.type === 'ticker'
+      ? JSON.stringify({ type: 'ticker', note: 'live price chart from the quote feed (correct by construction)', name: node.name, price: node.series.price, at: node.series.at })
+      : JSON.stringify(node).slice(0, NODE_CHARS);
     if (used + json.length > CARD_CHARS) break;
     used += json.length;
     lines.push(`Node ${index}: ${json}`);

@@ -5,6 +5,7 @@
  */
 
 import type { BillingBasis, Price } from './pricing';
+import type { TickerNodeData } from './ticker';
 import type { ImageLicense } from './types';
 
 /** search = new web search, ask = answer as a new card, refine = a new card that adjusts this one. */
@@ -41,6 +42,8 @@ export type CardNode =
   /** A video from the sources, played in place when the site allows embedding. */
   | { type: 'video'; source: number; caption?: string }
   | { type: 'chart'; kind: 'bar' | 'hbar' | 'line' | 'area' | 'pie'; title?: string; unit?: string; data: { label: string; value: number }[] }
+  /** A live market price and its chart, built by the server from a quote feed — never written by the model. */
+  | ({ type: 'ticker' } & TickerNodeData)
   | { type: 'progress'; label: string; value: number; caption?: string }
   | { type: 'rating'; value: number; max?: number; label?: string }
   | { type: 'table'; columns: string[]; rows: string[][]; highlight?: number }

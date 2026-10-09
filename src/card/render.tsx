@@ -12,6 +12,7 @@ import {
 } from './primitives';
 
 const ChartView = lazy(() => import('./ChartView'));
+const TickerView = lazy(() => import('./TickerView'));
 
 const GAP: Record<Gap, string> = { sm: 'gap-1.5 sm:gap-2', md: 'gap-2 sm:gap-3', lg: 'gap-3 sm:gap-5' };
 const COLS = { 2: 'grid-cols-2', 3: 'grid-cols-2 sm:grid-cols-3 max-sm:[&>*:last-child:nth-child(odd)]:col-span-2', 4: 'grid-cols-2 sm:grid-cols-4' } as const;
@@ -139,6 +140,7 @@ export function NodeView({ node }: { node: CardNode }): ReactNode {
     case 'keyvalue': return <KeyValue node={node} />;
     case 'list': return <List node={node} />;
     case 'chart': return <Suspense fallback={<SlotView node={{ type: 'slot', hint: 'chart', shape: 'chart' }} />}><ChartView node={node} /></Suspense>;
+    case 'ticker': return <Suspense fallback={<SlotView node={{ type: 'slot', hint: 'chart', shape: 'chart' }} />}><TickerView node={node} /></Suspense>;
     case 'progress': return <ProgressView node={node} />;
     case 'rating': return <Rating node={node} />;
     case 'table': return <TableView node={node} />;

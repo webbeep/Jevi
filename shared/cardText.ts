@@ -1,4 +1,5 @@
 import type { AnswerCard, CardNode } from './card';
+import { priceText } from './ticker';
 
 /** Plain text of a card for copying: title, subtitle, then every block; no markdown, no [n] markers, no URLs. */
 export function cardPlainText(card: AnswerCard, results: { title: string }[] = []): string {
@@ -86,6 +87,9 @@ export function cardPlainText(card: AnswerCard, results: { title: string }[] = [
         break;
       case 'accordion':
         blocks.push({ text: n.items.map((i) => `${i.title}: ${i.text}`).join('\n') });
+        break;
+      case 'ticker':
+        blocks.push({ text: `${n.name} (${n.symbol}): ${priceText(n.series.price)} ${n.kind === 'fx' ? '' : n.currency}`.trim() });
         break;
       case 'reveal':
         blocks.push({ text: n.items.map((i) => `${i.front}: ${i.back}`).join('\n') });

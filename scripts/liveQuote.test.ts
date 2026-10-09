@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { quoteAsk } from '../shared/quoteAsk.ts';
 import { cacheTier } from '../shared/cacheTtl.ts';
-import { formatPrice, isQuoteRow, quoteRow, type LiveQuote } from '../server/liveQuote.ts';
+import { formatPrice, isQuoteRow, quoteRow, tickerNode, type LiveQuote } from '../server/liveQuote.ts';
 
 const symbolOf = (q: string) => {
   const ask = quoteAsk(q);
@@ -96,5 +96,20 @@ describe('quoteRow', () => {
   test('small prices keep their digits', () => {
     assert.equal(formatPrice(0.1234567), '0.1235');
     assert.equal(formatPrice(0.00001234), '0.00001234');
+  });
+});
+
+describe('tickerNode', () => {
+  const base: LiveQuote = { symbol: 'TSLA', name: 'Tesla, Inc.', kind: 'stock', currency: 'USD', price: 382.7, closes: [], at: new Date('2026-10-09T20:00:00Z'), source: 'yahoo' };
+
+  test('no intraday series, no chart', () => {
+    assert.equal(tickerNode(base), undefined);
+  });
+
+  test('the chart ends on the live price', () => {
+    const node = tickerNode({ ...base, series: { range: '1D', points: [[1, 375], [2, 380]], base: 375, price: 380, at: '2026-10-09T19:55:00Z' } });
+    assert.equal(node?.type, 'ticker');
+    assert.equal(node?.type === 'ticker' && node.series.price, 382.7);
+    assert.equal(node?.type === 'ticker' && node.feed, 'Yahoo Finance');
   });
 });
