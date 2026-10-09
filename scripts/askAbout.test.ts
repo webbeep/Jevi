@@ -23,6 +23,11 @@ const cases: [Box, string][] = [
   [{ kind: 'tile', label: 'Founded by', value: 'Raj Bhatt and Ann Lee', entity: 'BlueFlame AI' }, "Who are Raj Bhatt and Ann Lee, BlueFlame AI's founders?"],
   [{ kind: 'tile', label: 'Head coach', value: 'Steve Kerr' }, 'Who is Steve Kerr, the head coach?'],
   [{ kind: 'tile', label: 'CEO', value: 'Raj Bhatt', entity: 'Warriors' }, "Who is Raj Bhatt, Warriors' CEO?"],
+  // a company in a role a company can fill
+  [{ kind: 'fact', label: 'Owner', value: 'Datasite', entity: 'BlueFlame AI' }, "What is Datasite, BlueFlame AI's owner?"],
+  [{ kind: 'fact', label: 'Owned by', value: 'Datasite', entity: 'BlueFlame AI' }, "What is Datasite, BlueFlame AI's owner?"],
+  [{ kind: 'fact', label: 'Owner', value: 'Joe Lacob', entity: 'Warriors' }, "Who is Joe Lacob, Warriors' owner?"],
+  [{ kind: 'tile', label: 'Founded by', value: 'Y Combinator Labs', entity: 'Acme' }, "What is Y Combinator Labs, Acme's founder?"],
   // profile facts and kinds
   [{ kind: 'fact', label: 'Role', value: 'Senior Software Engineer', entity: 'Ray Lee' }, "What does Ray Lee's role as Senior Software Engineer involve?"],
   [{ kind: 'fact', label: 'Location', value: 'New York, NY', entity: 'Ray Lee' }, "What is Ray Lee's connection to New York, NY?"],

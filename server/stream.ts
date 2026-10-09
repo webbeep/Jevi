@@ -344,9 +344,9 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
         if (person) console.log(JSON.stringify({ zo: 'entity', nameFallback: true, kept: picked.length, gatedOut }));
       }
     }
-    if (!results.results.length && seedRows?.length && !isPersonAsk(query)) {
+    if (!results.results.length && seedRows?.length) {
       // A tapped chip names something the card on screen already cited: answer from those rows, not a dead end.
-      const term = (entityQuery(query) || query).toLowerCase();
+      const term = ((isPersonAsk(query) ? personSubject(query) : '') || entityQuery(query) || query).toLowerCase();
       const cited = seedRows.filter((row) => `${row.title} ${row.snippet}`.toLowerCase().includes(term));
       if (cited.length) {
         results = { ...results, results: cited, knowledge: undefined };

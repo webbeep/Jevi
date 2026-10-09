@@ -189,6 +189,8 @@ describe('T444 entity disambiguation', () => {
     assert.equal(isPersonAsk('what is photosynthesis'), false);
     assert.equal(isPersonAsk('best tablets', 'profile'), false);
     assert.equal(isPersonAsk('who is the fastest animal'), false);
+    assert.equal(isPersonAsk('Who is Datasite, owner of Blueflame AI'), false);
+    assert.equal(isPersonAsk('Who is Drake?'), true);
   });
 
   test('entityHintFor names the person for person labels and stays silent otherwise', () => {

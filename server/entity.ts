@@ -316,7 +316,13 @@ export function isPersonAsk(query: string, pattern?: string): boolean {
   if (COMPARE_ASK.test(query) && !WHO_IS.test(query.trim())) return false;
   const subject = personSubject(query);
   if (pattern === 'profile') return subject !== '';
-  if (WHO_IS.test(query.trim()) || ABOUT.test(query.trim())) return subject !== '';
+  if (WHO_IS.test(query.trim()) || ABOUT.test(query.trim())) {
+    // "Who is Datasite, owner of BlueFlame AI": one name word plus more words is a company asked about
+    // with context; the person gate needs a full name, so it would drop every source.
+    const rest = query.trim().replace(/\?+\s*$/, '').replace(WHO_IS, '').replace(ABOUT, '');
+    if (wordCount(subject) < 2 && wordCount(rest) > wordCount(subject)) return false;
+    return subject !== '';
+  }
   // SPD-C1 (t457): a capitalised phrase inside a longer sentence is the topic, not a person lookup
   // ("Fact-check: Gmail lets you attach files up to 50 MB", "Does AirPods Pro 3 have a heart rate sensor?").
   // Treating it as a person dropped every source without that exact name (live H2H P11/P12/P13: 0–1 sources).

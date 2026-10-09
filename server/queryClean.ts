@@ -10,6 +10,11 @@ function collapse(s: string): string {
   return s.replace(/\s+/g, ' ').trim();
 }
 
+/** A phrase of 2+ words said twice in a row once: "Blueflame AI Blueflame AI at Datasite" -> "Blueflame AI at Datasite". */
+function dedupePhrases(s: string): string {
+  return s.replace(/\b([\p{L}\p{N}][\p{L}\p{N}'’.-]*(?:\s+[\p{L}\p{N}][\p{L}\p{N}'’.-]*){1,4})\s+\1(?![\p{L}\p{N}])/giu, '$1');
+}
+
 function core(token: string): string {
   return token.replace(TRAIL_PUNCT, '');
 }
@@ -69,7 +74,7 @@ function tidy(q: string): string {
  * card title stuck on the end. Never returns an empty string.
  */
 export function sanitizeSearchQuery(q: string, sourceTitle?: string): string {
-  const input = collapse(q);
+  const input = dedupePhrases(collapse(q));
   const domainsOnly = tidy(withoutDomains(input));
   let out = domainsOnly;
   if (sourceTitle?.trim()) out = tidy(stripSourceTail(out, sourceTitle));
@@ -100,7 +105,8 @@ export function relaxQuery(q: string): string {
 
 /** Leading run of Capitalized words, at most four. Empty when the query does not start with one. */
 export function entityQuery(q: string): string {
-  const words = withoutDomains(q.replace(/["'“”‘’()[\]{}]/g, ' '))
+  const asked = q.trim().replace(/^(?:who|what|where|when|which|how)\s+(?:is|are|was|were|does|do|did)\s+(?:the\s+)?/i, '');
+  const words = withoutDomains(asked.replace(/["'“”‘’()[\]{}]/g, ' '))
     .split(/\s+/)
     .filter((token) => !isSiteFilter(token))
     .map((word) => word.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, ''))

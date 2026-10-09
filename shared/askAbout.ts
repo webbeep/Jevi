@@ -145,6 +145,17 @@ function labelOnly(box: Box, label: string, E?: string): string {
   return `What is ${subject}?`;
 }
 
+/** Roles a company fills as often as a person ("Owner: Datasite", "Parent: Alphabet"). */
+const ORG_ROLE = /\b(owners?|owned by|partners?|parent|hosts?|leaders?|creators?|created by|backers?|investors?)\b/i;
+const ORG_WORD = /\b(inc|llc|ltd|corp|co|plc|gmbh|ai|group|capital|ventures|partners|holdings|labs?|technologies|systems|media|studios?|bank|fund|university|company)\.?$/i;
+
+/** The value is one or more people's names, not a company: "Who is …" fits. */
+function namesPeople(label: string, V: string): boolean {
+  const parts = V.split(/\s*(?:,|&|\band\b)\s*/).filter(Boolean);
+  if (parts.some((p) => ORG_WORD.test(p))) return false;
+  return !ORG_ROLE.test(label) || parts.every(nameLike);
+}
+
 function labelValue(label: string, V: string, unit: string, E?: string): string {
   const by = BY.find(([re]) => re.test(label));
   const L = by ? by[1] : lowerLabel(label);
@@ -153,7 +164,7 @@ function labelValue(label: string, V: string, unit: string, E?: string): string 
     if (isNumeric(V)) return `What is behind ${possessive(label)} ${V}${unit}?`;
     return `What about ${label} (${V})?`;
   }
-  if ((PERSON.test(label) || by) && !isNumeric(V)) {
+  if ((PERSON.test(label) || by) && !isNumeric(V) && namesPeople(label, V)) {
     const many = /,|\band\b|&/.test(V);
     const role = many && !/s$/.test(L) ? `${L}s` : L;
     return E ? `${many ? 'Who are' : 'Who is'} ${V}, ${possessive(E)} ${role}?` : `${many ? 'Who are' : 'Who is'} ${V}, the ${role}?`;

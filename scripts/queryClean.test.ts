@@ -12,6 +12,8 @@ test('sanitize drops domains and a trailing card title, and keeps site filters',
   assert.equal(sanitizeSearchQuery('site:espn.com Nique Clifford www.espn.com'), 'site:espn.com Nique Clifford');
   assert.equal(sanitizeSearchQuery('Nique Clifford.'), 'Nique Clifford');
   assert.equal(sanitizeSearchQuery('sactownsports.com'), 'sactownsports.com');
+  assert.equal(sanitizeSearchQuery('Who is Datasite, owner of Blueflame AI Blueflame AI at Datasite'), 'Who is Datasite, owner of Blueflame AI at Datasite');
+  assert.equal(sanitizeSearchQuery('Walla Walla wineries'), 'Walla Walla wineries');
 });
 
 test('relax keeps the entity and entityQuery takes the leading capitalized run', () => {
@@ -19,6 +21,7 @@ test('relax keeps the entity and entityQuery takes the leading capitalized run',
   assert.equal(relaxQuery('site:espn.com "Nique Clifford" (standout)'), 'Nique Clifford');
   assert.equal(relaxQuery('Alpha Beta Gamma Delta Epsilon Zeta Eta Theta'), 'Alpha Beta Gamma Delta Epsilon Zeta');
   assert.equal(entityQuery(NIQU), 'Nique Clifford Sacramento Kings');
+  assert.equal(entityQuery('Who is Datasite, owner of Blueflame AI'), 'Datasite');
   assert.equal(entityQuery('Alpha Beta Gamma Delta Epsilon'), 'Alpha Beta Gamma Delta');
   assert.equal(entityQuery('preseason standout'), '');
 });
