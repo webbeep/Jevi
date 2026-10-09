@@ -329,6 +329,16 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
         if (person) console.log(JSON.stringify({ zo: 'entity', nameFallback: true, kept: picked.length, gatedOut }));
       }
     }
+    if (!results.results.length && seedRows?.length && !isPersonAsk(query)) {
+      // A tapped chip names something the card on screen already cited: answer from those rows, not a dead end.
+      const term = (entityQuery(query) || query).toLowerCase();
+      const cited = seedRows.filter((row) => `${row.title} ${row.snippet}`.toLowerCase().includes(term));
+      if (cited.length) {
+        results = { ...results, results: cited, knowledge: undefined };
+        fromSeeds = true;
+        recovered = 'seeds';
+      }
+    }
     if (!results.results.length && hasLlm(env)) recovered = 'knowledge';
     console.log(JSON.stringify({ zo: 'empty-recovery', reason, providers: engineErrors(firstEngines), relaxed: tryRelaxed, entity: triedEntity, recovered }));
     if (!results.results.length) {
@@ -527,7 +537,7 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
       send('plan', plan);
       const query = withRef(await rewritten, req.ref);
       send('rewrite', { query });
-      await searchAndDesign(send, env, query, 'any', context, started, scope, true);
+      await searchAndDesign(send, env, query, 'any', context, started, scope, true, req.ref ? req.search?.results : undefined);
       return;
     }
     case 'refine': {

@@ -288,8 +288,14 @@ export function isPersonAsk(query: string, pattern?: string): boolean {
   // ("Fact-check: Gmail lets you attach files up to 50 MB", "Does AirPods Pro 3 have a heart rate sensor?").
   // Treating it as a person dropped every source without that exact name (live H2H P11/P12/P13: 0–1 sources).
   if (subject && wordCount(query) - wordCount(subject) > 3) return false;
+  // One capitalised word ("TypeSafe $870M funding round", "Gemini 4 Argon launch") is a company or
+  // product far more often than a person; and money or launch words make it a business topic, so the
+  // person gate would drop every news page about it (live tapped ask-about chip → "couldn't find more").
+  if (wordCount(subject) < 2 || BUSINESS_TOPIC.test(query)) return false;
   return subject !== '' && nameLike(subject);
 }
+
+const BUSINESS_TOPIC = /[$€£]\s?\d|\b\d+(?:\.\d+)?\s?(?:[mbk]|million|billion)\b|\b(funding|raises?|raised|series [a-f]|seed round|valuation|ipo|acquisition|acquires?|acquired|merger|earnings|revenue|stock|shares|launch(?:es|ed)?|release[sd]?|model|startup|company|layoffs?)\b/i;
 
 /** Single-word roles (lowercase) plus a few two-word ones. */
 const ROLE2 = ['software engineer', 'software developer', 'concert pianist', 'general dentist', 'prime minister', 'chief executive', 'medical doctor'];

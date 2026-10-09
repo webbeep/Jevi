@@ -53,6 +53,15 @@ test('a sloppy-case person ask keeps the whole name', () => {
   assert.equal(personSubject('who is Barack Obama'), 'Barack Obama');
 });
 
+test('a company, product or funding ask is not a person ask', () => {
+  for (const q of ['TypeSafe $870M funding round', 'Anthropic $13B funding round', 'Gemini 4 Argon launch', 'OpenAI Sora release', 'Mistral AI raises Series C']) {
+    assert.equal(isPersonAsk(q), false, q);
+  }
+  assert.equal(isPersonAsk('who is Messi'), true);
+  assert.equal(isPersonAsk('Jaylen Brown injuries'), true);
+  assert.equal(isPersonAsk('Taylor Swift latest album'), true);
+});
+
 test('a Which-one? pick keeps the topic of the ask that offered it', () => {
   const context = 'Topic: jaylen brown injuries\nCard they are acting on (Q: jaylen brown injuries): Which one?';
   const asks = [...askedQuestions(context), 'jaylen brown injuries'];
