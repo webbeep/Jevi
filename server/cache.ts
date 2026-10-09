@@ -91,11 +91,12 @@ export function unpackSearch(payload: string): SearchResponse | undefined {
 
 export type CacheRead = { kind: 'off' } | { kind: 'miss' } | { kind: 'hit'; response: SearchResponse };
 
-export async function readSearchCache(db: CacheDb | undefined, key: string, now = Date.now()): Promise<CacheRead> {
+/** `maxAgeMs`: how old a row may be for this query (shared/cacheTtl.ts); at most a day. */
+export async function readSearchCache(db: CacheDb | undefined, key: string, now = Date.now(), maxAgeMs = TTL_MS): Promise<CacheRead> {
   if (!db) return { kind: 'off' };
   try {
     const row = await db.prepare('SELECT payload, created_at FROM search_cache WHERE cache_key = ?').bind(key).first<{ payload: string; created_at: number }>();
-    if (!row || now - row.created_at > TTL_MS) return { kind: 'miss' };
+    if (!row || now - row.created_at > Math.min(maxAgeMs, TTL_MS)) return { kind: 'miss' };
     const response = unpackSearch(row.payload);
     return response ? { kind: 'hit', response } : { kind: 'miss' };
   } catch {

@@ -1,4 +1,5 @@
-import { ANSWER_TTL_S, answerCacheUrl } from '../shared/answerKey';
+import { answerCacheUrl } from '../shared/answerKey';
+import { cacheTier, TIER_TTL_S } from '../shared/cacheTtl';
 import { type Send, sseResponse } from './sse';
 import type { StreamRequest } from './stream';
 import { cacheBypass, testForce, wantsRefresh } from './token';
@@ -40,10 +41,12 @@ export async function serveStream(o: {
   const key = new Request(answerCacheUrl({ query: o.req.query, freshness: o.req.freshness, context: o.req.context }));
   const bypass = cacheBypass(o.request, o.env);
   const refresh = wantsRefresh(o.request);
+  const tier = cacheTier(o.req.query, o.req.freshness);
+  const ttl = TIER_TTL_S[tier];
   if (!bypass && !refresh) {
     try {
       const hit = await cache.match(key);
-      if (hit) return new Response(hit.body, { headers: HIT_HEADERS });
+      if (hit) return new Response(hit.body, { headers: { ...HIT_HEADERS, 'X-ZO-TTL': `${tier}:${ttl}` } });
     } catch {
       /* treat a broken cache as a miss */
     }
@@ -75,14 +78,14 @@ export async function serveStream(o: {
         .put(
           key,
           new Response(frames.join(''), {
-            headers: { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': `public, max-age=${ANSWER_TTL_S}` },
+            headers: { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': `public, max-age=${ttl}` },
           }),
         )
         .catch(() => undefined);
       if (o.waitUntil) o.waitUntil(put);
     },
     {
-      headers: { 'X-ZO-Cache': bypass ? 'BYPASS' : refresh ? 'REFRESH' : 'MISS' },
+      headers: { 'X-ZO-Cache': bypass ? 'BYPASS' : refresh ? 'REFRESH' : 'MISS', 'X-ZO-TTL': `${tier}:${ttl}` },
       onFrame: (event, frame) => {
         frames.push(frame);
         if (event === 'node') sawNode = true;

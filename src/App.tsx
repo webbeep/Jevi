@@ -23,6 +23,7 @@ import { FaviconStack, SourcesRail, SourcesSheet } from './Sources';
 import { type SessionActions, type Turn, liveBody, scrollToTurn, useSession } from './useSession';
 import { readChoices } from '../shared/choices';
 import { loadSnapshot, normalizeAnswerQuery, purgeDegradedSnapshots, saveSnapshot } from '../shared/answerKey';
+import { cacheTtlS } from '../shared/cacheTtl';
 import { turnDegraded, turnsDegraded } from '../shared/degraded';
 import { MANUAL_RETRY_AFTER, OFFLINE_MESSAGE, clearPending, loadPending, savePending } from '../shared/offline';
 import { RECENT_KEY, clearHistory, readHistory, recordAsk } from '../shared/personal';
@@ -64,14 +65,15 @@ function regenOnce(q: string): boolean {
 }
 
 function readAnswerCache(query: string): Turn[] | undefined {
+  const maxAge = cacheTtlS(query);
   try {
-    const hit = loadSnapshot<Turn[]>(sessionStorage, query);
+    const hit = loadSnapshot<Turn[]>(sessionStorage, query, Date.now(), maxAge);
     if (hit) return hit;
   } catch {
     /* private mode */
   }
   try {
-    return loadSnapshot<Turn[]>(localStorage, query);
+    return loadSnapshot<Turn[]>(localStorage, query, Date.now(), maxAge);
   } catch {
     return undefined;
   }

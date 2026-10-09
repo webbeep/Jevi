@@ -85,12 +85,12 @@ test('normalizeAnswerQuery collapses case, space, quotes and trailing punctuatio
 
 test('answerCacheUrl includes freshness and a context hash only when context is set', () => {
   const plain = answerCacheUrl({ query: '  Kindle  vs Kobo? ', freshness: 'week' });
-  assert.equal(plain, 'https://answer-cache.zo.internal/v1-e26?q=kindle%20vs%20kobo&f=week');
+  assert.equal(plain, 'https://answer-cache.zo.internal/v1-e27?q=kindle%20vs%20kobo&f=week');
   assert.equal(plain.includes('&c='), false);
   const empty = answerCacheUrl({ query: 'Kindle vs Kobo', freshness: 'any', context: '' });
   assert.equal(empty.includes('&c='), false);
   const withContext = answerCacheUrl({ query: 'Kindle vs Kobo', freshness: 'day', context: 'topic' });
-  assert.equal(withContext, `https://answer-cache.zo.internal/v1-e26?q=kindle%20vs%20kobo&f=day&c=${fnv1a('topic')}`);
+  assert.equal(withContext, `https://answer-cache.zo.internal/v1-e27?q=kindle%20vs%20kobo&f=day&c=${fnv1a('topic')}`);
   assert.equal(fnv1a('topic'), fnv1a('topic'));
   assert.notEqual(fnv1a('topic'), fnv1a('other'));
   assert.match(fnv1a('topic'), /^[0-9a-f]{8}$/);
@@ -114,6 +114,11 @@ test('snapshots round-trip, expire, and survive a quota error', () => {
   assert.deepEqual(loadSnapshot(store, 'kindle vs kobo', 1_000), turns);
   assert.equal(loadSnapshot(store, 'kindle vs kobo', 1_000 + ANSWER_TTL_S * 1000 + 1), undefined);
   assert.equal(store.getItem(snapshotKey('kindle vs kobo')), null);
+
+  saveSnapshot(store, 'nba scores tonight', turns, 1_000);
+  assert.deepEqual(loadSnapshot(store, 'nba scores tonight', 1_000 + 60_000, 300), turns);
+  assert.equal(loadSnapshot(store, 'nba scores tonight', 1_000 + 301_000, 300), undefined);
+  assert.deepEqual(loadSnapshot(store, 'nba scores tonight', 1_000 + 301_000), turns, 'an offline restore keeps the full day');
 
   store.setItem(snapshotKey('broken'), '{');
   assert.equal(loadSnapshot(store, 'broken'), undefined);
@@ -171,6 +176,28 @@ test('serveStream stores a miss and replays a normalized hit without calling run
   assert.equal(second.headers.get('X-ZO-Cache'), 'HIT');
   assert.equal(calls, 1);
   assert.equal(await second.text(), body);
+});
+
+test('the saved answer lives as long as its query stays current', async () => {
+  const seen: string[] = [];
+  const cache = {
+    async match() {
+      return undefined;
+    },
+    async put(_req: Request, res: Response) {
+      seen.push(res.headers.get('cache-control') ?? '');
+    },
+  };
+  const pending: Promise<unknown>[] = [];
+  const run = async (send: Send) => {
+    send('node', { index: 0, node: { type: 'text', text: 'hi' } });
+    send('done', { engine: 'composed', removed: 0, pagesRead: 1, ms: 4 });
+  };
+  for (const q of ['Kindle vs Kobo', 'AI news today', 'Lakers live score']) {
+    const res = await serveStream({ request: new Request('https://zo.page/api/stream', { method: 'POST' }), env: {}, req: search(q), run, waitUntil: (p) => pending.push(p), cache });
+    await finish(res, pending);
+  }
+  assert.deepEqual(seen, ['public, max-age=86400', 'public, max-age=300', 'public, max-age=30']);
 });
 
 test('a pressed Retry skips the saved answer and replaces it with the fresh one', async () => {

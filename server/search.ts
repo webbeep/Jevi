@@ -9,6 +9,7 @@ import type {
 import { knowledgeMatches } from '../shared/relevance';
 import type { AskScope } from './budget';
 import { newLedger } from './budget';
+import { cacheTtlS } from '../shared/cacheTtl';
 import { cacheDb, packSearch, readSearchCache, searchCacheKey, writeSearchCache } from './cache';
 import { cascadeWeb } from './cascade';
 import { searchDegraded } from './degraded';
@@ -251,7 +252,7 @@ export async function searchWithLate(q: Query, env: Env, scope?: AskScope): Prom
   } else if (ask.refresh) {
     ask.ledger.cache = db ? 'miss' : 'off';
   } else {
-    const cached = await readSearchCache(db, key);
+    const cached = await readSearchCache(db, key, Date.now(), cacheTtlS(q.q, q.freshness) * 1000);
     // T424: a degraded cached search (0 sources / Wikipedia-only / provider errors) is a miss.
     if (cached.kind === 'hit' && !searchDegraded(cached.response)) {
       ask.ledger.cache = 'hit';
