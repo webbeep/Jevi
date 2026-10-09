@@ -28,11 +28,13 @@ import {
 import { fetchWikiDisambiguation, fetchWikiLeadImage } from './wikiSearch';
 import { type EntityHint, mentionsAny } from './imageGate';
 import type { RowImagePlan } from './pictures';
-import type { AnswerCard, FollowupContext, FollowupIntent, LayoutPlan } from '../shared/card';
+import type { AnswerCard, CardNode, FollowupContext, FollowupIntent, LayoutPlan } from '../shared/card';
 import { type AskRef, refContext, withRef } from '../shared/askAbout';
 import type { EngineStatus, Freshness, ImageResult, SearchResponse, SearchResult } from '../shared/types';
 import { rewriteQuery } from './ai';
-import { designParallel, designStream } from './design';
+import { type DesignRequest, designParallel, designStream, gateNode } from './design';
+import { briefSources } from './brief';
+import { reviewCard } from './review';
 import { permitted } from './images';
 import { hasLlm } from './llm';
 import { collectPages, ogImageOf } from './pages';
@@ -193,7 +195,10 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   // Conversation turns reason from what is already known; everything else reads pages first.
   const chat = req.followup?.mode === 'chat';
   const budget = chat ? { count: 3, need: 0, budgetMs: 0 } : req.deep ? DEEP_PAGES : pageBudget(req.readPages);
-  const pages = await collectPages(req.search.results, env, budget, late, scope);
+  // The source check runs while pages are read, so it costs little or no extra time.
+  const briefing = newSearch && !chat ? briefSources({ query: req.query, intent: req.intent, context: req.context, results: req.search.results, isLive: isQuoteRow }, env) : undefined;
+  const [pages, brief] = await Promise.all([collectPages(req.search.results, env, budget, late, scope), briefing]);
+  if (brief) console.log(JSON.stringify({ zo: 'brief', use: brief.use.length, stale: brief.stale, offTopic: brief.offTopic, conflicts: brief.conflicts.length, missing: !!brief.missing }));
   const fresh = pages.filter((p) => !req.search.results[p.n - 1]?.content);
   if (fresh.length) send('pages', fresh.map(({ n, url, text }) => ({ n, url, text })));
 
@@ -216,15 +221,56 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   // Follow-ups (small answers and redesigns) stay coherent in one call; full search cards are designed region by region in parallel.
   const designer = req.followup ? designStream : designParallel;
   const rowImages = chat ? undefined : rowImagePlan(req, env, scope);
-  const summary = await designer({ ...req, pages, context: req.context?.slice(0, 4000), rowImages }, env, {
+  const designReq: DesignRequest = { ...req, pages, brief, context: req.context?.slice(0, 4000), rowImages };
+  const shown = new Map<number, CardNode>();
+  let head: Omit<AnswerCard, 'body'> | undefined;
+  const summary = await designer(designReq, env, {
     thinking: () => send('thinking', {}),
     layout: (regions) => send('layout', regions),
-    head: (head) => send('head', head),
-    node: (node, index) => send('node', { index, node }),
+    head: (h) => {
+      head = h;
+      send('head', h);
+    },
+    node: (node, index) => {
+      shown.set(index, node);
+      send('node', { index, node });
+    },
     followups: (items) => send('followups', items),
     credit: (credit) => send('credit', credit),
   });
+  if (!chat && req.followup?.mode !== 'refine' && summary.engine === 'composed') {
+    await checkAnswer(send, env, designReq, shown, head, started);
+  }
   send('done', { ...summary, pagesRead: pages.length, ms: Date.now() - started });
+}
+
+/** The finished card, read once against the goal before it is saved: wrong nodes are corrected in place. */
+async function checkAnswer(send: Send, env: Env, req: DesignRequest, shown: Map<number, CardNode>, head: Omit<AnswerCard, 'body'> | undefined, started: number) {
+  const at = Date.now();
+  const review = await reviewCard({
+    query: req.followup?.question ?? req.query,
+    context: req.context,
+    brief: req.brief,
+    results: req.search.results,
+    isLive: isQuoteRow,
+    head,
+    nodes: shown,
+  }, env);
+  if (!review) return;
+  let fixed = 0;
+  for (const fix of review.fixes) {
+    const node = gateNode(fix.node, req);
+    if (!node) continue;
+    shown.set(fix.index, node);
+    send('node', { index: fix.index, node });
+    fixed++;
+  }
+  const warning = review.note ? gateNode({ type: 'callout', tone: 'warning', icon: 'triangle-alert', text: review.note }, req) : undefined;
+  const leadIndex = [...shown.keys()].sort((a, b) => a - b).find((i) => !['actions', 'citations'].includes(shown.get(i)!.type));
+  if (warning && leadIndex !== undefined) {
+    send('node', { index: leadIndex, node: { type: 'stack', direction: 'col', gap: 'sm', children: [warning, shown.get(leadIndex)!] } });
+  }
+  console.log(JSON.stringify({ zo: 'review', ok: review.ok, problems: review.problems, fixed, warned: !!warning, ms: Date.now() - at, total: Date.now() - started }));
 }
 
 /**

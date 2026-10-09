@@ -16,6 +16,7 @@ import { personSubject } from './entity';
 import { isVideoUrl, wantsVideo } from './videoSearch';
 import { guessFreshness, stricter } from './freshness';
 import { isQuoteRow } from './liveQuote';
+import { BRIEF_ROWS, rejectedSources, type SourceBrief } from './brief';
 
 const GRAMMAR = `Each node is a JSON object with a "type" field.
 LAYOUT
@@ -103,6 +104,8 @@ export interface DesignRequest {
   intent?: string;
   /** T442: fill pictures on tiles and media rows the designer left blank. */
   rowImages?: RowImagePlan;
+  /** Which sources answer the goal as of today, judged before designing. */
+  brief?: SourceBrief;
 }
 
 export interface DesignEvents {
@@ -209,6 +212,20 @@ function liveQuoteRule(req: DesignRequest): string {
   ].join('\n');
 }
 
+function briefRules(req: DesignRequest): string {
+  const b = req.brief;
+  if (!b) return '';
+  const refs = (ns: number[]) => ns.map((n) => `[${n}]`).join(' ');
+  return [
+    `- GOAL — a right answer gives: ${b.goal} Check every node against it; leave out anything that doesn't serve it.`,
+    b.use.length ? `- Answer from ${refs(b.use)} (checked: on-goal and current).` : '',
+    b.stale.length ? `- ${refs(b.stale)} are outdated for this ask: never present their facts or numbers as current; leave them out.` : '',
+    b.offTopic.length ? `- ${refs(b.offTopic)} are about something else (another person, product, place or period): never use them.` : '',
+    b.conflicts.length ? `- Sources disagree: ${b.conflicts.join(' ')} Trust the live or newest authoritative source and date the figure you show.` : '',
+    b.missing ? `- The sources don't answer: ${b.missing} Say so plainly in one short callout instead of filling the gap.` : '',
+  ].filter(Boolean).join('\n');
+}
+
 function timeRules(req: DesignRequest): string {
   const today = `- Today is ${new Date().toISOString().slice(0, 10)} (UTC).`;
   const asked = stricter(guessFreshness(req.query), guessFreshness(req.followup?.question ?? ''));
@@ -230,6 +247,7 @@ function taskBlock(req: DesignRequest): string {
     req.simple ? '- Write for a 10-year-old: plain words and a friendly analogy.' : '',
     timeRules(req),
     liveQuoteRule(req),
+    briefRules(req),
     followupRules(req.followup, req.search.query).trim().replace(/^/, '- '),
     req.search.results.length ? '' : '- No web sources were found for this; answer from general knowledge, say it may be out of date, and do not cite sources.',
     req.context ? `- Conversation so far (use it to resolve references like "it" or "the cheaper one"; don't repeat it):\n${req.context}` : '',
@@ -238,14 +256,16 @@ function taskBlock(req: DesignRequest): string {
     .join('\n');
 }
 
-function corpusOf(req: DesignRequest): string {
+/** Numbers the card may show: never from a source the brief found outdated or about something else. */
+export function corpusOf(req: DesignRequest): string {
+  const rejected = rejectedSources(req.brief, Math.min(req.search.results.length, BRIEF_ROWS));
   return [
     req.query,
     req.followup?.question ?? '',
     req.followup?.baseCard ? JSON.stringify(req.followup.baseCard) : '',
-    ...req.search.results.map((r) => `${r.title} ${r.snippet} ${r.date ?? ''}`),
+    ...req.search.results.filter((_, i) => !rejected.has(i + 1)).map((r) => `${r.title} ${r.snippet} ${r.date ?? ''}`),
     req.search.knowledge?.extract ?? '',
-    ...req.pages.map((p) => p.text),
+    ...req.pages.filter((p) => !rejected.has(p.n)).map((p) => p.text),
   ].join(' ');
 }
 
@@ -311,6 +331,13 @@ function parseLine(line: string, g: Grounding, imageCount: number, query: string
   const [clean] = sanitizeNodes([obj], imageCount, 0, { sources, query: seatQuery ?? query });
   const [grounded] = clean ? groundNodes([clean], g) : [];
   return grounded ? { kind: 'node', node: grounded } : { kind: 'dropped' };
+}
+
+/** A node written outside the design stream (the answer review) passes the same sanitize and grounding gates. */
+export function gateNode(raw: unknown, req: DesignRequest): CardNode | undefined {
+  const g = new Grounding(corpusOf(req), req.followup?.mode === 'chat');
+  const parsed = parseLine(JSON.stringify(raw), g, Math.min(req.search.images.length, 12), req.query, priceSources(req), req.followup?.question ?? req.query);
+  return parsed?.kind === 'node' ? emitReady(parsed.node, req.search.results.length === 0) : undefined;
 }
 
 const NODE_TYPES = new Set<string>(['stack', 'grid', 'section', 'tabs', 'scroller', 'divider', 'hero', 'heading', 'text', 'stat', 'tile', 'keyvalue', 'list', 'chart', 'progress', 'rating', 'table', 'timeline', 'steps', 'proscons', 'badges', 'quote', 'callout', 'draft', 'code', 'links', 'video', 'image', 'gallery', 'profile', 'actions', 'choices', 'slider', 'scaler', 'pricing', 'accordion', 'reveal', 'citations'] satisfies CardNode['type'][]);
