@@ -149,9 +149,12 @@ export default function App() {
   const [chat, setChat] = useState(0);
   const mainRef = useRef<HTMLDivElement>(null);
   const home = turns.length === 0;
+  const startSearchRef = useRef<(q: string) => void>(() => undefined);
+  // Tapping a suggestion (or Enter on a highlighted one) searches it right away.
   const fillFromTypeahead = useCallback((text: string) => {
     setInput(text);
-    inputRef.current?.focus();
+    inputRef.current?.blur();
+    startSearchRef.current(text);
   }, []);
   const typeahead = useTypeahead(home ? input : '', fillFromTypeahead, histRev);
   const historyCount = useMemo(() => {
@@ -200,6 +203,7 @@ export default function App() {
     history.pushState(null, '', `?${new URLSearchParams({ q: query })}`);
     session.search(query, { reset: true });
   };
+  startSearchRef.current = startSearch;
 
   const editStarter = (text: string) => {
     setInput(text);
