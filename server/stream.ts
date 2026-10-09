@@ -41,6 +41,7 @@ import { gateResults } from './relevanceGate';
 import { entityQuery, relaxQuery, tickerQueries } from './queryClean';
 import { type LateExtras, searchWithLate } from './search';
 import { scholarlyResults, withScholarly } from './scholarly';
+import { videoResults, withVideos } from './videoSearch';
 import type { Send } from './sse';
 import { extraQueries, understand } from './understand';
 import { cacheBypass, testForce, validTestToken } from './token';
@@ -230,6 +231,8 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   let u: Awaited<typeof understood>;
   // SPD-C4 (t457): paper/DOI asks also read OpenAlex, in parallel with the web search.
   const scholarly = scholarlyResults(query);
+  // Watch asks also read YouTube (keyless), in parallel: web results rarely carry a playable video.
+  const videos = videoResults(query);
   // Searches that need no model ("$rdw" → "RDW stock news today") lead the rewrites.
   const instant = tickerQueries(query);
   if (!rewritten) {
@@ -253,6 +256,8 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   let results = applyPickGate(query, applyRelevance(query, { ...found.response, query }, scope.ledger));
   const scholar = await scholarly;
   if (scholar.length) results = { ...results, results: withScholarly(scholar, results.results) };
+  const clips = await videos;
+  if (clips.length) results = { ...results, results: withVideos(clips, results.results) };
   let late: Promise<LateExtras> | undefined = found.late;
   // EN4 part 8: set when the answer is rebuilt from the rows behind a Which-one? pick, so the
   // seed pages get re-read instead of designed from the snippets alone.

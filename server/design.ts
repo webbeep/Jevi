@@ -13,6 +13,7 @@ import { clip, type Env } from './util';
 import { VerdictSession } from './verdict';
 import { accepts, targetFor } from './imageGate';
 import { personSubject } from './entity';
+import { isVideoUrl, wantsVideo } from './videoSearch';
 
 const GRAMMAR = `Each node is a JSON object with a "type" field.
 LAYOUT
@@ -67,8 +68,14 @@ const DEPTH_HINT = {
   detailed: 'Be thorough but tidy: up to 8 top-level nodes, grouping extra detail into tabs or accordions.',
 } as const;
 
-/** Watch pages that play in place (channels and playlists are ordinary links). */
-const isVideo = (url: string) => /(youtube\.com\/(watch\?|shorts\/|live\/)|youtu\.be\/|vimeo\.com\/\d)/.test(url);
+const isVideo = isVideoUrl;
+
+/** A watch ask with a playable source opens on that video, placed without a model call so it can't be left out. */
+function videoLead(req: DesignRequest): CardNode | undefined {
+  if (!wantsVideo(req.followup?.question ?? req.query)) return undefined;
+  const at = req.search.results.slice(0, 12).findIndex((r) => isVideo(r.url));
+  return at >= 0 ? { type: 'video', source: at + 1 } : undefined;
+}
 
 function sourcesBlock(search: SearchResponse, pages: PageText[], pageChars = 2800): string {
   const results = search.results.slice(0, 12).map((r, i) => `[${i + 1}] ${isVideo(r.url) ? 'VIDEO ' : ''}${r.title} (${r.domain}${r.date ? `, ${r.date}` : ''}): ${clip(r.snippet, 420)}`);
@@ -405,21 +412,23 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
   const imageCount = Math.min(req.search.images.length, 12);
   if (!hasLlm(env)) return extractive(req, on);
 
-  const regions = patternById(req.pattern).skeleton;
+  const lead = videoLead(req);
+  const skeleton = patternById(req.pattern).skeleton;
+  const regions = lead ? [lead, ...skeleton] : skeleton;
   on.layout(regions);
   const sources = priceSources(req);
   const g = new Grounding(corpusOf(req));
   const pictures = new PictureResolver(env, req.search.images, on.credit, req.query, undefined, req.rowImages && { ...req.rowImages, results: req.search.results });
   const emitNode = bindVerdict(req, on.node);
   const polish = new Polisher(textCap(req));
-  const shared = `${sourcesBlock(req.search, req.pages, 2800)}\n\nTASK\n${taskBlock(req)}\n- Card regions, top to bottom:\n${regions.map((r, i) => `  R${i + 1}: ${regionPurpose(r)}`).join('\n')}\n  FINISH: header, interactive control, actions, citations, follow-ups`;
+  const shared = `${sourcesBlock(req.search, req.pages, 2800)}\n\nTASK\n${taskBlock(req)}\n- Card regions, top to bottom:\n${skeleton.map((r, i) => `  R${i + 1}: ${regionPurpose(r)}`).join('\n')}${lead?.type === 'video' ? `\n  (Above R1 the card already plays VIDEO source [${lead.source}]; don't add another video node for it.)` : ''}\n  FINISH: header, interactive control, actions, citations, follow-ups`;
   const query = req.followup?.question ?? req.query;
 
   let contentNodes = 0;
   let removed = 0;
 
   let headSentAny = false;
-  const regionCall = (region: CardNode, i: number) => {
+  const regionCall = (region: CardNode, i: number, offset: number) => {
     const user = `${shared}\n- YOU DESIGN R${i + 1}: ${JSON.stringify(region)}. Replace its slots with real components; you may reshape it (a stack or grid can hold several components) but keep to this region's purpose.${i === 0 ? ' R1 is the lead: it must answer the question at a glance.' : ''}\n- Output exactly one line: one JSON node.\n\nQUERY: ${query}`;
     let done = false;
     return llmLines(env, SYSTEM_REGION, user, 1200, (line) => {
@@ -428,9 +437,9 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
       if (parsed?.kind === 'node') {
         done = true;
         const node = emitReady(polish.apply(parsed.node), req.search.results.length === 0);
-        if (!node) return;
+        if (!node || (node.type === 'video' && lead?.type === 'video' && node.source === lead.source)) return;
         contentNodes++;
-        pictures.emit(node, i, emitNode);
+        pictures.emit(node, i + offset, emitNode);
       } else if (parsed?.kind === 'dropped') removed++;
     });
   };
@@ -471,7 +480,12 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
     });
   };
 
-  const results = await Promise.allSettled([...regions.map(regionCall), finishCall()]);
+  if (lead) {
+    contentNodes++;
+    emitNode(lead, 0);
+  }
+  const offset = lead ? 1 : 0;
+  const results = await Promise.allSettled([...skeleton.map((region, i) => regionCall(region, i, offset)), finishCall()]);
   if (!headSentAny) on.head({ title: titleCase(req.query) });
   results.filter((r) => r.status === 'rejected').forEach((r) => console.error('region failed', (r as PromiseRejectedResult).reason));
   await pictures.flush();
@@ -493,6 +507,8 @@ function extractive(req: DesignRequest, on: DesignEvents): DesignSummary {
   const personTitle = patternId === 'profile' && req.rowImages?.hintFor && subject ? (req.rowImages.hintFor(subject)?.name ?? subject) : '';
   const imageRef = k?.image ? search.images.findIndex((img) => img.thumb === k.image) : -1;
   const body: CardNode[] = [];
+  const lead = videoLead(req);
+  if (lead) body.push(lead);
 
   if (onTopic && k && ['profile', 'visual', 'explainer', 'answer'].includes(patternId)) {
     body.push({ type: 'profile', name: k.title, subtitle: k.description, imageRef: imageRef >= 0 ? imageRef : undefined });
