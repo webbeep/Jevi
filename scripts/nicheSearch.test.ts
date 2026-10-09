@@ -202,6 +202,26 @@ describe('cascade rewrites', { concurrency: 1 }, () => {
     }
   });
 
+  test('searches known up front still run when the intent read is slow', async () => {
+    clearDeadEngines();
+    const orig = globalThis.fetch;
+    const asked: string[] = [];
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (!String(input).includes('langsearch')) return Response.json({});
+      const q = askedQuery(init);
+      asked.push(q);
+      return langHits(q, 8);
+    };
+    try {
+      const never = new Promise<{ more: string[]; freshness: Freshness }>(() => {});
+      const out = await cascadeWeb({ q: 'Ed Chu', more: ['Edward Chu'], later: never, freshness: 'any', count: 10 }, LANG, newLedger());
+      assert.deepEqual(asked.sort(), ['Ed Chu', 'Edward Chu']);
+      assert.equal(out.more[0]?.query, 'Edward Chu');
+    } finally {
+      globalThis.fetch = orig;
+    }
+  });
+
   test('a thin literal search waits for the rewrites, which recover the niche ask', async () => {
     clearDeadEngines();
     const orig = globalThis.fetch;

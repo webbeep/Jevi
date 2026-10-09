@@ -441,8 +441,10 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUnt
     if ('v' in first) return first.v;
     if (!first.r.ok) return NO_EXTRAS;
     if (!literalGood(first.r)) return extrasReady;
+    // Searches known before the intent read ("Edward Chu" for "who is Ed Chu", ticker news) never wait on it.
+    const upfront = q.more?.length ? { extras: plannedExtras(q), fresh: q.freshness } : NO_EXTRAS;
     const left = EXTRAS_WAIT_MS - (Date.now() - cascadeStarted);
-    return left > 0 ? Promise.race([extrasReady, sleep(left).then(() => NO_EXTRAS)]) : NO_EXTRAS;
+    return left > 0 ? Promise.race([extrasReady, sleep(left).then(() => upfront)]) : upfront;
   };
 
   for (const step of steps) {

@@ -250,7 +250,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
       if (x) send('intent', { intent: x.intent, queries: x.queries });
       return { more: routeExtras(route, moreQueries(query, [...instant, ...extraQueries(query, x)])), freshness: freshness === 'any' ? x?.freshness ?? literalFresh : freshness };
     });
-    found = await searchWithLate({ q: queriesForAsk(query, []), later, freshness: literalFresh, count: 20, waitExtras: deep }, env, scope);
+    found = await searchWithLate({ q: queriesForAsk(query, []), more: routeExtras(route, moreQueries(query, instant)), later, freshness: literalFresh, count: 20, waitExtras: deep }, env, scope);
     u = await understood;
   } else {
     u = undefined;
