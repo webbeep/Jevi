@@ -33,3 +33,12 @@ export function cacheTier(query: string, freshness: Freshness | string = 'any'):
 
 /** Seconds a saved answer or search for this query may be reused. */
 export const cacheTtlS = (query: string, freshness: Freshness | string = 'any'): number => TIER_TTL_S[cacheTier(query, freshness)];
+
+/**
+ * Seconds a saved search may be reused. Searches spend free-plan provider credits, so they live a
+ * little longer than answers: a re-ask redesigns from the saved rows instead of paying for a new search.
+ */
+export function searchTtlS(query: string, freshness: Freshness | string = 'any'): number {
+  const tier = cacheTier(query, freshness);
+  return Math.max(TIER_TTL_S[tier], tier === 'live' ? 120 : 600);
+}

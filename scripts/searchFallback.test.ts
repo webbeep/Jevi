@@ -262,9 +262,10 @@ describe('search fallback', { concurrency: 1 }, () => {
     }
   });
 
-  test('a long off-topic fallback list gets a second opinion from the next engine, and the stronger list leads', async () => {
+  test('a long off-topic fallback list gets a second opinion from a free engine, never a keyed one', async () => {
     clearDeadEngines();
     const orig = globalThis.fetch;
+    let tavily = 0;
     globalThis.fetch = async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes('api.langsearch.com')) {
@@ -272,18 +273,20 @@ describe('search fallback', { concurrency: 1 }, () => {
         return Response.json({ code: 200, data: { webPages: { value } } });
       }
       if (url.includes('api.tavily.com')) {
-        return Response.json({ results: [1, 2, 3].map((i) => ({ title: `TypeSafe raises $870M funding round ${i}`, url: `https://news${i}.example/typesafe`, content: 'TypeSafe AI closed an $870M funding round.' })) });
+        tavily += 1;
+        return Response.json({ results: [] });
+      }
+      if (url.includes('en.wikipedia.org')) {
+        return Response.json({ query: { search: [1, 2, 3].map((i) => ({ title: `TypeSafe funding round ${i}`, snippet: 'TypeSafe raised an $870M funding round.' })) } });
       }
       return new Response('no', { status: 500 });
     };
     try {
-      const env = { SEARCH_ORDER: 'langsearch,tavily', LANGSEARCH_API_KEY: 'l', TAVILY_API_KEY: 't' } as Env;
+      const env = { SEARCH_ORDER: 'langsearch,tavily,wikipedia', LANGSEARCH_API_KEY: 'l', TAVILY_API_KEY: 't' } as Env;
       const ledger = newLedger();
       const out = await cascadeWeb({ q: 'TypeSafe $870M funding round', freshness: 'any', count: 8 }, env, ledger);
-      assert.equal(out.engine, 'tavily');
-      assert.ok(out.hits[0]?.title.startsWith('TypeSafe raises'));
-      assert.equal(out.more.some((m) => m.hits.some((h) => h.url.includes('py0'))), true);
-      assert.ok(ledger.fellThrough.includes('tavily:second-opinion'));
+      assert.equal(tavily, 0);
+      assert.ok(out.hits.length + out.more.reduce((n, m) => n + m.hits.length, 0) + out.wikiHits.length >= 10);
     } finally {
       globalThis.fetch = orig;
       clearDeadEngines();

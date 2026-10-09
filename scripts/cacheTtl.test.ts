@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { cacheTier, cacheTtlS } from '../shared/cacheTtl.ts';
+import { cacheTier, cacheTtlS, searchTtlS } from '../shared/cacheTtl.ts';
 
 test('live asks are reused for seconds', () => {
   for (const q of ['Lakers live score', 'bitcoin price', 'weather in Boston', 'Is the Warriors game live', 'AAPL stock price right now', 'breaking news Gaza']) {
@@ -34,4 +34,11 @@ test('the freshness window can only make it shorter', () => {
   assert.equal(cacheTier('Kindle vs Kobo', 'day'), 'short');
   assert.equal(cacheTier('Kindle vs Kobo', 'week'), 'medium');
   assert.equal(cacheTier('Lakers live score', 'week'), 'live');
+});
+
+test('saved searches outlive answers a little, so a re-ask does not spend provider credits', () => {
+  assert.equal(searchTtlS('Lakers live score'), 120);
+  assert.equal(searchTtlS('AI news today'), 600);
+  assert.equal(searchTtlS('NBA standings'), 3 * 3600);
+  assert.equal(searchTtlS('who is Ed Chu'), 86400);
 });

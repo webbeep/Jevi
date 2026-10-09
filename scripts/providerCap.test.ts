@@ -86,13 +86,15 @@ describe('provider daily cap', { concurrency: 1 }, () => {
       assert.equal(await takeSlot({} as Env, 'serper', 'eval'), false);
       const before = broken.prepares;
       assert.equal(await takeSlot({ DB: broken } as Env, 'exa', 'prod'), false);
-      assert.equal(await takeSlot({ DB: broken } as Env, 'tavily', 'prod'), true);
-      assert.equal(await takeSlot({} as Env, 'tavily', 'prod'), true);
+      assert.equal(await takeSlot({ DB: broken } as Env, 'you', 'prod'), true);
+      assert.equal(await takeSlot({} as Env, 'you', 'prod'), true);
       assert.equal(broken.prepares, before + 1);
       assert.equal(capFor({} as Env, 'serper', 'prod'), 200);
       assert.equal(capFor({} as Env, 'serper', 'eval'), 50);
       assert.equal(capFor({} as Env, 'exa', 'prod'), 10);
       assert.equal(capFor({} as Env, 'exa', 'eval'), 0);
+      assert.equal(capFor({} as Env, 'tavily', 'prod'), 30);
+      assert.equal(capFor({} as Env, 'firecrawl', 'eval'), 0);
       assert.equal(capFor({ EXA_DAILY_CAP: 'off' } as Env, 'exa', 'prod'), undefined);
       assert.equal(logs.length, 3);
       assert.deepEqual(JSON.parse(logs[0]!), { zo: 'provider-cap', provider: 'serper', bucket: 'prod', over: true });

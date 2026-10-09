@@ -23,6 +23,9 @@ const DEFAULT_CAPS: Record<string, Record<CapBucket, number>> = {
   'you-keyless': { prod: 100, eval: 100 },
   // Exa is the paid last resort: a strict prod cap and none for eval traffic.
   exa: { prod: 10, eval: 0 },
+  // Free tiers: Tavily ~1,000 credits a month (~30/day), Firecrawl 500 one-time credits. Late fallbacks only.
+  tavily: { prod: 30, eval: 0 },
+  firecrawl: { prod: 10, eval: 0 },
 };
 
 /**

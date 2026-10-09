@@ -480,7 +480,8 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUnt
 
   for (const step of steps) {
     if (!step.enabled) continue;
-    if (held && heldTried) break;
+    // The second opinion only asks free engines; keyed ones spend free-plan credits.
+    if (held && (heldTried || KEYED.has(step.name))) break;
     if (step.name === 'wikipedia' && wikiTask) {
       if (held) heldTried = true;
       const hits = await takeWiki();
