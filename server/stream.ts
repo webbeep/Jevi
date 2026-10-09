@@ -277,6 +277,7 @@ async function checkAnswer(send: Send, env: Env, req: DesignRequest, shown: Map<
     context: req.context,
     brief: req.brief,
     results: req.search.results,
+    pages: req.pages,
     isLive: isQuoteRow,
     head,
     nodes: shown,
@@ -354,7 +355,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     // Literal question first. Planner rewrites are the later calls, still inside the cap.
     const q = queriesForAsk(query, instant);
     const more = routeExtras(route, moreQueries(query, instant));
-    found = await searchWithLate({ q, more, freshness: freshness === 'any' ? guessFreshness(query) : freshness, count: 20 }, env, scope);
+    found = await searchWithLate({ q, more, freshness: freshness === 'any' ? guessFreshness(query) : freshness, count: 20, onLiteral }, env, scope);
   }
   let results = applyPickGate(query, applyRelevance(query, { ...found.response, query }, scope.ledger));
   // "AI news today" must not lead with last week's launch: past-window rows drop once enough current ones remain.

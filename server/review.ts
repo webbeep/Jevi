@@ -17,11 +17,11 @@ Flag only real errors that would mislead the reader:
 - a stated fact, number or date is not supported by the results, or is attributed to the wrong thing;
 - it carries over facts from the conversation that belong to a different subject;
 - two nodes show the same fact, number or chart (fix the later one with something else the results support, or a short text node).
-The writer also read the full text of several result pages; you see only short snippets. A fact missing from a snippet is not an error: flag it only when the results contradict it, or when it is a current value (price, score, date of an event) that no result supports.
+You see the result snippets and the page text the writer read (clipped). A fact found in neither may come from a part of a page you can't see: flag it only when the results contradict it, or when it is a current value (price, score, date of an event) that nothing supports.
 Style, wording, layout and missing nice-to-haves are not errors. For a "today" or "latest" ask, anything from the past 36 hours is current: don't flag it, and don't warn that nothing is dated exactly today.
 Reply as JSON: {"verdict":"ok"|"fix","problems":[string],"fixes":[{"node":number,"replace":object}],"note":string}
 - problems: one short line per error, naming the node number.
-- fixes: for each wrong node you can correct from the results, a full replacement node in the same JSON shape as the original (same "type" when possible), with facts only from the results and citations like [2]. At most 3.
+- fixes: for each wrong node you can correct from the results, a full replacement node in the same JSON shape as the original (same "type" when possible), with facts only from the results and citations like [2]. Keep every supported fact of the original; never blank a value out with "—" or drop a comparison side. At most 3.
 - note: only when the results themselves leave the answer uncertain (no current figure, sources disagree, the person can't be identified): one plain sentence for the reader about that uncertainty. Never describe the card's own mistakes in the note (no "the card says…", "the card mixes…"): fix those nodes instead. Otherwise "".
 - verdict "ok" with empty problems, fixes and note when the card is right.`;
 
@@ -42,6 +42,7 @@ export interface Review {
 const SELF_REMARK = /\b(the|this) (card|answer)('s)?\b|\bnode \d/i;
 
 const NODE_CHARS = 900;
+const PAGE_CHARS = 1500;
 const CARD_CHARS = 7000;
 
 export function readReview(raw: Raw | undefined, indices: Set<number>): Review | undefined {
@@ -102,6 +103,8 @@ export async function reviewCard(
     context?: string;
     brief?: SourceBrief;
     results: SearchResult[];
+    /** Page text the writer read, numbered like the results. */
+    pages?: { n: number; text: string }[];
     isLive: (r: SearchResult) => boolean;
     head?: Omit<AnswerCard, 'body'>;
     nodes: Map<number, CardNode>;
@@ -118,6 +121,7 @@ export async function reviewCard(
     args.brief?.stale.length ? `Outdated results: ${args.brief.stale.map((n) => `[${n}]`).join(' ')}` : '',
     args.brief?.offTopic.length ? `Off-topic results: ${args.brief.offTopic.map((n) => `[${n}]`).join(' ')}` : '',
     `Results:\n${args.results.slice(0, BRIEF_ROWS).map((r, i) => rowLine(r, i, args.isLive(r))).join('\n')}`,
+    args.pages?.length ? `Page text the writer read:\n${args.pages.slice(0, 5).map((p) => `[${p.n}] ${p.text.replace(/\s+/g, ' ').slice(0, PAGE_CHARS)}`).join('\n')}` : '',
     `CARD\n${cardText(args.head, args.nodes)}`,
   ].filter(Boolean).join('\n');
   const call = llmJson<Raw>(env, SYSTEM, user, 1200).catch((err) => {

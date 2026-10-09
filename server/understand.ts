@@ -17,7 +17,7 @@ const FRESHNESS = new Set<Freshness>(['any', 'day', 'week', 'month', 'year']);
 const SYSTEM = `You read what someone typed into a search box the way a thoughtful person would, work out what they actually want, and write the web searches that find it.
 Reply as JSON: {"intent": string, "queries": string[], "freshness": "day"|"week"|"month"|"year"|"any"}
 - intent: one sentence naming what they want to see, e.g. "A short summary of today's top news stories."
-- queries: 1-3 web search queries, best first, 3-10 words each. Spell out what the words imply: "news tldr today" wants today's top headlines summarised, not a site or channel called TLDR, so search "top news headlines <today's date>". When they mean now (today, latest, this week, current, live, score, price), name the date, month or year. Keep the literal text as a query only when it already finds the answer (names, products, exact phrases).
+- queries: 1-3 web search queries, best first, 3-10 words each. Spell out what the words imply: "news tldr today" wants today's top headlines summarised, not a site or channel called TLDR, so search "top news headlines <today's date>". When they mean now (today, latest, this week, current, live, score, price), name the date, month or year. Keep the literal text as a query only when it already finds the answer (names, products, exact phrases). The literal text is searched anyway, so never repeat it with one filler word ("X vs Y comparison"). For a comparison, write one query per option ("Pixel 10 specs price review") so every side gets sources.
 - freshness: how recent results must be; "day" for today's news, scores or prices; "any" for timeless things.
 - Never add facts or guesses about the answer itself.`;
 
@@ -36,10 +36,19 @@ export async function understand(query: string, env: Env, context?: string, time
   return { intent: out.intent.trim().slice(0, 200), queries, freshness: FRESHNESS.has(out.freshness as Freshness) ? (out.freshness as Freshness) : 'any' };
 }
 
-const same = (a: string, b: string) => a.toLowerCase().replace(/\W+/g, ' ').trim() === b.toLowerCase().replace(/\W+/g, ' ').trim();
+const words = (s: string) => new Set(s.toLowerCase().split(/[^a-z0-9$]+/).filter(Boolean));
+
+/** The literal search again, give or take one word ("iphone 17 vs pixel 10 comparison"). */
+export function nearLiteral(q: string, query: string): boolean {
+  const asked = words(query);
+  const mine = words(q);
+  const added = [...mine].filter((w) => !asked.has(w)).length;
+  const dropped = [...asked].filter((w) => !mine.has(w)).length;
+  return added + dropped <= 1;
+}
 
 /** Searches that add something beyond the literal query. */
-export const extraQueries = (query: string, u: Understanding | undefined) => (u?.queries ?? []).filter((q) => !same(q, query)).slice(0, 2);
+export const extraQueries = (query: string, u: Understanding | undefined) => (u?.queries ?? []).filter((q) => !nearLiteral(q, query)).slice(0, 2);
 
 /**
  * Merges the intended searches with the literal one: results interleaved by rank across the intended

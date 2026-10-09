@@ -32,7 +32,13 @@ export const QUERIES = [
   { q: 'write a short apology email for missing a meeting', kind: 'made' },
 ];
 
-async function run({ q, kind }) {
+export const FOLLOWUPS = [
+  { seed: 'how do mRNA vaccines work', q: 'explain it like I am 10', kind: 'chat' },
+  { seed: 'iphone 17 vs pixel 10', q: 'which one has better battery life?', kind: 'chat' },
+  { seed: 'AI news today', q: 'what about Google?', kind: 'chat' },
+];
+
+async function run({ q, kind, body }) {
   const t0 = performance.now();
   const at = {};
   const nodes = new Map();
@@ -45,7 +51,7 @@ async function run({ q, kind }) {
   const res = await fetch(`${base}/api/stream`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...(cached ? {} : { 'x-zo-refresh': '1' }) },
-    body: JSON.stringify({ kind: 'search', query: q, freshness: 'any' }),
+    body: JSON.stringify(body ?? { kind: 'search', query: q, freshness: 'any' }),
   });
   at.ttfb = performance.now() - t0;
   if (!res.ok || !res.body) return { q, kind, status: res.status, error: await res.text().catch(() => '') };
@@ -102,6 +108,8 @@ async function run({ q, kind }) {
     choices: done?.choices?.length,
     error: error?.message ?? error,
     t: done?.t,
+    card: { title: head?.title ?? q, ...head, body: [...nodes.keys()].sort((a, b) => a - b).map((i) => nodes.get(i)) },
+    searchData: search,
   };
 }
 
@@ -119,8 +127,18 @@ async function pool(items, n, fn) {
   return results;
 }
 
-const pick = only ? QUERIES.filter((x) => x.q.toLowerCase().includes(only.toLowerCase())) : QUERIES;
-const rows = await pool(pick, concurrency, run);
+/** The seed search, then the follow-up asked about its card, the way the app sends it. */
+async function runFollowup({ seed, q, kind }) {
+  const first = await run({ q: seed });
+  if (!first.searchData) return { ...first, q: `${seed} → ${q}`, error: 'seed failed' };
+  const body = { kind: 'followup', question: q, original: seed, search: first.searchData, cards: [{ id: 1, title: first.card.title, card: first.card }], context: `Asked: ${seed}\nCard: ${first.card.title}` };
+  return { ...(await run({ q: `${seed} → ${q}`, kind, body })), seedDone: first.done };
+}
+
+const followups = args.includes('--followups');
+const list = followups ? FOLLOWUPS : QUERIES;
+const pick = only ? list.filter((x) => x.q.toLowerCase().includes(only.toLowerCase())) : list;
+const rows = await pool(pick, concurrency, followups ? runFollowup : run);
 const pct = (xs, p) => {
   const s = xs.filter((x) => typeof x === 'number').sort((a, b) => a - b);
   return s.length ? s[Math.min(s.length - 1, Math.floor((p / 100) * s.length))] : undefined;
@@ -132,4 +150,4 @@ console.table(rows.map(({ q, search, designing, head, firstNode, done, nodes, re
 console.log(JSON.stringify(summary));
 const stages = rows.filter((x) => x.t).map((x) => ({ q: x.q.slice(0, 26), ...x.t }));
 if (stages.length) console.table(stages);
-if (out) writeFileSync(out, JSON.stringify({ base, at: new Date().toISOString(), summary, rows }, null, 2));
+if (out) writeFileSync(out, JSON.stringify({ base, at: new Date().toISOString(), summary, rows: rows.map(({ searchData: _s, ...r }) => r) }, null, 2));

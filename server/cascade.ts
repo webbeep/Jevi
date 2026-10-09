@@ -510,13 +510,12 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUnt
     ledger.search[step.name] += 1;
     if (held) heldTried = true;
     const started = Date.now();
-    const early = q.later && KEYED.has(step.name)
-      ? settled(step.run(q.q)).then((r) => {
-          mark(ledger, 'literal');
-          if (r.ok && q.onLiteral && literalGood(r)) q.onLiteral(r.value.hits.filter((h) => h.url && h.title));
-          return r;
-        })
-      : undefined;
+    const landed = (r: Settled): Settled => {
+      mark(ledger, 'literal');
+      if (r.ok && q.onLiteral && literalGood(r)) q.onLiteral(r.value.hits.filter((h) => h.url && h.title));
+      return r;
+    };
+    const early = q.later && KEYED.has(step.name) ? settled(step.run(q.q)).then(landed) : undefined;
     const ready = early ? await extrasFor(early) : KEYED.has(step.name) ? await extrasReady : NO_EXTRAS;
     extras = ready.extras;
     mark(ledger, 'rewrites');
@@ -535,7 +534,7 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUnt
       }
     }
     try {
-      const lit: Settled = early ? await early : parallel?.length ? await settled(step.run(q.q)) : { ok: true, value: await step.run(q.q) };
+      const lit: Settled = early ? await early : parallel?.length ? landed(await settled(step.run(q.q))) : landed({ ok: true, value: await step.run(q.q) });
       const out = lit.ok ? lit.value : { hits: [], images: [] };
       let hits = out.hits.filter((h) => h.url && h.title);
       let images = out.images;
