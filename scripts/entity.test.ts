@@ -26,6 +26,10 @@ import {
 import { gateResults } from '../server/relevanceGate.ts';
 import { isBlockedHost } from '../server/spamHosts.ts';
 import { isEventOrCategory, targetFor } from '../server/imageGate.ts';
+import { designStream, type DesignEvents, type DesignRequest, type DesignSummary } from '../server/design.ts';
+import type { RowImagePlan } from '../server/pictures.ts';
+import type { AnswerCard } from '../shared/card.ts';
+import type { SearchResponse } from '../shared/types.ts';
 
 const row = (title: string, snippet: string, url: string) => ({ title, url, snippet });
 
@@ -874,5 +878,72 @@ describe('EN4 part 8: tighter generic labels (Athlete/Artist/Musician → the re
     assert.ok(ray.includes('Founder of Raycon'), ray.join(' | '));
     assert.ok(ray.includes('Linked to Arsenal'), ray.join(' | '));
     assert.ok(descriptorsOf('serper-dk').some((l) => l.includes('C2 Education')), descriptorsOf('serper-dk').join(' | '));
+  });
+});
+
+describe('EN4: the extractive card header names the chosen person on a picked choice', () => {
+  const PICK = 'Ray Lee Raycon Founder';
+  const raycon: Entity = { id: 'ray-lee-ceo-raycon', name: 'Ray Lee', role: 'CEO', org: 'Raycon', terms: ['ceo', 'raycon'] };
+  const search = (query: string, knowledge?: SearchResponse['knowledge']): SearchResponse => ({
+    query,
+    freshness: 'any',
+    results: [{
+      title: 'Ray Lee - Co-founder & CEO at Raycon',
+      url: 'https://www.linkedin.com/in/ray-lee',
+      snippet: 'Ray Lee is the co-founder and CEO of Raycon, which he founded in 2016 in New York.',
+      domain: 'www.linkedin.com',
+      engines: ['serper'],
+    }],
+    images: [],
+    knowledge,
+    discussions: [],
+    engines: [],
+  });
+  /** No provider key, so designStream takes the extractive path server-side. */
+  const headOf = async (query: string, hintFor?: RowImagePlan['hintFor'], pattern = 'profile', knowledge?: SearchResponse['knowledge']) => {
+    const heads: Omit<AnswerCard, 'body'>[] = [];
+    const on: DesignEvents = { layout: () => {}, head: (h) => heads.push(h), node: () => {}, followups: () => {}, credit: () => {} };
+    const req: DesignRequest = {
+      query,
+      pattern,
+      depth: 'standard',
+      search: search(query, knowledge),
+      pages: [],
+      rowImages: hintFor ? { results: [], pool: [], hintFor } : undefined,
+    };
+    const summary: DesignSummary = await designStream(req, {}, on);
+    return { summary, heads };
+  };
+
+  test('a resolved single-person card is headed by the person, not the raw pick query', async () => {
+    const { summary, heads } = await headOf(PICK, entityHintFor(raycon, PICK));
+    assert.equal(summary.engine, 'extractive');
+    assert.deepEqual(heads.map((h) => h.title), ['Ray Lee']);
+    assert.notEqual(heads[0]!.title, PICK);
+  });
+
+  test('a missing person hint still cuts the header at the person subject', async () => {
+    const { heads } = await headOf(PICK, () => undefined);
+    assert.deepEqual(heads.map((h) => h.title), ['Ray Lee']);
+  });
+
+  test('an ask with no person subject keeps the raw query', async () => {
+    const { heads } = await headOf('best wireless headphones', entityHintFor(raycon, 'Raycon headphones'));
+    assert.deepEqual(heads.map((h) => h.title), ['best wireless headphones']);
+  });
+
+  test('a non-profile pattern and a card with no person hint keep the raw pick query', async () => {
+    const hintFor = entityHintFor(raycon, PICK);
+    assert.deepEqual((await headOf(PICK, hintFor, 'briefing')).heads.map((h) => h.title), [PICK]);
+    assert.deepEqual((await headOf(PICK, undefined, 'profile')).heads.map((h) => h.title), [PICK]);
+  });
+
+  test('an on-topic encyclopedia panel still wins the header', async () => {
+    const { heads } = await headOf('Ray Lee Founder', undefined, 'profile', {
+      title: 'Ray Lee',
+      url: 'https://en.wikipedia.org/wiki/Ray_Lee',
+      extract: 'Ray Lee is the founder of Raycon.',
+    });
+    assert.deepEqual(heads.map((h) => h.title), ['Ray Lee']);
   });
 });

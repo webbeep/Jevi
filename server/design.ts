@@ -488,6 +488,9 @@ function extractive(req: DesignRequest, on: DesignEvents): DesignSummary {
   const timeline = extractTimeline(cands);
   const k = search.knowledge;
   const onTopic = !!k && knowledgeMatches(query, k.title, k.description);
+  // A picked choice ("Ray Lee Raycon Founder") carries the chosen person's photo, so its header names that person.
+  const subject = personSubject(query);
+  const personTitle = patternId === 'profile' && req.rowImages?.hintFor && subject ? (req.rowImages.hintFor(subject)?.name ?? subject) : '';
   const imageRef = k?.image ? search.images.findIndex((img) => img.thumb === k.image) : -1;
   const body: CardNode[] = [];
 
@@ -496,7 +499,7 @@ function extractive(req: DesignRequest, on: DesignEvents): DesignSummary {
   } else if (patternId === 'profile' && req.rowImages?.hintFor) {
     // Single-entity person card without a knowledge panel: header with the chosen person's photo,
     // only when a pooled picture passes the same image gate (never a namesake's).
-    const name = personSubject(query);
+    const name = subject;
     const hint = name ? req.rowImages.hintFor(name) : undefined;
     if (name && hint) {
       const target = targetFor(hint.name ?? name, '', undefined, { hintFor: req.rowImages.hintFor });
@@ -512,7 +515,7 @@ function extractive(req: DesignRequest, on: DesignEvents): DesignSummary {
   const refs = [1, 2, 3, 4].filter((i) => i <= search.results.length);
   if (refs.length) body.push({ type: 'citations', refs });
 
-  on.head({ title: onTopic && k ? k.title : query, subtitle: patternById(patternId).label });
+  on.head({ title: onTopic && k ? k.title : personTitle || query, subtitle: patternById(patternId).label });
   const emitNode = bindVerdict(req, on.node);
   body.forEach((node, i) => emitNode(node, i));
   return { engine: 'extractive', removed: 0 };
