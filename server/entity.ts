@@ -219,6 +219,42 @@ export function nameIsTopic(query: string, rows: readonly EntityRow[]): boolean 
   return carry > 0 && named * 2 < carry;
 }
 
+/** Short and formal forms of a first name that name the same person ("ed" ↔ "edward"). */
+const NICKNAMES = [
+  ['ed', 'eddie', 'edward', 'edwin', 'edmund'], ['bob', 'bobby', 'rob', 'robbie', 'robert'], ['bill', 'billy', 'will', 'willie', 'william'],
+  ['mike', 'mikey', 'michael'], ['jim', 'jimmy', 'james'], ['joe', 'joey', 'joseph'], ['tom', 'tommy', 'thomas'], ['dave', 'david'],
+  ['dan', 'danny', 'daniel'], ['chris', 'christopher'], ['matt', 'matthew'], ['nick', 'nicholas'], ['tony', 'anthony'],
+  ['steve', 'steven', 'stephen'], ['andy', 'drew', 'andrew'], ['ben', 'benjamin'], ['sam', 'samuel', 'samantha'],
+  ['kate', 'katie', 'kathy', 'katherine', 'catherine'], ['liz', 'beth', 'betty', 'elizabeth'], ['jen', 'jenny', 'jennifer'],
+  ['rick', 'ricky', 'rich', 'dick', 'richard'], ['greg', 'gregory'], ['jeff', 'jeffrey'], ['ken', 'kenny', 'kenneth'],
+  ['larry', 'lawrence'], ['pat', 'patrick', 'patricia'], ['tim', 'timothy'], ['charlie', 'chuck', 'charles'],
+  ['johnny', 'jack', 'john'], ['jon', 'jonathan'], ['alex', 'alexander', 'alexandra'], ['fred', 'freddie', 'frederick'],
+  ['frank', 'francis'], ['gene', 'eugene'], ['hank', 'henry'], ['jerry', 'gerald'], ['phil', 'philip', 'phillip'],
+  ['pete', 'peter'], ['ron', 'ronnie', 'ronald'], ['don', 'donnie', 'donald'], ['sue', 'susan', 'suzanne'], ['vic', 'victor'],
+];
+const NICK_OF = new Map(NICKNAMES.flatMap((forms) => forms.map((f) => [f, forms] as const)));
+const firstNameForms = (tok: string): readonly string[] => NICK_OF.get(tok) ?? [tok];
+
+const FORMAL: Record<string, string> = {
+  ed: 'Edward', eddie: 'Edward', bob: 'Robert', bobby: 'Robert', rob: 'Robert', bill: 'William', will: 'William', mike: 'Michael',
+  jim: 'James', jimmy: 'James', joe: 'Joseph', tom: 'Thomas', dave: 'David', dan: 'Daniel', danny: 'Daniel', chris: 'Christopher',
+  matt: 'Matthew', nick: 'Nicholas', tony: 'Anthony', steve: 'Steven', andy: 'Andrew', ben: 'Benjamin', sam: 'Samuel',
+  kate: 'Katherine', liz: 'Elizabeth', jen: 'Jennifer', rick: 'Richard', greg: 'Gregory', jeff: 'Jeffrey', ken: 'Kenneth',
+  larry: 'Lawrence', pat: 'Patrick', tim: 'Timothy', charlie: 'Charles', alex: 'Alexander', pete: 'Peter', ron: 'Ronald', don: 'Donald',
+};
+
+/**
+ * "who is Ed Chu" also searches "Edward Chu": pages about a person mostly use the formal first name,
+ * so the short form alone misses most of the namesakes the asker has to choose between.
+ */
+export function formalNameQueries(query: string): string[] {
+  if (!isPersonAsk(query)) return [];
+  const name = personSubject(query);
+  const [first, ...rest] = name.split(/\s+/);
+  const formal = first ? FORMAL[first.toLowerCase()] : undefined;
+  return formal && rest.length ? [`${formal} ${rest.join(' ')}`] : [];
+}
+
 export function hasFullPersonName(name: string, row: EntityRow): boolean {
   const nameToks = tokens(name).filter((t) => t.length >= 2);
   if (nameToks.length < 2) return false;
@@ -227,15 +263,12 @@ export function hasFullPersonName(name: string, row: EntityRow): boolean {
   const escRe = /[.*+?^${}()|[\]\\]/g;
   const esc = nameToks.map((t) => t.replace(escRe, '\\$&')).join('\\s+');
   const re = new RegExp(`\\b${esc}\\b`, 'i');
-  const mid =
-    nameToks.length === 2
-      ? new RegExp(
-          `\\b${nameToks[0]!.replace(escRe, '\\$&')}\\s+[A-Za-z]\\.?\\s+${nameToks[1]!.replace(escRe, '\\$&')}\\b`,
-          'i',
-        )
-      : null;
+  // "Ed Chu" is written "Edward Chu", "Edward “Ed” Chu" or "Edward L. Chu" just as often.
+  const first = `(?:${firstNameForms(nameToks[0]!).map((t) => t.replace(escRe, '\\$&')).join('|')})`;
+  const rest = nameToks.slice(1).map((t) => t.replace(escRe, '\\$&')).join('\\s+');
+  const mid = new RegExp(`\\b${first}\\s+(?:(?:[A-Za-z]\\.?|["“'‘(][A-Za-z]+["”'’)])\\s+)?${rest}\\b`, 'i');
   // Match on title/snippet separately so "Ray Lee" + "Ray Lee, …" does not look like "Ray Lee Ray".
-  if (!segments.some((s) => re.test(s) || (mid && mid.test(s)))) return false;
+  if (!segments.some((s) => re.test(s) || mid.test(s))) return false;
   const AFTER_OK = new Set([
     'is', 'was', 'as', 'the', 'a', 'an', 'of', 'at', 'in', 'on', 'for', 'and', 'or', 'who', 'whose',
     'from', 'with', 'to', 'by', 'ceo', 'cto', 'cfo', 'coo', 'vp', 'co-founder', 'founder', 'director',

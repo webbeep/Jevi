@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { clearDeadEngines, newLedger, queriesForAsk } from '../server/budget.ts';
 import { cascadeWeb } from '../server/cascade.ts';
-import { askTopic, askedQuestions, isPersonAsk, nameIsTopic, personSubject, pickTopic, pickTopicQuery, resolveEntity } from '../server/entity.ts';
+import { askTopic, askedQuestions, formalNameQueries, hasFullPersonName, isPersonAsk, nameIsTopic, personSubject, pickTopic, pickTopicQuery, resolveEntity } from '../server/entity.ts';
+import { readPeople } from '../server/peopleSplit.ts';
 import { coverage } from '../server/search.ts';
 import { cashtags, expandCashtags, relaxQuery, tickerQueries } from '../server/queryClean.ts';
 import { gateResults } from '../server/relevanceGate.ts';
@@ -51,6 +52,33 @@ test('a sloppy-case person ask keeps the whole name', () => {
   assert.equal(personSubject('who is Messi now'), 'Messi');
   assert.equal(personSubject('who is Ray lee founder'), 'Ray Lee');
   assert.equal(personSubject('who is Barack Obama'), 'Barack Obama');
+});
+
+test('"Ed Chu" matches pages that write Edward Chu, and also searches the formal name', () => {
+  const row = (title: string, snippet = '') => ({ title, snippet, url: 'https://example.com' });
+  assert.equal(hasFullPersonName('Ed Chu', row('ASCO Remembers Dr. Edward Chu')), true);
+  assert.equal(hasFullPersonName('Ed Chu', row('Obituary', 'ASCO honors Edward “Ed” Chu, MD')), true);
+  assert.equal(hasFullPersonName('Ed Chu', row('Edward L. Chu, MD, MPhil')), true);
+  assert.equal(hasFullPersonName('Edward Chu', row('Ed Chu - CEO at Revco')), true);
+  assert.equal(hasFullPersonName('Ed Chu', row('Edgar Chu, painter')), false);
+  assert.equal(hasFullPersonName('Ed Chu', row('Ted Chu biography')), false);
+  assert.deepEqual(formalNameQueries('who is Ed chu'), ['Edward Chu']);
+  assert.deepEqual(formalNameQueries('who is Barack Obama'), []);
+});
+
+test('the model split of a shared name becomes choices only when it is usable', () => {
+  const raw = { people: [
+    { who: 'Oncologist, Montefiore cancer center director', rows: [1, 2, 10], query: 'Edward Chu oncologist Montefiore' },
+    { who: 'EPA regional deputy administrator', rows: [3, 9, 2], query: 'Edward Chu EPA' },
+    { who: 'CEO of Revco Industries', rows: [6], query: 'Ed Chu Revco' },
+    { who: 'Someone with no search', rows: [7], query: 'a person' },
+    { who: 'Out of range', rows: [40], query: 'Ed Chu' },
+  ] };
+  const choices = readPeople(raw, 'Ed Chu', 10)!;
+  assert.deepEqual(choices.map((c) => c.descriptor), ['Oncologist, Montefiore cancer center director', 'EPA regional deputy administrator', 'CEO of Revco Industries']);
+  assert.deepEqual(choices.map((c) => c.seeds), [[0, 1, 9], [2, 8], [5]]);
+  assert.equal(readPeople({ people: [raw.people[0]!] }, 'Ed Chu', 10), undefined);
+  assert.equal(readPeople(undefined, 'Ed Chu', 10), undefined);
 });
 
 test('a company, product or funding ask is not a person ask', () => {

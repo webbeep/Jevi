@@ -7,7 +7,9 @@ import {
   contextTerms,
   distinguishingTerms,
   entityContextLine,
+  type EntityChoice,
   entityHintFor,
+  formalNameQueries,
   isDisambiguationPage,
   isPersonAsk,
   knowledgeForKept,
@@ -43,6 +45,7 @@ import { type LateExtras, searchWithLate } from './search';
 import { scholarlyResults, withScholarly } from './scholarly';
 import { videoResults, withVideos } from './videoSearch';
 import { guessFreshness, preferFresh, staleComplaint, stricter } from './freshness';
+import { splitPeople } from './peopleSplit';
 import type { Send } from './sse';
 import { extraQueries, understand } from './understand';
 import { cacheBypass, testForce, validTestToken, wantsRefresh } from './token';
@@ -161,6 +164,14 @@ function applyPickGate(query: string, response: SearchResponse): SearchResponse 
   return { ...response, results: kept };
 }
 
+/** The model's split of the rows into people when it finds at least two; the heuristic choices otherwise. */
+async function sharperChoices(choices: EntityChoice[], rows: SearchResult[], env: Env): Promise<EntityChoice[]> {
+  const name = choices[0]?.name;
+  const split = name ? await splitPeople(name, rows, env) : undefined;
+  console.log(JSON.stringify({ zo: 'entity', kind: 'choices', choices: (split ?? choices).length, by: split ? 'model' : 'heuristic' }));
+  return split ?? choices;
+}
+
 async function design(send: Send, env: Env, req: DesignArgs, started: number, scope: AskScope, late?: Promise<LateExtras>) {
   // Follow-ups keep the sources already gated for the original question.
   if (!req.followup) req = { ...req, search: applyRelevance(req.query, req.search, scope.ledger) };
@@ -227,7 +238,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   // Watch asks also read YouTube (keyless), in parallel: web results rarely carry a playable video.
   const videos = videoResults(query);
   // Searches that need no model ("$rdw" → "RDW stock news today") lead the rewrites.
-  const instant = tickerQueries(query);
+  const instant = [...tickerQueries(query), ...formalNameQueries(query)];
   if (!rewritten) {
     // SPD2 (t457): every ask searches its literal words at once; the understood rewrites join the same
     // engine when the intent read lands (~1 s), instead of the whole search waiting for it. A time-sensitive
@@ -311,7 +322,8 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
             // Nothing about the asker's person: re-ask on the bare name and let them pick.
             const decision = resolveEntity(`Who is ${person}`, again.response.results, { pattern: 'profile' });
             if (decision.kind === 'choices') {
-              scope.ledger.entity = { kind: 'choices', choices: decision.choices.length };
+              const choices = await sharperChoices(decision.choices, again.response.results, env);
+              scope.ledger.entity = { kind: 'choices', choices: choices.length };
               send('search', { ...again.response, query });
               // Choices ride on the done event (FE readChoices() in shared/choices.ts); never cached.
               send('done', {
@@ -319,9 +331,9 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
                 removed: 0,
                 pagesRead: 0,
                 ms: Date.now() - started,
-                choices: publicChoices(decision.choices),
+                choices: publicChoices(choices),
               });
-              console.log(JSON.stringify({ zo: 'entity', pickNoMatch: true, rechoices: decision.choices.length }));
+              console.log(JSON.stringify({ zo: 'entity', pickNoMatch: true, rechoices: choices.length }));
               return;
             }
           }
@@ -417,11 +429,11 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   }
   const decision = resolveEntity(query, results.results, { pattern: plan.pattern, prior: priorEntity(context) });
   if (decision.kind === 'choices') {
-    scope.ledger.entity = { kind: 'choices', choices: decision.choices.length };
-    console.log(JSON.stringify({ zo: 'entity', kind: 'choices', choices: decision.choices.length }));
+    const choices = await sharperChoices(decision.choices, results.results, env);
+    scope.ledger.entity = { kind: 'choices', choices: choices.length };
     send('search', results);
     // Choices ride on the done event (FE readChoices() in shared/choices.ts); never cached.
-    send('done', { engine: 'extractive', removed: 0, pagesRead: 0, ms: Date.now() - started, choices: publicChoices(decision.choices) });
+    send('done', { engine: 'extractive', removed: 0, pagesRead: 0, ms: Date.now() - started, choices: publicChoices(choices) });
     return;
   }
   let designContext = context;
