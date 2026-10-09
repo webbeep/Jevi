@@ -73,6 +73,17 @@ export function NodeView({ node }: { node: CardNode }): ReactNode {
     case 'stack': {
       const row = node.direction === 'row';
       const compact = row && node.children.every(isCompact);
+      // Three or more small cells can't share a phone's width (labels overflowed ~90px tiles): two-up there, one row from sm.
+      if (compact && node.children.length > 2) {
+        const n = node.children.length;
+        return (
+          <TilePictures.Provider value={node.children.some(wantsPicture)}>
+            <div className={cn('grid min-w-0 grid-cols-2', n % 2 === 1 && '[&>*:last-child]:col-span-2 sm:[&>*:last-child]:col-span-1', n <= 4 ? (n === 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-4') : 'sm:grid-cols-3', GAP[node.gap ?? 'md'])}>
+              {node.children.map((c, i) => <div key={i} className="flex min-w-0 flex-col [&>*]:flex-1"><NodeView node={c} /></div>)}
+            </div>
+          </TilePictures.Provider>
+        );
+      }
       return (
         <TilePictures.Provider value={node.children.some(wantsPicture)}>
           <div className={cn('flex min-w-0', GAP[node.gap ?? 'md'], compact ? 'no-scrollbar flex-row overflow-x-auto overscroll-x-contain' : row ? cn('flex-col sm:flex-row', ALIGN[node.align ?? 'start'], node.wrap && 'sm:flex-wrap') : 'flex-col')}>

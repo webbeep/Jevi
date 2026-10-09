@@ -62,7 +62,8 @@ function useCountUp(value: string, ms = 700): string {
     if (!Number.isFinite(target)) return;
     const start = performance.now();
     let frame = requestAnimationFrame(function tick(now) {
-      const t = Math.min(1, (now - start) / ms);
+      // A frame's timestamp can precede `start`; below 0 the ease shows a negative number ("-1 PTS").
+      const t = Math.min(1, Math.max(0, (now - start) / ms));
       setShown(target * (1 - (1 - t) ** 3));
       if (t < 1) frame = requestAnimationFrame(tick);
     });
@@ -123,13 +124,16 @@ export function StatView({ node }: { node: Of<'stat'> }) {
   const ask = askQuestion(box);
   const ref: AskRef = { label, value: value && node.unit ? `${value}${node.unit === '%' ? node.unit : ` ${node.unit}`}` : value, entity };
   return (
-    <div className="relative rounded-xl border bg-card p-3 transition-colors has-[>button:hover]:border-foreground/20 sm:p-4">
+    <div className="@container relative min-w-0 overflow-hidden rounded-xl border bg-card p-3 transition-colors has-[>button:hover]:border-foreground/20 sm:p-4">
       <ItemButton ask={ask} askRef={ref} className="absolute inset-0 rounded-[inherit] cursor-pointer" />
       <div className="pointer-events-none relative flex items-start gap-3">
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5 text-[12.5px] text-muted-foreground"><Icon name={node.icon} className="size-3.5" />{node.label}</div>
-          <div className="mt-1 flex items-baseline gap-1 sm:mt-1.5">
-            <span className="text-[22px] font-semibold tabular-nums tracking-[-0.03em] sm:text-[26px]">{plain(node.value)}</span>
+          <div className="flex min-w-0 items-center gap-1.5 text-[12.5px] text-muted-foreground">
+            <Icon name={node.icon} className="size-3.5 shrink-0" />
+            <span className="truncate" title={label}>{node.label}</span>
+          </div>
+          <div className="mt-1 flex min-w-0 flex-wrap items-baseline gap-x-1 sm:mt-1.5">
+            <span className="min-w-0 text-[22px] font-semibold tabular-nums tracking-[-0.03em] [overflow-wrap:anywhere] sm:text-[26px]">{plain(node.value)}</span>
             {node.unit && <span className="text-sm text-muted-foreground">{node.unit}</span>}
           </div>
           {node.delta && (
@@ -139,7 +143,8 @@ export function StatView({ node }: { node: Of<'stat'> }) {
           )}
         </div>
         {img && (
-          <span className="relative shrink-0">
+          // A narrow tile has no room beside the label: the picture would sit on top of it.
+          <span className="relative hidden shrink-0 @[11rem]:block">
             <img src={img} alt={plain(node.label)} loading="lazy" decoding="async" width={36} height={36} className="size-9 rounded-full bg-muted object-cover" onError={onImgError} />
             <PhotoCredit src={img} className="-bottom-2.5 left-1/2 -translate-x-1/2" />
           </span>
@@ -429,7 +434,7 @@ export function Tile({ node }: { node: Of<'tile'> }) {
         {link && <span className="-my-[3px] shrink-0"><SourceChip result={link} n={node.source!} /></span>}
       </span>
       {!slot && !img && !pending && <Icon name={icon} className="pointer-events-none relative size-[18px] text-foreground/70 sm:size-5" />}
-      {node.value && <span className="pointer-events-none relative text-[15px] font-semibold tracking-tight sm:text-base">{plain(node.value)}</span>}
+      {node.value && <span className="pointer-events-none relative max-w-full text-[15px] font-semibold tracking-tight [overflow-wrap:anywhere] sm:text-base">{plain(node.value)}</span>}
       {node.sub && <span className="pointer-events-none relative text-[11px] leading-tight text-muted-foreground"><RichText text={node.sub} inline noLinks /></span>}
     </div>
   );
