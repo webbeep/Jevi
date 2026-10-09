@@ -338,11 +338,26 @@ function parseLine(line: string, g: Grounding, imageCount: number, query: string
   return grounded ? { kind: 'node', node: grounded } : { kind: 'dropped' };
 }
 
+/** The ticker is the card's chart: a model-drawn chart beside it only repeats the price, worse. */
+function withoutCharts(node: CardNode | undefined): CardNode | undefined {
+  if (!node || node.type === 'chart') return undefined;
+  if (node.type === 'tabs') {
+    const tabs = node.tabs.map((t) => ({ ...t, children: t.children.map(withoutCharts).filter((c): c is CardNode => !!c) })).filter((t) => t.children.length);
+    return tabs.length ? { ...node, tabs } : undefined;
+  }
+  if ('children' in node) {
+    const children = node.children.map(withoutCharts).filter((c): c is CardNode => !!c);
+    return children.length ? { ...node, children } as CardNode : undefined;
+  }
+  return node;
+}
+
 /** A node written outside the design stream (the answer review) passes the same sanitize and grounding gates. */
 export function gateNode(raw: unknown, req: DesignRequest): CardNode | undefined {
   const g = new Grounding(corpusOf(req), req.followup?.mode === 'chat');
   const parsed = parseLine(JSON.stringify(raw), g, Math.min(req.search.images.length, 12), req.query, priceSources(req), req.followup?.question ?? req.query);
-  return parsed?.kind === 'node' ? emitReady(parsed.node, req.search.results.length === 0) : undefined;
+  const node = parsed?.kind === 'node' ? emitReady(parsed.node, req.search.results.length === 0) : undefined;
+  return req.ticker ? withoutCharts(node) : node;
 }
 
 const NODE_TYPES = new Set<string>(['stack', 'grid', 'section', 'tabs', 'scroller', 'divider', 'hero', 'heading', 'text', 'stat', 'tile', 'keyvalue', 'list', 'chart', 'progress', 'rating', 'table', 'timeline', 'steps', 'proscons', 'badges', 'quote', 'callout', 'draft', 'code', 'links', 'video', 'image', 'gallery', 'profile', 'actions', 'choices', 'slider', 'scaler', 'pricing', 'accordion', 'reveal', 'citations'] satisfies CardNode['type'][]);
@@ -408,7 +423,8 @@ export async function designStream(req: DesignRequest, env: Env, on: DesignEvent
           headSent = true;
           return on.head(parsed.head);
         case 'node': {
-          const node = emitReady(polish.apply(parsed.node), req.search.results.length === 0);
+          const ready = emitReady(polish.apply(parsed.node), req.search.results.length === 0);
+          const node = req.ticker ? withoutCharts(ready) : ready;
           if (!node) return;
           if (isContent(node)) {
             if (contentNodes >= MAX_CONTENT_NODES) return;
