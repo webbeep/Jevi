@@ -154,4 +154,28 @@ describe('cascade rewrites', { concurrency: 1 }, () => {
       globalThis.fetch = orig;
     }
   });
+
+  for (const literal of ['empty', 'error'] as const) {
+    test(`an ${literal} literal search answers from the rewrites that already ran`, async () => {
+      clearDeadEngines();
+      const orig = globalThis.fetch;
+      globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (!String(input).includes('langsearch')) return Response.json({});
+        const q = askedQuery(init);
+        if (q === 'lebron preseason debut tonight') {
+          return literal === 'empty' ? Response.json({ code: 200, data: { webPages: { value: [] } } }) : new Response('boom', { status: 500 });
+        }
+        return langHits(q, 6);
+      };
+      try {
+        const later = Promise.resolve({ more: ['LeBron James preseason debut', 'LeBron preseason debut how to watch'], freshness: 'any' as Freshness });
+        const out = await cascadeWeb({ q: 'lebron preseason debut tonight', later, freshness: 'day', count: 10 }, LANG, newLedger());
+        assert.equal(out.engine, 'langsearch');
+        assert.equal(out.hits.length, 6);
+        assert.equal(out.more.length, 1);
+      } finally {
+        globalThis.fetch = orig;
+      }
+    });
+  }
 });

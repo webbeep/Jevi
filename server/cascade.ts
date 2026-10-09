@@ -486,9 +486,28 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUnt
       }
     }
     try {
-      const out = early ? await early.then((r) => { if (!r.ok) throw r.error; return r.value; }) : await step.run(q.q);
+      const lit: Settled = early ? await early : parallel?.length ? await settled(step.run(q.q)) : { ok: true, value: await step.run(q.q) };
+      const out = lit.ok ? lit.value : { hits: [], images: [] };
       let hits = out.hits.filter((h) => h.url && h.title);
       let images = out.images;
+      if (!hits.length && parallel?.length) {
+        // The rewrites already spent this ask's calls, so an empty literal search answers from them.
+        const rescued: { query: string; hits: WebHit[]; images: ImageResult[] }[] = [];
+        for (const p of parallel) {
+          const done = await p.task;
+          const extra = done.ok ? done.value.hits.filter((h) => h.url && h.title) : [];
+          if (extra.length) rescued.push({ query: p.text, hits: extra, images: done.ok ? done.value.images : [] });
+          else ledger.fellThrough.push(`${step.name}:also-${done.ok ? 'empty' : failureOf(done.error).reason}`);
+        }
+        if (rescued.length) {
+          ledger.fellThrough.push(`${step.name}:empty-literal-rescued`);
+          statuses.push({ name: step.name, ok: true, count: rescued.reduce((n, r) => n + r.hits.length, 0), ms: Date.now() - started });
+          const [lead, ...rest] = rescued;
+          const wikiHits = await takeWiki();
+          return { engine: step.name, hits: lead.hits, more: rest.map(({ query, hits }) => ({ query, hits })), wikiHits, images: rescued.flatMap((r) => r.images), statuses };
+        }
+      }
+      if (!lit.ok) throw lit.error;
       if (!hits.length) {
         ledger.fellThrough.push(`${step.name}:empty`);
         statuses.push({ name: step.name, ok: false, count: 0, ms: Date.now() - started, error: 'empty' });
