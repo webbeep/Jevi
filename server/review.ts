@@ -17,7 +17,7 @@ Flag only real errors that would mislead the reader:
 - a stated fact, number or date is not supported by the results, or is attributed to the wrong thing;
 - it carries over facts from the conversation that belong to a different subject;
 - two nodes show the same fact, number or chart (fix the later one with something else the results support, or a short text node).
-Style, wording, layout and missing nice-to-haves are not errors.
+Style, wording, layout and missing nice-to-haves are not errors. For a "today" or "latest" ask, anything from the past 36 hours is current: don't flag it, and don't warn that nothing is dated exactly today.
 Reply as JSON: {"verdict":"ok"|"fix","problems":[string],"fixes":[{"node":number,"replace":object}],"note":string}
 - problems: one short line per error, naming the node number.
 - fixes: for each wrong node you can correct from the results, a full replacement node in the same JSON shape as the original (same "type" when possible), with facts only from the results and citations like [2]. At most 3.

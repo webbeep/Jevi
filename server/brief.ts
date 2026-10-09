@@ -23,7 +23,7 @@ const SYSTEM = `You check web search results before an assistant answers from th
 Reply as JSON: {"goal": string, "use": number[], "stale": number[], "offTopic": number[], "conflicts": string[], "missing": string}
 - goal: one sentence naming what a right answer must give (e.g. "Bitcoin's current USD price and today's move", "Who Ed Chu of BlueFlame AI is and his role"). Use the conversation to resolve references.
 - use: result numbers that directly answer the goal and are current enough for it, best first.
-- stale: results whose information is outdated for this goal: an old price, last season's stats, a superseded version, news older than the ask allows. Judge by the result's date and content against today's date. An evergreen fact (a definition, a birth date) is not stale.
+- stale: results whose information is outdated for this goal: an old price, last season's stats, a superseded version, news older than the ask allows. Judge by the result's date and content against today's date. An evergreen fact (a definition, a birth date) is not stale. For a "today" or "latest" ask, the past 36 hours count as today.
 - offTopic: results about something else: another person or company with the same name, a different product, place or time period, or results that only share words with the ask.
 - conflicts: at most 3 short notes where results disagree on a fact that matters, naming the results and their dates, e.g. "[3] says 71,360 on Jun 2; live quote [1] says 82,290".
 - missing: what the person asked that no result answers, or "" when the results cover it.
