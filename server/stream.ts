@@ -33,7 +33,7 @@ import { type AskRef, refContext, withRef } from '../shared/askAbout';
 import type { EngineStatus, Freshness, ImageResult, SearchResponse, SearchResult } from '../shared/types';
 import { rewriteQuery } from './ai';
 import { type DesignRequest, designParallel, designStream, gateNode } from './design';
-import { briefSources } from './brief';
+import { BRIEF_ROWS, briefSources, remapBrief, type SourceBrief } from './brief';
 import { keepPictures, reviewCard } from './review';
 import { permitted } from './images';
 import { hasLlm } from './llm';
@@ -45,6 +45,9 @@ import { logAsk, mark, moreQueries, newLedger, queriesForAsk } from './budget';
 import { gateResults } from './relevanceGate';
 import { entityQuery, relaxQuery, tickerQueries } from './queryClean';
 import { type LateExtras, normalizeUrl, searchWithLate } from './search';
+import type { WebHit } from './cascade';
+import { domainOf } from './util';
+import { quoteAsk } from '../shared/quoteAsk';
 import { scholarlyResults, withScholarly } from './scholarly';
 import { videoResults, withVideos } from './videoSearch';
 import { guessFreshness, preferFresh, staleComplaint, stricter } from './freshness';
@@ -112,7 +115,18 @@ interface DesignArgs {
   entityHint?: (entity: string) => EntityHint | undefined;
   /** A price card's lead: the live price and chart, built from the quote feed. */
   ticker?: CardNode;
+  /** The source check, started on the literal search's rows while the rewrites were still searching. */
+  earlyBrief?: Promise<EarlyBrief | undefined>;
 }
+
+interface EarlyBrief {
+  brief: SourceBrief;
+  judged: SearchResult[];
+}
+
+const TICKER_SHOWN = 'a live price chart with the current price, today\'s intraday line and 1W to 5Y history from the quote feed';
+
+const webRow = (h: WebHit): SearchResult => ({ title: h.title, url: h.url, snippet: h.snippet, domain: domainOf(h.url), engines: ['web'], date: h.date, content: h.content });
 
 /**
  * T442: pictures for tiles and media rows the designer left blank. The card's one picture search is the
@@ -177,6 +191,8 @@ function askDetail(query: string, subject: string): string {
   return query.replace(/^\s*(who\s+is|who\s+was|who's)\s+/i, '').replace(/[?]+\s*$/, '').split(/\s+/).filter((w) => !names.has(w.toLowerCase().replace(/[^a-z'-]/g, ''))).join(' ').replace(/^[,\s-]+/, '').trim();
 }
 
+const QUOTE_EXTRAS_MS = 700;
+
 const WHO_ASK = /^\s*(who\s+is|who\s+was|who's)\b/i;
 
 /** The model's split of the rows into people when it finds at least two; the heuristic choices otherwise. */
@@ -198,7 +214,10 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   const chat = req.followup?.mode === 'chat';
   const budget = chat ? { count: 3, need: 0, budgetMs: 0 } : req.deep ? DEEP_PAGES : pageBudget(req.readPages);
   // The source check runs while pages are read, so it costs little or no extra time.
-  const briefing = newSearch && !chat ? briefSources({ query: req.query, intent: req.intent, context: req.context, results: req.search.results, isLive: isQuoteRow, shown: req.ticker ? 'a live price chart with the current price, today\'s intraday line and 1W to 5Y history from the quote feed' : undefined }, env) : undefined;
+  // Usually it already ran on the literal search's rows while the rewrites were searching.
+  const briefing = !newSearch || chat ? undefined
+    : req.earlyBrief ? req.earlyBrief.then((early) => early && remapBrief(early.brief, early.judged, req.search.results))
+    : briefSources({ query: req.query, intent: req.intent, context: req.context, results: req.search.results, isLive: isQuoteRow, shown: req.ticker ? TICKER_SHOWN : undefined }, env);
   const [pages, brief] = await Promise.all([collectPages(req.search.results, env, budget, late, scope).finally(() => mark(scope.ledger, 'pages')), briefing?.finally(() => mark(scope.ledger, 'brief'))]);
   if (brief) console.log(JSON.stringify({ zo: 'brief', use: brief.use.length, stale: brief.stale, offTopic: brief.offTopic, conflicts: brief.conflicts.length, missing: !!brief.missing }));
   const fresh = pages.filter((p) => !req.search.results[p.n - 1]?.content);
@@ -294,6 +313,18 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
 
   // Keyless, in parallel with the web search: a price ask is answered from the live quote, not old articles.
   const quoting = liveQuote(query).finally(() => mark(scope.ledger, 'quote'));
+  // The source check needs only rows, so it starts on the literal search's and overlaps the wait for the rewrites'.
+  let intentNow: string | undefined;
+  void understood.then((x) => { intentNow = x?.intent; });
+  let earlyBrief: Promise<EarlyBrief | undefined> | undefined;
+  const onLiteral = (hits: WebHit[]) => {
+    earlyBrief ??= quoting.then(async (quote) => {
+      const rows = [...(quote ? [quoteRow(quote)] : []), ...gateResults(query, hits.map(webRow)).kept].slice(0, BRIEF_ROWS);
+      const brief = await briefSources({ query, intent: intentNow, context, results: rows, isLive: isQuoteRow, shown: quote ? TICKER_SHOWN : undefined }, env);
+      mark(scope.ledger, 'brief');
+      return brief && { brief, judged: rows };
+    });
+  };
   const route = routeOf(query);
   scope.ledger.route = route;
   const deep = route === 'deep';
@@ -314,7 +345,8 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
       if (x) send('intent', { intent: x.intent, queries: x.queries });
       return { more: routeExtras(route, moreQueries(query, [...instant, ...extraQueries(query, x)])), freshness: freshness === 'any' ? x?.freshness ?? literalFresh : freshness };
     });
-    found = await searchWithLate({ q: queriesForAsk(query, []), more: routeExtras(route, moreQueries(query, instant)), later, freshness: literalFresh, count: 20, waitExtras: deep }, env, scope);
+    // A price ask is answered by the live quote; the rewrites only add the news around it.
+    found = await searchWithLate({ q: queriesForAsk(query, []), more: routeExtras(route, moreQueries(query, instant)), later, freshness: literalFresh, count: 20, waitExtras: deep, extrasCutMs: quoteAsk(query) ? QUOTE_EXTRAS_MS : undefined, onLiteral }, env, scope);
     mark(scope.ledger, 'found');
     u = await understood;
   } else {
@@ -579,7 +611,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   }
   send('search', results);
   const boost = imageBoost(pattern, results, env, scope, boostQuery);
-  await design(send, env, { query, pattern, depth: plan.depth, readPages: plan.readPages || deep || fromSeeds, search: results, context: designContext, intent: u?.intent, deep, boost, entityHint, ticker: quote ? tickerNode(quote) : undefined }, started, scope, late);
+  await design(send, env, { query, pattern, depth: plan.depth, readPages: plan.readPages || deep || fromSeeds, search: results, context: designContext, intent: u?.intent, deep, boost, entityHint, ticker: quote ? tickerNode(quote) : undefined, earlyBrief }, started, scope, late);
 }
 
 /**

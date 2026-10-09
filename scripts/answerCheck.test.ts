@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { readBrief, rejectedSources } from '../server/brief.ts';
+import { readBrief, rejectedSources, remapBrief } from '../server/brief.ts';
 import { keepPictures, readReview } from '../server/review.ts';
 import { corpusOf, gateNode, type DesignRequest } from '../server/design.ts';
 import { Grounding } from '../server/ground.ts';
@@ -71,6 +71,12 @@ describe('answer review', () => {
     assert.equal(readReview({ verdict: 'fix', problems: ['minor'], fixes: [], note: '' }, shown)?.ok, true);
   });
 
+  test('remarks about the card itself never reach the reader', () => {
+    const fix = [{ node: 1, replace: { type: 'text', text: 'Sony WH-CH720N, $98 [2]' } }];
+    assert.equal(readReview({ verdict: 'fix', problems: ['Node 1 lists premium models'], fixes: fix, note: 'The card mixes budget and premium models.' }, shown)?.note, undefined);
+    assert.equal(readReview({ verdict: 'fix', problems: ['Node 0 price is from June'], fixes: [], note: 'No result gives a price from today.' }, shown)?.note, 'No result gives a price from today.');
+  });
+
   test('unreadable replies are ignored', () => {
     assert.equal(readReview({ verdict: 'maybe' }, shown), undefined);
     assert.equal(readReview(undefined, shown), undefined);
@@ -131,5 +137,22 @@ describe('review fixes keep pictures', () => {
   test('a node of another type takes nothing', () => {
     const after = { type: 'text', text: 'x' };
     assert.equal(keepPictures({ type: 'profile', name: 'A', imageSrc: 'u' }, after), after);
+  });
+});
+
+describe('early source check', () => {
+  const row = (url: string) => ({ title: url, url: `https://${url}`, snippet: '', domain: url, engines: ['web'] });
+
+  test('renumbers onto the final rows and marks rows it never saw', () => {
+    const judged = [row('a.com/1'), row('b.com/2'), row('c.com/3')];
+    const final = [row('x.com/new'), row('c.com/3'), row('a.com/1'), row('b.com/2')];
+    const brief = { goal: 'g', use: [1, 3], stale: [2], offTopic: [], conflicts: ['[1] says 5; [2] says 6'], missing: 'today\'s price' };
+    assert.deepEqual(remapBrief(brief, judged, final), { goal: 'g', use: [3, 2], stale: [4], offTopic: [], conflicts: ['[3] says 5; [4] says 6'], missing: undefined, partial: true });
+  });
+
+  test('the same rows keep everything', () => {
+    const judged = [row('a.com'), row('b.com')];
+    const brief = { goal: 'g', use: [2], stale: [], offTopic: [1], conflicts: [], missing: 'x' };
+    assert.deepEqual(remapBrief(brief, judged, [judged[1]!, judged[0]!]), { goal: 'g', use: [1], stale: [], offTopic: [2], conflicts: [], missing: 'x' });
   });
 });

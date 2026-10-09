@@ -1,5 +1,6 @@
 import type { SearchResult } from '../shared/types';
 import { hasLlm, llmJson } from './llm';
+import { normalizeUrl } from './search';
 import type { Env } from './util';
 
 /** Sources the designer sees, numbered the same way (see `sourcesBlock`). */
@@ -17,6 +18,38 @@ export interface SourceBrief {
   conflicts: string[];
   /** What the person asked that no source answers. */
   missing?: string;
+  /** Some of the sources the card is written from were not judged (they arrived after the check ran). */
+  partial?: boolean;
+}
+
+/** A brief judged on `judged` (an early subset of the rows), renumbered for the rows the card is written from. */
+export function remapBrief(brief: SourceBrief, judged: SearchResult[], results: SearchResult[]): SourceBrief {
+  const at = new Map(results.slice(0, BRIEF_ROWS).map((r, i) => [normalizeUrl(r.url), i + 1]));
+  const map = (ns: number[]) => ns.flatMap((n) => {
+    const row = judged[n - 1];
+    const to = row && at.get(normalizeUrl(row.url));
+    return to ? [to] : [];
+  });
+  const seen = new Set(judged.map((r) => normalizeUrl(r.url)));
+  const partial = [...at.keys()].some((url) => !seen.has(url));
+  const conflicts = brief.conflicts.flatMap((c) => {
+    let lost = false;
+    const text = c.replace(/\[(\d+)\]/g, (_, n: string) => {
+      const [to] = map([Number(n)]);
+      if (!to) lost = true;
+      return `[${to}]`;
+    });
+    return lost ? [] : [text];
+  });
+  return {
+    goal: brief.goal,
+    use: map(brief.use),
+    stale: map(brief.stale),
+    offTopic: map(brief.offTopic),
+    conflicts,
+    missing: partial ? undefined : brief.missing,
+    ...(partial ? { partial } : {}),
+  };
 }
 
 const SYSTEM = `You check web search results before an assistant answers from them. Judge them against what the person actually wants, today's date and the conversation.

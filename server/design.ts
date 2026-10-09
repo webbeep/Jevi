@@ -224,7 +224,7 @@ function briefRules(req: DesignRequest): string {
   const refs = (ns: number[]) => ns.map((n) => `[${n}]`).join(' ');
   return [
     `- GOAL — a right answer gives: ${b.goal} Check every node against it; leave out anything that doesn't serve it.`,
-    b.use.length ? `- Answer from ${refs(b.use)} (checked: on-goal and current).` : '',
+    b.use.length ? (b.partial ? `- ${refs(b.use)} were checked as on-goal and current; other results may also serve the goal.` : `- Answer from ${refs(b.use)} (checked: on-goal and current).`) : '',
     b.stale.length ? `- ${refs(b.stale)} are outdated for this ask: never present their facts or numbers as current; leave them out.` : '',
     b.offTopic.length ? `- ${refs(b.offTopic)} are about something else (another person, product, place or period): never use them.` : '',
     b.conflicts.length ? `- Sources disagree: ${b.conflicts.join(' ')} Trust the live or newest authoritative source and date the figure you show.` : '',

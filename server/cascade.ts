@@ -42,6 +42,10 @@ interface Query {
   count: number;
   /** Always wait for `later` rewrites and their results (deep asks), even when the literal search already answered. */
   waitExtras?: boolean;
+  /** With a good literal search, how long its rewrites' results may still join. */
+  extrasCutMs?: number;
+  /** The literal search's rows, as soon as they land (before the rewrites' results). */
+  onLiteral?: (hits: WebHit[]) => void;
 }
 
 /** Gated literal hits that make the ask answerable without waiting on a slow intent read. */
@@ -506,7 +510,13 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUnt
     ledger.search[step.name] += 1;
     if (held) heldTried = true;
     const started = Date.now();
-    const early = q.later && KEYED.has(step.name) ? settled(step.run(q.q)).finally(() => mark(ledger, 'literal')) : undefined;
+    const early = q.later && KEYED.has(step.name)
+      ? settled(step.run(q.q)).then((r) => {
+          mark(ledger, 'literal');
+          if (r.ok && q.onLiteral && literalGood(r)) q.onLiteral(r.value.hits.filter((h) => h.url && h.title));
+          return r;
+        })
+      : undefined;
     const ready = early ? await extrasFor(early) : KEYED.has(step.name) ? await extrasReady : NO_EXTRAS;
     extras = ready.extras;
     mark(ledger, 'rewrites');
@@ -575,7 +585,7 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUnt
       };
       if (parallel) {
         // A good literal search never waits out a slow rewrite: what has not landed by the cut is dropped.
-        const cut = !q.waitExtras && parallel.length && literalGood({ ok: true, value: out }) ? sleep(EXTRA_RESULTS_WAIT_MS).then(() => 'late' as const) : undefined;
+        const cut = !q.waitExtras && parallel.length && literalGood({ ok: true, value: out }) ? sleep(q.extrasCutMs ?? EXTRA_RESULTS_WAIT_MS).then(() => 'late' as const) : undefined;
         for (const p of parallel) {
           const done = cut ? await Promise.race([p.task, cut]) : await p.task;
           if (done === 'late') {

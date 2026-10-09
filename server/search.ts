@@ -11,7 +11,7 @@ import type { AskScope } from './budget';
 import { newLedger } from './budget';
 import { searchTtlS } from '../shared/cacheTtl';
 import { cacheDb, packSearch, readSearchCache, searchCacheKey, writeSearchCache } from './cache';
-import { cascadeWeb } from './cascade';
+import { type WebHit, cascadeWeb } from './cascade';
 import { searchDegraded } from './degraded';
 import { diversify } from './diversify';
 import { gateResults } from './relevanceGate';
@@ -34,6 +34,10 @@ interface Query {
   lite?: boolean;
   /** Always wait for `later` rewrites (deep asks), even when the literal search already answered. */
   waitExtras?: boolean;
+  /** With a good literal search, how long its rewrites' results may still join. */
+  extrasCutMs?: number;
+  /** The literal search's rows, as soon as they land (not called on a cache hit). */
+  onLiteral?: (hits: WebHit[]) => void;
 }
 
 interface Hit {

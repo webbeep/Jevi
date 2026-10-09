@@ -22,7 +22,7 @@ Style, wording, layout and missing nice-to-haves are not errors. For a "today" o
 Reply as JSON: {"verdict":"ok"|"fix","problems":[string],"fixes":[{"node":number,"replace":object}],"note":string}
 - problems: one short line per error, naming the node number.
 - fixes: for each wrong node you can correct from the results, a full replacement node in the same JSON shape as the original (same "type" when possible), with facts only from the results and citations like [2]. At most 3.
-- note: when the card is misleading and the results can't fix it (e.g. no current figure, wrong person), one plain sentence telling the reader what is uncertain; otherwise "".
+- note: only when the results themselves leave the answer uncertain (no current figure, sources disagree, the person can't be identified): one plain sentence for the reader about that uncertainty. Never describe the card's own mistakes in the note (no "the card says…", "the card mixes…"): fix those nodes instead. Otherwise "".
 - verdict "ok" with empty problems, fixes and note when the card is right.`;
 
 interface Raw {
@@ -39,6 +39,8 @@ export interface Review {
   note?: string;
 }
 
+const SELF_REMARK = /\b(the|this) (card|answer)('s)?\b|\bnode \d/i;
+
 const NODE_CHARS = 900;
 const CARD_CHARS = 7000;
 
@@ -53,7 +55,9 @@ export function readReview(raw: Raw | undefined, indices: Set<number>): Review |
         .slice(0, 3)
         .map((f) => ({ index: f.node, node: f.replace }))
     : [];
-  const note = typeof raw.note === 'string' && raw.note.trim() ? raw.note.trim().replace(/\s+/g, ' ').slice(0, 240) : undefined;
+  const said = typeof raw.note === 'string' ? raw.note.trim().replace(/\s+/g, ' ').slice(0, 240) : '';
+  // A note about the card's own wording is an editor's remark, not something the reader should see.
+  const note = said && !SELF_REMARK.test(said) ? said : undefined;
   const ok = raw.verdict === 'ok' || (!fixes.length && !note);
   return { ok, problems, fixes: ok ? [] : fixes, note: ok ? undefined : note };
 }
