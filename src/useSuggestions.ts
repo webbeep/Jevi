@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { personalizedStarters } from '../shared/personal';
+import { personalizedStarters, readHistory, readRelated, relatedSubjects, writeRelated } from '../shared/personal';
 import {
   canShuffle,
   pickShown,
@@ -17,10 +17,19 @@ function load(width: number): { items: Suggestion[]; personalized: boolean } {
   }
 }
 
+/** Subjects of the newest asks that have no fresh related searches yet. */
+function missingRelated(): { key: string; query: string }[] {
+  try {
+    return relatedSubjects(readHistory(localStorage), readRelated(localStorage));
+  } catch {
+    return [];
+  }
+}
+
 /**
- * Home starters. Cold start is the curated Strategy set. Once this device has
- * ask history, the list is the on-device ranking (no network). Shuffle stays
- * off until the pool rule is met.
+ * Home starters. Cold start is the curated Strategy set. Once this device has ask history, the list
+ * is built on-device from the newest asks, then enriched with popular related searches for those
+ * subjects (the free suggest endpoint, cached 6h). Shuffle stays off until the pool rule is met.
  */
 export function useSuggestions(): {
   items: Suggestion[];
@@ -41,6 +50,24 @@ export function useSuggestions(): {
 
   useEffect(() => {
     setState(load(width));
+  }, [width, rev]);
+
+  useEffect(() => {
+    const subjects = missingRelated();
+    if (!subjects.length) return;
+    const ac = new AbortController();
+    void Promise.all(subjects.map(({ key, query }) =>
+      fetch(`/api/suggest-typeahead?q=${encodeURIComponent(query)}`, { signal: ac.signal })
+        .then((res) => res.json() as Promise<{ suggestions?: unknown }>)
+        .then((data) => {
+          const list = Array.isArray(data.suggestions) ? data.suggestions.filter((s): s is string => typeof s === 'string') : [];
+          writeRelated(localStorage, key, list);
+        })
+        .catch(() => undefined),
+    )).then(() => {
+      if (!ac.signal.aborted) setState(load(width));
+    });
+    return () => ac.abort();
   }, [width, rev]);
 
   const refresh = useCallback(() => setRev((n) => n + 1), []);

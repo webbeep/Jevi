@@ -8,14 +8,18 @@ import {
   TYPEAHEAD_CACHE_KEY,
   categorize,
   clearHistory,
+  computeItems,
+  readRelated,
+  relatedSubjects,
+  RELATED_KEY,
+  subjectOf,
+  writeRelated,
   personalizedStarters,
   readHistory,
   recordAsk,
   type Storage,
 } from '../shared/personal.ts';
 import { PASSING_TEXTS } from '../shared/starters.ts';
-
-const DAY = 24 * 60 * 60 * 1000;
 
 function memory(): Storage {
   const box = new Map<string, string>();
@@ -37,64 +41,53 @@ test('cold start returns the generic Strategy set and does not cache', () => {
   assert.equal(storage.getItem(STARTERS_CACHE_KEY), null);
 });
 
-test('history ranks starters by category and puts the last-ask follow-on first', () => {
+test('history personalizes from recent subjects with per-kind ideas, then generic fill', () => {
   const storage = memory();
   recordAsk(storage, 'best cheap headphones', 1_000);
-  recordAsk(storage, 'best robot vacuum under $200', 2_000);
+  recordAsk(storage, 'jaylen brown injuries', 2_000);
+  recordAsk(storage, 'why $rdw dropping', 3_000);
   assert.equal(categorize('should I lease or buy my next car'), 'decision');
-  assert.equal(readHistory(storage)[0].cat, 'shopping');
 
   const shown = personalizedStarters(storage, 1280, 5_000);
   assert.equal(shown.personalized, true);
   assert.equal(shown.items.length, 4);
-  assert.equal(shown.items[0].id, 'p-last');
-  assert.equal(shown.items[0].icon, 'history');
-  assert.equal(shown.items[0].text, 'compare top picks for best robot vacuum under $200');
-  assert.equal(shown.items[1].id, 'v2-earbuds-100');
-  assert.equal(shown.items[2].id, 'v2b-robot-vacuum-300');
-
-  const cached = JSON.parse(storage.getItem(STARTERS_CACHE_KEY) ?? '{}') as { at: number; items: { id: string }[] };
-  assert.equal(cached.at, 5_000);
-  assert.ok(cached.items.length >= 4);
-  const ids = cached.items.map((item) => item.id);
-  assert.ok(ids.indexOf('v2-earbuds-100') < ids.indexOf('v2b-robot-vacuum-300'));
-  assert.ok(ids.indexOf('v2b-robot-vacuum-300') < ids.indexOf('v2-airfryer-instantpot'));
+  const texts = shown.items.map((item) => item.text);
+  assert.equal(texts[0], 'RDW stock news today');
+  assert.ok(texts[1].startsWith('Jaylen Brown'), texts[1]);
+  assert.ok(texts[2].includes('best cheap headphones'), texts[2]);
+  assert.equal(shown.items[3].id, 'v2-earbuds-100');
+  assert.ok(!texts.some((t) => /injur/i.test(t)), 'does not re-suggest the topic already asked');
 });
 
-test('starter cache is reused within 24h and fewer than 5 new asks, then recomputed', () => {
-  const storage = memory();
-  recordAsk(storage, 'best cheap headphones', 1_000);
-  recordAsk(storage, 'best robot vacuum under $200', 2_000);
-  personalizedStarters(storage, 1280, 5_000);
-
-  recordAsk(storage, 'how to boil water', 3_000);
-  recordAsk(storage, 'how to fold a shirt', 4_000);
-  recordAsk(storage, 'how to iron a shirt', 5_000);
-  recordAsk(storage, 'how to sew a button', 6_000);
-  const reused = personalizedStarters(storage, 1280, 7_000);
-  const cached = JSON.parse(storage.getItem(STARTERS_CACHE_KEY) ?? '{}') as { at: number; asksAtCompute: number };
-  assert.equal(cached.at, 5_000);
-  assert.equal(cached.asksAtCompute, 2);
-  assert.equal(reused.items[1].id, 'v2-earbuds-100');
-
-  recordAsk(storage, 'how to jump a battery', 8_000);
-  const recomputed = personalizedStarters(storage, 1280, 9_000);
-  const next = JSON.parse(storage.getItem(STARTERS_CACHE_KEY) ?? '{}') as { at: number; asksAtCompute: number };
-  assert.equal(next.at, 9_000);
-  assert.equal(next.asksAtCompute, 7);
-  assert.equal(recomputed.items[0].id, 'p-last');
-  assert.equal(recomputed.items[0].text, 'how to jump a battery — common mistakes');
-  assert.equal(recomputed.items[1].id, 'v2-wine-stain');
+test('subjectOf pulls tickers, sports names, people, and general topics', () => {
+  assert.deepEqual(subjectOf('why $rdw dropping'), { subject: 'RDW', topic: 'dropping', kind: 'ticker' });
+  assert.deepEqual(subjectOf('jaylen brown injuries'), { subject: 'jaylen brown', topic: 'injuries', kind: 'sports' });
+  assert.equal(subjectOf('who is Ed chu').kind, 'person');
+  assert.equal(subjectOf('best cheap headphones').kind, 'general');
 });
 
-test('starter cache recomputes after 24 hours', () => {
+test('related searches lead each subject lane, skipping restated topics and other names', () => {
+  const history = [
+    { q: 'jaylen brown injuries', t: 2, cat: 'other' as const },
+    { q: 'who is Ed chu', t: 1, cat: 'other' as const },
+  ];
+  assert.deepEqual(relatedSubjects(history, {}).map((r) => r.key.toLowerCase()), ['jaylen brown', 'ed chu']);
+  const related = {
+    'jaylen brown': ['jaylen brown', 'jaylen brown injury', 'jaylen brown trade'],
+    'ed chu': ['ed chung', 'ed chu linkedin'],
+  };
+  const texts = computeItems(history, related, 4).map((item) => item.text);
+  assert.ok(texts.includes('Jaylen Brown trade'));
+  assert.ok(texts.includes('Ed Chu linkedin'));
+  assert.ok(!texts.some((t) => /chung|injury/i.test(t)));
+  assert.deepEqual(relatedSubjects(history, related), []);
+});
+
+test('related cache round-trips and expires after 6 hours', () => {
   const storage = memory();
-  recordAsk(storage, 'best cheap mug', 1_000);
-  personalizedStarters(storage, 1280, 10_000);
-  personalizedStarters(storage, 1280, 10_000 + DAY - 1);
-  assert.equal(JSON.parse(storage.getItem(STARTERS_CACHE_KEY) ?? '{}').at, 10_000);
-  personalizedStarters(storage, 1280, 10_000 + DAY);
-  assert.equal(JSON.parse(storage.getItem(STARTERS_CACHE_KEY) ?? '{}').at, 10_000 + DAY);
+  writeRelated(storage, 'RDW', ['rdw stock forecast'], 1_000);
+  assert.deepEqual(readRelated(storage, 2_000), { rdw: ['rdw stock forecast'] });
+  assert.deepEqual(readRelated(storage, 1_000 + 6 * 60 * 60 * 1000 + 1), {});
 });
 
 test('history is newest-first, deduped, and capped at 50', () => {
@@ -113,19 +106,21 @@ test('history is newest-first, deduped, and capped at 50', () => {
   assert.equal(storage.getItem(ASKCOUNT_KEY), '62');
 });
 
-test('clearHistory wipes history, starters, ask count, recents, and the typeahead key', () => {
+test('clearHistory wipes history, starters, related, ask count, recents, and the typeahead key', () => {
   const storage = memory();
   recordAsk(storage, 'best mug', 1);
   storage.setItem(RECENT_KEY, '["best mug"]');
   storage.setItem(TYPEAHEAD_CACHE_KEY, '{}');
-  personalizedStarters(storage, 1280, 10);
+  storage.setItem(STARTERS_CACHE_KEY, '{}');
+  writeRelated(storage, 'mug', ['mug warmer'], 5);
   assert.ok(storage.getItem(HISTORY_KEY));
-  assert.ok(storage.getItem(STARTERS_CACHE_KEY));
+  assert.ok(storage.getItem(RELATED_KEY));
   clearHistory(storage);
   assert.equal(storage.getItem(HISTORY_KEY), null);
   assert.equal(storage.getItem(STARTERS_CACHE_KEY), null);
   assert.equal(storage.getItem(ASKCOUNT_KEY), null);
   assert.equal(storage.getItem(RECENT_KEY), null);
   assert.equal(storage.getItem(TYPEAHEAD_CACHE_KEY), null);
+  assert.equal(storage.getItem(RELATED_KEY), null);
   assert.equal(personalizedStarters(storage, 1280, 20).personalized, false);
 });
