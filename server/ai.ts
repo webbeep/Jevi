@@ -18,27 +18,40 @@ export async function rewriteQuery(original: string, question: string, env: Env,
   const latest = askedQuestions(context)[0] ?? original;
   if (!hasLlm(env)) {
     const raw = question.toLowerCase().includes(latest.toLowerCase()) ? question : `${question} ${latest}`;
-    return keepEntity(sanitizeSearchQuery(raw, fromCard), context, fromCard);
+    return keepEntity(sanitizeSearchQuery(raw, fromCard), context, fromCard, question);
   }
   const { query } = await llmJson<{ query: string }>(
     env,
-    'Rewrite the follow-up into one standalone web search query (4-12 words) for what the person wants next. Keep the subject of the conversation and its qualifiers (dish, product, place, audience, budget, and what they asked about it: injuries, price, news, stats, schedule) unless the follow-up clearly changes topic; resolve references like "it" or "the cheaper one". A follow-up that only says which person or thing they meant keeps the earlier request: after "jaylen brown injuries", "the celtics one" means "Jaylen Brown Celtics injuries", not his profile. A short label such as "apple varieties" asked from a card about apple pie means "best apple varieties for apple pie". Never add website names, domains, or publication names to the query unless the person explicitly asked for that site. Reply as JSON: {"query": string}.',
+    'Rewrite the follow-up into one standalone web search query (4-12 words) for what the person wants next. Keep the subject of the conversation and its qualifiers (dish, product, place, audience, budget, and what they asked about it: injuries, price, news, stats, schedule) unless the follow-up clearly changes topic; resolve references like "it" or "the cheaper one". A follow-up that only says which person or thing they meant keeps the earlier request: after "jaylen brown injuries", "the celtics one" means "Jaylen Brown Celtics injuries", not his profile. A short label such as "apple varieties" asked from a card about apple pie means "best apple varieties for apple pie". If the follow-up names a different person, company or thing, or says the earlier person was the wrong one, search what it names and do not carry the earlier person or their details into the query. Never add website names, domains, or publication names to the query unless the person explicitly asked for that site. Reply as JSON: {"query": string}.',
     `Conversation started with: ${original}\n${latest && latest !== original ? `Most recent request: ${latest}\n` : ''}${context ? `Conversation so far:\n${context}\n` : ''}${fromCard ? `Asked from the card: ${fromCard}\n` : ''}Follow-up: ${question}`,
     80,
   );
-  return keepEntity(sanitizeSearchQuery(query?.trim() || question, fromCard), context, fromCard);
+  return keepEntity(sanitizeSearchQuery(query?.trim() || question, fromCard), context, fromCard, question);
 }
 
 /**
  * T444: a thread that chose a person keeps them. When the context carries a
  * `Chosen person:` line but the rewrite dropped the surname, name them again.
  */
-function keepEntity(query: string, context: string, fromCard?: string): string {
+function keepEntity(query: string, context: string, fromCard?: string, question = ''): string {
   const prior = priorEntity(context);
-  if (!prior) return query;
+  if (!prior || movesOn(question, prior.name)) return query;
   const surname = prior.name.split(/\s+/).pop()?.toLowerCase();
   if (!surname || query.toLowerCase().includes(surname)) return query;
   return sanitizeSearchQuery(`${query} ${prior.name}`, fromCard);
+}
+
+const BACK_REF = /\b(he|she|him|his|her|hers|they|them|their|this person|same person)\b/i;
+
+/**
+ * The follow-up turns to someone or something else ("who runs Datasite?", "what about Joe Lacob"):
+ * it names a capitalised thing that is not the chosen person, and never points back at them.
+ */
+export function movesOn(question: string, person: string): boolean {
+  if (BACK_REF.test(question)) return false;
+  const own = new Set(person.toLowerCase().split(/\s+/));
+  const words = question.trim().split(/\s+/).slice(1).map((w) => w.replace(/[^A-Za-z0-9'’-]/g, ''));
+  return words.some((w) => /^[A-Z][A-Za-z0-9'’-]+$/.test(w) && !own.has(w.toLowerCase()));
 }
 
 const SLOTS: Record<SlotKind, string> = {

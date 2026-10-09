@@ -42,3 +42,9 @@ export function threadPerson(original: string, context?: string): string {
 
 /** Conversation context without the earlier `Chosen person:` lock, which named the person now ruled out. */
 export const withoutChosen = (context?: string) => context?.replace(/^Chosen person:.*$\n?/gm, '').trim() || undefined;
+
+/**
+ * Context for a search about a newly picked person: the thread's topic line only. Earlier cards
+ * describe whoever was on screen before, and a card writer short of sources borrows their facts.
+ */
+export const topicOnly = (context?: string) => context?.split('\n').find((line) => line.startsWith('Topic:'))?.trim() || undefined;

@@ -46,7 +46,7 @@ import { scholarlyResults, withScholarly } from './scholarly';
 import { videoResults, withVideos } from './videoSearch';
 import { guessFreshness, preferFresh, staleComplaint, stricter } from './freshness';
 import { splitPeople } from './peopleSplit';
-import { personSteer, threadPerson, withoutChosen } from './personSteer';
+import { personSteer, threadPerson, topicOnly, withoutChosen } from './personSteer';
 import type { Send } from './sse';
 import { extraQueries, understand } from './understand';
 import { cacheBypass, testForce, validTestToken, wantsRefresh } from './token';
@@ -352,8 +352,12 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     }
     if (!results.results.length && seedRows?.length) {
       // A tapped chip names something the card on screen already cited: answer from those rows, not a dead end.
-      const term = ((isPersonAsk(query) ? personSubject(query) : '') || entityQuery(query) || query).toLowerCase();
-      const cited = seedRows.filter((row) => `${row.title} ${row.snippet}`.toLowerCase().includes(term));
+      // A person + detail only takes rows about that very person, never a namesake's that shares the name.
+      const person = isPersonAsk(query) ? personSubject(query) : '';
+      const term = (person || entityQuery(query) || query).toLowerCase();
+      const cited = person && distinguishingTerms(query).length
+        ? seedRows.filter((row) => personSourceOk(query, row))
+        : seedRows.filter((row) => `${row.title} ${row.snippet}`.toLowerCase().includes(term));
       if (cited.length) {
         results = { ...results, results: cited, knowledge: undefined };
         fromSeeds = true;
@@ -541,19 +545,22 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
     const picked = req.question.trim();
     // A Which-one? pick keeps what the ask was about ("jaylen brown injuries" → that person's injuries, not
     // their profile): search the person and the topic, with the pick locked as the thread's chosen person.
-    const topic = isPersonAsk(picked) ? pickTopic(picked, [...askedQuestions(req.context), req.original]) : '';
+    const person = isPersonAsk(picked);
+    const topic = person ? pickTopic(picked, [...askedQuestions(req.context), req.original]) : '';
+    // A picked person starts clean: the cards before it were about someone else or a list of people.
+    const pickContext = person ? [topicOnly(req.context), refLine].filter(Boolean).join('\n') || undefined : context;
     if (topic) {
       const query = pickTopicQuery(picked, topic);
       const label = pickSeeds(picked, req.search?.results ?? []).label;
       const chosen = `Chosen person: ${personSubject(picked)}${label ? ` — ${label}` : ''}`;
       send('rewrite', { query });
-      await searchAndDesign(send, env, query, 'any', [chosen, context].filter(Boolean).join('\n'), started, scope, true, req.search?.results);
+      await searchAndDesign(send, env, query, 'any', [chosen, pickContext].filter(Boolean).join('\n'), started, scope, true, req.search?.results);
       return;
     }
     const query = picked;
     send('rewrite', { query });
     // EN4 part 8: the rows that produced these choices come along, so the pick never comes back empty.
-    await searchAndDesign(send, env, query, 'any', context, started, scope, true, req.search?.results);
+    await searchAndDesign(send, env, query, 'any', pickContext, started, scope, true, req.search?.results);
     return;
   }
 
@@ -562,7 +569,7 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
   const steer = req.intent !== 'adjust' ? personSteer(req.question) : undefined;
   const person = steer ? threadPerson(req.original, req.context) : '';
   if (steer && person) {
-    const base = withoutChosen(context);
+    const base = topicOnly(withoutChosen(context));
     if (steer.kind === 'narrow') {
       const query = `${person}, ${steer.detail}`;
       send('rewrite', { query });

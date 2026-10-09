@@ -187,10 +187,16 @@ export function contextTerms(query: string, name = personSubject(query)): string
   const nameSet = new Set(tokens(name));
   const raw = query.trim().replace(/\?+\s*$/, '').replace(WHO_IS, '').replace(ABOUT, '').replace(LEAD_Q, '');
   const words = raw.split(/\s+/).map(cleanWord).filter(Boolean);
+  // "Ed Chu, bf ai": everything after the comma is the detail the asker typed, whatever its case.
+  const typed = raw.trim().toLowerCase().startsWith(`${name.toLowerCase()},`);
   const out: string[] = [];
   for (const w of words) {
     const t = tokens(w)[0];
     if (!t || nameSet.has(t) || COMMON.has(t)) continue;
+    if (typed && t.length >= 2 && !SPORTS_LEAGUE.test(w)) {
+      if (!out.includes(t)) out.push(t);
+      continue;
+    }
     // CamelCase orgs (BlueFlame) or short org tails (AI, Inc) — not NBA/NFL alone.
     // Sports leagues (NBA) are season context, not identity — requiring them dropped the
     // Nique Clifford Wikipedia bio from a preseason ask.
@@ -320,19 +326,26 @@ export function personSourceOk(query: string, row: EntityRow, name = personSubje
   if (!need.length) return true;
   const raw = `${row.title ?? ''} ${row.snippet ?? ''}`;
   const body = new Set(tokens(`${raw} ${row.url ?? ''}`));
-  const short = need.some((t) => t.length <= 4) ? initialisms(raw) : new Set<string>();
+  // A short detail's other words must sit right after the match ("bf ai" -> "Blueflame AI"), so an
+  // author list's "Bernd Fischer" never reads as "bf".
+  const tails = new Set(ctx.filter((t) => !need.includes(t)));
+  const short = need.some((t) => t.length <= 4) ? initialisms(raw, tails) : new Set<string>();
   return need.some((t) => body.has(t) || (t.length >= 5 && [...body].some((w) => w.includes(t))) || (t.length <= 4 && short.has(t)));
 }
 
-/** Initials a short detail may stand for: "BlueFlame" and "Blue Flame" both give "bf". */
-export function initialisms(text: string): Set<string> {
+/**
+ * Initials a short detail may stand for. CamelCase always counts ("BlueFlame" -> "bf"); a run of
+ * capitalised words ("Blue Flame") or one word read by its letters ("Blueflame") only counts when the
+ * next word is one of `tails`, the detail's other words ("bf ai" needs "… AI" right after).
+ */
+export function initialisms(text: string, tails: ReadonlySet<string> = new Set()): Set<string> {
   const out = new Set<string>();
   const words = text.split(/[^A-Za-z0-9]+/).filter(Boolean);
-  for (const w of words) {
+  const tailAt = (i: number) => tails.has((words[i] ?? '').toLowerCase());
+  for (const [i, w] of words.entries()) {
     const caps = w.match(/[A-Z][a-z0-9]*/g);
     if (caps && caps.length >= 2 && caps.length <= 4) out.add(caps.map((c) => c[0]).join('').toLowerCase());
-    // "Blueflame" written as one word still reads as "bf": first letter plus a later letter, in order.
-    if (/^[A-Z][a-z]{4,}$/.test(w)) {
+    if (/^[A-Z][a-z]{4,}$/.test(w) && tailAt(i + 1)) {
       const lw = w.toLowerCase();
       for (let k = 2; k < lw.length; k++) out.add(lw[0]! + lw[k]!);
     }
@@ -341,7 +354,7 @@ export function initialisms(text: string): Set<string> {
     let acc = '';
     for (let j = i; j < Math.min(i + 4, words.length) && /^[A-Z]/.test(words[j]!); j++) {
       acc += words[j]![0]!.toLowerCase();
-      if (acc.length >= 2) out.add(acc);
+      if (acc.length >= 2 && tailAt(j + 1)) out.add(acc);
     }
   }
   return out;

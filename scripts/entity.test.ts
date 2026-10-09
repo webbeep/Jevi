@@ -1043,3 +1043,16 @@ test('"Name, detail" is a person ask even when the pages scatter the name words'
   assert.equal(isBlockedHost('https://pornozavr.net/video/1'), true);
   assert.equal(isBlockedHost('https://www.essexlive.news/story'), false);
 });
+
+test('a lowercase detail after "Name," picks that person, never a namesake on an author list', () => {
+  const blueflame: EntityRow = { title: 'About Blueflame AI | Our Mission & Team', url: 'https://www.blueflame.ai/about', snippet: 'Ed Chu, Chief Technology Officer at Blueflame AI, brings decades' };
+  const scientist: EntityRow = { title: 'Edward Chu - collaboration distance', url: 'https://csauthors.net/edward-chu', snippet: 'Edward Chu, Bernd Fischer, Alan Ford: collaborative sensor grids framework (2008)' };
+  const oncologist: EntityRow = { title: 'Ed Chu - Oncologist', url: 'https://x.org/a', snippet: 'Dr. Ed Chu, cancer center director at Montefiore' };
+  assert.deepEqual(contextTerms('Ed Chu, bf ai'), ['bf', 'ai']);
+  assert.equal(personSourceOk('Ed Chu, bf ai', blueflame), true);
+  assert.equal(personSourceOk('Ed Chu, bf ai', scientist), false);
+  assert.equal(personSourceOk('Ed Chu, bf ai', oncologist), false);
+  assert.equal(personSourceOk('Ed Chu, blueflame ai', blueflame), true);
+  assert.equal(personSourceOk('Ed Chu, blueflame ai', scientist), false);
+  assert.equal(personSourceOk('Ed Chu, montefiore', oncologist), true);
+});
