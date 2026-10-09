@@ -430,10 +430,11 @@ export function Tile({ node }: { node: Of<'tile'> }) {
           isVerdict(node.value) ? 'min-h-[2lh] items-start' : 'items-center',
         )}
       >
+        {!slot && !img && !pending && !isVerdict(node.value) && <Icon name={icon} className="size-3.5 shrink-0 text-foreground/60" />}
         <span className="line-clamp-2 min-w-0 text-pretty [overflow-wrap:anywhere]">{plain(node.label)}</span>
         {link && <span className="-my-[3px] shrink-0"><SourceChip result={link} n={node.source!} /></span>}
       </span>
-      {!slot && !img && !pending && <Icon name={icon} className="pointer-events-none relative size-[18px] text-foreground/70 sm:size-5" />}
+      {!slot && !img && !pending && isVerdict(node.value) && <Icon name={icon} className="pointer-events-none relative size-[18px] text-foreground/70 sm:size-5" />}
       {node.value && <span className="pointer-events-none relative max-w-full text-[15px] font-semibold tracking-tight [overflow-wrap:anywhere] sm:text-base">{plain(node.value)}</span>}
       {node.sub && <span className="pointer-events-none relative text-[11px] leading-tight text-muted-foreground"><RichText text={node.sub} inline noLinks /></span>}
     </div>
@@ -794,43 +795,58 @@ export function Profile({ node }: { node: Of<'profile'> }) {
   const box: Box = { kind: 'profile', label: node.name, value: node.subtitle, entity: node.name };
   const nameAsk = askQuestion(box);
   const nameRef: AskRef = { label: node.name, value: node.subtitle, entity: node.name };
+  // The card header already says the name: the profile then leads with what it adds.
+  const repeatsTitle = sameName(useContext(CardTitle), node.name);
   return (
-    <div className="flex items-center gap-3 sm:gap-4">
-      <span className="relative shrink-0">
-        <Avatar className="size-16 rounded-2xl border sm:size-20">
+    <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-3 sm:gap-x-4">
+      <span className="relative shrink-0 sm:row-span-2 sm:self-start">
+        <Avatar className="size-14 rounded-2xl border sm:size-20">
           {img && <AvatarImage src={img} alt={node.name} className="object-cover" />}
           <AvatarFallback className="rounded-2xl text-xl">{initials(node.name)}</AvatarFallback>
         </Avatar>
         {img && <PhotoCredit src={img} className="bottom-1 left-1/2 -translate-x-1/2" />}
       </span>
-      <div className="min-w-0 flex-1">
-        <div className="relative">
-          <ItemButton ask={nameAsk} askRef={nameRef} className="absolute inset-0 rounded-[inherit] cursor-pointer" />
-          <div className="pointer-events-none relative">
-            <div className="text-xl font-semibold tracking-tight">{node.name}</div>
-            {node.subtitle && <div className="text-sm text-muted-foreground">{node.subtitle}</div>}
-          </div>
+      <div className="relative min-h-11 min-w-0 content-center">
+        <ItemButton ask={nameAsk} askRef={nameRef} className="absolute inset-0 rounded-[inherit] cursor-pointer" />
+        <div className="pointer-events-none relative">
+          {repeatsTitle && node.subtitle ? (
+            <div className="text-pretty text-[15px] font-medium leading-snug text-foreground/85">{node.subtitle}</div>
+          ) : (
+            <>
+              <div className="text-lg font-semibold leading-tight tracking-tight sm:text-xl">{node.name}</div>
+              {node.subtitle && <div className="mt-0.5 text-pretty text-sm leading-snug text-muted-foreground">{node.subtitle}</div>}
+            </>
+          )}
         </div>
-        {node.facts && node.facts.length > 0 && (
-          <div className="mt-1 flex flex-wrap gap-x-4 text-sm">
-            {node.facts.map((f) => {
-              const fact: Box = { kind: 'fact', label: f.label, value: f.value, entity: node.name };
-              const ask = askQuestion(fact);
-              const ref: AskRef = { label: f.label, value: f.value, entity: node.name };
-              return (
-                // T453: ≥44×44 tap target per fact (rows sit flush, so neighbours never overlap).
-                <span key={f.label} className="relative inline-flex min-h-11 min-w-11 items-center">
-                  <ItemButton ask={ask} askRef={ref} className="absolute inset-0 rounded-[inherit] cursor-pointer" />
-                  <span className="pointer-events-none relative"><span className="text-muted-foreground">{f.label}</span> <span className="font-medium">{f.value}</span></span>
-                </span>
-              );
-            })}
-          </div>
-        )}
       </div>
+      {node.facts && node.facts.length > 0 && (
+        <dl className="col-span-2 grid grid-cols-2 gap-x-3 sm:col-span-1 sm:col-start-2">
+          {node.facts.map((f) => {
+            const fact: Box = { kind: 'fact', label: f.label, value: f.value, entity: node.name };
+            const ask = askQuestion(fact);
+            const ref: AskRef = { label: f.label, value: f.value, entity: node.name };
+            return (
+              // T453: ≥44×44 tap target per fact (rows sit flush, so neighbours never overlap).
+              <div key={f.label} className={cn('relative flex min-h-11 min-w-0 flex-col justify-center py-1', f.value.length > 22 && 'col-span-2')}>
+                <ItemButton ask={ask} askRef={ref} className="absolute inset-0 rounded-[inherit] cursor-pointer" />
+                <dt className="pointer-events-none relative truncate text-xs text-muted-foreground">{f.label}</dt>
+                <dd className="pointer-events-none relative text-pretty text-sm font-medium leading-snug [overflow-wrap:anywhere]">{f.value}</dd>
+              </div>
+            );
+          })}
+        </dl>
+      )}
     </div>
   );
 }
+
+/** The card header's title, so a body node can skip repeating it. */
+export const CardTitle = createContext('');
+
+const sameName = (a: string, b: string) => {
+  const key = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '');
+  return !!a && key(a) === key(b);
+};
 
 export function Actions({ node }: { node: Of<'actions'> }) {
   const { onSearch, onAsk, onRefine } = useCard();
