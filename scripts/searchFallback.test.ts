@@ -261,4 +261,32 @@ describe('search fallback', { concurrency: 1 }, () => {
       clearDeadEngines();
     }
   });
+
+  test('a long off-topic fallback list gets a second opinion from the next engine, and the stronger list leads', async () => {
+    clearDeadEngines();
+    const orig = globalThis.fetch;
+    globalThis.fetch = async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('api.langsearch.com')) {
+        const value = Array.from({ length: 10 }, (_, i) => ({ name: `Type-safe Python tips ${i}`, url: `https://py${i}.example/`, snippet: 'Static typing in Python with mypy.' }));
+        return Response.json({ code: 200, data: { webPages: { value } } });
+      }
+      if (url.includes('api.tavily.com')) {
+        return Response.json({ results: [1, 2, 3].map((i) => ({ title: `TypeSafe raises $870M funding round ${i}`, url: `https://news${i}.example/typesafe`, content: 'TypeSafe AI closed an $870M funding round.' })) });
+      }
+      return new Response('no', { status: 500 });
+    };
+    try {
+      const env = { SEARCH_ORDER: 'langsearch,tavily', LANGSEARCH_API_KEY: 'l', TAVILY_API_KEY: 't' } as Env;
+      const ledger = newLedger();
+      const out = await cascadeWeb({ q: 'TypeSafe $870M funding round', freshness: 'any', count: 8 }, env, ledger);
+      assert.equal(out.engine, 'tavily');
+      assert.ok(out.hits[0]?.title.startsWith('TypeSafe raises'));
+      assert.equal(out.more.some((m) => m.hits.some((h) => h.url.includes('py0'))), true);
+      assert.ok(ledger.fellThrough.includes('tavily:second-opinion'));
+    } finally {
+      globalThis.fetch = orig;
+      clearDeadEngines();
+    }
+  });
 });

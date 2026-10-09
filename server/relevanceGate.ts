@@ -232,3 +232,10 @@ export function gateResults<T extends GateHit>(query: string, rows: readonly T[]
   }
   return { kept, dropped: rows.length - kept.length };
 }
+
+/** Rows that clearly match the question (not ones kept only because most of the list scored low). */
+export function strongCount(query: string, rows: readonly GateHit[]): number {
+  const { kept } = gateResults(query, rows);
+  const profile = termsOf(query);
+  return kept.filter((row) => judge(profile, row).pass).length;
+}

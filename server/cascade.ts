@@ -5,7 +5,7 @@ import { SEARCH_ENGINES, callCap, type CallLedger, type SearchEngine, engineDead
 import { loadSkips, tripSkip } from './engineSkip';
 import { SERPER_IMAGES_SHARE, takeSlot, type CapBucket } from './providerCap';
 import { HttpStatusError, type Env, clip, domainOf, fetchJson } from './util';
-import { gateResults } from './relevanceGate';
+import { gateResults, strongCount } from './relevanceGate';
 import { fetchWikiSearch } from './wikiSearch';
 import { youKeyedSearch, youKeylessSearch, youKeyPresent } from './youSearch';
 
@@ -46,6 +46,10 @@ interface Query {
 
 /** Gated literal hits that make the ask answerable without waiting on a slow intent read. */
 const LITERAL_OK = 4;
+/** Below this many clearly on-topic rows, a fallback engine's answer gets a second opinion from the next engine. */
+const SECOND_OPINION_MIN = 3;
+/** A thin list is an honest answer; a long one with few on-topic rows is the engine matching anything. */
+const NOISY_ROWS = 8;
 /** With a good literal search, rewrites still join if the intent read lands this soon after the cascade starts. */
 const EXTRAS_WAIT_MS = 1200;
 /** With a good literal search, a rewrite's results are used only if they arrive this soon after the literal ones. */
@@ -447,11 +451,41 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUnt
     return left > 0 ? Promise.race([extrasReady, sleep(left).then(() => upfront)]) : upfront;
   };
 
+  // Past Serper, a fallback engine answers almost anything with 20 rows; when few of them are on topic
+  // the next engine is asked too (one extra call) and the stronger list leads.
+  let held: { result: CascadeResult; strong: number } | undefined;
+  // The second opinion is one engine, never a walk down to the paid ones.
+  let heldTried = false;
+  const strongOf = (r: CascadeResult) => strongCount(q.q, [...r.hits, ...r.more.flatMap((m) => m.hits)]);
+  const finish = (result: CascadeResult, name: string): CascadeResult | undefined => {
+    const strong = strongOf(result);
+    if (held) {
+      const [lead, next] = strong > held.strong ? [result, held.result] : [held.result, result];
+      ledger.fellThrough.push(`${name}:second-opinion`);
+      return {
+        engine: lead.engine,
+        hits: lead.hits,
+        more: [...lead.more, { query: q.q, hits: next.hits }, ...next.more],
+        wikiHits: lead.wikiHits.length ? lead.wikiHits : next.wikiHits,
+        images: [...lead.images, ...next.images],
+        statuses,
+      };
+    }
+    const rows = result.hits.length + result.more.reduce((n, m) => n + m.hits.length, 0);
+    if (name === 'serper' || name === 'wikipedia' || strong >= SECOND_OPINION_MIN || rows < NOISY_ROWS) return result;
+    held = { result, strong };
+    ledger.bonus = (ledger.bonus ?? 0) + 1;
+    return undefined;
+  };
+
   for (const step of steps) {
     if (!step.enabled) continue;
+    if (held && heldTried) break;
     if (step.name === 'wikipedia' && wikiTask) {
+      if (held) heldTried = true;
       const hits = await takeWiki();
-      if (hits.length) return { engine: 'wikipedia', hits, more: [], wikiHits: [], images: [], statuses };
+      if (hits.length) return held ? finish({ engine: 'wikipedia', hits, more: [], wikiHits: [], images: [], statuses }, 'wikipedia')! : { engine: 'wikipedia', hits, more: [], wikiHits: [], images: [], statuses };
+      if (held) break;
       continue;
     }
     if (blocked(step.name)) {
@@ -469,6 +503,7 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUnt
       continue;
     }
     ledger.search[step.name] += 1;
+    if (held) heldTried = true;
     const started = Date.now();
     const early = q.later && KEYED.has(step.name) ? settled(step.run(q.q)) : undefined;
     const ready = early ? await extrasFor(early) : KEYED.has(step.name) ? await extrasReady : NO_EXTRAS;
@@ -506,7 +541,9 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUnt
           statuses.push({ name: step.name, ok: true, count: rescued.reduce((n, r) => n + r.hits.length, 0), ms: Date.now() - started });
           const [lead, ...rest] = rescued;
           const wikiHits = await takeWiki();
-          return { engine: step.name, hits: lead.hits, more: rest.map(({ query, hits }) => ({ query, hits })), wikiHits, images: rescued.flatMap((r) => r.images), statuses };
+          const done = finish({ engine: step.name, hits: lead.hits, more: rest.map(({ query, hits }) => ({ query, hits })), wikiHits, images: rescued.flatMap((r) => r.images), statuses }, step.name);
+          if (done) return done;
+          continue;
         }
       }
       if (!lit.ok) throw lit.error;
@@ -555,7 +592,8 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUnt
       }
       statuses.push({ name: step.name, ok: true, count: hits.length + more.reduce((n, list) => n + list.hits.length, 0), ms: Date.now() - started });
       const wikiHits = KEYED.has(step.name) ? await takeWiki() : [];
-      return { engine: step.name, hits, more, wikiHits, images, statuses };
+      const done = finish({ engine: step.name, hits, more, wikiHits, images, statuses }, step.name);
+      if (done) return done;
     } catch (err) {
       const failure = failureOf(err);
       await noteFailure(step.name, failure, true);
@@ -564,6 +602,7 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUnt
       if (!failure.fall) break;
     }
   }
+  if (held) return { ...held.result, statuses };
   if (wikiTask && !wikiReported) {
     const hits = await takeWiki();
     if (hits.length) return { engine: 'wikipedia', hits, more: [], wikiHits: [], images: [], statuses };
