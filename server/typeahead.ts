@@ -1,42 +1,34 @@
 /**
- * Prefix completions for the home input. Workers AI when the binding is
- * present; isolate LRU + Cache API in front. Failures return an empty list
- * so the client can fall back to history and starters.
+ * Prefix completions for the home input, from the public search-suggest endpoints
+ * (Google, DuckDuckGo as a hedge). No model call and no key: ~100-300 ms and free.
+ * Isolate LRU + Cache API in front. Failures return an empty list so the client
+ * falls back to history and starters.
  */
 import { normalizePrefix } from '../shared/typeahead.ts';
-import { canSpend, charge, charsToTokens, estimateNeurons, neuronsFromResponse, releaseBudget } from './aiBudget.ts';
-import { isQuotaError, markWorkersAiQuota, nextUtcMidnight, workersAiQuotaDown } from './aiQuota.ts';
-import type { Env } from './util';
+import { UA, type Env } from './util';
 
 export { normalizePrefix };
 
-const DEFAULT_MODEL = '@cf/meta/llama-3.2-1b-instruct';
-const AI_TIMEOUT_MS = 800;
+const PROVIDER_TIMEOUT_MS = 900;
+const HEDGE_MS = 150;
 const MEM_MAX = 500;
+const MAX_SUGGESTIONS = 6;
 
 export interface TypeaheadResponse {
   suggestions: string[];
-  source: 'ai' | 'cache' | 'none';
+  source: 'web' | 'cache' | 'none';
   ms: number;
-  /** Why AI gave nothing (timeout, error class/message, empty parse). No secrets: provider error text only. */
+  /** Why nothing came back (off, timeout, provider error). Provider error text only. */
   reason?: string;
 }
 
-interface AiBinding {
-  run(model: string, input: Record<string, unknown>): Promise<unknown>;
-}
+type Fetch = typeof fetch;
 
 const mem = new Map<string, string[]>();
 
-/** After a quota error (4006: daily free neurons used) skip AI until the next 00:00 UTC reset; other errors back off 60s. */
-let aiDownUntil = 0;
-function markAiDown(why: string, now = Date.now()) {
-  if (isQuotaError(why)) {
-    markWorkersAiQuota(now);
-    aiDownUntil = nextUtcMidnight(now);
-  } else if (why !== 'timeout') {
-    aiDownUntil = now + 60_000;
-  }
+/** Clears the isolate cache (unit tests). */
+export function resetTypeaheadCache(): void {
+  mem.clear();
 }
 
 function memGet(key: string): string[] | undefined {
@@ -59,51 +51,79 @@ function memSet(key: string, value: string[]) {
 }
 
 function cacheKey(prefix: string): string {
-  return `https://typeahead.cache/v1?q=${encodeURIComponent(prefix)}`;
+  return `https://typeahead.cache/v2?q=${encodeURIComponent(prefix)}`;
 }
 
 function none(t0: number, reason?: string): TypeaheadResponse {
   return { suggestions: [], source: 'none', ms: Date.now() - t0, ...(reason ? { reason: reason.slice(0, 160) } : {}) };
 }
 
-function stripLine(line: string): string {
-  let s = line.trim();
-  s = s.replace(/^\d+[.)\-:\]]\s*/, '');
-  s = s.replace(/^[-*•–—]\s*/, '');
-  s = s.replace(/^["'“”‘’]+/, '').replace(/["'“”‘’]+$/, '');
-  return s.trim().replace(/\s+/g, ' ');
-}
-
-/** Split a model reply into 3–5 cleaned completions. Exported for unit tests. */
-export function parseAiLines(text: string, prefix: string): string[] {
+/**
+ * The OpenSearch suggestion shape both providers answer with: `[query, [s1, s2, ...], ...]`.
+ * Cleaned, deduped case-insensitively, the exact prefix dropped. Exported for unit tests.
+ */
+export function parseSuggest(data: unknown, prefix: string): string[] {
+  if (!Array.isArray(data) || !Array.isArray(data[1])) return [];
   const p = normalizePrefix(prefix);
   const seen = new Set<string>();
-  const cleaned: string[] = [];
-  for (const line of text.split(/\r?\n/)) {
-    let s = stripLine(line);
-    if (!s) continue;
-    if (s.length > 80) s = s.slice(0, 80).trimEnd();
-    const key = s.toLowerCase();
-    if (!key || key === p || seen.has(key)) continue;
+  const out: string[] = [];
+  for (const raw of data[1] as unknown[]) {
+    const item = typeof raw === 'string' ? raw : raw && typeof raw === 'object' && typeof (raw as { phrase?: unknown }).phrase === 'string' ? (raw as { phrase: string }).phrase : '';
+    const text = item.replace(/\s+/g, ' ').trim();
+    const key = text.toLowerCase();
+    if (!text || text.length > 80 || key === p || seen.has(key)) continue;
     seen.add(key);
-    cleaned.push(s);
+    out.push(text);
+    if (out.length >= MAX_SUGGESTIONS) break;
   }
-  const first = p.split(' ')[0] ?? '';
-  let picked = cleaned;
-  if (first.length >= 2) {
-    const shared = cleaned.filter((s) => s.toLowerCase().startsWith(first));
-    if (shared.length >= 3) picked = shared;
-  }
-  return picked.slice(0, 5);
+  return out;
 }
 
-function extractText(out: unknown): string {
-  if (typeof out === 'string') return out;
-  if (out && typeof out === 'object' && 'response' in out) {
-    const response = (out as { response: unknown }).response;
-    return typeof response === 'string' ? response : '';
-  }
-  return '';
+async function fetchSuggest(url: string, prefix: string, doFetch: Fetch): Promise<string[]> {
+  const res = await doFetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json' }, signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS) });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const list = parseSuggest(JSON.parse(await res.text()), prefix);
+  if (!list.length) throw new Error('empty');
+  return list;
+}
+
+const PROVIDERS: ((q: string) => string)[] = [
+  (q) => `https://suggestqueries.google.com/complete/search?client=firefox&hl=en&ie=utf-8&oe=utf-8&q=${encodeURIComponent(q)}`,
+  (q) => `https://duckduckgo.com/ac/?type=list&kl=us-en&q=${encodeURIComponent(q)}`,
+];
+
+/** Google first; DuckDuckGo joins after HEDGE_MS or as soon as Google fails. First non-empty list wins. */
+function hedged(prefix: string, doFetch: Fetch): Promise<string[]> {
+  return new Promise((resolve, reject) => {
+    const errors: string[] = [];
+    let started = 0;
+    let done = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const launch = () => {
+      if (done || started >= PROVIDERS.length) return;
+      const url = PROVIDERS[started++]!(prefix);
+      if (started < PROVIDERS.length) timer = setTimeout(launch, HEDGE_MS);
+      fetchSuggest(url, prefix, doFetch).then(
+        (list) => {
+          if (done) return;
+          done = true;
+          clearTimeout(timer);
+          resolve(list);
+        },
+        (err: unknown) => {
+          errors.push(err instanceof Error ? err.message : String(err));
+          if (errors.length === PROVIDERS.length) {
+            done = true;
+            reject(new Error(errors.join('; ')));
+          } else {
+            clearTimeout(timer);
+            launch();
+          }
+        },
+      );
+    };
+    launch();
+  });
 }
 
 async function readEdgeCache(prefix: string): Promise<string[] | undefined> {
@@ -112,7 +132,7 @@ async function readEdgeCache(prefix: string): Promise<string[] | undefined> {
     const hit = await caches.default.match(new Request(cacheKey(prefix)));
     if (!hit) return;
     const data = (await hit.json()) as { suggestions?: unknown };
-    const suggestions = Array.isArray(data.suggestions) ? data.suggestions.filter((s): s is string => typeof s === 'string' && s.trim().length > 0).slice(0, 5) : [];
+    const suggestions = Array.isArray(data.suggestions) ? data.suggestions.filter((s): s is string => typeof s === 'string' && s.trim().length > 0).slice(0, MAX_SUGGESTIONS) : [];
     return suggestions.length ? suggestions : undefined;
   } catch {
     return;
@@ -133,10 +153,11 @@ async function writeEdgeCache(prefix: string, suggestions: string[]) {
   }
 }
 
-export async function suggestTypeahead(q: string, env: Env): Promise<TypeaheadResponse> {
+export async function suggestTypeahead(q: string, env: Env, doFetch: Fetch = fetch): Promise<TypeaheadResponse> {
   const t0 = Date.now();
   const prefix = normalizePrefix(q);
-  if (prefix.length < 3) return none(t0);
+  if (prefix.length < 2) return none(t0);
+  if (env.TYPEAHEAD === 'off') return none(t0, 'off');
 
   const remembered = memGet(prefix);
   if (remembered) return { suggestions: remembered, source: 'cache', ms: Date.now() - t0 };
@@ -147,55 +168,12 @@ export async function suggestTypeahead(q: string, env: Env): Promise<TypeaheadRe
     return { suggestions: edge, source: 'cache', ms: Date.now() - t0 };
   }
 
-  if (env.TYPEAHEAD === 'off') return none(t0, 'off');
-  // _middleware sets WORKERS_AI=off on local hosts: skip at once instead of waiting out the AI timeout.
-  if (env.WORKERS_AI === 'off') return none(t0, 'workers ai off');
-  const ai = (env as Record<string, unknown>).AI as AiBinding | undefined;
-  if (!ai || typeof ai.run !== 'function') return none(t0, 'no binding');
-  if (Date.now() < aiDownUntil || workersAiQuotaDown()) return none(t0, 'ai cooling down');
-
-  const model = env.TYPEAHEAD_MODEL || DEFAULT_MODEL;
-  const messages = [
-    { role: 'system', content: 'You complete everyday search queries. Reply with exactly 5 lines, no numbering, no quotes, no extra prose.' },
-    { role: 'user', content: `Return 5 short everyday search-query completions that start with or extend this prefix. One per line, no numbering.\nPrefix: ${prefix}` },
-  ];
-  const maxOut = 60;
-  const est = estimateNeurons(model, charsToTokens(messages[0].content.length + messages[1].content.length), maxOut);
-  if (!(await canSpend(env, est))) {
-    if (workersAiQuotaDown()) return none(t0, '4006: neuron cap');
-    return none(t0, 'ai budget');
-  }
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let held = est;
   try {
-    const raced = await Promise.race([
-      ai.run(model, {
-        messages,
-        max_tokens: maxOut,
-        temperature: 0.2,
-      }).then((v) => ({ ok: true as const, v })).catch((e: unknown) => ({ ok: false as const, why: `error: ${e instanceof Error ? e.message : String(e)}` })),
-      new Promise<{ ok: false; why: string }>((resolve) => {
-        timer = setTimeout(() => resolve({ ok: false, why: 'timeout' }), AI_TIMEOUT_MS);
-      }),
-    ]);
-    // The run is already in flight on timeout, so count the ceiling either way.
-    const billed = raced.ok ? neuronsFromResponse(model, raced.v, est) : est;
-    charge(env, billed, held);
-    held = 0;
-    if (!raced.ok) {
-      markAiDown(raced.why);
-      return none(t0, raced.why);
-    }
-    const text = extractText(raced.v);
-    const suggestions = parseAiLines(text, prefix);
-    if (!suggestions.length) return none(t0, `empty: ${typeof raced.v === 'object' && raced.v ? Object.keys(raced.v).join(',') : typeof raced.v} ${text.slice(0, 60)}`);
+    const suggestions = await hedged(prefix, doFetch);
     memSet(prefix, suggestions);
     await writeEdgeCache(prefix, suggestions);
-    return { suggestions, source: 'ai', ms: Date.now() - t0 };
+    return { suggestions, source: 'web', ms: Date.now() - t0 };
   } catch (e) {
-    if (held) releaseBudget(held);
-    return none(t0, `error: ${e instanceof Error ? e.message : String(e)}`);
-  } finally {
-    if (timer) clearTimeout(timer);
+    return none(t0, e instanceof Error ? e.message : String(e));
   }
 }

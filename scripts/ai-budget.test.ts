@@ -3,7 +3,6 @@ import { afterEach, test } from 'node:test';
 import { canSpend, charge, charsToTokens, estimateNeurons, neuronLimit, neuronsFromResponse, releaseBudget, resetAiBudgetState, utcDay } from '../server/aiBudget.ts';
 import { resetWorkersAiQuota, workersAiQuotaDown } from '../server/aiQuota.ts';
 import { hasLlm, llmJson } from '../server/llm.ts';
-import { suggestTypeahead } from '../server/typeahead.ts';
 import type { Env } from '../server/util.ts';
 import { openBudgetDb } from './memoryBudgetDb.ts';
 
@@ -50,28 +49,6 @@ test('canSpend refuses once the day total reaches the 95% limit and skips Worker
   await assert.rejects(() => llmJson(aiEnv, 'system', 'hello'));
   assert.equal(calls, 0);
   assert.equal(hasLlm(aiEnv), false);
-
-  let typeaheadCalls = 0;
-  const typed = await suggestTypeahead('quark budget cap', {
-    DB: db,
-    AI: { async run() { typeaheadCalls += 1; return { response: 'a\nb\nc' }; } },
-  } as Env);
-  assert.equal(typed.suggestions.length, 0);
-  assert.equal(typed.source, 'none');
-  assert.equal(typeaheadCalls, 0);
-});
-
-test('typeahead at the cap returns no AI lines so the client can use the local list', async () => {
-  const db = openBudgetDb({ day: utcDay(), neurons: 9500 });
-  let calls = 0;
-  const typed = await suggestTypeahead('quark local fallback', {
-    DB: db,
-    AI: { async run() { calls += 1; return { response: 'a\nb\nc' }; } },
-  } as Env);
-  assert.equal(calls, 0);
-  assert.equal(typed.source, 'none');
-  assert.equal(typed.suggestions.length, 0);
-  assert.match(typed.reason ?? '', /4006/);
 });
 
 test('a new UTC day starts from zero', async () => {
@@ -97,11 +74,6 @@ test('a missing DB fails closed and does not throw', async () => {
   assert.equal(await canSpend(env, 10), false);
   assert.equal(workersAiQuotaDown(), false);
   await assert.rejects(() => llmJson(env, 'system', 'hello'));
-  assert.equal(calls, 0);
-  const typed = await suggestTypeahead('quark missing db', env);
-  assert.equal(typed.source, 'none');
-  assert.equal(typed.reason, 'ai budget');
-  assert.equal(typed.suggestions.length, 0);
   assert.equal(calls, 0);
 });
 

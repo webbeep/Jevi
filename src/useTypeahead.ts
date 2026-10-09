@@ -2,6 +2,7 @@ import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { STARTERS } from '../shared/starters';
 import { readHistory } from '../shared/personal';
 import {
+  MIN_PREFIX,
   createDebouncer,
   matchLocal,
   mergeSuggestions,
@@ -10,7 +11,7 @@ import {
 
 const FALLBACK = STARTERS.map((s) => s.text);
 const LIST_ID = 'home-typeahead';
-const DEBOUNCE_MS = 250;
+const DEBOUNCE_MS = 120;
 
 const clientCache = new Map<string, string[]>();
 
@@ -36,8 +37,8 @@ export function useTypeahead(input: string, onFill: (text: string) => void, revi
   }, [revision]);
 
   const rows = useMemo(() => {
-    if (normalizePrefix(input).length < 3) return [];
-    return mergeSuggestions(matchLocal(history, input), remote, matchLocal(FALLBACK, input), input, 5);
+    if (normalizePrefix(input).length < MIN_PREFIX) return [];
+    return mergeSuggestions(matchLocal(history, input), remote, matchLocal(FALLBACK, input), input);
   }, [history, input, remote]);
 
   useEffect(() => {
@@ -52,7 +53,7 @@ export function useTypeahead(input: string, onFill: (text: string) => void, revi
 
   useEffect(() => {
     const prefix = normalizePrefix(input);
-    if (prefix.length < 3) {
+    if (prefix.length < MIN_PREFIX) {
       abortRef.current?.abort();
       setRemote([]);
       return;

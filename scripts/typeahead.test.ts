@@ -1,10 +1,7 @@
 import assert from 'node:assert/strict';
-import { beforeEach, test } from 'node:test';
-import { resetAiBudgetState } from '../server/aiBudget.ts';
-import { resetWorkersAiQuota } from '../server/aiQuota.ts';
-import { parseAiLines, suggestTypeahead } from '../server/typeahead.ts';
+import { test } from 'node:test';
+import { parseSuggest, resetTypeaheadCache, suggestTypeahead } from '../server/typeahead.ts';
 import type { Env } from '../server/util.ts';
-import { openBudgetDb } from './memoryBudgetDb.ts';
 import {
   createDebouncer,
   matchLocal,
@@ -12,110 +9,104 @@ import {
   normalizePrefix,
 } from '../shared/typeahead.ts';
 
-beforeEach(() => {
-  resetAiBudgetState();
-  resetWorkersAiQuota();
-});
-
 test('normalizePrefix trims, lowercases, collapses spaces, and clips to 80', () => {
   assert.equal(normalizePrefix('  Best   Wireless\tEarbuds  '), 'best wireless earbuds');
   assert.equal(normalizePrefix(` ${'A'.repeat(90)} `).length, 80);
   assert.equal(normalizePrefix('  ab '), 'ab');
 });
 
-test('prefixes shorter than 3 characters yield no suggestions', async () => {
-  assert.equal(normalizePrefix('  hi ').length, 2);
-  assert.deepEqual(matchLocal(['best wireless earbuds under $100'], 'ab'), []);
-  const result = await suggestTypeahead('ab', {});
+test('prefixes shorter than 2 characters yield no suggestions', async () => {
+  assert.deepEqual(matchLocal(['best wireless earbuds under $100'], 'b'), []);
+  const result = await suggestTypeahead('a', {}, (() => { throw new Error('no fetch'); }) as typeof fetch);
   assert.deepEqual(result.suggestions, []);
   assert.equal(result.source, 'none');
 });
 
-test('mergeSuggestions keeps history, then AI, then fallback, deduped and capped', () => {
+test('mergeSuggestions keeps a few history rows, then web, then fallback, deduped and capped', () => {
   const merged = mergeSuggestions(
-    ['Running shoes for rain', 'running shoes for rain', 'exact input'],
-    ['running shoes for gym', 'Running shoes for rain'],
-    ['how to get a red wine stain out of a carpet', 'running shoes for gym', 'one', 'two', 'three', 'four'],
+    ['Running shoes for rain', 'running shoes for rain', 'exact input', 'running shoes wide', 'running shoes flat', 'running shoes kids'],
+    ['running shoes for gym', 'Running shoes for rain', 'running shoes nike'],
+    ['how to get a red wine stain out of a carpet', 'one', 'two'],
     'exact input',
-    5,
+    6,
   );
-  assert.deepEqual(merged.map((row) => row.source), ['history', 'ai', 'fallback', 'fallback', 'fallback']);
+  assert.deepEqual(merged.map((row) => row.source), ['history', 'history', 'history', 'web', 'web', 'fallback']);
   assert.equal(merged[0].text, 'Running shoes for rain');
-  assert.equal(merged[1].text, 'running shoes for gym');
-  assert.equal(merged.length, 5);
+  assert.equal(merged[3].text, 'running shoes for gym');
   assert.equal(merged.some((row) => row.text.toLowerCase() === 'exact input'), false);
 });
 
-test('mergeSuggestions uses the fallback list when AI returns nothing', () => {
-  const merged = mergeSuggestions([], [], ['best wireless earbuds under $100'], 'best w', 5);
-  assert.equal(merged.length, 1);
-  assert.equal(merged[0].source, 'fallback');
-  assert.equal(merged[0].text, 'best wireless earbuds under $100');
+test('mergeSuggestions shows only history and fallback when the web returns nothing', () => {
+  const merged = mergeSuggestions(['best wok', 'best wool socks', 'best w1', 'best w2'], [], ['best wireless earbuds under $100'], 'best w', 6);
+  assert.deepEqual(merged.map((row) => row.source), ['history', 'history', 'history', 'history', 'fallback']);
   assert.deepEqual(mergeSuggestions(['Best W'], [], ['Best W'], 'best w', 5), []);
 });
 
-test('matchLocal matches prefix, substring, and word, and drops the exact input', () => {
-  const list = ['best wireless earbuds under $100', 'how to get a red wine stain out of a carpet', 'Best wireless earbuds under $100'];
+test('matchLocal ranks prefix, then word-start, then substring matches, and drops the exact input', () => {
+  const list = ['how to get a red wine stain out of a carpet', 'wine pairing for salmon', 'best wireless earbuds under $100', 'Best wireless earbuds under $100', 'twine knots'];
   assert.deepEqual(matchLocal(list, 'best wireless'), ['best wireless earbuds under $100']);
-  assert.equal(matchLocal(list, 'wine').some((text) => text.includes('wine')), true);
+  assert.deepEqual(matchLocal(list, 'wine'), ['wine pairing for salmon', 'how to get a red wine stain out of a carpet', 'twine knots']);
+  assert.deepEqual(matchLocal(list, 'red wine'), ['how to get a red wine stain out of a carpet']);
+  assert.deepEqual(matchLocal(['twine knots'], 'wi'), [], 'two characters match word starts only');
   assert.deepEqual(matchLocal(['best wireless earbuds under $100'], 'best wireless earbuds under $100'), []);
 });
 
-test('parseAiLines strips numbering, quotes, and bullets, and drops empties and the prefix', () => {
-  const lines = parseAiLines([
-    '1. best wireless earbuds under $50',
-    '2) "best wireless earbuds for running"',
-    '- best wireless earbuds for work',
-    '* best wireless earbuds under $50',
-    'best wireless',
-    '',
-    'cheap laptops under $500',
-  ].join('\n'), 'best wireless');
-  assert.deepEqual(lines, [
-    'best wireless earbuds under $50',
-    'best wireless earbuds for running',
-    'best wireless earbuds for work',
-  ]);
+test('parseSuggest reads the OpenSearch shape, dedupes, and drops the prefix', () => {
+  assert.deepEqual(
+    parseSuggest(['jaylen b', ['jaylen brown', 'Jaylen Brown', 'jaylen b', 'jaylen brown injury', '', 42, 'x'.repeat(90)]], 'Jaylen B'),
+    ['jaylen brown', 'jaylen brown injury'],
+  );
+  assert.deepEqual(parseSuggest(['q', [{ phrase: 'q stock' }]], 'q'), ['q stock']);
+  assert.deepEqual(parseSuggest({ nope: true }, 'q'), []);
 });
 
-test('suggestTypeahead returns AI lines, then serves the isolate cache', async () => {
-  let calls = 0;
-  const env = {
-    DB: openBudgetDb(),
-    AI: {
-      async run() {
-        calls += 1;
-        return { response: '1. quark earbuds alpha\n2. quark earbuds beta\n3. quark earbuds gamma\n' };
-      },
-    },
-  } as Env;
-  const first = await suggestTypeahead('quark earbuds', env);
-  assert.equal(first.source, 'ai');
-  assert.deepEqual(first.suggestions, ['quark earbuds alpha', 'quark earbuds beta', 'quark earbuds gamma']);
-  const second = await suggestTypeahead('  Quark   earbuds ', env);
+function suggestFetch(handler: (url: string) => Response): { fetch: typeof fetch; urls: string[] } {
+  const urls: string[] = [];
+  const fn = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    urls.push(url);
+    return handler(url);
+  }) as typeof fetch;
+  return { fetch: fn, urls };
+}
+
+const ok = (q: string, list: string[]) => new Response(JSON.stringify([q, list]), { status: 200 });
+
+test('suggestTypeahead returns web completions without any model call, then serves the isolate cache', async () => {
+  resetTypeaheadCache();
+  let aiCalls = 0;
+  const env = { AI: { async run() { aiCalls += 1; return { response: 'x' }; } } } as unknown as Env;
+  const net = suggestFetch((url) => ok('quark earbuds', url.includes('google') ? ['quark earbuds alpha', 'quark earbuds beta'] : ['ddg']));
+  const first = await suggestTypeahead('quark earbuds', env, net.fetch);
+  assert.equal(first.source, 'web');
+  assert.deepEqual(first.suggestions, ['quark earbuds alpha', 'quark earbuds beta']);
+  const second = await suggestTypeahead('  Quark   earbuds ', env, net.fetch);
   assert.equal(second.source, 'cache');
-  assert.equal(calls, 1);
+  assert.equal(net.urls.length, 1);
+  assert.equal(aiCalls, 0);
 });
 
-test('suggestTypeahead returns none when AI is off, errors, or times out', async () => {
-  const off = await suggestTypeahead('quark disabled zz', { TYPEAHEAD: 'off', DB: openBudgetDb(), AI: { async run() { throw new Error('should not run'); } } } as Env);
+test('suggestTypeahead falls over to DuckDuckGo when Google fails', async () => {
+  resetTypeaheadCache();
+  const net = suggestFetch((url) => (url.includes('google') ? new Response('nope', { status: 503 }) : ok('rdw', ['rdw stock', 'rdw stock news'])));
+  const out = await suggestTypeahead('rdw', {}, net.fetch);
+  assert.equal(out.source, 'web');
+  assert.deepEqual(out.suggestions, ['rdw stock', 'rdw stock news']);
+  assert.ok(net.urls.some((u) => u.includes('duckduckgo')));
+});
+
+test('suggestTypeahead returns none when off or when every provider fails', async () => {
+  resetTypeaheadCache();
+  const net = suggestFetch(() => { throw new Error('should not run'); });
+  const off = await suggestTypeahead('quark disabled zz', { TYPEAHEAD: 'off' }, net.fetch);
   assert.equal(off.source, 'none');
   assert.deepEqual(off.suggestions, []);
+  assert.equal(net.urls.length, 0);
 
-  // Timeout first: an error starts a cooldown that would skip the AI call.
-  const timed = await suggestTypeahead('quark timeout zz', { DB: openBudgetDb(), AI: { run: () => new Promise(() => {}) } } as Env);
-  assert.equal(timed.source, 'none');
-  assert.ok(timed.ms >= 700);
-
-  const failed = await suggestTypeahead('quark explode zz', { DB: openBudgetDb(), AI: { async run() { throw new Error('4006: you have used up your daily free allocation of 10,000 neurons'); } } } as Env);
+  const down = suggestFetch(() => new Response('[]', { status: 200 }));
+  const failed = await suggestTypeahead('quark nothing zz', {}, down.fetch);
   assert.equal(failed.source, 'none');
-  assert.match(failed.reason ?? '', /4006/);
-
-  let calls = 0;
-  const after = await suggestTypeahead('quark after quota zz', { DB: openBudgetDb(), AI: { async run() { calls++; return { response: 'a\nb\nc' }; } } } as Env);
-  assert.equal(after.source, 'none');
-  assert.equal(after.reason, 'ai cooling down');
-  assert.equal(calls, 0, 'quota error skips AI until the daily reset');
+  assert.match(failed.reason ?? '', /empty/);
 });
 
 test('createDebouncer runs only the last call after the delay, and cancel drops it', async () => {
