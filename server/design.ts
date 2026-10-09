@@ -17,6 +17,7 @@ import { isVideoUrl, wantsVideo } from './videoSearch';
 import { guessFreshness, stricter } from './freshness';
 import { isQuoteRow } from './liveQuote';
 import { BRIEF_ROWS, rejectedSources, type SourceBrief } from './brief';
+import { CHART_TALK, withoutCharts } from '../shared/tickerNotes';
 
 const GRAMMAR = `Each node is a JSON object with a "type" field.
 LAYOUT
@@ -336,28 +337,6 @@ function parseLine(line: string, g: Grounding, imageCount: number, query: string
   const [clean] = sanitizeNodes([obj], imageCount, 0, { sources, query: seatQuery ?? query });
   const [grounded] = clean ? groundNodes([clean], g) : [];
   return grounded ? { kind: 'node', node: grounded } : { kind: 'dropped' };
-}
-
-/** Talk about a chart, image or price series being unavailable — false on a card that opens with the live chart. */
-const CHART_TALK = /\b(chart|graph|image|picture|photo|price (?:data|history|series)|historical (?:data|prices))\b/i;
-const UNAVAILABLE = /\b(no|not|unavailable|missing|isn'?t|aren'?t|couldn'?t|can'?t|cannot|without|lack)\b/i;
-
-/** The ticker is the card's chart: a model-drawn chart beside it only repeats the price, worse, and a note that a chart is missing is wrong. */
-function withoutCharts(node: CardNode | undefined): CardNode | undefined {
-  if (!node || node.type === 'chart') return undefined;
-  if (node.type === 'callout' || node.type === 'text') {
-    const said = `${node.type === 'callout' ? node.title ?? '' : ''} ${node.text}`;
-    if (CHART_TALK.test(said) && UNAVAILABLE.test(said)) return undefined;
-  }
-  if (node.type === 'tabs') {
-    const tabs = node.tabs.map((t) => ({ ...t, children: t.children.map(withoutCharts).filter((c): c is CardNode => !!c) })).filter((t) => t.children.length);
-    return tabs.length ? { ...node, tabs } : undefined;
-  }
-  if ('children' in node) {
-    const children = node.children.map(withoutCharts).filter((c): c is CardNode => !!c);
-    return children.length ? { ...node, children } as CardNode : undefined;
-  }
-  return node;
 }
 
 /** A node written outside the design stream (the answer review) passes the same sanitize and grounding gates. */

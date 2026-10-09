@@ -82,6 +82,11 @@ export default function TickerView({ node }: { node: TickerNode }) {
     if (!loaded[r]) void load(r);
   };
 
+  // A saved card reopened later starts from its old line: catch up once.
+  useEffect(() => {
+    if (Date.now() - Date.parse(node.series.at) > LIVE_REFRESH_MS) void load(node.series.range, true);
+  }, [node.series, load]);
+
   useEffect(() => {
     if (range !== '1D') return;
     const started = Date.now();

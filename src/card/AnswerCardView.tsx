@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cardPlainText } from '../../shared/cardText';
+import { tickerBody } from '../../shared/tickerNotes';
 import { citedRefs } from '../library';
 import { LogoMark } from '../Logo';
 import { FaviconStack } from '../Sources';
@@ -52,6 +53,8 @@ export function AnswerCardView({ card, version, filling, streaming, status, patt
     const timer = setTimeout(() => setToast(null), 1600);
     return () => clearTimeout(timer);
   }, [toast]);
+  // Cards saved before the server dropped them can still carry a "no chart" note beside the live chart.
+  const body = useMemo(() => tickerBody(card.body), [card.body]);
   const cited = useMemo(() => (filling ? [] : citedRefs(card).flatMap((n) => (results[n - 1] ? [results[n - 1]] : []))), [filling, card, results]);
   const copyAnswer = () => {
     navigator.clipboard.writeText(cardPlainText(card, results)).then(() => setToast('Copied'), () => setToast("Couldn't copy"));
@@ -133,7 +136,7 @@ export function AnswerCardView({ card, version, filling, streaming, status, patt
 
       <div className={cn('px-4 pb-5 pt-3.5 transition-[opacity,filter] duration-300 sm:px-6 sm:pb-6 sm:pt-4', status && !streaming && 'pointer-events-none opacity-50 blur-[1px]', cited.length && 'pb-4 sm:pb-5')}>
         <CardTitle.Provider value={card.title}>
-          <Nodes key={version} nodes={card.body} className="gap-5" stagger={!streaming} />
+          <Nodes key={version} nodes={body} className="gap-5" stagger={!streaming} />
         </CardTitle.Provider>
       </div>
 

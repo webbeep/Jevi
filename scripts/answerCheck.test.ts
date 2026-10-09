@@ -4,6 +4,8 @@ import { readBrief, rejectedSources } from '../server/brief.ts';
 import { readReview } from '../server/review.ts';
 import { corpusOf, gateNode, type DesignRequest } from '../server/design.ts';
 import { Grounding } from '../server/ground.ts';
+import { tickerBody } from '../shared/tickerNotes.ts';
+import type { CardNode } from '../shared/card.ts';
 
 describe('source brief', () => {
   test('keeps valid source numbers and drops overlaps', () => {
@@ -92,5 +94,20 @@ describe('ticker cards', () => {
 
   test('other notes stay', () => {
     assert.ok(gateNode({ type: 'callout', text: 'Crypto trades around the clock, so the day range covers a rolling day.' }, req));
+  });
+});
+
+describe('saved ticker cards', () => {
+  test('the old "no chart" note is hidden beside the live chart', () => {
+    const ticker = { type: 'ticker', symbol: 'BTC-USD', name: 'Bitcoin', kind: 'crypto', currency: 'USD', feed: 'Yahoo Finance', series: { range: '1D', points: [[1, 1], [2, 2]], base: 1, price: 2, at: '' } } as const;
+    const note = { type: 'callout', title: 'No chart image available', text: 'Sources give only a live price snapshot with day and 52-week ranges — no accessible BTC/USD chart data.' } as const;
+    const tiles = { type: 'grid', cols: 2, children: [{ type: 'tile', label: 'Day range', value: '81,602–83,259' }] } as const;
+    const body = tickerBody([ticker, note, tiles] as unknown as CardNode[]);
+    assert.deepEqual(body.map((n) => n.type), ['ticker', 'grid']);
+  });
+
+  test('cards without a ticker are untouched', () => {
+    const body = [{ type: 'callout', text: 'No chart is available for this.' }] as unknown as CardNode[];
+    assert.equal(tickerBody(body), body);
   });
 });
