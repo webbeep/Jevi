@@ -19,6 +19,7 @@ import { logAsk, moreQueries, newLedger, queriesForAsk } from './budget';
 import { gateResults } from './relevanceGate';
 import { entityQuery, relaxQuery } from './queryClean';
 import { type LateExtras, searchWithLate } from './search';
+import { scholarlyResults, withScholarly } from './scholarly';
 import type { Send } from './sse';
 import { extraQueries, understand } from './understand';
 import { cacheBypass, testForce, validTestToken } from './token';
@@ -186,6 +187,8 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   const deep = route === 'deep';
   let found: Awaited<ReturnType<typeof searchWithLate>>;
   let u: Awaited<typeof understood>;
+  // SPD-C4 (t457): paper/DOI asks also read OpenAlex, in parallel with the web search.
+  const scholarly = scholarlyResults(query);
   if (!rewritten && freshness === 'any' && !TIME_SENSITIVE.test(query)) {
     // SPD2 (t457): a timeless ask searches its literal words at once; the understood rewrites join the same
     // engine when the intent read lands (~1 s), instead of the whole search waiting for it.
@@ -207,6 +210,8 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     found = await searchWithLate({ q, more, freshness: fresh, count: 20 }, env, scope);
   }
   let results = applyRelevance(query, { ...found.response, query }, scope.ledger);
+  const scholar = await scholarly;
+  if (scholar.length) results = { ...results, results: withScholarly(scholar, results.results) };
   let late: Promise<LateExtras> | undefined = found.late;
 
   if (!results.results.length) {
