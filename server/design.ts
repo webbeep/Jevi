@@ -15,6 +15,7 @@ import { accepts, targetFor } from './imageGate';
 import { personSubject } from './entity';
 import { isVideoUrl, wantsVideo } from './videoSearch';
 import { guessFreshness, stricter } from './freshness';
+import { isQuoteRow } from './liveQuote';
 
 const GRAMMAR = `Each node is a JSON object with a "type" field.
 LAYOUT
@@ -198,6 +199,16 @@ const SYSTEM_REGION = `${DESIGNER}
 - Output only what the TASK asks for, as JSON Lines: one complete compact JSON object per line. Every node carries a \"type\" field, e.g. {\"type\":\"hero\",...}. No code fences, no prose, no blank lines, no line breaks inside a JSON object.`;
 
 /** Today's date always; for "today"/"latest" asks, what current means and that every number stays on the subject. */
+function liveQuoteRule(req: DesignRequest): string {
+  const row = req.search.results[0];
+  if (!isQuoteRow(row)) return '';
+  return [
+    `- LIVE MARKET DATA: source [1] (${row!.title}) is a quote fetched seconds ago. When the ask is about this price, its live price is THE current price: lead with it in a hero, with the day change as the delta, and cite [1].`,
+    '- Every other price in SOURCES is historical. Show one only next to its own date and never call it current, latest, today\'s or an all-time high unless that source says so for that date. Leave out prices that are years old unless the ask is about history.',
+    '- The daily closes in [1] make a good line chart; the day and 52-week ranges fit tiles. Use news sources for why it is moving, not for the price.',
+  ].join('\n');
+}
+
 function timeRules(req: DesignRequest): string {
   const today = `- Today is ${new Date().toISOString().slice(0, 10)} (UTC).`;
   const asked = stricter(guessFreshness(req.query), guessFreshness(req.followup?.question ?? ''));
@@ -218,6 +229,7 @@ function taskBlock(req: DesignRequest): string {
     req.intent ? `- What the person wants: ${req.intent} Answer that; sources that only match their words but not this are background at most.` : '',
     req.simple ? '- Write for a 10-year-old: plain words and a friendly analogy.' : '',
     timeRules(req),
+    liveQuoteRule(req),
     followupRules(req.followup, req.search.query).trim().replace(/^/, '- '),
     req.search.results.length ? '' : '- No web sources were found for this; answer from general knowledge, say it may be out of date, and do not cite sources.',
     req.context ? `- Conversation so far (use it to resolve references like "it" or "the cheaper one"; don't repeat it):\n${req.context}` : '',

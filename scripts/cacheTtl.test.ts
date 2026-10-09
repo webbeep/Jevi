@@ -3,14 +3,14 @@ import { test } from 'node:test';
 import { cacheTier, cacheTtlS, searchTtlS } from '../shared/cacheTtl.ts';
 
 test('live asks are reused for seconds', () => {
-  for (const q of ['Lakers live score', 'bitcoin price', 'weather in Boston', 'Is the Warriors game live', 'AAPL stock price right now', 'breaking news Gaza']) {
+  for (const q of ['Lakers live score', 'bitcoin price', 'weather in Boston', 'Is the Warriors game live', 'AAPL stock price right now', 'breaking news Gaza', 'why $rdw dropping', 'Btc Usd']) {
     assert.equal(cacheTier(q), 'live', q);
   }
   assert.equal(cacheTtlS('Lakers live score'), 30);
 });
 
 test('today, news and stock moves are reused for minutes', () => {
-  for (const q of ['AI news today', 'Warriors game tonight', 'why $rdw dropping', 'Nvidia earnings', 'Jaylen Brown injury', 'latest iPhone leaks']) {
+  for (const q of ['AI news today', 'Warriors game tonight', 'Nvidia earnings', 'Jaylen Brown injury', 'latest iPhone leaks']) {
     assert.equal(cacheTier(q), 'short', q);
   }
   assert.equal(cacheTtlS('AI news today'), 300);

@@ -1,3 +1,4 @@
+import { quoteAsk } from './quoteAsk';
 import type { Freshness } from './types';
 
 /**
@@ -26,7 +27,7 @@ const FROM_FRESHNESS: Partial<Record<Freshness, CacheTier>> = { day: 'short', we
 
 /** The tier for a query: the most time-sensitive of what its words and its freshness window say. */
 export function cacheTier(query: string, freshness: Freshness | string = 'any'): CacheTier {
-  const words: CacheTier = LIVE.test(query) ? 'live' : SHORT.test(query) ? 'short' : MEDIUM.test(query) ? 'medium' : 'long';
+  const words: CacheTier = LIVE.test(query) || quoteAsk(query) ? 'live' : SHORT.test(query) ? 'short' : MEDIUM.test(query) ? 'medium' : 'long';
   const window = FROM_FRESHNESS[freshness as Freshness] ?? 'long';
   return RANK[words] >= RANK[window] ? words : window;
 }

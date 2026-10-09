@@ -8,6 +8,7 @@ import {
   distinguishingTerms,
   entityContextLine,
   type EntityChoice,
+  type EntityDecision,
   entityHintFor,
   formalNameQueries,
   isDisambiguationPage,
@@ -45,6 +46,7 @@ import { type LateExtras, normalizeUrl, searchWithLate } from './search';
 import { scholarlyResults, withScholarly } from './scholarly';
 import { videoResults, withVideos } from './videoSearch';
 import { guessFreshness, preferFresh, staleComplaint, stricter } from './freshness';
+import { isQuoteRow, liveQuote, quoteRow } from './liveQuote';
 import { splitPeople } from './peopleSplit';
 import { personSteer, threadPerson, topicOnly, withoutChosen } from './personSteer';
 import type { Send } from './sse';
@@ -237,6 +239,8 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     return plan;
   });
 
+  // Keyless, in parallel with the web search: a price ask is answered from the live quote, not old articles.
+  const quoting = liveQuote(query);
   const route = routeOf(query);
   scope.ledger.route = route;
   const deep = route === 'deep';
@@ -274,6 +278,12 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   if (scholar.length) results = { ...results, results: withScholarly(scholar, results.results) };
   const clips = await videos;
   if (clips.length) results = { ...results, results: withVideos(clips, results.results) };
+  const quote = await quoting;
+  const live = quote ? quoteRow(quote) : undefined;
+  if (live) {
+    results = { ...results, results: [live, ...results.results.filter((r) => !isQuoteRow(r))] };
+    console.log(JSON.stringify({ zo: 'quote', symbol: quote!.symbol, source: quote!.source, ms: Date.now() - started }));
+  }
   let late: Promise<LateExtras> | undefined = found.late;
   // EN4 part 8: set when the answer is rebuilt from the rows behind a Which-one? pick, so the
   // seed pages get re-read instead of designed from the snippets alone.
@@ -411,7 +421,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   // results. Ambiguous names return choices instead of a mixed card.
   const plan = await planned;
   // Bare person ask with no Wikipedia "may refer to" in the SERP: one keyless disambiguation lookup (0 Serper).
-  if (isPersonAsk(query, plan.pattern) && !contextTerms(query).length && !priorEntity(context) && !nameIsTopic(query, results.results)) {
+  if (!live && isPersonAsk(query, plan.pattern) && !contextTerms(query).length && !priorEntity(context) && !nameIsTopic(query, results.results)) {
     const name = personSubject(query);
     if (name && !results.results.some((r) => isDisambiguationPage(r))) {
       const wiki = await fetchWikiDisambiguation(name).catch(() => null);
@@ -453,7 +463,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     }
   }
   const prior = steer ? undefined : priorEntity(context);
-  const decision = resolveEntity(query, results.results, { pattern: plan.pattern, prior });
+  const decision: EntityDecision = live ? { kind: 'skip' } : resolveEntity(query, results.results, { pattern: plan.pattern, prior });
   // A bare "who is" for someone without an encyclopedia page, whose namesakes the heuristic dropped:
   // the model may still see several people worth offering ("who is Ed Chu" → oncologist, EPA official, CEO).
   const unsure = !steer && decision.kind === 'single' && !prior && decision.dropped.length >= 2 && WHO_ASK.test(query) && !distinguishingTerms(query).length
