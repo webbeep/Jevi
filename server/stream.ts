@@ -219,8 +219,10 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
 
   send('designing', { pagesRead: pages.length, ms: Date.now() - started });
   // Follow-ups (small answers and redesigns) stay coherent in one call; full search cards are designed region by region in parallel.
-  const designer = req.followup ? designStream : designParallel;
-  const rowImages = chat ? undefined : rowImagePlan(req, env, scope);
+  // A live quote is one number told one way: regions designed in parallel each repeat the price and the chart.
+  const quoteCard = isQuoteRow(req.search.results[0]);
+  const designer = req.followup || quoteCard ? designStream : designParallel;
+  const rowImages = chat || quoteCard ? undefined : rowImagePlan(req, env, scope);
   const designReq: DesignRequest = { ...req, pages, brief, context: req.context?.slice(0, 4000), rowImages };
   const shown = new Map<number, CardNode>();
   let head: Omit<AnswerCard, 'body'> | undefined;

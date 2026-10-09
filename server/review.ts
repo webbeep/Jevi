@@ -15,7 +15,8 @@ Flag only real errors that would mislead the reader:
 - it is about the wrong subject (a namesake, another company, product, place or period);
 - it presents an old value or old news as current (check dates against today), or contradicts a LIVE result or newer results;
 - a stated fact, number or date is not supported by the results, or is attributed to the wrong thing;
-- it carries over facts from the conversation that belong to a different subject.
+- it carries over facts from the conversation that belong to a different subject;
+- two nodes show the same fact, number or chart (fix the later one with something else the results support, or a short text node).
 Style, wording, layout and missing nice-to-haves are not errors.
 Reply as JSON: {"verdict":"ok"|"fix","problems":[string],"fixes":[{"node":number,"replace":object}],"note":string}
 - problems: one short line per error, naming the node number.
