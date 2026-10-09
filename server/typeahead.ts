@@ -98,7 +98,7 @@ function hedged(prefix: string, doFetch: Fetch): Promise<string[]> {
     const errors: string[] = [];
     let started = 0;
     let done = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    let timer: ReturnType<typeof setTimeout> | null = null;
     const launch = () => {
       if (done || started >= PROVIDERS.length) return;
       const url = PROVIDERS[started++]!(prefix);

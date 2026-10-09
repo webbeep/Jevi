@@ -114,6 +114,9 @@ const SPECIFIC_ROLES: [RegExp, string][] = [
 /** Every word of those roles, so a pick query built from one still cuts at the person name. */
 const ROLE_TAIL = new Set(SPECIFIC_ROLES.flatMap(([, label]) => label.toLowerCase().split(' ')));
 
+/** Lowercase words after a name that are about the person, not part of the name ("Messi now", "Ed playing"). */
+const LOWER_STOP = /^(?:now|today|currently|really|actually|exactly|again|anyway|net|worth|age|wife|husband|married|dating|dead|alive|famous|known|.*ing|.*ed|.*ly)$/;
+
 /** The person the query is about, or '' when there is none. */
 export function personSubject(query: string): string {
   const raw = query.trim();
@@ -130,6 +133,16 @@ export function personSubject(query: string): string {
       run.push(w);
       if (run.length === 6) break;
     } else break;
+  }
+  // "who is Ed chu": a sloppy-case surname after a capitalised first name still belongs to the name.
+  if (hadWho && run.length && run.length < 3 && words.length <= 4) {
+    const start = words.indexOf(run[0]!);
+    for (const w of words.slice(start + run.length)) {
+      const lw = w.toLowerCase();
+      if (run.length >= 3 || !/^[a-z][a-z'-]+$/.test(w) || COMMON.has(lw) || LOWER_STOP.test(lw)) break;
+      if (ROLE1.has(lw) || DESCRIPTOR_WORDS.has(lw) || ROLE_TAIL.has(lw) || SPORTS_LEAGUE.test(lw) || ORG_TAIL.test(lw)) break;
+      run.push(w[0]!.toUpperCase() + w.slice(1));
+    }
   }
   if (run.length) {
     // "Ray Lee BlueFlame AI" / "Ray Lee Raycon Founder" → person "Ray Lee";

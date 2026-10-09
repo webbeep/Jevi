@@ -1,5 +1,6 @@
 import { estimateCost } from './router';
 import { clearSkipCache } from './engineSkip';
+import { expandCashtags } from './queryClean';
 import { HttpStatusError } from './util';
 
 /** Hard cap on paid and backup search HTTP calls for one ask, including sub-queries and retries. */
@@ -119,11 +120,11 @@ export function failureOf(err: unknown): { fall: boolean; dead: boolean; reason:
 const cleanQuery = (s: string) => s.replace(/\s+/g, ' ').trim().slice(0, 180);
 
 /**
- * The person's question, unchanged. It is always one of the searches: a planner
- * rewrite is an extra call, not a replacement.
+ * The person's question, with cashtags spelled out ("$rdw" → "RDW stock"). It is always
+ * one of the searches: a planner rewrite is an extra call, not a replacement.
  */
 export function queriesForAsk(literal: string, _extras: string[]): string {
-  return cleanQuery(literal);
+  return cleanQuery(expandCashtags(literal));
 }
 
 /**

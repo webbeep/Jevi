@@ -33,7 +33,7 @@ import { planLayout } from './plan';
 import type { AskScope, CallLedger } from './budget';
 import { logAsk, moreQueries, newLedger, queriesForAsk } from './budget';
 import { gateResults } from './relevanceGate';
-import { entityQuery, relaxQuery } from './queryClean';
+import { entityQuery, relaxQuery, tickerQueries } from './queryClean';
 import { type LateExtras, searchWithLate } from './search';
 import { scholarlyResults, withScholarly } from './scholarly';
 import type { Send } from './sse';
@@ -42,8 +42,15 @@ import { cacheBypass, testForce, validTestToken } from './token';
 import { SERPER_ANON_SHARE } from './providerCap';
 import type { Env } from './util';
 
-/** Asks whose answer depends on when they are asked: they wait for the intent read's freshness before searching. */
-const TIME_SENSITIVE = /\b(news|latest|today|tonight|yesterday|tomorrow|this (?:week|weekend|month|year|season)|right now|now|current(?:ly)?|live|breaking|recent(?:ly)?|update[sd]?|score[sd]?|standings|price[sd]?|cost[s]?|deals?|sale|weather|forecast|stocks?|market|election|polls?|20\d\d)\b/i;
+const FRESH_DAY = /\b(today|tonight|yesterday|right now|live|breaking|score[sd]?)\b/i;
+const FRESH_WEEK = /\b(news|latest|this week|recent(?:ly)?|headlines)\b/i;
+
+/** Freshness the literal search can take from the ask's own words, before the intent read lands. */
+export function guessFreshness(query: string): Freshness {
+  if (FRESH_DAY.test(query)) return 'day';
+  if (FRESH_WEEK.test(query)) return 'week';
+  return 'any';
+}
 
 export interface CardOnScreen {
   id: number;
@@ -218,25 +225,25 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   let u: Awaited<typeof understood>;
   // SPD-C4 (t457): paper/DOI asks also read OpenAlex, in parallel with the web search.
   const scholarly = scholarlyResults(query);
-  if (!rewritten && freshness === 'any' && !TIME_SENSITIVE.test(query)) {
-    // SPD2 (t457): a timeless ask searches its literal words at once; the understood rewrites join the same
-    // engine when the intent read lands (~1 s), instead of the whole search waiting for it.
+  // Searches that need no model ("$rdw" → "RDW stock news today") lead the rewrites.
+  const instant = tickerQueries(query);
+  if (!rewritten) {
+    // SPD2 (t457): every ask searches its literal words at once; the understood rewrites join the same
+    // engine when the intent read lands (~1 s), instead of the whole search waiting for it. A time-sensitive
+    // ask takes its literal freshness from its own words; the rewrites use the intent read's.
+    const literalFresh = freshness === 'any' ? guessFreshness(query) : freshness;
     const later = understood.then((x) => {
       if (x) send('intent', { intent: x.intent, queries: x.queries });
-      return { more: routeExtras(route, moreQueries(query, extraQueries(query, x))), freshness: x?.freshness ?? freshness };
+      return { more: routeExtras(route, moreQueries(query, [...instant, ...extraQueries(query, x)])), freshness: freshness === 'any' ? x?.freshness ?? literalFresh : freshness };
     });
-    found = await searchWithLate({ q: queriesForAsk(query, []), later, freshness, count: 20 }, env, scope);
+    found = await searchWithLate({ q: queriesForAsk(query, []), later, freshness: literalFresh, count: 20, waitExtras: deep }, env, scope);
     u = await understood;
-    await later;
   } else {
-    u = await understood;
-    const extras = extraQueries(query, u);
-    if (u) send('intent', { intent: u.intent, queries: u.queries });
+    u = undefined;
     // Literal question first. Planner rewrites are the later calls, still inside the cap.
-    const q = queriesForAsk(query, extras);
-    const more = routeExtras(route, moreQueries(query, extras));
-    const fresh = freshness === 'any' && u ? u.freshness : freshness;
-    found = await searchWithLate({ q, more, freshness: fresh, count: 20 }, env, scope);
+    const q = queriesForAsk(query, instant);
+    const more = routeExtras(route, moreQueries(query, instant));
+    found = await searchWithLate({ q, more, freshness: freshness === 'any' ? guessFreshness(query) : freshness, count: 20 }, env, scope);
   }
   let results = applyPickGate(query, applyRelevance(query, { ...found.response, query }, scope.ledger));
   const scholar = await scholarly;

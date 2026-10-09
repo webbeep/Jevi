@@ -22,7 +22,7 @@ Reply as JSON: {"intent": string, "queries": string[], "freshness": "day"|"week"
 - Never add facts or guesses about the answer itself.`;
 
 /** Reads the intent behind a query; falls back to nothing (the literal search alone) when slow or unavailable. */
-export async function understand(query: string, env: Env, context?: string, timeoutMs = 2500): Promise<Understanding | undefined> {
+export async function understand(query: string, env: Env, context?: string, timeoutMs = 1800): Promise<Understanding | undefined> {
   if (!hasLlm(env)) return undefined;
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
   const call = llmJson<Partial<Understanding>>(env, SYSTEM, `Today is ${today}.\n${context ? `Conversation so far:\n${context.slice(0, 1500)}\n` : ''}Typed: ${query}`, 160);

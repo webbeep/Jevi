@@ -84,6 +84,8 @@ function isEntity(word: string): boolean {
 
 /** Looser query: entities and numbers, trailing filler removed, at most six words. */
 export function relaxQuery(q: string): string {
+  const tickers = cashtags(q);
+  if (tickers.length) return `${tickers.map((t) => t.toUpperCase()).join(' ')} stock`;
   const kept = q.split(/\s+/).filter((token) => token && !isSiteFilter(token) && !isDomainLike(token));
   const words = collapse(kept.join(' '))
     .replace(/["'“”‘’()[\]{}]/g, ' ')
@@ -110,4 +112,23 @@ export function entityQuery(q: string): string {
     if (out.length === 4) break;
   }
   return out.join(' ');
+}
+
+const CASHTAG = /(^|[^A-Za-z0-9])\$([A-Za-z]{1,5})(?![A-Za-z0-9])/g;
+
+/** Stock tickers written as cashtags ("$rdw", "$NVDA"), lowercased. */
+export function cashtags(query: string): string[] {
+  return [...new Set([...query.matchAll(CASHTAG)].map((m) => m[2]!.toLowerCase()))];
+}
+
+/** "why $rdw dropping" → "why RDW stock dropping": engines read a bare "$rdw" as noise or a blood test. */
+export function expandCashtags(query: string): string {
+  if (!cashtags(query).length) return query;
+  const hasStock = /\b(?:stocks?|shares?)\b/i.test(query);
+  return collapse(query.replace(CASHTAG, (_, lead: string, t: string) => `${lead}${t.toUpperCase()}${hasStock ? '' : ' stock'}`));
+}
+
+/** Searches that need no model: the ticker's own news for a cashtag ask. */
+export function tickerQueries(query: string): string[] {
+  return cashtags(query).slice(0, 2).map((t) => `${t.toUpperCase()} stock news today`);
 }

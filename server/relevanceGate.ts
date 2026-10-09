@@ -30,8 +30,12 @@ const TASK = new Set([
   'compare', 'introduced', 'venue', 'also', 'too', 'really', 'let', 'lets', 'up', 'id', 'ids',
 ]);
 
+/** Three-letter words that never name the topic. */
+const FILLER3 = new Set(['new', 'top', 'all', 'any', 'out', 'off', 'way', 'see', 'put', 'set', 'say', 'try', 'own', 'via', 'etc', 'yet', 'ago', 'one', 'two', 'got', 'far', 'big', 'lot', 'few', 'day', 'non']);
+
 const TOKEN = /[A-Za-z0-9]+(?:['’.-][A-Za-z0-9]+)*/g;
 
+import { cashtags } from './queryClean';
 import { isBlockedHost } from './spamHosts';
 import { contextTerms, distinguishingTerms, hasFullPersonName, isPersonAsk, personSubject, personSourceOk } from './entity';
 
@@ -85,9 +89,10 @@ function conflicts(question: number[], found: number[]): boolean {
 
 function termsOf(query: string): Profile {
   const words = query.match(TOKEN) ?? [];
+  const tickers = new Set(cashtags(query));
   const caps: { i: number; token: string }[] = [];
   words.forEach((word, i) => {
-    if (!isCap(word)) return;
+    if (!isCap(word) && !tickers.has(word.toLowerCase())) return;
     const token = norm(word);
     if (token) caps.push({ i, token });
   });
@@ -108,11 +113,13 @@ function termsOf(query: string): Profile {
   };
   for (const phrase of phrases) for (const token of phrase) bump(token, 3);
   for (const token of singles) bump(token, 2);
+  for (const ticker of tickers) bump(ticker, 3);
   for (const word of words) {
     const token = norm(word);
-    if (!token || TASK.has(token) || isCap(word)) continue;
+    if (!token || TASK.has(token) || isCap(word) || tickers.has(token)) continue;
     if (/^(?:19|20)\d{2}$/.test(token) || /^\d+\.\d+$/.test(token) || /^\d{2,}$/.test(token)) bump(token, 2);
-    else if (token.length >= 4) bump(token, 1);
+    // Short lowercase words are names or tickers typed in lowercase ("ed chu", "rdw"), so they count too.
+    else if (token.length >= 4 || (token.length === 3 && /[a-z]/.test(token) && !FILLER3.has(token))) bump(token, 1);
   }
   const years = yearsOf(query);
   for (const year of years) bump(String(year), 2);
@@ -123,9 +130,15 @@ function termsOf(query: string): Profile {
 /** Light suffix fold so "printing" meets "print" and "printers". */
 function forms(token: string): string[] {
   const out = [token];
-  if (token.length >= 7 && token.endsWith('ers')) out.push(token.slice(0, -3));
-  if (token.length >= 7 && token.endsWith('ing')) out.push(token.slice(0, -3));
-  if (token.length >= 6 && token.endsWith('ed')) out.push(token.slice(0, -2));
+  const stem = (s: string) => {
+    out.push(s);
+    // "dropping"/"dropped" → "dropp" → "drop"; not "fall"/"miss".
+    if (/([b-df-hj-np-tv-z])\1$/.test(s) && !/(ll|ss|ff|zz)$/.test(s)) out.push(s.slice(0, -1));
+  };
+  if (token.length >= 7 && token.endsWith('ers')) stem(token.slice(0, -3));
+  if (token.length >= 7 && token.endsWith('ing')) stem(token.slice(0, -3));
+  if (token.length >= 6 && token.endsWith('ed')) stem(token.slice(0, -2));
+  if (token.length >= 5 && token.endsWith('ies')) out.push(`${token.slice(0, -3)}y`);
   if (token.length >= 5 && token.endsWith('s') && !token.endsWith('ss')) out.push(token.slice(0, -1));
   return out;
 }

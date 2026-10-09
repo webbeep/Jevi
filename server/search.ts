@@ -31,6 +31,8 @@ interface Query {
    * beside a full one. Workers allow 50 subrequests per request, and a full search alone uses about 25.
    */
   lite?: boolean;
+  /** Always wait for `later` rewrites (deep asks), even when the literal search already answered. */
+  waitExtras?: boolean;
 }
 
 interface Hit {

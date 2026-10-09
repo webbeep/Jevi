@@ -5,6 +5,7 @@ import { SEARCH_ENGINES, callCap, type CallLedger, type SearchEngine, engineDead
 import { loadSkips, tripSkip } from './engineSkip';
 import { SERPER_IMAGES_SHARE, takeSlot, type CapBucket } from './providerCap';
 import { HttpStatusError, type Env, clip, domainOf, fetchJson } from './util';
+import { gateResults } from './relevanceGate';
 import { fetchWikiSearch } from './wikiSearch';
 import { youKeyedSearch, youKeylessSearch, youKeyPresent } from './youSearch';
 
@@ -39,7 +40,19 @@ interface Query {
   later?: Promise<{ more: string[]; freshness: Freshness }>;
   freshness: Freshness;
   count: number;
+  /** Always wait for `later` rewrites and their results (deep asks), even when the literal search already answered. */
+  waitExtras?: boolean;
 }
+
+/** Gated literal hits that make the ask answerable without waiting on a slow intent read. */
+const LITERAL_OK = 4;
+/** With a good literal search, rewrites still join if the intent read lands this soon after the cascade starts. */
+const EXTRAS_WAIT_MS = 1200;
+/** With a good literal search, a rewrite's results are used only if they arrive this soon after the literal ones. */
+const EXTRA_RESULTS_WAIT_MS = 1500;
+
+const NO_EXTRAS: { extras: string[]; fresh?: Freshness } = { extras: [] };
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** Planner rewrites that differ from the literal question, at most two. */
 function plannedExtras(q: Query): string[] {
@@ -416,6 +429,21 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUnt
     ? q.later.then((l) => ({ extras: plannedExtras({ ...q, more: l.more }), fresh: l.freshness }), () => ({ extras: [], fresh: q.freshness }))
     : Promise.resolve({ extras: plannedExtras(q), fresh: q.freshness });
   let extras: string[] = q.later ? [] : plannedExtras(q);
+  const cascadeStarted = Date.now();
+  const literalGood = (r: Settled) => r.ok && gateResults(q.q, r.value.hits.filter((h) => h.url && h.title)).kept.length >= LITERAL_OK;
+  /**
+   * Rewrites for a step whose literal call is already running. A thin or failed literal search waits for
+   * them (they are the recall path for niche or badly typed asks); a good one waits only briefly.
+   */
+  const extrasFor = async (early: Promise<Settled>): Promise<{ extras: string[]; fresh?: Freshness }> => {
+    if (q.waitExtras) return extrasReady;
+    const first = await Promise.race([extrasReady.then((v) => ({ v })), early.then((r) => ({ r }))]);
+    if ('v' in first) return first.v;
+    if (!first.r.ok) return NO_EXTRAS;
+    if (!literalGood(first.r)) return extrasReady;
+    const left = EXTRAS_WAIT_MS - (Date.now() - cascadeStarted);
+    return left > 0 ? Promise.race([extrasReady, sleep(left).then(() => NO_EXTRAS)]) : NO_EXTRAS;
+  };
 
   for (const step of steps) {
     if (!step.enabled) continue;
@@ -441,7 +469,7 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUnt
     ledger.search[step.name] += 1;
     const started = Date.now();
     const early = q.later && KEYED.has(step.name) ? settled(step.run(q.q)) : undefined;
-    const ready = await extrasReady;
+    const ready = early ? await extrasFor(early) : KEYED.has(step.name) ? await extrasReady : NO_EXTRAS;
     extras = ready.extras;
     // Two planner rewrites plus this call fill the cap. Wikipedia stays off so both rewrites still run.
     if (KEYED.has(step.name) && extras.length < 2) startWiki();
@@ -486,7 +514,16 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUnt
         return failure.dead;
       };
       if (parallel) {
-        for (const p of parallel) await settle(p.text, p.task, p.at);
+        // A good literal search never waits out a slow rewrite: what has not landed by the cut is dropped.
+        const cut = !q.waitExtras && parallel.length && literalGood({ ok: true, value: out }) ? sleep(EXTRA_RESULTS_WAIT_MS).then(() => 'late' as const) : undefined;
+        for (const p of parallel) {
+          const done = cut ? await Promise.race([p.task, cut]) : await p.task;
+          if (done === 'late') {
+            ledger.fellThrough.push(`${step.name}:also-late`);
+            continue;
+          }
+          await settle(p.text, Promise.resolve(done), p.at);
+        }
       } else if (KEYED.has(step.name)) {
         for (const text of extras) {
           if (searchCalls(ledger) >= callCap(ledger) || engineDead(step.name)) break;
