@@ -197,6 +197,28 @@ export function contextTerms(query: string, name = personSubject(query)): string
  * Multi-word person name must appear as an adjacent phrase in title/snippet
  * (not URL — "blu-ray" / "lee-a-ray" false positives). A single name token is never enough.
  */
+/**
+ * A capitalised run the results don't print as a name is a topic, not a person: "Lebron Preseason debut"
+ * finds "LeBron James' preseason debut" pages, which carry both words but rarely side by side.
+ * "Who is …" asks always stay person asks.
+ */
+export function nameIsTopic(query: string, rows: readonly EntityRow[]): boolean {
+  const q = query.trim();
+  if (WHO_IS.test(q) || ABOUT.test(q) || !rows.length) return false;
+  const name = personSubject(q);
+  const nameToks = tokens(name).filter((t) => t.length >= 2);
+  if (nameToks.length < 2) return false;
+  let carry = 0;
+  let named = 0;
+  for (const row of rows) {
+    const text = ` ${tokens(`${row.title ?? ''} ${row.snippet ?? ''}`).join(' ')} `;
+    if (!nameToks.every((t) => text.includes(` ${t} `))) continue;
+    carry += 1;
+    if (hasFullPersonName(name, row)) named += 1;
+  }
+  return carry > 0 && named * 2 < carry;
+}
+
 export function hasFullPersonName(name: string, row: EntityRow): boolean {
   const nameToks = tokens(name).filter((t) => t.length >= 2);
   if (nameToks.length < 2) return false;
@@ -1048,7 +1070,7 @@ export function resolveEntity(
   rows: EntityRow[],
   opts?: { pattern?: string; prior?: Entity },
 ): EntityDecision {
-  if (!isPersonAsk(query, opts?.pattern)) return { kind: 'skip' };
+  if (!isPersonAsk(query, opts?.pattern) || nameIsTopic(query, rows)) return { kind: 'skip' };
   const name = personSubject(query);
   if (!name || !rows.length) return { kind: 'skip' };
   // A one-token famous ask ("Who is Obama"): one Wikipedia article for the token, plus other

@@ -74,14 +74,25 @@ const ENGINE_WEIGHT: Record<string, number> = { brave: 1.2, serper: 1.2, exa: 1.
 
 /** Reciprocal rank fusion across engines, so results found by several engines rise. */
 const QUERY_STOP = new Set(['the', 'and', 'for', 'with', 'how', 'what', 'why', 'when', 'who', 'are', 'is', 'to', 'of', 'in', 'on', 'a', 'an', 'vs', 'best', 'my', 'do', 'does', 'can', 'i']);
-const stem = (w: string) => w.replace(/(ies|es|s)$/, '');
+/** "dropping" → "drop", "injuries" → "injur", "watched" → "watch": matched as a prefix of the page text. */
+const stem = (w: string) => {
+  const s = w.length >= 6 ? w.replace(/(ing|ed)$/, '') : w;
+  return (s !== w && /([b-df-hj-np-tv-z])\1$/.test(s) ? s.slice(0, -1) : s).replace(/(ies|es|s)$/, '');
+};
 
-/** Share of the query's significant words a result mentions in its title, snippet or URL (0-1). */
-function coverage(query: string, hit: Hit): number {
+/**
+ * Share of the query's significant words a result mentions in its title, snippet or URL (0-1).
+ * `typed`: the person's own words, lifted to 0.5 once a third of them (at least two) are there, since a
+ * long, chatty ask ("lebron preseason debut what to expect and how to watch") is rarely repeated whole.
+ * Planner rewrites are already precise and keep the plain share.
+ */
+export function coverage(query: string, hit: Pick<Hit, 'title' | 'snippet' | 'url'>, typed = false): number {
   const words = [...new Set(query.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 1 && !QUERY_STOP.has(w)).map(stem))];
   if (!words.length) return 1;
   const text = `${hit.title} ${hit.snippet} ${hit.url}`.toLowerCase();
-  return words.filter((w) => text.includes(w)).length / words.length;
+  const found = words.filter((w) => text.includes(w)).length;
+  const share = found / words.length;
+  return typed && found >= Math.max(2, Math.ceil(words.length / 3)) ? Math.max(0.5, share) : share;
 }
 
 /**
@@ -105,7 +116,7 @@ function interleaveResults(lists: SearchResult[][]): SearchResult[] {
   return out;
 }
 
-function fuse(outputs: { engine: string; hits: Hit[] }[], count: number, query: string): SearchResult[] {
+function fuse(outputs: { engine: string; hits: Hit[] }[], count: number, query: string, typed = false): SearchResult[] {
   const merged = new Map<string, SearchResult & { score: number }>();
   for (const { engine, hits } of outputs) {
     hits.forEach((hit, rank) => {
@@ -126,7 +137,7 @@ function fuse(outputs: { engine: string; hits: Hit[] }[], count: number, query: 
     });
   }
   return [...merged.values()]
-    .map((r) => ({ r, cover: coverage(query, r) }))
+    .map((r) => ({ r, cover: coverage(query, r, typed) }))
     .filter(({ r, cover }) => cover >= 0.5 || r.engines.length > 1)
     .map(({ r, cover }) => ({ ...r, score: r.score * (0.3 + cover) }))
     .sort((a, b) => b.score - a.score)
@@ -271,7 +282,7 @@ export async function searchWithLate(q: Query, env: Env, scope?: AskScope): Prom
 
   // Each query is scored against its own words, then interleaved with the literal question first.
   const fused = [
-    fuse([{ engine: web.engine, hits: web.hits }], q.count, q.q),
+    fuse([{ engine: web.engine, hits: web.hits }], q.count, q.q, true),
     ...web.more.map((list) => fuse([{ engine: web.engine, hits: list.hits }], q.count, list.query)),
   ];
   const primary = interleaveResults(fused);

@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { clearDeadEngines, newLedger, queriesForAsk } from '../server/budget.ts';
 import { cascadeWeb } from '../server/cascade.ts';
-import { askTopic, askedQuestions, isPersonAsk, personSubject, pickTopic, pickTopicQuery } from '../server/entity.ts';
+import { askTopic, askedQuestions, isPersonAsk, nameIsTopic, personSubject, pickTopic, pickTopicQuery, resolveEntity } from '../server/entity.ts';
+import { coverage } from '../server/search.ts';
 import { cashtags, expandCashtags, relaxQuery, tickerQueries } from '../server/queryClean.ts';
 import { gateResults } from '../server/relevanceGate.ts';
 import { guessFreshness } from '../server/stream.ts';
@@ -68,6 +69,35 @@ test('a Which-one? pick keeps the topic of the ask that offered it', () => {
   assert.equal(pickTopic('Ray Lee BlueFlame AI', ['ray lee blueflame ai']), '');
   assert.equal(askTopic('Ray Lee BlueFlame AI', 'Ray Lee'), '');
   assert.equal(askTopic('Jaylen Brown injuries', 'Jaylen Brown'), 'injuries');
+});
+
+const DEBUT_ROWS = [
+  { title: "Three takeaways from LeBron James' preseason 76ers debut", url: 'https://a.example.com/1', snippet: 'James played 18 minutes.' },
+  { title: 'LeBron James reacts to preseason debut after Sixers fall to Nets', url: 'https://b.example.com/2', snippet: 'Philadelphia lost.' },
+  { title: 'LeBron preseason debut: 10 points in 18 minutes', url: 'https://c.example.com/3', snippet: 'LeBron James looked sharp.' },
+  { title: 'LeBron James preseason debut status revealed by Nick Nurse', url: 'https://d.example.com/4', snippet: 'Nurse said James will play.' },
+];
+
+test('a title-cased topic is not a person named "Lebron Preseason" (every source was dropped)', () => {
+  assert.equal(isPersonAsk('Lebron Preseason debut'), true);
+  assert.equal(nameIsTopic('Lebron Preseason debut', DEBUT_ROWS), true);
+  assert.equal(gateResults('Lebron Preseason debut', DEBUT_ROWS).kept.length, 4);
+  assert.equal(resolveEntity('Lebron Preseason debut', DEBUT_ROWS).kind, 'skip');
+  const named = [
+    { title: 'Jaylen Brown injury update', url: 'https://e.example.com/1', snippet: 'Jaylen Brown is day to day.' },
+    { title: 'Celtics: Jaylen Brown out vs Knicks', url: 'https://f.example.com/2', snippet: 'Brown has a hamstring strain.' },
+  ];
+  assert.equal(nameIsTopic('Jaylen Brown injuries', named), false);
+  assert.equal(nameIsTopic('Who is Lebron Preseason', DEBUT_ROWS), false);
+});
+
+test('a long chatty ask keeps titles that carry a third of its words', () => {
+  const q = 'LeBron preseason debut what to expect and how to watch';
+  const debut = { title: 'LeBron James debut highlights with the Sixers', snippet: '', url: 'https://nba.com/x' };
+  assert.ok(coverage(q, debut, true) >= 0.5);
+  assert.ok(coverage(q, debut) < 0.5, 'planner rewrites keep the plain share');
+  assert.ok(coverage(q, { title: 'Apple Store hours', snippet: 'Find a store', url: 'https://apple.com' }, true) < 0.5);
+  assert.ok(coverage('why rdw dropping', { title: 'Redwire (RDW) stock drops 12%', snippet: '', url: 'https://y.com' }, true) >= 0.5);
 });
 
 test('askedQuestions reads the conversation digest newest first', () => {

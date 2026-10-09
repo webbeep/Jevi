@@ -37,7 +37,7 @@ const TOKEN = /[A-Za-z0-9]+(?:['’.-][A-Za-z0-9]+)*/g;
 
 import { cashtags } from './queryClean';
 import { isBlockedHost } from './spamHosts';
-import { contextTerms, distinguishingTerms, hasFullPersonName, isPersonAsk, personSubject, personSourceOk } from './entity';
+import { contextTerms, distinguishingTerms, hasFullPersonName, isPersonAsk, nameIsTopic, personSubject, personSourceOk } from './entity';
 
 export interface GateHit {
   title: string;
@@ -187,7 +187,7 @@ export function gateResults<T extends GateHit>(query: string, rows: readonly T[]
   // token (org/role) when the query names one. A single-token match is never enough.
   let pool = clean;
   let personDropped = 0;
-  if (isPersonAsk(query)) {
+  if (isPersonAsk(query) && !nameIsTopic(query, clean)) {
     const name = personSubject(query);
     const nameToks = name ? name.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length >= 2) : [];
     // Multi-word person names only: a single token is never enough to force the person gate.

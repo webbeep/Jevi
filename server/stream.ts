@@ -12,6 +12,7 @@ import {
   isPersonAsk,
   knowledgeForKept,
   knowledgeRow,
+  nameIsTopic,
   personSourceOk,
   personSubject,
   pickSeeds,
@@ -159,7 +160,7 @@ function applyRelevance(query: string, response: SearchResponse, ledger: CallLed
  * choice label. When everything drops, the empty-results recovery runs instead.
  */
 function applyPickGate(query: string, response: SearchResponse): SearchResponse {
-  if (!isPersonAsk(query) || !distinguishingTerms(query).length) return response;
+  if (!isPersonAsk(query) || !distinguishingTerms(query).length || nameIsTopic(query, response.results)) return response;
   const kept = response.results.filter((row) => personSourceOk(query, row));
   if (kept.length === response.results.length) return response;
   console.log(JSON.stringify({ zo: 'entity', pickGate: true, kept: kept.length, dropped: response.results.length - kept.length }));
@@ -373,7 +374,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   // results. Ambiguous names return choices instead of a mixed card.
   const plan = await planned;
   // Bare person ask with no Wikipedia "may refer to" in the SERP: one keyless disambiguation lookup (0 Serper).
-  if (isPersonAsk(query, plan.pattern) && !contextTerms(query).length && !priorEntity(context)) {
+  if (isPersonAsk(query, plan.pattern) && !contextTerms(query).length && !priorEntity(context) && !nameIsTopic(query, results.results)) {
     const name = personSubject(query);
     if (name && !results.results.some((r) => isDisambiguationPage(r))) {
       const wiki = await fetchWikiDisambiguation(name).catch(() => null);
