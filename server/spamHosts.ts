@@ -6,6 +6,8 @@
 const HOST_RE =
   /(^|\.)(multporn|pornhub|xvideos|xnxx|xhamster|onlyfans|chaturbate|spankbang|redtube|youporn|tube8|porn360|xnxxes|hqporner|eporner|gotporn|porn\.com|xxx|nsfw|adultvideo|sexvid)(\.|$)/i;
 
+/** Adult words inside a host name ("pornozavr.net"); never "sex", which is in essex and sussex. */
+const ADULT_IN_HOST = /porn|xxx|hentai|xvideo|camgirl/i;
 /** Path/query tokens that mark an adult dump even on an unknown host. */
 const PATH_RE = /\/(porn|xxx|nsfw|adult|sex|hentai|nude|naked)(\/|$)/i;
 
@@ -50,7 +52,7 @@ export function isFictionHost(url: string): boolean {
 export function isBlockedHost(url: string): boolean {
   if (!url) return false;
   const host = hostOfUrl(url);
-  if (host && (HOST_RE.test(host) || isSpamWebApp(host))) return true;
+  if (host && (HOST_RE.test(host) || ADULT_IN_HOST.test(host) || isSpamWebApp(host))) return true;
   try {
     const u = new URL(url);
     if (PATH_RE.test(u.pathname)) return true;

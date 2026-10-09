@@ -219,6 +219,8 @@ export function nameIsTopic(query: string, rows: readonly EntityRow[]): boolean 
   const q = query.trim();
   if (WHO_IS.test(q) || ABOUT.test(q) || !rows.length) return false;
   const name = personSubject(q);
+  // "Ed Chu, Bf ai": the comma says the words before it are a name.
+  if (name && q.toLowerCase().startsWith(`${name.toLowerCase()},`)) return false;
   const nameToks = tokens(name).filter((t) => t.length >= 2);
   if (nameToks.length < 2) return false;
   let carry = 0;

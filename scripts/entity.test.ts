@@ -18,6 +18,7 @@ import {
   isDisambiguationPage,
   personSourceOk,
   personSubject,
+  nameIsTopic,
   knowledgeForKept,
   knowledgeRow,
   type Entity,
@@ -1030,4 +1031,15 @@ test('a detail typed after a full name stays out of the name and still finds the
   assert.equal(personSourceOk('Ed Chu, Montefiore', blueflame), false);
   assert.equal(personSubject('Barack Hussein Obama'), 'Barack Hussein Obama');
   assert.equal(personSubject('John Smith Jr'), 'John Smith Jr');
+});
+
+test('"Name, detail" is a person ask even when the pages scatter the name words', () => {
+  const rows: EntityRow[] = [
+    { title: 'Chu shogi', url: 'https://en.wikipedia.org/wiki/Chu_shogi', snippet: 'Chu shogi is a strategy board game; Ed. notes on the chu variant' },
+    { title: 'Ed Chu - Oncologist', url: 'https://x.org/a', snippet: 'Dr. Ed Chu, cancer center director' },
+    { title: 'Ed notes', url: 'https://y.org/b', snippet: 'Chu and Ed went to the market' },
+  ];
+  assert.equal(nameIsTopic('Ed Chu, Bf ai', rows), false);
+  assert.equal(isBlockedHost('https://pornozavr.net/video/1'), true);
+  assert.equal(isBlockedHost('https://www.essexlive.news/story'), false);
 });
