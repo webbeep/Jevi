@@ -605,6 +605,51 @@ function attachWeak(strong: number[][], weak: number[]): number[][] {
   return clusters;
 }
 
+/**
+ * The disambiguating words of an en.wikipedia "(qualifier)" row ("John Smith (explorer)"): its
+ * qualifier plus the role/org/location cores the page carries, minus the name itself.
+ */
+function qualifierWords(rows: EntityRow[], index: number, name: string): Set<string> {
+  const own = tokens(name);
+  return new Set([...extractSignals(rows[index]!, name).sig].filter((t) => t.length >= 4 && !own.includes(t)));
+}
+
+/**
+ * EN4 part 11 (live Serper "Who is John Smith"): one person split into two choices. An en.wikipedia
+ * "(qualifier)" row names ONE person ("John Smith (explorer)"), while pages about that same man
+ * (nps.gov, the Jamestown museums) had clustered on their own, so the ask offered "Explorer" next to
+ * "President of Jamestown". Before the strong clusters are ranked, merge a cluster B into the
+ * cluster A holding that Wikipedia qualifier row when at least half of B's rows carry one of the
+ * qualifier's own words (case-insensitive, whole word, in title+snippet). Two clusters that each
+ * carry their own qualifier row are two different people and never merge.
+ */
+function mergeQualifierClusters(strong: number[][], rows: EntityRow[], name: string): number[][] {
+  const clusters = strong.map((c) => [...c]);
+  const qualifiers = clusters.map((cluster) => {
+    for (const i of cluster) {
+      const row = rows[i]!;
+      if (!wikiNamesake(row, name)) continue;
+      const words = qualifierWords(rows, i, name);
+      if (words.size) return words;
+    }
+    return undefined;
+  });
+  for (let a = 0; a < clusters.length; a++) {
+    const words = qualifiers[a];
+    if (!words) continue;
+    for (let b = 0; b < clusters.length; b++) {
+      const cluster = clusters[b]!;
+      // Two clusters that each carry their own en.wikipedia qualifier row are two different people.
+      if (b === a || !cluster.length || qualifiers[b]) continue;
+      const carries = cluster.filter((i) => [...words].some((w) => hasWholeWord(`${rows[i]!.title ?? ''} ${rows[i]!.snippet ?? ''}`, w))).length;
+      if (carries * 2 < cluster.length) continue;
+      clusters[a] = [...clusters[a]!, ...cluster].sort((x, y) => x - y);
+      clusters[b] = [];
+    }
+  }
+  return clusters.filter((c) => c.length).sort((a, b) => b.length - a.length || a[0]! - b[0]!);
+}
+
 function topOf(cluster: number[], rows: EntityRow[], name: string): { role?: string; org?: string; location?: string } {
   const sigs = cluster.map((i) => extractSignals(rows[i]!, name));
   const count = (get: (s: RowSignals) => string[]) => {
@@ -1136,11 +1181,14 @@ export function resolveEntity(
   // pages about the name outrank one aggregator hit, so a dominant identity is never offered
   // as one of two choices.
   const bare = contextTerms(query, name).length === 0;
-  const ranked = strong
+  // A bare ask ranks its strong clusters; a cluster about the same person as the Wikipedia
+  // "(qualifier)" cluster joins it first, so one man is never offered as two choices.
+  const merged = bare ? mergeQualifierClusters(strong, rows, name) : strong;
+  const ranked = merged
     .map((c) => ({ cluster: c, score: c.reduce((s, i) => s + rowWeight(rows[i]!, name), 0) }))
     .sort((a, b) => b.score - a.score || b.cluster.length - a.cluster.length || a.cluster[0]! - b.cluster[0]!);
 
-  if (strong.length >= 2) {
+  if (merged.length >= 2) {
     if (bare) {
       const top = ranked[0]!.score;
       // Only offer a split when the runner-up is a real competitor (≥ half the top score).
@@ -1163,7 +1211,7 @@ export function resolveEntity(
   }
 
   // Single: the top-ranked cluster for a bare ask (else the biggest), weak rows attached to it.
-  const pool = bare && strong.length ? [ranked[0]!.cluster] : strong;
+  const pool = bare && merged.length ? [ranked[0]!.cluster] : merged;
   const clusters = attachWeak(pool.length ? pool : (weak.length ? [weak] : []), pool.length ? weak : []);
   if (!clusters.length) return { kind: 'skip' };
   const win = clusters[0]!;

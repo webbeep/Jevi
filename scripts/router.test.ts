@@ -28,7 +28,59 @@ describe('intent router', () => {
 });
 
 import { testForce, cacheBypass } from '../server/token.ts';
-import { permitted } from '../server/images.ts';
+import { permitted, thumbMatchesPage } from '../server/images.ts';
+import { accepts, targetFor } from '../server/imageGate.ts';
+import type { ImageResult } from '../shared/types.ts';
+import { readFileSync } from 'node:fs';
+
+/** Live Serper image pool for "Ray Lee Raycon CEO" (scripts/fixtures/en4/serper-live-raycon-images.json). */
+const RAYCON_POOL = JSON.parse(
+  readFileSync(new URL('./fixtures/en4/serper-live-raycon-images.json', import.meta.url), 'utf8'),
+).images as ImageResult[];
+/** The live pool pairs a Raycon video page with the hq720 frame of a different (unrelated) video. */
+const WRONG_FRAME = RAYCON_POOL.find((i) => i.url.includes('youtube.com/watch'))!;
+const FRAME_OF = (id: string) => `https://i.ytimg.com/vi/${id}/hq720.jpg`;
+
+describe('EN4: a YouTube thumbnail must be a frame of the page\'s own video', () => {
+  test('a frame of another video never matches its page', () => {
+    assert.equal(thumbMatchesPage(WRONG_FRAME), false);
+    assert.equal(thumbMatchesPage({ url: WRONG_FRAME.url, thumb: FRAME_OF('1Wic1K_ZkkU') }), true);
+    for (const url of ['https://youtu.be/1Wic1K_ZkkU', 'https://www.youtube.com/shorts/1Wic1K_ZkkU', 'https://www.youtube.com/embed/1Wic1K_ZkkU']) {
+      assert.equal(thumbMatchesPage({ url, thumb: FRAME_OF('1Wic1K_ZkkU') }), true, url);
+      assert.equal(thumbMatchesPage({ url, thumb: FRAME_OF('MCottgyRxZY') }), false, url);
+    }
+    // Numbered thumbnail shards and the /vi_webp/ path name their video the same way.
+    assert.equal(thumbMatchesPage({ url: 'https://youtu.be/1Wic1K_ZkkU', thumb: 'https://i9.ytimg.com/vi_webp/1Wic1K_ZkkU/webp.jpg' }), true);
+    // Everything else — a non-YouTube picture, or a YouTube frame on a page that is not a video — passes.
+    for (const img of RAYCON_POOL.filter((i) => i !== WRONG_FRAME)) assert.equal(thumbMatchesPage(img), true, img.thumb);
+    assert.equal(thumbMatchesPage({ url: 'https://youtube.com/@raycon', thumb: FRAME_OF('1Wic1K_ZkkU') }), true);
+    assert.equal(thumbMatchesPage({ url: 'https://lasentinel.net/ray-j.html', thumb: FRAME_OF('MCottgyRxZY') }), true);
+    assert.equal(thumbMatchesPage({ url: 'https://www.youtube.com/watch?v=1Wic1K_ZkkU', thumb: 'https://i.ytimg.com/vi/1Wic1K_ZkkU/hq720.jpg' }), true);
+  });
+
+  test('permitted drops exactly that frame from the live pool', () => {
+    const kept = permitted(RAYCON_POOL, {} as never);
+    assert.equal(kept.length, RAYCON_POOL.length - 1);
+    assert.ok(!kept.includes(WRONG_FRAME));
+    assert.deepEqual(kept.map((i) => i.url), RAYCON_POOL.filter((i) => i !== WRONG_FRAME).map((i) => i.url));
+  });
+
+  test('no Ray J photo passes the single-entity photo gate after the filter', () => {
+    const target = targetFor('Ray Lee', '', undefined, {
+      hintFor: () => ({ name: 'Ray Lee', context: ['raycon'], strict: true, requireContext: true }),
+    });
+    assert.equal(target.kind, 'named');
+    for (const img of permitted(RAYCON_POOL, {} as never)) {
+      if (/ray\s*lee/i.test(`${img.title} ${img.source}`)) continue;
+      assert.equal(accepts(target, img), false, `${img.source}: ${img.title}`);
+    }
+    for (const host of ['lasentinel.net', 'harlemworldmagazine.com']) {
+      const rayJ = RAYCON_POOL.filter((i) => i.source === host);
+      assert.ok(rayJ.length > 0, host);
+      for (const img of rayJ) assert.equal(accepts(target, img), false, `${host}: ${img.title}`);
+    }
+  });
+});
 
 describe('QA force flag and image hygiene', () => {
   const env = { ZO_TEST_TOKEN: 'tok' } as unknown as Parameters<typeof testForce>[1];

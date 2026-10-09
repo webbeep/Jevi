@@ -947,3 +947,70 @@ describe('EN4: the extractive card header names the chosen person on a picked ch
     assert.deepEqual(heads.map((h) => h.title), ['Ray Lee']);
   });
 });
+
+/** Recorded live Serper SERP for the EN4 part-11 fix (scripts/fixtures/en4/serper-live-js.json). */
+const LIVE_JS = JSON.parse(
+  fs.readFileSync(new URL('./fixtures/en4/serper-live-js.json', import.meta.url), 'utf8'),
+) as { query: string; rows: EntityRow[] };
+const explorerRow = (i: number) =>
+  /explor|jamestown|jamestowne/i.test(`${LIVE_JS.rows[i]!.title} ${LIVE_JS.rows[i]!.snippet} ${LIVE_JS.rows[i]!.url}`);
+
+describe('EN4 part 11: one person, never two choices (live Serper "Who is John Smith")', () => {
+  const wiki = LIVE_JS.rows.findIndex((r) => /John_Smith_\(explorer\)/.test(r.url));
+  const nps = LIVE_JS.rows.findIndex((r) => r.url.includes('nps.gov'));
+
+  test('the explorer and his Jamestown pages are one person, never "Explorer" next to "Jamestown"', () => {
+    const d = resolveEntity(LIVE_JS.query, LIVE_JS.rows, { pattern: 'profile' });
+    if (d.kind !== 'choices') {
+      assert.equal(d.kind, 'single', 'a split is only allowed when no two choices name the explorer');
+      if (d.kind !== 'single') return;
+      assert.ok(d.entity.terms.includes('explorer'), d.entity.terms.join(','));
+      assert.ok(d.kept.includes(wiki) && d.kept.includes(nps), d.kept.join(','));
+      return;
+    }
+    const labels = d.choices.map((c) => c.descriptor);
+    assert.equal(labels.filter((l) => /jamestown/i.test(l)).length, 0, labels.join(' | '));
+    const aboutHim = d.choices.filter((c) => /explor|jamestown/i.test(c.descriptor) || (c.seeds ?? []).some(explorerRow));
+    assert.equal(aboutHim.length, 1, labels.join(' | '));
+  });
+
+  test('a cluster about the same explorer joins the Wikipedia "(qualifier)" cluster', () => {
+    const rows: EntityRow[] = [
+      row(
+        'John Smith (explorer)',
+        'John Smith was an English soldier, explorer, admiral of New England, and author.',
+        'https://en.wikipedia.org/wiki/John_Smith_(explorer)',
+      ),
+      row(
+        'Explorer John Smith honoured at Jamestown',
+        'The explorer John Smith of the Virginia Company is honoured in Jamestown.',
+        'https://b.example/john-smith-explorer',
+      ),
+    ];
+    const d = resolveEntity('Who is John Smith', rows, { pattern: 'profile' });
+    assert.equal(d.kind, 'single');
+    if (d.kind !== 'single') return;
+    assert.deepEqual(d.kept, [0, 1]);
+  });
+
+  test('two Wikipedia qualifier rows are two different people and never merge', () => {
+    const rows: EntityRow[] = [
+      row('John Smith (explorer)', 'John Smith was an English soldier, explorer, admiral of New England, and author.', 'https://en.wikipedia.org/wiki/John_Smith_(explorer)'),
+      row('John Smith (housebreaker)', 'John Smith, also known as John Wilson, was an English author and criminal.', 'https://en.wikipedia.org/wiki/John_Smith_(housebreaker)'),
+      row('John Smith (baker)', 'John Smith was an English author of the first bakery manual.', 'https://en.wikipedia.org/wiki/John_Smith_(baker)'),
+    ];
+    const d = resolveEntity('Who is John Smith', rows, { pattern: 'profile' });
+    assert.equal(d.kind, 'choices');
+    if (d.kind !== 'choices') return;
+    assert.deepEqual(d.choices.map((c) => c.descriptor), ['Explorer', 'Housebreaker', 'Baker']);
+  });
+
+  test('the recorded choices (ls-dk, ls-js, serper-ray, serper-dk, serper-js) and the famous singles stand', () => {
+    assert.deepEqual(descriptorsOf('ls-dk'), ['Violinist', 'Restaurateur', 'CEO of C2 Education Centers']);
+    assert.deepEqual(descriptorsOf('ls-js'), ['Based in Northamptonshire', 'Housebreaker', 'Explorer']);
+    assert.deepEqual(descriptorsOf('serper-js'), ['Explorer', 'Player', 'Actor in Los Angeles']);
+    assert.ok(descriptorsOf('serper-ray').includes('Founder of Raycon'), descriptorsOf('serper-ray').join(' | '));
+    assert.ok(descriptorsOf('serper-dk').some((l) => l.includes('C2 Education')), descriptorsOf('serper-dk').join(' | '));
+    for (const key of ['ls-obama', 'serper-obama', 'ls-swift']) assert.equal(run(key).kind, 'single', key);
+  });
+});

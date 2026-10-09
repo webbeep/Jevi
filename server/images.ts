@@ -17,10 +17,61 @@ const GENERIC_PREVIEW = /logo|fallback|placeholder|default|favicon|\bfav\b|apple
 /** A site-wide preview (logo, favicon, placeholder) rather than a picture of the subject. */
 export const isGenericPreview = (url: string) => GENERIC_PREVIEW.test(url.split('#')[0]);
 
+/** Thumbnail hosts YouTube serves its frames from, including the numbered shards ("i1.ytimg.com"). */
+const YT_THUMB_HOST = /^(?:i\.ytimg\.com|img\.youtube\.com|i[0-9]\.ytimg\.com)$/i;
+
+/** A YouTube thumbnail names the video it is a frame of in its path ("/vi/<id>/", "/vi_webp/<id>/"). */
+const YT_THUMB_PATH = /^\/(?:vi|vi_webp)\/([^/]+)/;
+
+/** A YouTube video id: 9–64 URL-safe characters, long enough to never be a fragment of a longer one. */
+const videoId = (s: string) => (/^[\w-]{9,64}$/.test(s) ? s : '');
+
+/** The video a YouTube page url is about (`watch?v=`, youtu.be/<id>, `/shorts/`, `/embed/`), else ''. */
+function youTubeVideoId(pageUrl: string): string {
+  let u: URL;
+  try {
+    u = new URL(pageUrl);
+  } catch {
+    return '';
+  }
+  const host = u.hostname.replace(/^(?:www|m)\./, '').toLowerCase();
+  if (host === 'youtu.be') return videoId(u.pathname.slice(1).split('/')[0]!);
+  if (host !== 'youtube.com' && host !== 'youtube-nocookie.com') return '';
+  if (u.pathname.toLowerCase() === '/watch') return videoId(u.searchParams.get('v') ?? '');
+  const shorts = /^\/(?:shorts|embed)\/([^/]+)$/i.exec(u.pathname);
+  return shorts ? videoId(shorts[1]!) : '';
+}
+
+/** The video an i.ytimg.com / img.youtube.com thumbnail is a frame of, else ''. */
+function youTubeThumbId(thumb: string): string {
+  let u: URL;
+  try {
+    u = new URL(thumb);
+  } catch {
+    return '';
+  }
+  if (!YT_THUMB_HOST.test(u.hostname)) return '';
+  const frame = YT_THUMB_PATH.exec(u.pathname);
+  return frame ? frame[1]! : '';
+}
+
+/**
+ * A YouTube picture is a frame of the page's own video. An engine can pair a video page with the
+ * thumbnail of an unrelated one (live "Ray Lee Raycon CEO" was served the hq720 frame of a different
+ * video — a wrong face), so the ids must agree. Anything that is not a YouTube thumbnail of a
+ * YouTube video page is never checked.
+ */
+export function thumbMatchesPage(img: { url: string; thumb: string }): boolean {
+  const frame = youTubeThumbId(img.thumb);
+  if (!frame) return true;
+  const page = youTubeVideoId(img.url);
+  return !page || page === frame;
+}
+
 /** Drops pictures the deployment's image policy does not allow, and publisher previews that are just branding. */
 export function permitted(images: ImageResult[], env: Env): ImageResult[] {
   // Never hotlink anything that isn't https. Adult/spam hosts never appear as pictures.
-  return images.filter((i) => /^https:\/\//i.test(i.thumb) && !isBlockedHost(i.thumb) && !isBlockedHost(i.url) && (i.license !== 'source' || (allowsSourceImages(env) && !GENERIC_PREVIEW.test(i.thumb.split('#')[0]))));
+  return images.filter((i) => /^https:\/\//i.test(i.thumb) && !isBlockedHost(i.thumb) && !isBlockedHost(i.url) && (i.license !== 'source' || (allowsSourceImages(env) && !GENERIC_PREVIEW.test(i.thumb.split('#')[0]))) && thumbMatchesPage(i));
 }
 
 const licenseLabel = (short?: string) => (short ? stripHtml(short).replace(/^cc-/i, 'CC ').trim() : '');
