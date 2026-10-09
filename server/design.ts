@@ -14,6 +14,7 @@ import { VerdictSession } from './verdict';
 import { accepts, targetFor } from './imageGate';
 import { personSubject } from './entity';
 import { isVideoUrl, wantsVideo } from './videoSearch';
+import { guessFreshness, stricter } from './freshness';
 
 const GRAMMAR = `Each node is a JSON object with a "type" field.
 LAYOUT
@@ -196,6 +197,19 @@ const SYSTEM_REGION = `${DESIGNER}
 - You are one of several designers building the same card in parallel. The TASK tells you which part is yours and what the others cover; stay in your lane and never repeat their content. If your region is a list of items (picks, options, places), it holds the whole list.
 - Output only what the TASK asks for, as JSON Lines: one complete compact JSON object per line. Every node carries a \"type\" field, e.g. {\"type\":\"hero\",...}. No code fences, no prose, no blank lines, no line breaks inside a JSON object.`;
 
+/** Today's date always; for "today"/"latest" asks, what current means and that every number stays on the subject. */
+function timeRules(req: DesignRequest): string {
+  const today = `- Today is ${new Date().toISOString().slice(0, 10)} (UTC).`;
+  const asked = stricter(guessFreshness(req.query), guessFreshness(req.followup?.question ?? ''));
+  if (asked !== 'day' && asked !== 'week') return today;
+  const span = asked === 'day' ? 'today or the past 24 hours' : 'the past 7 days';
+  return [
+    today,
+    `- This ask is time-sensitive: lead with items dated ${span} (use the source dates) and say when each happened. Leave older items out, or put them last under an "Earlier" label; never present them as today's.`,
+    '- Every stat, number and item must be about what was asked: no market indices, stock prices or app rankings unless the ask is about markets, stocks or rankings.',
+  ].join('\n');
+}
+
 function taskBlock(req: DesignRequest): string {
   const pattern = patternById(req.pattern);
   return [
@@ -203,6 +217,7 @@ function taskBlock(req: DesignRequest): string {
     `- ${DEPTH_HINT[req.depth]}`,
     req.intent ? `- What the person wants: ${req.intent} Answer that; sources that only match their words but not this are background at most.` : '',
     req.simple ? '- Write for a 10-year-old: plain words and a friendly analogy.' : '',
+    timeRules(req),
     followupRules(req.followup, req.search.query).trim().replace(/^/, '- '),
     req.search.results.length ? '' : '- No web sources were found for this; answer from general knowledge, say it may be out of date, and do not cite sources.',
     req.context ? `- Conversation so far (use it to resolve references like "it" or "the cheaper one"; don't repeat it):\n${req.context}` : '',

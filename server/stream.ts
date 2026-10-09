@@ -42,21 +42,14 @@ import { entityQuery, relaxQuery, tickerQueries } from './queryClean';
 import { type LateExtras, searchWithLate } from './search';
 import { scholarlyResults, withScholarly } from './scholarly';
 import { videoResults, withVideos } from './videoSearch';
+import { guessFreshness, preferFresh, staleComplaint, stricter } from './freshness';
 import type { Send } from './sse';
 import { extraQueries, understand } from './understand';
 import { cacheBypass, testForce, validTestToken } from './token';
 import { SERPER_ANON_SHARE } from './providerCap';
 import type { Env } from './util';
 
-const FRESH_DAY = /\b(today|tonight|yesterday|right now|live|breaking|score[sd]?)\b/i;
-const FRESH_WEEK = /\b(news|latest|this week|recent(?:ly)?|headlines)\b/i;
-
-/** Freshness the literal search can take from the ask's own words, before the intent read lands. */
-export function guessFreshness(query: string): Freshness {
-  if (FRESH_DAY.test(query)) return 'day';
-  if (FRESH_WEEK.test(query)) return 'week';
-  return 'any';
-}
+export { guessFreshness } from './freshness';
 
 export interface CardOnScreen {
   id: number;
@@ -254,6 +247,9 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     found = await searchWithLate({ q, more, freshness: freshness === 'any' ? guessFreshness(query) : freshness, count: 20 }, env, scope);
   }
   let results = applyPickGate(query, applyRelevance(query, { ...found.response, query }, scope.ledger));
+  // "AI news today" must not lead with last week's launch: past-window rows drop once enough current ones remain.
+  const span = freshness !== 'any' ? freshness : stricter(guessFreshness(query), u?.freshness === 'day' || u?.freshness === 'week' ? u.freshness : 'any');
+  results = { ...results, results: preferFresh(results.results, span) };
   const scholar = await scholarly;
   if (scholar.length) results = { ...results, results: withScholarly(scholar, results.results) };
   const clips = await videos;
@@ -508,6 +504,16 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
     send('rewrite', { query });
     // EN4 part 8: the rows that produced these choices come along, so the pick never comes back empty.
     await searchAndDesign(send, env, query, 'any', context, started, scope, true, req.search?.results);
+    return;
+  }
+
+  // "That's not today's": re-run the ask the card answered on today's results only, never a reworded
+  // search of the complaint (live "AI news today" → "not today's" → a stock-market card).
+  if (req.intent !== 'adjust' && staleComplaint(req.question)) {
+    const query = askedQuestions(req.context)[0] ?? req.original;
+    const recent = 'The person said the last answer was not current: use only items from the past 24 hours, say when each happened, and if nothing that recent was found, say so plainly instead of repeating older items.';
+    send('rewrite', { query });
+    await searchAndDesign(send, env, query, 'day', [recent, context].filter(Boolean).join('\n'), started, scope, true);
     return;
   }
 
