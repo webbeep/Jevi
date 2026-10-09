@@ -164,6 +164,8 @@ function applyPickGate(query: string, response: SearchResponse): SearchResponse 
   return { ...response, results: kept };
 }
 
+const WHO_ASK = /^\s*(who\s+is|who\s+was|who's)\b/i;
+
 /** The model's split of the rows into people when it finds at least two; the heuristic choices otherwise. */
 async function sharperChoices(choices: EntityChoice[], rows: SearchResult[], env: Env): Promise<EntityChoice[]> {
   const name = choices[0]?.name;
@@ -427,9 +429,16 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
       console.log(JSON.stringify({ zo: 'entity', knowledgeRow: true, title: panel.title }));
     }
   }
-  const decision = resolveEntity(query, results.results, { pattern: plan.pattern, prior: priorEntity(context) });
-  if (decision.kind === 'choices') {
-    const choices = await sharperChoices(decision.choices, results.results, env);
+  const prior = priorEntity(context);
+  const decision = resolveEntity(query, results.results, { pattern: plan.pattern, prior });
+  // A bare "who is" for someone without an encyclopedia page, whose namesakes the heuristic dropped:
+  // the model may still see several people worth offering ("who is Ed Chu" → oncologist, EPA official, CEO).
+  const unsure = decision.kind === 'single' && !prior && decision.dropped.length >= 2 && WHO_ASK.test(query) && !distinguishingTerms(query).length
+    && !results.knowledge && !decision.kept.some((i) => /\.wikipedia\.org\//i.test(results.results[i]?.url ?? ''));
+  const split = unsure ? await splitPeople(decision.entity.name, results.results, env) : undefined;
+  if (split) console.log(JSON.stringify({ zo: 'entity', kind: 'choices', choices: split.length, by: 'model-over-single' }));
+  if (decision.kind === 'choices' || split) {
+    const choices = split ?? (decision.kind === 'choices' ? await sharperChoices(decision.choices, results.results, env) : []);
     scope.ledger.entity = { kind: 'choices', choices: choices.length };
     send('search', results);
     // Choices ride on the done event (FE readChoices() in shared/choices.ts); never cached.
