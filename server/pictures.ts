@@ -34,8 +34,18 @@ function itemEntity(text: string): string {
  * Nodes are shown immediately and re-emitted with their pictures as soon as
  * they are found.
  */
+/**
+ * SPD5 (t457): the longest the finished card waits for picture lookups and row pictures once the text is
+ * done. Lookups (3 s timeout + hedge) held `done` up to ~4 s on picture-heavy cards; pictures that are
+ * not in by then are left out, and nothing is emitted after the cap.
+ */
+export const PICTURE_WAIT_MS = 1500;
+
 export class PictureResolver {
   private readonly pending: Promise<void>[] = [];
+
+  /** Set once flush gives up waiting: later picture patches are dropped instead of arriving after done. */
+  private closed = false;
   private readonly used = new Set<string>();
   /** Query entities plus every item named on the card so far. */
   private readonly seen = new Set<string>();
@@ -274,6 +284,7 @@ export class PictureResolver {
     this.collect(node);
     const vetted = this.vet(node);
     const track = (n: CardNode) => {
+      if (this.closed) return;
       if (this.rows) this.latest.set(index, { node: n, emit });
       emit(n, index);
     };
@@ -288,8 +299,23 @@ export class PictureResolver {
     );
   }
 
-  /** Waits for outstanding lookups so the card is complete before it is marked done; then fills blank tiles and rows (T442). */
-  async flush(): Promise<void> {
+  /** Waits (at most `capMs`) for outstanding lookups and row pictures, so the card is complete before it is marked done. */
+  async flush(capMs = PICTURE_WAIT_MS): Promise<void> {
+    const started = Date.now();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const cap = new Promise<'cap'>((resolve) => {
+      timer = setTimeout(() => resolve('cap'), capMs);
+    });
+    const done = await Promise.race([this.flushAll().then(() => 'ok' as const), cap]);
+    if (timer !== undefined) clearTimeout(timer);
+    if (done === 'cap') {
+      this.closed = true;
+      console.log(JSON.stringify({ zo: 'pictures', capped: true, pending: this.pending.length, ms: Date.now() - started }));
+    }
+  }
+
+  /** Outstanding lookups, then blank tiles and rows (T442). */
+  private async flushAll(): Promise<void> {
     await Promise.allSettled(this.pending);
     if (!this.rows || !this.latest.size) return;
     try {
@@ -297,7 +323,7 @@ export class PictureResolver {
       const filled = await fillRowImages(entries.map(([, e]) => e.node), { lookup: (entity) => this.find(entity, this.env, 3, false), ...this.rows, pool: this.pool, onCredit: this.onCredit }, this.used);
       let count = 0;
       entries.forEach(([index, e], i) => {
-        if (!filled.changed[i]) return;
+        if (!filled.changed[i] || this.closed) return;
         count += 1;
         e.emit(filled.nodes[i], index);
       });
