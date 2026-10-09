@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { clearDeadEngines, newLedger, queriesForAsk } from '../server/budget.ts';
 import { cascadeWeb } from '../server/cascade.ts';
-import { isPersonAsk, personSubject } from '../server/entity.ts';
+import { askTopic, askedQuestions, isPersonAsk, personSubject, pickTopic, pickTopicQuery } from '../server/entity.ts';
 import { cashtags, expandCashtags, relaxQuery, tickerQueries } from '../server/queryClean.ts';
 import { gateResults } from '../server/relevanceGate.ts';
 import { guessFreshness } from '../server/stream.ts';
@@ -50,6 +50,30 @@ test('a sloppy-case person ask keeps the whole name', () => {
   assert.equal(personSubject('who is Messi now'), 'Messi');
   assert.equal(personSubject('who is Ray lee founder'), 'Ray Lee');
   assert.equal(personSubject('who is Barack Obama'), 'Barack Obama');
+});
+
+test('a Which-one? pick keeps the topic of the ask that offered it', () => {
+  const context = 'Topic: jaylen brown injuries\nCard they are acting on (Q: jaylen brown injuries): Which one?';
+  const asks = [...askedQuestions(context), 'jaylen brown injuries'];
+  assert.equal(pickTopic('Jaylen Brown Boston Celtics', asks), 'injuries');
+  assert.equal(pickTopicQuery('Jaylen Brown Boston Celtics', 'injuries'), 'Jaylen Brown boston celtics injuries');
+  assert.equal(pickTopicQuery('Jaylen Brown Basketball Player', 'injuries'), 'Jaylen Brown basketball injuries');
+  // The search stays an ask about that one person, and it is not a who-is ask.
+  const q = pickTopicQuery('Jaylen Brown Boston Celtics', 'injuries');
+  assert.equal(personSubject(q), 'Jaylen Brown');
+  assert.equal(isPersonAsk(q), true);
+  assert.notEqual(askTopic(q, 'Jaylen Brown'), '');
+  // A plain who-is ask, or a pick that already says it all, adds nothing.
+  assert.equal(pickTopic('Ray Lee BlueFlame AI', ['Who is Ray Lee']), '');
+  assert.equal(pickTopic('Ray Lee BlueFlame AI', ['ray lee blueflame ai']), '');
+  assert.equal(askTopic('Ray Lee BlueFlame AI', 'Ray Lee'), '');
+  assert.equal(askTopic('Jaylen Brown injuries', 'Jaylen Brown'), 'injuries');
+});
+
+test('askedQuestions reads the conversation digest newest first', () => {
+  const context = ['Topic: best running shoes', 'Earlier turns, oldest first:', '- Q: best running shoes → Top picks', '- Q: jaylen brown injuries → Which one?', 'Latest card (Q: celtics schedule): Games'].join('\n');
+  assert.deepEqual(askedQuestions(context), ['celtics schedule', 'jaylen brown injuries', 'best running shoes']);
+  assert.deepEqual(askedQuestions(undefined), []);
 });
 
 test('cashtags become searchable words and a model-free ticker search', () => {

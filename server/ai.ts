@@ -5,7 +5,7 @@ import type {
 } from '../shared/types';
 import { hasLlm, llmJson } from './llm';
 import { askJev, choice, jevKey } from './jev';
-import { priorEntity } from './entity';
+import { askedQuestions, priorEntity } from './entity';
 import { pageText } from './pages';
 import { sanitizeSearchQuery } from './queryClean';
 import { clip, type Env } from './util';
@@ -15,14 +15,15 @@ import { clip, type Env } from './util';
  * search query that keeps the conversation's subject ("best apple varieties for apple pie").
  */
 export async function rewriteQuery(original: string, question: string, env: Env, context = '', fromCard?: string): Promise<string> {
+  const latest = askedQuestions(context)[0] ?? original;
   if (!hasLlm(env)) {
-    const raw = question.toLowerCase().includes(original.toLowerCase()) ? question : `${question} ${original}`;
+    const raw = question.toLowerCase().includes(latest.toLowerCase()) ? question : `${question} ${latest}`;
     return keepEntity(sanitizeSearchQuery(raw, fromCard), context, fromCard);
   }
   const { query } = await llmJson<{ query: string }>(
     env,
-    'Rewrite the follow-up into one standalone web search query (4-12 words) for what the person wants next. Keep the subject of the conversation and its qualifiers (dish, product, place, audience, budget) unless the follow-up clearly changes topic; resolve references like "it" or "the cheaper one". A short label such as "apple varieties" asked from a card about apple pie means "best apple varieties for apple pie". Never add website names, domains, or publication names to the query unless the person explicitly asked for that site. Reply as JSON: {"query": string}.',
-    `Conversation started with: ${original}\n${context ? `Conversation so far:\n${context}\n` : ''}${fromCard ? `Asked from the card: ${fromCard}\n` : ''}Follow-up: ${question}`,
+    'Rewrite the follow-up into one standalone web search query (4-12 words) for what the person wants next. Keep the subject of the conversation and its qualifiers (dish, product, place, audience, budget, and what they asked about it: injuries, price, news, stats, schedule) unless the follow-up clearly changes topic; resolve references like "it" or "the cheaper one". A follow-up that only says which person or thing they meant keeps the earlier request: after "jaylen brown injuries", "the celtics one" means "Jaylen Brown Celtics injuries", not his profile. A short label such as "apple varieties" asked from a card about apple pie means "best apple varieties for apple pie". Never add website names, domains, or publication names to the query unless the person explicitly asked for that site. Reply as JSON: {"query": string}.',
+    `Conversation started with: ${original}\n${latest && latest !== original ? `Most recent request: ${latest}\n` : ''}${context ? `Conversation so far:\n${context}\n` : ''}${fromCard ? `Asked from the card: ${fromCard}\n` : ''}Follow-up: ${question}`,
     80,
   );
   return keepEntity(sanitizeSearchQuery(query?.trim() || question, fromCard), context, fromCard);

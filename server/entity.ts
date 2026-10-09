@@ -1281,6 +1281,65 @@ export function pickSeeds(query: string, rows: EntityRow[]): { seeds: number[]; 
   return { seeds: [...new Set(seeds)].sort((a, b) => a - b), label: label || tail };
 }
 
+/** Words that ask who someone is, which a profile card already answers. */
+const PROFILE_WORDS = new Set(['bio', 'biography', 'profile', 'wiki', 'wikipedia', 'background', 'person', 'info', 'information']);
+
+/**
+ * What the ask wants to know about the person beyond who they are ("jaylen brown injuries" →
+ * "injuries"); '' for a plain who-is ask. With `caps` off, capitalised words are the person's
+ * org/role ("Ray Lee BlueFlame AI"), not a topic.
+ */
+export function askTopic(query: string, name: string, caps = false): string {
+  const nameSet = new Set(tokens(name));
+  const raw = query.trim().replace(/\?+\s*$/, '').replace(WHO_IS, '').replace(ABOUT, '').replace(LEAD_Q, '');
+  const out: string[] = [];
+  for (const w of raw.split(/\s+/).map(cleanWord).filter(Boolean)) {
+    const t = w.toLowerCase().replace(/[’']s$/, '');
+    if (nameSet.has(t) || COMMON.has(t) || PROFILE_WORDS.has(t) || /^(how|what|when|where|why|which)$/.test(t)) continue;
+    if (!caps && /^[A-Z0-9]/.test(w)) continue;
+    if (ROLE1.has(t) || DESCRIPTOR_WORDS.has(t) || ROLE_TAIL.has(t) || ORG_TAIL.test(t) || GENERIC_ORG.test(t) || SPORTS_LEAGUE.test(t)) continue;
+    if (!out.includes(t)) out.push(t);
+  }
+  return out.join(' ');
+}
+
+/** Questions asked earlier in the thread, newest first, from the client's conversation digest. */
+export function askedQuestions(context?: string): string[] {
+  if (!context) return [];
+  const focus = [...context.matchAll(/\(Q: (.+?)\):/g)].map((m) => m[1]!);
+  const earlier = [...context.matchAll(/^- Q: (.+?) → /gm)].map((m) => m[1]!).reverse();
+  const topic = [...context.matchAll(/^Topic: (.+)$/gm)].map((m) => m[1]!);
+  return [...new Set([...focus, ...earlier, ...topic].map((q) => q.trim()).filter(Boolean))];
+}
+
+/**
+ * The topic a Which-one? pick inherits from the ask that offered it: the newest earlier ask that
+ * names the picked person ("jaylen brown injuries" + pick "Jaylen Brown Boston Celtics" →
+ * "injuries"). Words the pick already carries are dropped; '' when that ask was a plain who-is.
+ */
+export function pickTopic(pick: string, asks: string[]): string {
+  const name = personSubject(pick);
+  if (!name) return '';
+  const nameToks = tokens(name);
+  const have = new Set(tokens(pick));
+  for (const ask of asks) {
+    if (!ask || normText(ask) === normText(pick)) continue;
+    const toks = new Set(tokens(ask));
+    if (!nameToks.every((t) => toks.has(t))) continue;
+    return askTopic(ask, name, true).split(' ').filter((w) => w && !have.has(w)).join(' ');
+  }
+  return '';
+}
+
+/**
+ * The search for a pick that inherits a topic: the name, the words that tell this person apart
+ * (lowercase, so the name stays the person), then the topic ("Jaylen Brown boston celtics injuries").
+ */
+export function pickTopicQuery(pick: string, topic: string): string {
+  const name = personSubject(pick);
+  return [name, ...distinguishingTerms(pick, name), topic].filter(Boolean).join(' ').slice(0, 160);
+}
+
 /** True when this result is about the chosen entity (name + a matching signal, or name only). */
 export function matchesEntity(entity: Entity, row: EntityRow): boolean {
   if (!hasFullPersonName(entity.name, row)) return false;

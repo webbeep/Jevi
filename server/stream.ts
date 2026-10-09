@@ -2,6 +2,8 @@ import { DEEP_PAGES, routeExtras, routeOf } from './router';
 import { serperImages } from './cascade';
 import { publicEvent } from './publicPayload';
 import {
+  askTopic,
+  askedQuestions,
   contextTerms,
   distinguishingTerms,
   entityContextLine,
@@ -13,6 +15,8 @@ import {
   personSourceOk,
   personSubject,
   pickSeeds,
+  pickTopic,
+  pickTopicQuery,
   priorEntity,
   publicChoices,
   resolveEntity,
@@ -427,8 +431,9 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     entityHint = entityHintFor(decision.entity, query);
     // Name + the asker's own context ("Ray Lee BlueFlame AI") pulls that person's photos, not a namesake's.
     boostQuery = contextTerms(query).length ? query : decision.entity.name;
-    // Person singles must be profile cards so image boost + row pictures run (Lead GATE: David Kim / BlueFlame had 0 imgs on answer pattern).
-    if (pattern !== 'profile') {
+    // Person singles must be profile cards so image boost + row pictures run (Lead GATE: David Kim / BlueFlame had 0 imgs on answer pattern),
+    // unless the ask is about something of theirs ("Jaylen Brown injuries"): that keeps the planned layout.
+    if (pattern !== 'profile' && !askTopic(query, decision.entity.name)) {
       pattern = 'profile';
       send('plan', { ...plan, pattern });
     }
@@ -481,7 +486,19 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
   // A search button on a card: always resolve it against the conversation ("apple varieties" → "best apples for apple pie").
   if (req.intent === 'search') {
     // Card/control prompts (incl. Which-one? choice.query) are already the search string — do not LLM-rewrite.
-    const query = req.question.trim();
+    const picked = req.question.trim();
+    // A Which-one? pick keeps what the ask was about ("jaylen brown injuries" → that person's injuries, not
+    // their profile): search the person and the topic, with the pick locked as the thread's chosen person.
+    const topic = isPersonAsk(picked) ? pickTopic(picked, [...askedQuestions(req.context), req.original]) : '';
+    if (topic) {
+      const query = pickTopicQuery(picked, topic);
+      const label = pickSeeds(picked, req.search?.results ?? []).label;
+      const chosen = `Chosen person: ${personSubject(picked)}${label ? ` — ${label}` : ''}`;
+      send('rewrite', { query });
+      await searchAndDesign(send, env, query, 'any', [chosen, context].filter(Boolean).join('\n'), started, scope, true, req.search?.results);
+      return;
+    }
+    const query = picked;
     send('rewrite', { query });
     // EN4 part 8: the rows that produced these choices come along, so the pick never comes back empty.
     await searchAndDesign(send, env, query, 'any', context, started, scope, true, req.search?.results);
