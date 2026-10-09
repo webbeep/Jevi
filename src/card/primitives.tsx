@@ -430,7 +430,7 @@ export function Tile({ node }: { node: Of<'tile'> }) {
       </span>
       {!slot && !img && !pending && <Icon name={icon} className="pointer-events-none relative size-[18px] text-foreground/70 sm:size-5" />}
       {node.value && <span className="pointer-events-none relative text-[15px] font-semibold tracking-tight sm:text-base">{plain(node.value)}</span>}
-      {node.sub && <span className="pointer-events-none relative text-[11px] leading-tight text-muted-foreground" data-vendor-true={node.vendorTrue || undefined}><RichText text={node.sub} inline noLinks /></span>}
+      {node.sub && <span className="pointer-events-none relative text-[11px] leading-tight text-muted-foreground"><RichText text={node.sub} inline noLinks /></span>}
     </div>
   );
 }
@@ -581,17 +581,13 @@ export function TableView({ node }: { node: Of<'table'> }) {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {node.rows.map((r, ri) => {
-            const meta = node.priceRows?.[ri];
-            return (
-              <TableRow key={ri}>
-                {r.map((cell, ci) => <TableCell key={ci} className={cn('whitespace-normal px-2 py-2 text-[13px] align-top sm:px-3 sm:py-2.5 sm:text-sm', ci === 0 && 'font-medium text-muted-foreground', node.highlight === ci && 'bg-muted/60')}>
-                  <RichText text={cell} inline />
-                  {ci === 0 && meta?.domain && <div className="mt-0.5 text-[11px] text-muted-foreground">{meta.domain}</div>}
-                </TableCell>)}
-              </TableRow>
-            );
-          })}
+          {node.rows.map((r, ri) => (
+            <TableRow key={ri}>
+              {r.map((cell, ci) => <TableCell key={ci} className={cn('whitespace-normal px-2 py-2 text-[13px] align-top sm:px-3 sm:py-2.5 sm:text-sm', ci === 0 && 'font-medium text-muted-foreground', node.highlight === ci && 'bg-muted/60')}>
+                <RichText text={cell} inline />
+              </TableCell>)}
+            </TableRow>
+          ))}
         </TableBody>
       </Table>
     </div>
