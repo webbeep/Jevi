@@ -87,9 +87,10 @@ function notifyUsage(res: Response) {
 }
 
 /** POSTs to the streaming endpoint and calls `onEvent` for every Server-Sent Event as it arrives. */
-export async function stream(body: StreamBody, onEvent: (e: StreamEvent) => void, signal?: AbortSignal, opts?: { retry?: boolean }): Promise<void> {
+export async function stream(body: StreamBody, onEvent: (e: StreamEvent) => void, signal?: AbortSignal, opts?: { retry?: boolean; refresh?: boolean }): Promise<void> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (opts?.retry) headers['x-zo-retry'] = '1';
+  if (opts?.refresh) headers['x-zo-refresh'] = '1';
   let res: Response;
   try {
     res = await fetch('/api/stream', { method: 'POST', headers, body: JSON.stringify(body), signal });

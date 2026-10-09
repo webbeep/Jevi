@@ -1,7 +1,7 @@
 import { ANSWER_TTL_S, answerCacheUrl } from '../shared/answerKey';
 import { type Send, sseResponse } from './sse';
 import type { StreamRequest } from './stream';
-import { cacheBypass, testForce } from './token';
+import { cacheBypass, testForce, wantsRefresh } from './token';
 import type { Env } from './util';
 
 export interface CacheLike {
@@ -39,7 +39,8 @@ export async function serveStream(o: {
 
   const key = new Request(answerCacheUrl({ query: o.req.query, freshness: o.req.freshness, context: o.req.context }));
   const bypass = cacheBypass(o.request, o.env);
-  if (!bypass) {
+  const refresh = wantsRefresh(o.request);
+  if (!bypass && !refresh) {
     try {
       const hit = await cache.match(key);
       if (hit) return new Response(hit.body, { headers: HIT_HEADERS });
@@ -81,7 +82,7 @@ export async function serveStream(o: {
       if (o.waitUntil) o.waitUntil(put);
     },
     {
-      headers: { 'X-ZO-Cache': bypass ? 'BYPASS' : 'MISS' },
+      headers: { 'X-ZO-Cache': bypass ? 'BYPASS' : refresh ? 'REFRESH' : 'MISS' },
       onFrame: (event, frame) => {
         frames.push(frame);
         if (event === 'node') sawNode = true;

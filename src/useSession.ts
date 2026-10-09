@@ -200,7 +200,8 @@ export function useSession() {
    * Streams `body` into turn `id`, event by event. A follow-up stream can be
    * re-routed mid-flight: to an existing card (redesign) or into a new search.
    */
-  const run = useCallback(async (id: number, body: StreamBody, opts?: { retry?: boolean }) => {
+  /** `refresh`: the person pressed Retry, so the server skips its saved answer and search. */
+  const run = useCallback(async (id: number, body: StreamBody, opts?: { retry?: boolean; refresh?: boolean }) => {
     bodies.current.set(id, body);
     controllers.current.get(id)?.abort();
     const controller = new AbortController();
@@ -311,7 +312,7 @@ export function useSession() {
       for (;;) {
         update(id, { notice: undefined });
         try {
-          await stream(body, onEvent, controller.signal, opts?.retry || attempt > 0 ? { retry: true } : undefined);
+          await stream(body, onEvent, controller.signal, { retry: opts?.retry || attempt > 0, refresh: opts?.refresh });
           break;
         } catch (err) {
           if (!shouldAutoRetry(err, attempt, sawContent) || !alive()) throw err;
@@ -386,12 +387,12 @@ export function useSession() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [update, run]);
 
-  const runSearchTurn = useCallback(async (id: number, query: string, opts?: { retry?: boolean }) => {
+  const runSearchTurn = useCallback(async (id: number, query: string, opts?: { retry?: boolean; refresh?: boolean }) => {
     const keep = Boolean(opts?.retry && get(id)?.offline);
     if (keep) update(id, { kind: 'search', question: query, searchId: id, filling: true, thinking: false, status: undefined });
     else update(id, { kind: 'search', question: query, searchId: id, filling: true, plan: undefined, search: undefined, result: undefined, live: undefined, error: undefined, offline: undefined, reconnects: undefined });
     try {
-      await run(id, { kind: 'search', query, freshness: 'any', context: memory(id) || undefined }, opts?.retry ? { retry: true } : undefined);
+      await run(id, { kind: 'search', query, freshness: 'any', context: memory(id) || undefined }, opts);
     } catch {
       const turn = get(id);
       if (turn?.offline) return;
@@ -508,7 +509,7 @@ export function useSession() {
     const turn = get(id);
     if (!turn) return;
     if (turn.kind === 'search') {
-      void runSearchTurn(id, turn.question, turn.offline ? { retry: true } : undefined);
+      void runSearchTurn(id, turn.question, turn.offline ? { retry: true } : { refresh: true });
       return;
     }
     const body = bodies.current.get(id);
@@ -519,7 +520,7 @@ export function useSession() {
       return;
     }
     update(id, { error: undefined, result: undefined, live: undefined, filling: true, status: undefined, thinking: false, retryable: undefined, offline: undefined, reconnects: undefined });
-    void run(id, body).catch(() => undefined);
+    void run(id, body, { refresh: true }).catch(() => undefined);
   }, [run, runSearchTurn, update]);
   retryRef.current = retry;
 

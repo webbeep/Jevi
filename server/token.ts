@@ -33,6 +33,9 @@ export function testForce(request: Request, env: Env): TestForce | undefined {
   return validTestToken(request.headers.get('x-zo-test-token'), env.ZO_TEST_TOKEN) ? raw : undefined;
 }
 
+/** The person pressed Retry: skip saved answers and searches, then save the fresh ones in their place. */
+export const wantsRefresh = (request: Request): boolean => request.headers.get('x-zo-refresh') === '1';
+
 /** QA cache bypass: `x-zo-no-cache: 1` (or a forced test fault) is honored only with a valid test token. */
 export function cacheBypass(request: Request, env: Env): boolean {
   if (testForce(request, env)) return true;

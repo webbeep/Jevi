@@ -173,6 +173,29 @@ test('serveStream stores a miss and replays a normalized hit without calling run
   assert.equal(await second.text(), body);
 });
 
+test('a pressed Retry skips the saved answer and replaces it with the fresh one', async () => {
+  const mem = memoryCache();
+  let text = 'old';
+  let calls = 0;
+  const run = async (send: Send) => {
+    calls += 1;
+    send('node', { index: 0, node: { type: 'text', text } });
+    send('done', { engine: 'composed', removed: 0, pagesRead: 1, ms: 4 });
+  };
+  const ask = (headers: Record<string, string> = {}) =>
+    serveStream({ request: new Request('https://zo.page/api/stream', { method: 'POST', headers }), env: {}, req: search('AI news today'), run, waitUntil: mem.waitUntil, cache: mem.cache });
+  await finish(await ask(), mem.pending);
+  text = 'new';
+  const retried = await ask({ 'x-zo-refresh': '1' });
+  assert.equal(retried.headers.get('X-ZO-Cache'), 'REFRESH');
+  assert.match(await finish(retried, mem.pending), /new/);
+  assert.equal(calls, 2);
+  const after = await ask();
+  assert.equal(after.headers.get('X-ZO-Cache'), 'HIT');
+  assert.match(await after.text(), /new/);
+  assert.equal(calls, 2);
+});
+
 test('serveStream does not store a stream cancelled before done', async () => {
   const mem = memoryCache();
   let release!: () => void;

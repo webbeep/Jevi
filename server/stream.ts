@@ -45,7 +45,7 @@ import { videoResults, withVideos } from './videoSearch';
 import { guessFreshness, preferFresh, staleComplaint, stricter } from './freshness';
 import type { Send } from './sse';
 import { extraQueries, understand } from './understand';
-import { cacheBypass, testForce, validTestToken } from './token';
+import { cacheBypass, testForce, validTestToken, wantsRefresh } from './token';
 import { SERPER_ANON_SHARE } from './providerCap';
 import type { Env } from './util';
 
@@ -577,6 +577,7 @@ export async function runStream(req: StreamRequest, env: Env, rawSend: Send, opt
   const scope: AskScope = {
     ledger,
     bypass: opts?.request ? cacheBypass(opts.request, env) : false,
+    refresh: opts?.request ? wantsRefresh(opts.request) : false,
     waitUntil: opts?.waitUntil,
     eval: opts?.request ? validTestToken(opts.request.headers.get('x-zo-test-token'), env.ZO_TEST_TOKEN) : false,
   };

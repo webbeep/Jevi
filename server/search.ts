@@ -248,6 +248,8 @@ export async function searchWithLate(q: Query, env: Env, scope?: AskScope): Prom
 
   if (ask.bypass) {
     ask.ledger.cache = 'bypass';
+  } else if (ask.refresh) {
+    ask.ledger.cache = db ? 'miss' : 'off';
   } else {
     const cached = await readSearchCache(db, key);
     // T424: a degraded cached search (0 sources / Wikipedia-only / provider errors) is a miss.

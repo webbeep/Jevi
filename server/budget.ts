@@ -44,6 +44,8 @@ export interface CallLedger {
 export interface AskScope {
   ledger: CallLedger;
   bypass: boolean;
+  /** Retry pressed: searches skip the cache read but still write the fresh result. */
+  refresh?: boolean;
   waitUntil?: (promise: Promise<unknown>) => void;
   /** Valid `x-zo-test-token` only. Selects the eval daily-cap bucket. */
   eval?: boolean;
