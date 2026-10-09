@@ -23,3 +23,11 @@ test('SPD-C4: a work becomes a doi.org source that states its DOI and year; web 
   assert.deepEqual(withScholarly([r], web).map((x) => x.domain), ['doi.org', 'example.com']);
   assert.equal(workToResult({ title: 'no doi' }), undefined);
 });
+
+test('SPD-C4: Crossref items map onto the same source shape', async () => {
+  const { crossrefToWork } = await import('../server/scholarly.ts');
+  const r = workToResult(crossrefToWork({ DOI: '10.1111/j.1365-2869.2009.00799.x', title: ['Sleep deprivation impairs spatial working memory'], issued: { 'date-parts': [[2009, 3]] }, 'container-title': ['Journal of Sleep Research'], author: [{ given: 'C.', family: 'Kim' }], 'is-referenced-by-count': 157, abstract: '<jats:p>Sleep loss impairs memory.</jats:p>' }))!;
+  assert.equal(r.url, 'https://doi.org/10.1111/j.1365-2869.2009.00799.x');
+  assert.match(r.content!, /Published: 2009\. Venue: Journal of Sleep Research\. DOI: 10\.1111/);
+  assert.match(r.content!, /Abstract: Sleep loss impairs memory\./);
+});
