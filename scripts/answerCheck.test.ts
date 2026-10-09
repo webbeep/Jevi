@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { readBrief, rejectedSources } from '../server/brief.ts';
-import { readReview } from '../server/review.ts';
+import { keepPictures, readReview } from '../server/review.ts';
 import { corpusOf, gateNode, type DesignRequest } from '../server/design.ts';
 import { Grounding } from '../server/ground.ts';
 import { tickerBody } from '../shared/tickerNotes.ts';
@@ -109,5 +109,27 @@ describe('saved ticker cards', () => {
   test('cards without a ticker are untouched', () => {
     const body = [{ type: 'callout', text: 'No chart is available for this.' }] as unknown as CardNode[];
     assert.equal(tickerBody(body), body);
+  });
+});
+
+describe('review fixes keep pictures', () => {
+  test('a corrected grid keeps the pictures placed on its tiles', () => {
+    const before = { type: 'grid', cols: 2, children: [
+      { type: 'tile', label: 'iPhone 17', value: '$829', imageSrc: 'https://img/a.jpg' },
+      { type: 'tile', label: 'Pixel 10', value: '$799', imageRef: 2 },
+    ] };
+    const after = { type: 'grid', cols: 2, children: [
+      { type: 'tile', label: 'iPhone 17', value: '$799', imageQuery: 'iPhone 17' },
+      { type: 'tile', label: 'Pixel 10', value: '$699', imageRef: 0 },
+    ] };
+    assert.deepEqual(keepPictures(before, after), { type: 'grid', cols: 2, children: [
+      { type: 'tile', label: 'iPhone 17', value: '$799', imageSrc: 'https://img/a.jpg', imageRef: undefined, imageQuery: undefined },
+      { type: 'tile', label: 'Pixel 10', value: '$699', imageRef: 0 },
+    ] });
+  });
+
+  test('a node of another type takes nothing', () => {
+    const after = { type: 'text', text: 'x' };
+    assert.equal(keepPictures({ type: 'profile', name: 'A', imageSrc: 'u' }, after), after);
   });
 });

@@ -17,6 +17,7 @@ Flag only real errors that would mislead the reader:
 - a stated fact, number or date is not supported by the results, or is attributed to the wrong thing;
 - it carries over facts from the conversation that belong to a different subject;
 - two nodes show the same fact, number or chart (fix the later one with something else the results support, or a short text node).
+The writer also read the full text of several result pages; you see only short snippets. A fact missing from a snippet is not an error: flag it only when the results contradict it, or when it is a current value (price, score, date of an event) that no result supports.
 Style, wording, layout and missing nice-to-haves are not errors. For a "today" or "latest" ask, anything from the past 36 hours is current: don't flag it, and don't warn that nothing is dated exactly today.
 Reply as JSON: {"verdict":"ok"|"fix","problems":[string],"fixes":[{"node":number,"replace":object}],"note":string}
 - problems: one short line per error, naming the node number.
@@ -55,6 +56,24 @@ export function readReview(raw: Raw | undefined, indices: Set<number>): Review |
   const note = typeof raw.note === 'string' && raw.note.trim() ? raw.note.trim().replace(/\s+/g, ' ').slice(0, 240) : undefined;
   const ok = raw.verdict === 'ok' || (!fixes.length && !note);
   return { ok, problems, fixes: ok ? [] : fixes, note: ok ? undefined : note };
+}
+
+const PICTURE_KEYS = ['imageSrc', 'imageRef', 'imageQuery'] as const;
+const hasPicture = (o: Record<string, unknown>) => o.imageSrc !== undefined || o.imageRef !== undefined;
+
+/**
+ * Pictures are placed after the card is written and nothing places them after the review: a corrected
+ * node keeps the picture of the node it replaces, part by part, wherever it has none of its own.
+ */
+export function keepPictures(before: unknown, after: unknown): unknown {
+  if (Array.isArray(before) && Array.isArray(after)) return after.map((item, i) => keepPictures(before[i], item));
+  if (!before || !after || typeof before !== 'object' || typeof after !== 'object' || Array.isArray(before) || Array.isArray(after)) return after;
+  const was = before as Record<string, unknown>;
+  const now = { ...(after as Record<string, unknown>) };
+  if (was.type !== now.type) return after;
+  if (!hasPicture(now) && hasPicture(was)) for (const k of PICTURE_KEYS) now[k] = was[k];
+  for (const k of ['children', 'items']) if (Array.isArray(now[k])) now[k] = keepPictures(was[k], now[k]);
+  return now;
 }
 
 /** Top-level nodes as the reviewer reads them; actions, citations and pictures carry no claims. */

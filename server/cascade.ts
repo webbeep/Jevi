@@ -1,7 +1,7 @@
 import { cleanMarkdown } from '../shared/text';
 import type { EngineStatus, Freshness, ImageResult } from '../shared/types';
 import { ddgBackupOn, fetchBackup } from './backup';
-import { SEARCH_ENGINES, callCap, type CallLedger, type SearchEngine, engineDead, failureOf, rememberDead, searchCalls } from './budget';
+import { SEARCH_ENGINES, callCap, type CallLedger, type SearchEngine, engineDead, failureOf, mark, rememberDead, searchCalls } from './budget';
 import { loadSkips, tripSkip } from './engineSkip';
 import { SERPER_IMAGES_SHARE, takeSlot, type CapBucket } from './providerCap';
 import { HttpStatusError, type Env, clip, domainOf, fetchJson } from './util';
@@ -506,9 +506,10 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUnt
     ledger.search[step.name] += 1;
     if (held) heldTried = true;
     const started = Date.now();
-    const early = q.later && KEYED.has(step.name) ? settled(step.run(q.q)) : undefined;
+    const early = q.later && KEYED.has(step.name) ? settled(step.run(q.q)).finally(() => mark(ledger, 'literal')) : undefined;
     const ready = early ? await extrasFor(early) : KEYED.has(step.name) ? await extrasReady : NO_EXTRAS;
     extras = ready.extras;
+    mark(ledger, 'rewrites');
     // Two planner rewrites plus this call fill the cap. Wikipedia stays off so both rewrites still run.
     if (KEYED.has(step.name) && extras.length < 2) startWiki();
     // SPD1 (t457): every route runs its rewrites alongside the literal search, each counted and capped like it.

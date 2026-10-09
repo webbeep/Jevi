@@ -39,6 +39,13 @@ export interface CallLedger {
   serperShare?: number;
   /** T444 entity disambiguation outcome for this ask (server log only). */
   entity?: { kind: string; id?: string; dropped?: number; choices?: number };
+  /** Milliseconds from the ask's start to the first time each stage was reached (server log and `done`). */
+  stages?: { at: number; ms: Record<string, number> };
+}
+
+/** Records the first time this ask reached `stage`. */
+export function mark(ledger: CallLedger, stage: string): void {
+  if (ledger.stages) ledger.stages.ms[stage] ??= Date.now() - ledger.stages.at;
 }
 
 export interface AskScope {
@@ -164,5 +171,6 @@ export function logAsk(ledger: CallLedger, served?: string): void {
     ...(ledger.empty ? { empty: ledger.empty } : {}),
     ...(ledger.relevanceDropped != null ? { relevanceDropped: ledger.relevanceDropped } : {}),
     ...(ledger.entity ? { entity: ledger.entity } : {}),
+    ...(ledger.stages ? { stages: ledger.stages.ms } : {}),
   }));
 }

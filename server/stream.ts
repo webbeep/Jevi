@@ -34,14 +34,14 @@ import type { EngineStatus, Freshness, ImageResult, SearchResponse, SearchResult
 import { rewriteQuery } from './ai';
 import { type DesignRequest, designParallel, designStream, gateNode } from './design';
 import { briefSources } from './brief';
-import { reviewCard } from './review';
+import { keepPictures, reviewCard } from './review';
 import { permitted } from './images';
 import { hasLlm } from './llm';
 import { collectPages, ogImageOf } from './pages';
 import { MADE_PATTERNS } from './patterns';
 import { planLayout } from './plan';
 import type { AskScope, CallLedger } from './budget';
-import { logAsk, moreQueries, newLedger, queriesForAsk } from './budget';
+import { logAsk, mark, moreQueries, newLedger, queriesForAsk } from './budget';
 import { gateResults } from './relevanceGate';
 import { entityQuery, relaxQuery, tickerQueries } from './queryClean';
 import { type LateExtras, normalizeUrl, searchWithLate } from './search';
@@ -199,7 +199,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   const budget = chat ? { count: 3, need: 0, budgetMs: 0 } : req.deep ? DEEP_PAGES : pageBudget(req.readPages);
   // The source check runs while pages are read, so it costs little or no extra time.
   const briefing = newSearch && !chat ? briefSources({ query: req.query, intent: req.intent, context: req.context, results: req.search.results, isLive: isQuoteRow, shown: req.ticker ? 'a live price chart with the current price, today\'s intraday line and 1W to 5Y history from the quote feed' : undefined }, env) : undefined;
-  const [pages, brief] = await Promise.all([collectPages(req.search.results, env, budget, late, scope), briefing]);
+  const [pages, brief] = await Promise.all([collectPages(req.search.results, env, budget, late, scope).finally(() => mark(scope.ledger, 'pages')), briefing?.finally(() => mark(scope.ledger, 'brief'))]);
   if (brief) console.log(JSON.stringify({ zo: 'brief', use: brief.use.length, stale: brief.stale, offTopic: brief.offTopic, conflicts: brief.conflicts.length, missing: !!brief.missing }));
   const fresh = pages.filter((p) => !req.search.results[p.n - 1]?.content);
   if (fresh.length) send('pages', fresh.map(({ n, url, text }) => ({ n, url, text })));
@@ -242,8 +242,10 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     followups: (items) => send('followups', items),
     credit: (credit) => send('credit', credit),
   });
+  mark(scope.ledger, 'designed');
   if (!chat && req.followup?.mode !== 'refine' && summary.engine === 'composed') {
     await checkAnswer(send, env, designReq, shown, head, started);
+    mark(scope.ledger, 'reviewed');
   }
   send('done', { ...summary, pagesRead: pages.length, ms: Date.now() - started });
 }
@@ -263,8 +265,9 @@ async function checkAnswer(send: Send, env: Env, req: DesignRequest, shown: Map<
   if (!review) return;
   let fixed = 0;
   for (const fix of review.fixes) {
-    const node = gateNode(fix.node, req);
-    if (!node) continue;
+    const gated = gateNode(fix.node, req);
+    if (!gated) continue;
+    const node = keepPictures(shown.get(fix.index), gated) as CardNode;
     shown.set(fix.index, node);
     send('node', { index: fix.index, node });
     fixed++;
@@ -283,14 +286,14 @@ async function checkAnswer(send: Send, env: Env, req: DesignRequest, shown: Map<
  * Rewritten follow-ups already say what they mean, so they skip the understanding step.
  */
 async function searchAndDesign(send: Send, env: Env, query: string, freshness: Freshness, context: string | undefined, started: number, scope: AskScope, rewritten = false, seedRows?: SearchResult[], steer?: { avoid: Set<string>; rejected: string }) {
-  const understood = rewritten ? Promise.resolve(undefined) : understand(query, env, context);
+  const understood = rewritten ? Promise.resolve(undefined) : understand(query, env, context).finally(() => mark(scope.ledger, 'understood'));
   const planned = understood.then((u) => planLayout(query, env, { intent: u?.intent })).then((plan) => {
     send('plan', plan);
     return plan;
   });
 
   // Keyless, in parallel with the web search: a price ask is answered from the live quote, not old articles.
-  const quoting = liveQuote(query);
+  const quoting = liveQuote(query).finally(() => mark(scope.ledger, 'quote'));
   const route = routeOf(query);
   scope.ledger.route = route;
   const deep = route === 'deep';
@@ -312,6 +315,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
       return { more: routeExtras(route, moreQueries(query, [...instant, ...extraQueries(query, x)])), freshness: freshness === 'any' ? x?.freshness ?? literalFresh : freshness };
     });
     found = await searchWithLate({ q: queriesForAsk(query, []), more: routeExtras(route, moreQueries(query, instant)), later, freshness: literalFresh, count: 20, waitExtras: deep }, env, scope);
+    mark(scope.ledger, 'found');
     u = await understood;
   } else {
     u = undefined;
@@ -695,6 +699,8 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
   }
 }
 
+const TIMED_EVENTS = new Set(['intent', 'plan', 'search', 'designing', 'head', 'node']);
+
 export interface StreamOpts {
   request?: Request;
   /** Signed-in ask (gate userId). Signed-out asks draw on at most SERPER_ANON_SHARE of the Serper prod day. */
@@ -706,7 +712,10 @@ export async function runStream(req: StreamRequest, env: Env, rawSend: Send, opt
   const started = Date.now();
   const ledger = newLedger();
   // Provider and model names never reach the client (t432); the model goes to the server log.
+  ledger.stages = { at: started, ms: {} };
   const send: Send = (event, data) => {
+    if (TIMED_EVENTS.has(event)) mark(ledger, event);
+    if (event === 'done' && data && typeof data === 'object') data = { ...data, t: ledger.stages?.ms };
     const out = publicEvent(event, data);
     if (out.via) ledger.via = out.via;
     rawSend(event, out.data);
