@@ -41,11 +41,12 @@ import type { AskScope, CallLedger } from './budget';
 import { logAsk, moreQueries, newLedger, queriesForAsk } from './budget';
 import { gateResults } from './relevanceGate';
 import { entityQuery, relaxQuery, tickerQueries } from './queryClean';
-import { type LateExtras, searchWithLate } from './search';
+import { type LateExtras, normalizeUrl, searchWithLate } from './search';
 import { scholarlyResults, withScholarly } from './scholarly';
 import { videoResults, withVideos } from './videoSearch';
 import { guessFreshness, preferFresh, staleComplaint, stricter } from './freshness';
 import { splitPeople } from './peopleSplit';
+import { personSteer, threadPerson, withoutChosen } from './personSteer';
 import type { Send } from './sse';
 import { extraQueries, understand } from './understand';
 import { cacheBypass, testForce, validTestToken, wantsRefresh } from './token';
@@ -223,7 +224,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
  * inside the three-call cap (two rewrites leave no room for Wikipedia).
  * Rewritten follow-ups already say what they mean, so they skip the understanding step.
  */
-async function searchAndDesign(send: Send, env: Env, query: string, freshness: Freshness, context: string | undefined, started: number, scope: AskScope, rewritten = false, seedRows?: SearchResult[]) {
+async function searchAndDesign(send: Send, env: Env, query: string, freshness: Freshness, context: string | undefined, started: number, scope: AskScope, rewritten = false, seedRows?: SearchResult[], steer?: { avoid: Set<string>; rejected: string }) {
   const understood = rewritten ? Promise.resolve(undefined) : understand(query, env, context);
   const planned = understood.then((u) => planLayout(query, env, { intent: u?.intent })).then((plan) => {
     send('plan', plan);
@@ -429,13 +430,24 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
       console.log(JSON.stringify({ zo: 'entity', knowledgeRow: true, title: panel.title }));
     }
   }
-  const prior = priorEntity(context);
+  let rejectedSplit: EntityChoice[] | undefined;
+  if (steer) {
+    // "Not this one": the rejected card's pages go, and the model sorts what is left into the other people.
+    const others = results.results.filter((r) => !steer.avoid.has(normalizeUrl(r.url)));
+    if (others.length) results = { ...results, results: others, knowledge: undefined };
+    rejectedSplit = await splitPeople(personSubject(query), results.results, env, { exclude: steer.rejected, min: 1 });
+    if (rejectedSplit?.length === 1) {
+      results = { ...results, results: rejectedSplit[0]!.seeds!.map((i) => results.results[i]!) };
+      rejectedSplit = undefined;
+    }
+  }
+  const prior = steer ? undefined : priorEntity(context);
   const decision = resolveEntity(query, results.results, { pattern: plan.pattern, prior });
   // A bare "who is" for someone without an encyclopedia page, whose namesakes the heuristic dropped:
   // the model may still see several people worth offering ("who is Ed Chu" → oncologist, EPA official, CEO).
-  const unsure = decision.kind === 'single' && !prior && decision.dropped.length >= 2 && WHO_ASK.test(query) && !distinguishingTerms(query).length
+  const unsure = !steer && decision.kind === 'single' && !prior && decision.dropped.length >= 2 && WHO_ASK.test(query) && !distinguishingTerms(query).length
     && !results.knowledge && !decision.kept.some((i) => /\.wikipedia\.org\//i.test(results.results[i]?.url ?? ''));
-  const split = unsure ? await splitPeople(decision.entity.name, results.results, env) : undefined;
+  const split = rejectedSplit ?? (unsure ? await splitPeople(decision.entity.name, results.results, env) : undefined);
   if (split) console.log(JSON.stringify({ zo: 'entity', kind: 'choices', choices: split.length, by: 'model-over-single' }));
   if (decision.kind === 'choices' || split) {
     const choices = split ?? (decision.kind === 'choices' ? await sharperChoices(decision.choices, results.results, env) : []);
@@ -535,6 +547,28 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
     send('rewrite', { query });
     // EN4 part 8: the rows that produced these choices come along, so the pick never comes back empty.
     await searchAndDesign(send, env, query, 'any', context, started, scope, true, req.search?.results);
+    return;
+  }
+
+  // A person thread steered by the asker: "not this" offers the other people with that name, and
+  // "from BlueFlame AI" searches that one. The normal rewrite kept the person on screen either way.
+  const steer = req.intent !== 'adjust' ? personSteer(req.question) : undefined;
+  const person = steer ? threadPerson(req.original, req.context) : '';
+  if (steer && person) {
+    const base = withoutChosen(context);
+    if (steer.kind === 'narrow') {
+      const query = `${person} ${steer.detail}`;
+      send('rewrite', { query });
+      await searchAndDesign(send, env, query, 'any', [`The person means the ${person} connected to ${steer.detail}, not anyone on the earlier cards.`, base].filter(Boolean).join('\n'), started, scope, true);
+      return;
+    }
+    const query = `Who is ${person}`;
+    const shown = from?.card ? [from.card.title, from.card.subtitle].filter(Boolean).join(' — ') : from?.title ?? '';
+    send('rewrite', { query });
+    await searchAndDesign(send, env, query, 'any', base, started, scope, true, undefined, {
+      avoid: new Set((req.search?.results ?? []).map((r) => normalizeUrl(r.url))),
+      rejected: shown || person,
+    });
     return;
   }
 

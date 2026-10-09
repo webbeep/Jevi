@@ -19,9 +19,9 @@ const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(
 
 /**
  * Parses the model's grouping into choices over `rows` (1-based in the reply, 0-based seeds).
- * Undefined unless it names at least two people, each with its own rows and a search that keeps the surname.
+ * Undefined unless it names at least `min` people, each with its own rows and a search that keeps the surname.
  */
-export function readPeople(raw: Raw | undefined, name: string, count: number): EntityChoice[] | undefined {
+export function readPeople(raw: Raw | undefined, name: string, count: number, min = 2): EntityChoice[] | undefined {
   const surname = name.trim().split(/\s+/).at(-1)?.toLowerCase() ?? '';
   const taken = new Set<number>();
   const out: EntityChoice[] = [];
@@ -37,7 +37,7 @@ export function readPeople(raw: Raw | undefined, name: string, count: number): E
     out.push({ name, descriptor, query, id: slug(`${name} ${descriptor}`), seeds });
     if (out.length === 5) break;
   }
-  return out.length >= 2 ? out : undefined;
+  return out.length >= min ? out : undefined;
 }
 
 /**
@@ -45,13 +45,15 @@ export function readPeople(raw: Raw | undefined, name: string, count: number): E
  * snippets ("Edward “Ed” Chu, MD", "Ed CHU | Dr Edward Y.W. Chu") far better than the signal heuristics.
  * Undefined when there is no model, it is slow, or it finds fewer than two people.
  */
-export async function splitPeople(name: string, rows: SearchResult[], env: Env, timeoutMs = 2500): Promise<EntityChoice[] | undefined> {
-  if (!hasLlm(env) || rows.length < 2) return undefined;
+export async function splitPeople(name: string, rows: SearchResult[], env: Env, opts: { timeoutMs?: number; exclude?: string; min?: number } = {}): Promise<EntityChoice[] | undefined> {
+  const { timeoutMs = 2500, exclude, min = 2 } = opts;
+  if (!hasLlm(env) || rows.length < min) return undefined;
   const list = rows
     .slice(0, 20)
     .map((r, i) => `${i + 1}. ${r.title} — ${r.domain}\n   ${(r.snippet ?? '').replace(/\s+/g, ' ').slice(0, 220)}`)
     .join('\n');
-  const call = llmJson<Raw>(env, SYSTEM, `Name: ${name}\nResults:\n${list}`, 500).catch(() => undefined);
+  const skip = exclude ? `\nThe searcher said they do NOT mean this person, so leave them and their results out: ${exclude}` : '';
+  const call = llmJson<Raw>(env, SYSTEM, `Name: ${name}${skip}\nResults:\n${list}`, 500).catch(() => undefined);
   const timeout = new Promise<undefined>((r) => setTimeout(() => r(undefined), timeoutMs));
-  return readPeople(await Promise.race([call, timeout]), name, Math.min(rows.length, 20));
+  return readPeople(await Promise.race([call, timeout]), name, Math.min(rows.length, 20), min);
 }
