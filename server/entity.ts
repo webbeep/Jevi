@@ -252,9 +252,10 @@ const NICKNAMES = [
   ['johnny', 'jack', 'john'], ['jon', 'jonathan'], ['alex', 'alexander', 'alexandra'], ['fred', 'freddie', 'frederick'],
   ['frank', 'francis'], ['gene', 'eugene'], ['hank', 'henry'], ['jerry', 'gerald'], ['phil', 'philip', 'phillip'],
   ['pete', 'peter'], ['ron', 'ronnie', 'ronald'], ['don', 'donnie', 'donald'], ['sue', 'susan', 'suzanne'], ['vic', 'victor'],
+  ['jess', 'jessie', 'jessica'],
 ];
 const NICK_OF = new Map(NICKNAMES.flatMap((forms) => forms.map((f) => [f, forms] as const)));
-const firstNameForms = (tok: string): readonly string[] => NICK_OF.get(tok) ?? [tok];
+export const firstNameForms = (tok: string): readonly string[] => NICK_OF.get(tok) ?? [tok];
 
 const FORMAL: Record<string, string> = {
   ed: 'Edward', eddie: 'Edward', bob: 'Robert', bobby: 'Robert', rob: 'Robert', bill: 'William', will: 'William', mike: 'Michael',

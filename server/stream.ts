@@ -7,6 +7,7 @@ import {
   contextTerms,
   distinguishingTerms,
   entityContextLine,
+  type Entity,
   type EntityChoice,
   type EntityDecision,
   entityHintFor,
@@ -48,6 +49,7 @@ import { type LateExtras, normalizeUrl, searchWithLate } from './search';
 import type { WebHit } from './cascade';
 import { domainOf } from './util';
 import { choicesIn, distinctActions, subjectWords } from './chips';
+import { isOwnSite, pickOwnSite, probeOwnSite, type SiteCandidate, withOwnSite } from './ownSite';
 import { quoteAsk } from '../shared/quoteAsk';
 import { scholarlyResults, withScholarly } from './scholarly';
 import { videoResults, withVideos } from './videoSearch';
@@ -338,6 +340,9 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
 
   // Keyless, in parallel with the web search: a price ask is answered from the live quote, not old articles.
   const quoting = liveQuote(query).finally(() => mark(scope.ledger, 'quote'));
+  // A person named with what they do ("Jessica Hamrick DeepMind", a tapped Which-one? choice) is often too
+  // little-known for the engines to surface their own website, so guess it from the name while the search runs.
+  const siteProbe = !steer && isPersonAsk(query) && contextTerms(query).length ? probeOwnSite(personSubject(query)) : undefined;
   // The source check needs only rows, so it starts on the literal search's and overlaps the wait for the rewrites'.
   let intentNow: string | undefined;
   void understood.then((x) => { intentNow = x?.intent; });
@@ -607,7 +612,15 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
       results = { ...results, knowledge: undefined, images: results.images.filter((i) => i.url !== panel.url) };
       console.log(JSON.stringify({ zo: 'entity', knowledgeDropped: true, title: panel.title }));
     }
-    designContext = [entityContextLine(decision.entity), context].filter(Boolean).join('\n');
+    const site = await ownSiteFor(query, decision.entity, results.results, siteProbe);
+    if (site) {
+      const placed = withOwnSite(results.results, site);
+      results = { ...results, results: placed.rows };
+      designContext = [entityContextLine(decision.entity), `Own website: source [${placed.n}] (${site.domain}). Link it in the profile as their website and prefer it for who they are and what they do now.`, context].filter(Boolean).join('\n');
+      console.log(JSON.stringify({ zo: 'entity', ownSite: site.engines[0] === 'site' ? 'guessed' : 'found', n: placed.n }));
+    } else {
+      designContext = [entityContextLine(decision.entity), context].filter(Boolean).join('\n');
+    }
     entityHint = entityHintFor(decision.entity, query);
     // Name + the asker's own context ("Ray Lee BlueFlame AI") pulls that person's photos, not a namesake's.
     boostQuery = contextTerms(query).length ? query : decision.entity.name;
@@ -640,6 +653,18 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   send('search', results);
   const boost = imageBoost(pattern, results, env, scope, boostQuery);
   await design(send, env, { query, pattern, depth: plan.depth, readPages: plan.readPages || deep || fromSeeds, search: results, context: designContext, intent: u?.intent, deep, boost, entityHint, ticker: quote ? tickerNode(quote) : undefined, earlyBrief }, started, scope, late);
+}
+
+const SITE_WAIT_MS = 600;
+
+/** The person's own website: from the kept rows when the engines found it, else a verified guessed domain. */
+async function ownSiteFor(query: string, entity: Entity, rows: SearchResult[], probe: Promise<SiteCandidate[]> | undefined): Promise<SearchResult | undefined> {
+  const asked = personSubject(query);
+  const name = asked.split(/\s+/).length >= 2 ? asked : entity.name;
+  const found = rows.find((r) => isOwnSite(name, r));
+  if (found || !probe) return found;
+  const candidates = await Promise.race([probe, new Promise<SiteCandidate[]>((r) => setTimeout(() => r([]), SITE_WAIT_MS))]);
+  return pickOwnSite(candidates, name, [...contextTerms(query), ...entity.terms]);
 }
 
 /**

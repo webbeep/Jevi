@@ -8,7 +8,7 @@ import { isGenericPreview } from './images';
 import { type LateExtras, normalizeUrl } from './search';
 import { HttpStatusError, type Env, stripHtml } from './util';
 
-const BROWSER_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36';
+export const BROWSER_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36';
 const MIN_TEXT = 300;
 /** Jina payment/quota failures skip that reader for ~6h (shared KV ENGINE_SKIP), so asks go straight to direct fetch. */
 const JINA_TRIP = new Set(['payment', 'quota', 'credit']);
@@ -33,7 +33,7 @@ function ogImage(html: string, base: string): string | undefined {
   }
 }
 
-function htmlToText(html: string): string {
+export function htmlToText(html: string): string {
   // A window may start at `<main`/`<article>` with no close tag, or end before `</body>`.
   const opener = /^\s*<(main|article)(?=[\s>/])/i.exec(html);
   let main: string | undefined;
