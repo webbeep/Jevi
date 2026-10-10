@@ -1098,6 +1098,7 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
           {!choicesOnly && <CardContext.Provider value={context}>
             <AnswerCardView
               card={card}
+              ask={turn.question}
               version={`${turn.id}-${turn.version}`}
               filling={offlinePartial ? false : turn.filling}
               streaming={offlinePartial ? false : streaming}

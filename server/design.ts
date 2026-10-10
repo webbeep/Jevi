@@ -1,4 +1,5 @@
 import { withoutRepeatedLead, type AnswerCard, type CardNode, type FollowupContext, type ImageCredit, type LayoutPlan } from '../shared/card';
+import { fitNode } from '../shared/fitChart';
 import { knowledgeMatches } from '../shared/relevance';
 import type { SearchResponse } from '../shared/types';
 import { hasLlm, llmLines } from './llm';
@@ -38,7 +39,7 @@ DISPLAY
 - links {items:[{source, label, note}]}  (pages, videos, channels, tools or official sites to open — each is a SOURCES number; label is a short name for it, note says what it is: "Official site", "Video · 12 min", "Live coverage")
 - video {source, caption}  (a VIDEO source, playable in place; use it when watching beats reading — tutorials, highlights, trailers, talks)
 LINKS: anything the person will want to open (an article, video, product page, booking or official site) carries "source": its SOURCES number, on a tile, list item or links item. Never write raw URLs.
-- chart {kind:"bar"|"hbar"|"line"|"area"|"pie", title, unit, data:[{label, value:number}]}  (bar: compare categories; hbar: rankings with long names; line/area: change over time; pie: shares of a whole)
+- chart {kind:"bar"|"hbar"|"line"|"area"|"pie", title, unit, data:[{label, value:number}]}  (bar: compare a magnitude across short categories; hbar: the same with long names; line/area: change over time; pie: shares of a whole. Put the unit in "unit" only, not again in the title. A schedule, tip-off time, or a slate of game scores is a table, never a chart.)
 - progress {label, value:0-100, caption}
 - rating {value, max, label}
 - table {columns:[string], rows:[[string]], highlight:column index}
@@ -159,7 +160,7 @@ STYLE — visual first, minimal text
 - When the person wants to understand something (why/how/what is, or an explainer layout), explanation is the content: use clear, plain sentences in short paragraphs or an accordion, keep every step of the reasoning (don't skip what a newcomer needs), and add a one-line analogy. Still concise.
 - Predict what they will want next: offer the 1-3 most likely adjustments as controls (choices, slider, scaler) or "refine" actions — e.g. a different budget, size, date range, audience or level of detail — so they never have to type a clarification.
 - Pictures: every picture must show the specific item it sits next to — each product, place, dish or person gets its own imageQuery with its exact name. Use pictures where seeing the item helps (products, places, food, people, animals, landmarks, designs); skip them for abstract topics. Never reuse one picture for several items and never use a general stock-style photo. Never use an IMAGES index for an item when the image's description names another item or says vs/compare; give each item its own imageQuery instead.
-- Charts and tables only when they add understanding: a chart needs 3+ comparable numbers from the sources (a trend, a ranking, shares of a whole); a table needs 2+ items compared across 3+ attributes. Never chart two numbers or non-numeric facts; a stat or tile is better there.
+- Charts and tables only when they add understanding: a chart needs 3+ comparable magnitudes from the sources (a trend, a ranking, shares of a whole). Never chart two numbers, clock times, or a list of game scores — those are a table, one row per game, with the full names. A table needs 2+ items compared across 2+ attributes. A stat or tile is better for a single number.
 
 FIT THE KIND OF REQUEST
 - Quick fact (who, when, how tall, what time, define a word): the answer in a hero or one sentence, a line of context, and little else — 2-3 nodes.
@@ -339,7 +340,8 @@ function parseLine(line: string, g: Grounding, imageCount: number, query: string
   }
   const [clean] = sanitizeNodes([obj], imageCount, 0, { sources, query: seatQuery ?? query });
   const [grounded] = clean ? groundNodes([clean], g) : [];
-  return grounded ? { kind: 'node', node: grounded } : { kind: 'dropped' };
+  const fitted = grounded ? fitNode(grounded, seatQuery ?? query) : undefined;
+  return fitted ? { kind: 'node', node: fitted } : { kind: 'dropped' };
 }
 
 /** A node written outside the design stream (the answer review) passes the same sanitize and grounding gates. */
@@ -499,7 +501,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
 
   let headSentAny = false;
   const regionCall = (region: CardNode, i: number, offset: number) => {
-    const user = `${shared}\n- YOU DESIGN R${i + 1}: ${JSON.stringify(region)}. The person is already looking at this arrangement, so keep it: a grid stays that grid, a stack stays that stack, a section keeps its title. Replace each slot with the component its shape names: a tile stays a tile, a table becomes a table with the same number of columns, steps stay steps, proscons stays proscons, a timeline stays a timeline, a hero becomes a hero or stat, a block becomes text, keyvalue or list.${i === 0 ? ' R1 is the lead: it must answer the question at a glance.' : ''}\n- Output exactly one line: one JSON node.\n\nQUERY: ${query}`;
+    const user = `${shared}\n- YOU DESIGN R${i + 1}: ${JSON.stringify(region)}. The person is already looking at this arrangement, so keep it: a grid stays that grid, a stack stays that stack, a section keeps its title. Replace each slot with the component its shape names: a tile stays a tile, a table becomes a table with the same number of columns, steps stay steps, proscons stays proscons, a timeline stays a timeline, a hero becomes a hero or stat, a block becomes text, keyvalue or list. A chart slot stays a chart only for a ranking or a trend; a schedule, a tip-off, or a slate of scores becomes a table.${i === 0 ? ' R1 is the lead: it must answer the question at a glance.' : ''}\n- Output exactly one line: one JSON node.\n\nQUERY: ${query}`;
     let done = false;
     return llmLines(env, SYSTEM_REGION, user, 1200, (line) => {
       if (done) return;

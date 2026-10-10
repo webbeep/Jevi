@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { cardPlainText } from '../../shared/cardText';
 import { publicShareUrl } from '../../shared/publicUrl';
+import { fitNode } from '../../shared/fitChart';
 import { tickerBody } from '../../shared/tickerNotes';
 import { citedRefs } from '../library';
 import { LogoMark } from '../Logo';
@@ -26,8 +27,10 @@ import { Icon } from './Icon';
 import { Nodes } from './render';
 import { CardTitle } from './primitives';
 
-export function AnswerCardView({ card, version, filling, streaming, status, pattern, alternatives, onPattern, simple, onSimple, onRegenerate, onRetry, toolbar, provisional = false, trail, revealLayout = false }: {
+export function AnswerCardView({ card, ask = '', version, filling, streaming, status, pattern, alternatives, onPattern, simple, onSimple, onRegenerate, onRetry, toolbar, provisional = false, trail, revealLayout = false }: {
   card: AnswerCard;
+  /** The question this card answers, so a saved chart can be refit without a new search. */
+  ask?: string;
   /** Changes whenever a fresh design starts, replaying the entrance animation. */
   version: string;
   filling: boolean;
@@ -58,7 +61,7 @@ export function AnswerCardView({ card, version, filling, streaming, status, patt
     return () => clearTimeout(timer);
   }, [toast]);
   // Cards saved before the server dropped them can still carry a "no chart" note beside the live chart.
-  const body = useMemo(() => tickerBody(card.body), [card.body]);
+  const body = useMemo(() => tickerBody(card.body).map((node) => fitNode(node, ask)), [card.body, ask]);
   // The layout that was just on screen, kept for one beat so the answer can arrive over it
   // instead of the skeleton vanishing first.
   const layoutSnap = useRef<CardNode[]>([]);

@@ -80,7 +80,7 @@ export const PATTERNS: PatternDef[] = [
   {
     id: 'dataset',
     label: 'Numbers & trends',
-    description: 'Statistics, rankings or measurements best shown as a chart with a few headline numbers',
+    description: 'One comparable magnitude ranked or trended (population, revenue, a rate over time), shown as a chart. Not a schedule, a slate of game scores, or clock times — those are a table',
     skeleton: [grid(3, slot('number', 'tile'), slot('number', 'tile'), slot('number', 'tile')), slot('chart', 'chart'), slot('takeaway', 'line')],
   },
   {
@@ -157,6 +157,7 @@ export function heuristicPattern(q: string): string {
   if (/\b(should i|worth it|is it good)\b/.test(s)) return 'decision';
   if (isBriefingQuery(s)) return 'briefing';
   if (/\b(history|timeline|origin|evolution)\b/.test(s)) return 'timeline';
+  if (/\b(scores|box scores?|highlights|fixtures|slate|tip-?offs?|kick-?offs?)\b/.test(s)) return 'briefing';
   if (/\b(current|right now|price|score|rate|forecast)\b/.test(s)) return 'spotlight';
   if (/\b(statistics|stats|population|how many|growth|trend)\b/.test(s)) return 'dataset';
   if (/^(what is|what are|explain|define)/.test(s) || /^how (do|does)\b/.test(s) || /\bhow\b.*\bworks?\b/.test(s)) return 'explainer';
