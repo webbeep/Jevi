@@ -67,7 +67,7 @@ export const PATTERNS: PatternDef[] = [
     id: 'explainer',
     label: 'Explainer',
     description: 'A concept or idea explained simply: one-line definition, the key parts, an analogy and why it matters',
-    skeleton: [slot('definition', 'hero'), grid(2, slot('key idea', 'block'), slot('key idea', 'block'), slot('key idea', 'block'), slot('key idea', 'block')), slot('analogy', 'line')],
+    skeleton: [slot('the idea in one value or sentence', 'hero'), grid(2, slot('key part', 'tile'), slot('key part', 'tile'), slot('key part', 'tile'), slot('key part', 'tile')), slot('how the parts fit together', 'block'), slot('analogy', 'line')],
   },
   {
     id: 'visual',
