@@ -133,7 +133,7 @@ export function heuristicPattern(q: string): string {
   if (/\b(history|timeline|origin|evolution)\b/.test(s)) return 'timeline';
   if (/\b(current|right now|price|score|rate|forecast)\b/.test(s)) return 'spotlight';
   if (/\b(statistics|stats|population|how many|growth|trend)\b/.test(s)) return 'dataset';
-  if (/^(what is|what are|explain|define)/.test(s)) return 'explainer';
+  if (/^(what is|what are|explain|define)/.test(s) || /^how (do|does)\b/.test(s) || /\bhow\b.*\bworks?\b/.test(s)) return 'explainer';
   if (/^(who is|who was)/.test(s)) return 'profile';
   if (/\b(photos|pictures|images|places to visit|things to do)\b/.test(s)) return 'visual';
   return 'answer';

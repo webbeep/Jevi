@@ -885,16 +885,17 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
   // research: an empty card, or a placeholder in that gap, looks like the wait is fake.
   const answerStarted = !!turn.live && liveBody(turn.live, true).some((n) => n.type !== 'citations' && n.type !== 'slot');
   const offlinePartial = Boolean(turn.offline && (turn.live?.head || streaming));
+  // Jev's plan already names the layout. Once the sources have landed, that skeleton is the placeholder —
+  // its hero, tiles, grid and section titles — not a generic pair of shimmer blocks. A later `layout`
+  // event (a profile override, a video lead) replaces it with the skeleton the card will actually fill.
+  const chosenLayout = turn.live?.regions.length ? turn.live.regions : turn.plan?.skeleton.body ?? [];
+  const sourcesSettled = !!turn.search;
+  const layoutReady = !answerStarted && chosenLayout.length > 0 && (turn.kind !== 'search' || sourcesSettled);
   const card: AnswerCard = useMemo(() => {
-    // The plan's guessed layout often differs from the card that is designed, so placeholders follow the
-    // real layout (`regions`) once it is known and stay neutral until then.
     const skeleton = { title: turn.question, body: LOADING };
     const live = turn.live;
-    const layoutReady = !!live?.regions.length && !answerStarted;
     let base: AnswerCard;
-    // The chosen layout animates in once it exists and the answer is not written yet. Before that the
-    // body is the searches and their results (the trail), never a generic skeleton.
-    if (layoutReady) base = { ...skeleton, ...live?.head, body: live?.regions ?? [] };
+    if (layoutReady) base = { ...skeleton, ...live?.head, body: chosenLayout };
     else if (live && (streaming || offlinePartial)) {
       const fillingNow = offlinePartial ? false : turn.filling;
       base = { ...skeleton, ...live.head, body: liveBody(live, fillingNow) };
@@ -902,12 +903,12 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
     else base = { ...skeleton, ...live?.head, body: [] };
     if (!turn.result && !live?.head && turn.kind !== 'search') base = { ...base, title: turn.question };
     return turn.pins.length ? { ...base, body: [...base.body, { type: 'section', title: 'Pinned by you', icon: 'pin', children: turn.pins }] } : base;
-  }, [streaming, offlinePartial, answerStarted, turn.live, turn.result, turn.question, turn.kind, turn.pins, turn.filling]);
+  }, [streaming, offlinePartial, answerStarted, layoutReady, chosenLayout, turn.live, turn.result, turn.question, turn.kind, turn.pins, turn.filling]);
 
   // The header is showing the question / plan skeleton, not the final title.
   const provisional = !turn.result && !turn.live?.head;
-  // Until the layout is chosen, a search shows its queries and then the sources as they arrive.
-  // Once the layout exists and the answer is still being written, the card shows that layout instead.
+  // Until Jev's layout can take over, a search shows its queries and then the sources.
+  // Once that layout is on screen and the answer has not started, the card shows it instead.
   const searching = turn.kind === 'search' || !!turn.peek?.length || !!turn.search || !!turn.intent?.queries?.length;
   const waiting = turn.filling && !turn.result && !turn.offline && !turn.error && !answerStarted;
   const trail = waiting && searching ? (
@@ -1011,7 +1012,7 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
               toolbar={!turn.filling && !offlinePartial && turn.result ? <SaveButton query={turn.question} title={card.title} card={card} /> : undefined}
               provisional={provisional}
               trail={trail}
-              revealLayout={!!turn.live?.regions.length && !answerStarted}
+              revealLayout={layoutReady}
             />
           </CardContext.Provider>}
           {choices && !turn.filling && <WhichOne choices={choices} onPick={(text) => void actions.followup(text, id, 'search')} />}

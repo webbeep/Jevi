@@ -39,7 +39,7 @@ import { keepPictures, reviewCard } from './review';
 import { permitted } from './images';
 import { hasLlm } from './llm';
 import { collectPages, ogImageOf } from './pages';
-import { MADE_PATTERNS } from './patterns';
+import { MADE_PATTERNS, skeletonCard } from './patterns';
 import { planLayout } from './plan';
 import type { AskScope, CallLedger } from './budget';
 import { logAsk, mark, moreQueries, newLedger, queriesForAsk } from './budget';
@@ -642,7 +642,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     // unless the ask is about something of theirs ("Jaylen Brown injuries"): that keeps the planned layout.
     if (pattern !== 'profile' && !askTopic(query, decision.entity.name)) {
       pattern = 'profile';
-      send('plan', { ...plan, pattern });
+      send('plan', { ...plan, pattern, skeleton: skeletonCard(query, pattern) });
     }
     // The kept Wikipedia article's own lead image (keyless, 0 Serper). It still goes through the image gate:
     // title/source carry the article title + snippet, so the chosen person's name/org must be on it.

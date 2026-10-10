@@ -498,7 +498,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
 
   let headSentAny = false;
   const regionCall = (region: CardNode, i: number, offset: number) => {
-    const user = `${shared}\n- YOU DESIGN R${i + 1}: ${JSON.stringify(region)}. Replace its slots with real components; you may reshape it (a stack or grid can hold several components) but keep to this region's purpose.${i === 0 ? ' R1 is the lead: it must answer the question at a glance.' : ''}\n- Output exactly one line: one JSON node.\n\nQUERY: ${query}`;
+    const user = `${shared}\n- YOU DESIGN R${i + 1}: ${JSON.stringify(region)}. The person is already looking at this arrangement, so keep it: a grid stays that grid, a stack stays that stack, a section keeps its title. Replace each slot with the component its hint describes (a hero slot becomes a hero or stat, a tile stays a tile, a block becomes text, keyvalue, list or steps).${i === 0 ? ' R1 is the lead: it must answer the question at a glance.' : ''}\n- Output exactly one line: one JSON node.\n\nQUERY: ${query}`;
     let done = false;
     return llmLines(env, SYSTEM_REGION, user, 1200, (line) => {
       if (done) return;

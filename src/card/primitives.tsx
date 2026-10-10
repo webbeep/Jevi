@@ -894,21 +894,52 @@ export function Actions({ node }: { node: Of<'actions'> }) {
   );
 }
 
+/** The hole a chosen layout leaves for one component, in that component's shape. */
 export function SlotView({ node }: { node: Of<'slot'> }) {
   switch (node.shape) {
     case 'hero':
-      return <div className="space-y-3"><Skeleton className="h-3 w-24" /><Skeleton className="h-14 w-40" /><Skeleton className="h-3 w-56" /></div>;
+      return (
+        <div className="flex min-w-0 flex-col">
+          <Skeleton className="h-3 w-24" />
+          <Skeleton className="mt-2 h-14 w-36 rounded-md" />
+          <Skeleton className="mt-3 h-3.5 w-52" />
+        </div>
+      );
     case 'tile':
-      return <Skeleton className="h-24 min-w-[84px] flex-1 rounded-xl" />;
+      return (
+        <div className="flex min-h-[88px] min-w-[84px] flex-1 flex-col items-center justify-center gap-2 rounded-xl border bg-card px-3 py-3">
+          <Skeleton className="h-3 w-14" />
+          <Skeleton className="h-5 w-20" />
+        </div>
+      );
     case 'chart':
       return <Skeleton className="h-48 w-full rounded-xl" />;
     case 'row':
-      return <div className="flex items-center gap-3"><Skeleton className="size-14 shrink-0 rounded-xl" /><div className="flex-1 space-y-2"><Skeleton className="h-4 w-1/2" /><Skeleton className="h-3 w-3/4" /></div></div>;
+      return (
+        <div className="flex items-center gap-3">
+          <Skeleton className="size-14 shrink-0 rounded-full" />
+          <div className="min-w-0 flex-1 space-y-2">
+            <Skeleton className="h-4 w-1/3" />
+            <Skeleton className="h-3 w-1/2" />
+          </div>
+        </div>
+      );
     case 'block':
-      return <div className="space-y-2.5"><Skeleton className="h-3.5 w-full" /><Skeleton className="h-3.5 w-[92%]" /><Skeleton className="h-3.5 w-[78%]" /></div>;
+      return (
+        <div className="space-y-2.5">
+          <Skeleton className="h-3.5 w-full" />
+          <Skeleton className="h-3.5 w-[92%]" />
+          <Skeleton className="h-3.5 w-[70%]" />
+        </div>
+      );
     case 'line':
     case undefined:
-      return <Skeleton className="h-4 w-3/4" />;
+      return (
+        <div className="flex items-center justify-between gap-4 py-1.5">
+          <Skeleton className="h-3.5 w-24" />
+          <Skeleton className="h-3.5 w-28" />
+        </div>
+      );
     default: {
       const unreachable: never = node.shape;
       return unreachable;
