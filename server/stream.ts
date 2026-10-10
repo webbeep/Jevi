@@ -621,7 +621,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
       const placed = withOwnSite(results.results, site);
       results = { ...results, results: placed.rows };
       website = placed.n;
-      designContext = [entityContextLine(decision.entity), `Own website: source [${placed.n}] (${site.domain}); the profile links it. Prefer it for who they are and what they do now, and cite it.`, context].filter(Boolean).join('\n');
+      designContext = [entityContextLine(decision.entity), `Own website: source [${placed.n}] (${site.domain}); the profile already links it, so no action for it. Prefer it for who they are and what they do now, and cite it.`, context].filter(Boolean).join('\n');
       console.log(JSON.stringify({ zo: 'entity', ownSite: site.engines[0], n: placed.n }));
     } else {
       designContext = [entityContextLine(decision.entity), context].filter(Boolean).join('\n');
