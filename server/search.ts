@@ -313,10 +313,10 @@ export async function searchWithLate(q: Query, env: Env, scope?: AskScope): Prom
   // Relevance runs after diversify and before the cap, so a junk hit cannot take a slot the model will read.
   const pooled = q.ungated ? { kept: [...extra, ...web12], dropped: 0 } : gateResults(q.q, [...extra, ...web12]);
   ask.ledger.relevanceDropped = (ask.ledger.relevanceDropped ?? 0) + pooled.dropped;
-  if (!pooled.kept.length && web12.length && (ask.ledger.gateSample?.length ?? 0) < 3) {
+  if ((ask.ledger.gateSample?.length ?? 0) < 4) {
     ask.ledger.gateSample = [...(ask.ledger.gateSample ?? []), {
       q: q.q.slice(0, 80),
-      rows: web12.slice(0, 8).map((r) => ({
+      rows: web12.slice(0, 6).map((r) => ({
         d: r.domain,
         t: r.title.slice(0, 70),
         s: r.snippet.slice(0, 110),
