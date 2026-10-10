@@ -415,9 +415,25 @@ function mentionsOrg(term: string, seq: readonly string[]): boolean {
   return false;
 }
 
+/**
+ * LinkedIn often prints "Ricky C." and puts the surname only in the profile URL
+ * (`/in/rickycheuk`). With a company on the page, that is still this person.
+ */
+function truncatedName(name: string, row: EntityRow): boolean {
+  const parts = name.split(/\s+/).filter((w) => w.length >= 2);
+  if (parts.length < 2) return false;
+  const first = parts[0]!;
+  const last = parts[parts.length - 1]!;
+  const text = `${row.title ?? ''} ${row.snippet ?? ''}`;
+  const initial = new RegExp(`\\b${first.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+${last[0]}\\b`, 'i');
+  if (initial.test(text)) return true;
+  const slug = parts.join('').toLowerCase();
+  return tokens(row.url ?? '').some((t) => t.replace(/-/g, '') === slug);
+}
+
 /** Source is about this person ask: full name + (>=1 context token when the query gives one). */
 export function personSourceOk(query: string, row: EntityRow, name = personSubject(query)): boolean {
-  if (!name || !hasFullPersonName(name, row)) return false;
+  if (!name || (!hasFullPersonName(name, row) && !truncatedName(name, row))) return false;
   const ctx = contextTerms(query, name);
   if (!ctx.length) return true;
   // Only a distinguishing term counts: a picked "Ray Lee Raycon Founder" must name Raycon, not the role.

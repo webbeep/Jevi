@@ -51,6 +51,16 @@ test('a coffee and heart ask keeps the heart page and the caffeine page', () => 
   assert.equal(gated.dropped, 0);
 });
 
+test('a misspelled company keeps the LinkedIn page that prints only a last initial', () => {
+  const q = 'Ricky Cheuk Bleuflame AI';
+  const linkedin = hit('Ricky C.', 'Software Engineer at Blueflame AI. New York.', 'https://www.linkedin.com/in/rickycheuk');
+  const rugby = hit('Ricky C.', 'Hong Kong rugby player Ricky C.', 'https://hkrugby.example/r');
+  const namesake = hit('Ricky Cheuk - Hong Kong rugby', 'Former Hong Kong international rugby player Ricky Cheuk.', 'https://hkrugby.example/ricky');
+  const gated = gateResults(q, [rugby, namesake, linkedin]);
+  assert.deepEqual(gated.kept.map((r) => r.url), [linkedin.url]);
+  assert.equal(gated.dropped, 2);
+});
+
 test('a one-word ask about an odd name keeps the single hit that carries it', () => {
   const q = 'zxqv';
   const tiktok = hit('ZXQV (@gstopcat)', 'ZXQV (@gstopcat) on TikTok | 403K Likes. 2235 Followers.', 'https://www.tiktok.com/@gstopcat');

@@ -1071,6 +1071,8 @@ test('a misspelled company locks that person instead of the namesakes', () => {
   assert.equal(personSourceOk(q, engineer), true);
   assert.equal(personSourceOk(q, rugby), false);
   assert.equal(personSourceOk(q, { title: 'Ricky Cheuk', url: 'https://x.example/a', snippet: 'Ricky Cheuk works at Blue Flame AI in New York' }), true);
+  assert.equal(personSourceOk(q, { title: 'Ricky C.', url: 'https://www.linkedin.com/in/rickycheuk', snippet: 'Software Engineer at Blueflame AI. New York.' }), true);
+  assert.equal(personSourceOk(q, { title: 'Ricky C.', url: 'https://hkrugby.example/r', snippet: 'Hong Kong rugby player Ricky C.' }), false);
   const d = resolveEntity(q, [rugby, ted, directory, engineer]);
   assert.equal(d.kind, 'single');
   if (d.kind !== 'single') return;

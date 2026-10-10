@@ -194,10 +194,12 @@ export function gateResults<T extends GateHit>(query: string, rows: readonly T[]
     if (name && nameToks.length >= 2) {
       let ok: T[];
       if (distinguishingTerms(query, name).length) {
-        // The ask names an org/role: a row is about this person only with the full name AND
-        // that term on the page. No name-only fallback — an empty pool hands the ask to
-        // stream.ts, whose pick gate re-searches the bare name and re-asks with choices.
-        ok = clean.filter((row) => hasFullPersonName(name, row) && personSourceOk(query, row, name));
+        // The ask names an org/role. personSourceOk already requires this person (the full
+        // name, or a LinkedIn-style "First L." plus the profile slug) and that org on the
+        // page, including a one-letter misspelling. Requiring the full name here dropped
+        // "Ricky C." /in/rickycheuk for "Ricky Cheuk Bleuflame AI" and the ask came back empty.
+        // No name-only fallback — an empty pool hands the ask to stream.ts.
+        ok = clean.filter((row) => personSourceOk(query, row, name));
         if (!ok.length) return { kept: [], dropped: rows.length };
       } else {
         const ctx = contextTerms(query, name);
