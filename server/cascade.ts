@@ -1,3 +1,4 @@
+import { isBlockPage } from './blockPage';
 import { cleanMarkdown } from '../shared/text';
 import type { EngineStatus, Freshness, ImageResult } from '../shared/types';
 import { ddgBackupOn, fetchBackup } from './backup';
@@ -150,7 +151,7 @@ async function tavilySearch(q: Query, env: Env): Promise<{ hits: WebHit[]; image
       url: r.url,
       snippet: clip(r.content ?? '', 320),
       date: r.published_date,
-      content: r.content && r.content.length > 300 ? r.content : undefined,
+      content: r.content && r.content.length > 300 && !isBlockPage(r.content) ? r.content : undefined,
     })),
     images: (data.images ?? []).map((img) => {
       const url = typeof img === 'string' ? img : img.url;

@@ -3,6 +3,7 @@ import type { SearchResult } from '../shared/types';
 import type { AskScope } from './budget';
 import { engineDead, failureOf, rememberDead } from './budget';
 import { loadSkips, tripSkip } from './engineSkip';
+import { isBlockPage, readable, rememberBlocked } from './blockPage';
 import { readPage } from './htmlcap';
 import { isGenericPreview } from './images';
 import { type LateExtras, normalizeUrl } from './search';
@@ -114,6 +115,10 @@ function bump(scope: AskScope | undefined, kind: 'jina' | 'keyless' | 'direct'):
 async function readReadable(url: string, env: Env, signal: AbortSignal, images: Map<string, string> | undefined, scope: AskScope | undefined): Promise<string> {
   const enough = (text: string) => {
     if (text.length < MIN_TEXT) throw new Error('not enough text');
+    if (isBlockPage(text)) {
+      rememberBlocked(url);
+      throw new Error('blocked');
+    }
     return text;
   };
   const key = env.JINA_API_KEY;
@@ -155,6 +160,7 @@ async function readReadable(url: string, env: Env, signal: AbortSignal, images: 
 /** Fetches one page's readable text. Keyless Jina when the key is missing or Jina is dead; direct fetch is the fallback. */
 export async function pageText(url: string, env: Env, timeoutMs = 9000, maxChars = 6000, images?: Map<string, string>, scope?: AskScope): Promise<string> {
   if (!isFetchable(url)) throw new Error('URL not allowed');
+  if (!readable(url)) throw new Error('site refuses automated reads');
   const signal = AbortSignal.timeout(timeoutMs);
   const text = await readReadable(url, env, signal, images, scope);
   return text.length > maxChars ? `${text.slice(0, maxChars)}…` : text;
@@ -178,7 +184,7 @@ export async function collectPages(
   // Only sources the designer is shown (numbered 1-12) are worth reading.
   const numbered = results.slice(0, 12).map((r, i) => ({ r, n: i + 1 }));
   const ready: PageText[] = numbered
-    .filter(({ r }) => r.content && r.content.length >= MIN_TEXT)
+    .filter(({ r }) => r.content && r.content.length >= MIN_TEXT && !isBlockPage(r.content))
     .slice(0, count)
     .map(({ r, n }) => ({ n, url: r.url, text: r.content! }));
   if (ready.length >= need) return ready;
@@ -188,7 +194,7 @@ export async function collectPages(
   const missing = numbered.filter(({ r, n }) => !have.has(n) && !seen.has(r.domain) && seen.add(r.domain)).slice(0, count - ready.length);
   const fromLate = async (url: string) => {
     const text = (await late)?.content.get(normalizeUrl(url));
-    if (!text || text.length < MIN_TEXT) throw new Error('no late content');
+    if (!text || text.length < MIN_TEXT || isBlockPage(text)) throw new Error('no late content');
     return text;
   };
 
