@@ -881,6 +881,9 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
   onQueue: (queued: { q: string; ref?: AskRef; from: number; item?: string }) => void;
 }) {
   const streaming = !!turn.live?.nodes.some(Boolean);
+  // A later region can arrive before the first one. Until the top of the answer is real, keep showing the
+  // research: an empty card, or a placeholder in that gap, looks like the wait is fake.
+  const answerStarted = !!turn.live && liveBody(turn.live, true).some((n) => n.type !== 'citations' && n.type !== 'slot');
   const offlinePartial = Boolean(turn.offline && (turn.live?.head || streaming));
   const card: AnswerCard = useMemo(() => {
     // The plan's guessed layout often differs from the card that is designed, so placeholders follow the
@@ -901,7 +904,7 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
   const provisional = !turn.result && !turn.live?.head;
   // The whole wait, including while the layout is decided and the answer is written, shows the research
   // itself. Placeholder blocks only stood in for that work.
-  const waiting = turn.filling && !turn.result && !turn.offline && !turn.error && !streaming;
+  const waiting = turn.filling && !turn.result && !turn.offline && !turn.error && !answerStarted;
   const trail = waiting ? (
     <ResearchTrail
       question={turn.question}
