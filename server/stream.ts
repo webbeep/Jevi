@@ -382,7 +382,8 @@ function applyReview(send: Send, req: DesignRequest, shown: Map<number, CardNode
   const warning = review.note ? gateNode({ type: 'callout', tone: 'warning', icon: 'triangle-alert', text: review.note }, req) : undefined;
   const leadIndex = [...shown.keys()].sort((a, b) => a - b).find((i) => !['actions', 'citations'].includes(shown.get(i)!.type));
   const lead = leadIndex === undefined ? undefined : shown.get(leadIndex);
-  const leadWarns = lead?.type === 'callout' && lead.tone === 'warning' || (lead?.type === 'stack' && lead.children[0]?.type === 'callout' && lead.children[0].tone === 'warning');
+  const isCallout = (node: CardNode | undefined) => node?.type === 'callout' || (node?.type === 'stack' && node.children.some((child) => child.type === 'callout'));
+  const leadWarns = isCallout(lead);
   if (warning && leadIndex !== undefined && !leadWarns) {
     send('node', { index: leadIndex, node: { type: 'stack', direction: 'col', gap: 'sm', children: [warning, shown.get(leadIndex)!] } });
   }
