@@ -26,6 +26,8 @@ export interface Box {
   detail?: string;
   /** Timeline date. */
   when?: string;
+  /** The row is a playable clip. Ask what is in it, not what the series name means. */
+  clip?: boolean;
 }
 
 export const REF_MAX = 300;
@@ -132,6 +134,16 @@ const nameLike = (s: string) => {
 
 const mentions = (hay: string | undefined, needle: string | undefined) => !!hay && !!needle && hay.toLowerCase().includes(needle.toLowerCase());
 
+const OCCASION = /^(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s+(?:19|20)\d{2})?|(?:19|20)\d{2}-\d{2}-\d{2}|\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?(?:,?\s+(?:19|20)\d{2})?)$/i;
+
+/** "NBA's Top 10 Plays — Oct 7, 2026" is one clip on one night, not the name of the series. */
+function occasionOf(label: string): { subject: string; when: string } | undefined {
+  const m = label.match(/^(.+?)\s+[—–|-]\s+(.+)$/);
+  if (!m || !OCCASION.test(m[2].trim())) return undefined;
+  const subject = m[1].trim();
+  return subject ? { subject, when: m[2].trim() } : undefined;
+}
+
 function labelOnly(box: Box, label: string, E?: string): string {
   const [subject0, rest] = split(label);
   const subject = cut(subject0, 80);
@@ -196,6 +208,14 @@ export function askQuestion(box: Box): string {
     const when = cut(clean(box.when), 40);
     return out(E ? `What happened with ${E} on ${when} (${label})?` : `What happened in ${when}: ${label}?`);
   }
+  // A dated clip ("NBA's Top 10 Plays — Oct 7, 2026") is that night's video, not a definition of the series.
+  const occasion = label ? occasionOf(label) : undefined;
+  if (occasion) {
+    return out(box.clip
+      ? `What happened in the ${occasion.subject} video from ${occasion.when}?`
+      : `What happened in ${occasion.subject} on ${occasion.when}?`);
+  }
+  if (box.clip && label) return out(`What's in the ${label} video?`);
   if ((box.kind === 'verdict' || isVerdict(value)) && label && value) return out(verdictQuestion(label, value, E));
   // An entity the value already names adds nothing ("Company: BlueFlame AI" on a BlueFlame AI card).
   if (E && value && mentions(value, E)) E = undefined;

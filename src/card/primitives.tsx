@@ -187,6 +187,17 @@ function useSource(n: number | undefined) {
 /** The thing an item is about: "**Golden Delicious** — holds shape" → "Golden Delicious". */
 const subjectOf = (text: string) => plain(text).replace(/\*\*/g, '').split(/\s[—–-]\s|:\s/)[0].trim().slice(0, 80);
 
+/** A source title that adds the date ("Top 10 Plays" → "Top 10 Plays — Oct 7, 2026") is the thing that was tapped. */
+function followTitle(label: string | undefined, sourceTitle: string | undefined, clip: boolean): string {
+  const shown = plain(label ?? '');
+  const source = plain(sourceTitle ?? '');
+  if (!shown) return source;
+  if (!source) return shown;
+  if (source.toLowerCase().startsWith(shown.toLowerCase()) && source.length > shown.length) return source;
+  if (clip && /\b(?:19|20)\d{2}\b/.test(source) && !/\b(?:19|20)\d{2}\b/.test(shown)) return source;
+  return shown;
+}
+
 /** Container classes shared by tappable items: visible keyboard focus ring with the theme ring token. */
 const ITEM_FOCUS = 'outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring/50';
 
@@ -340,9 +351,10 @@ export function Links({ node }: { node: Of<'links'> }) {
     <ul className="divide-y rounded-xl border bg-card">
       {items.map(({ source, r, label, note }) => {
         const video = !!videoEmbed(r.url);
-        const box: Box = { kind: 'link', label: label ?? r.title, entity };
+        const title = followTitle(label, r.title, video);
+        const box: Box = { kind: 'link', label: title, entity, clip: video };
         const ask = askQuestion(box);
-        const ref: AskRef = { label: subjectOf(label ?? r.title), entity, sourceUrl: r.url, snippet: r.snippet };
+        const ref: AskRef = { label: title, entity, sourceUrl: r.url, snippet: r.snippet };
         return (
           <li key={r.url} className="relative">
             <ItemButton ask={ask} askRef={ref} className={cn('absolute inset-0 cursor-pointer transition-colors hover:bg-foreground/[0.03] [li:first-child>&]:rounded-t-xl [li:last-child>&]:rounded-b-xl')} />
@@ -352,7 +364,7 @@ export function Links({ node }: { node: Of<'links'> }) {
                 {video && <Play className="absolute -bottom-1 -right-1 size-3.5 rounded-full bg-foreground fill-background p-0.5 text-background" />}
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block text-sm font-medium leading-snug">{label ?? r.title} <SourceChip result={r} n={source} className="-my-[3px]" /></span>
+                <span className="block text-sm font-medium leading-snug">{title} <SourceChip result={r} n={source} className="-my-[3px]" /></span>
                 <span className="block text-xs leading-snug text-muted-foreground">{note ? `${note} · ` : ''}{domainLabel(r.domain)}</span>
               </span>
               <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
@@ -484,9 +496,11 @@ function MediaThumb({ item, index }: { item: Of<'list'>['items'][number]; index:
 function MediaRow({ item, index }: { item: Of<'list'>['items'][number]; index: number }) {
   const r = useSource(item.source);
   const { entity } = useCard();
-  const box: Box = { kind: 'row', label: plain(item.text), detail: item.meta, entity };
+  const clip = !!r && !!videoEmbed(r.url);
+  const title = followTitle(item.text, r?.title, clip);
+  const box: Box = { kind: 'row', label: title, detail: item.meta, entity, clip };
   const ask = askQuestion(box);
-  const ref: AskRef = { label: subjectOf(item.text), value: item.meta, entity, sourceUrl: r?.url, snippet: r?.snippet };
+  const ref: AskRef = { label: clip ? title : subjectOf(item.text), value: item.meta, entity, sourceUrl: r?.url, snippet: r?.snippet };
   return (
     <li className="relative">
       <ItemButton ask={ask} askRef={ref} className={cn('absolute inset-0 cursor-pointer transition-colors hover:bg-foreground/[0.03] [li:first-child>&]:rounded-t-xl [li:last-child>&]:rounded-b-xl')} />
@@ -525,9 +539,11 @@ export function List({ node }: { node: Of<'list'> }) {
     <ul className="-my-1 sm:-my-[5px]">
       {node.items.map((item, i) => {
         const r = item.source ? results[item.source - 1] : undefined;
+        const clip = !!r && !!videoEmbed(r.url);
+        const title = followTitle(item.text, r?.title, clip);
         // T453: every box type taps to a natural follow-up (Ricky: lists too); cites/source chip stay tappable above.
-        const ask = askQuestion({ kind: 'list', label: plain(item.text), detail: item.meta, entity });
-        const ref: AskRef = { label: subjectOf(item.text), value: item.meta, entity, sourceUrl: r?.url, snippet: r?.snippet };
+        const ask = askQuestion({ kind: 'list', label: title, detail: item.meta, entity, clip });
+        const ref: AskRef = { label: clip ? title : subjectOf(item.text), value: item.meta, entity, sourceUrl: r?.url, snippet: r?.snippet };
         return (
           <li key={i} onClick={rowClick} className="group relative flex min-h-11 cursor-pointer py-1 text-sm leading-relaxed sm:py-[5px]">
             <ItemButton ask={ask} askRef={ref} className="absolute inset-y-0 -inset-x-1 cursor-pointer rounded-md transition-colors group-hover:bg-foreground/[0.03]" />

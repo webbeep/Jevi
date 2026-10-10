@@ -54,6 +54,9 @@ const cases: [Box, string][] = [
   [{ kind: 'row', label: 'AMP — research and diligence agent', entity: 'BlueFlame AI' }, 'What is AMP?'],
   [{ kind: 'list', label: 'Clifford scored 18 off the bench in every preseason game so far [3]' }, 'Explain "Clifford scored 18 off the bench in every preseason game so far"'],
   [{ kind: 'link', label: 'ESPN preseason tracker' }, 'What is ESPN preseason tracker?'],
+  [{ kind: 'link', label: "NBA's Top 10 Plays — Oct 7, 2026", clip: true }, "What happened in the NBA's Top 10 Plays video from Oct 7, 2026?"],
+  [{ kind: 'link', label: 'Top 10 Plays — October 7, 2026' }, 'What happened in Top 10 Plays on October 7, 2026?'],
+  [{ kind: 'link', label: "NBA's Top 10 Plays", clip: true }, "What's in the NBA's Top 10 Plays video?"],
   [{ kind: 'timeline', label: 'Series A', when: '2024' }, 'What happened in 2024: Series A?'],
   [{ kind: 'timeline', label: 'Top 10 plays', when: 'Oct 7, 2026', entity: 'NBA' }, 'What happened with NBA on Oct 7, 2026 (Top 10 plays)?'],
   // T453 ship: game tiles on sports cards
