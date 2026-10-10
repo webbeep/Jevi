@@ -7,6 +7,7 @@ import {
   contextTerms,
   correctedPersonQuery,
   distinguishingTerms,
+  vowelSwap,
   entityContextLine,
   type Entity,
   type EntityChoice,
@@ -44,7 +45,7 @@ import { collectPages, ogImageOf } from './pages';
 import { MADE_PATTERNS, skeletonCard } from './patterns';
 import { planLayout } from './plan';
 import type { AskScope, CallLedger } from './budget';
-import { logAsk, mark, moreQueries, newLedger, queriesForAsk } from './budget';
+import { SEARCH_CALL_CAP, logAsk, mark, moreQueries, newLedger, queriesForAsk, searchCalls } from './budget';
 import { gateResults } from './relevanceGate';
 import { entityQuery, plainQuotes, relaxQuery, tickerQueries } from './queryClean';
 import { type LateExtras, normalizeUrl, searchWithLate } from './search';
@@ -450,17 +451,35 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
       const orgWord = person ? distinguishingTerms(query).find((t) => t.length >= 6) : undefined;
       if (orgWord) {
         triedEntity = true;
-        const org = contextTerms(query).join(' ');
-        const looked = await searchWithLate({ q: org, freshness: 'any', count: 8, lite: true, ungated: true }, env, scope);
-        const spelling = correctedPersonQuery(query, looked.response.results);
-        if (spelling) {
-          const named = await searchWithLate({ q: spelling, freshness: 'any', count: 10, lite: true }, env, scope);
+        const swapped = vowelSwap(orgWord);
+        if (swapped) {
+          const room = SEARCH_CALL_CAP + (scope.ledger.bonus ?? 0) - searchCalls(scope.ledger);
+          if (room < 1) scope.ledger.bonus = (scope.ledger.bonus ?? 0) + (1 - room);
+          const guess = `${person} ${swapped[0]!.toUpperCase()}${swapped.slice(1)}`;
+          const named = await searchWithLate({ q: guess, freshness: 'any', count: 10, lite: true }, env, scope);
           const kept = applyPickGate(query, applyRelevance(query, { ...named.response, query }, scope.ledger));
           if (kept.results.length) {
             results = kept;
             late = named.late;
             recovered = 'entity';
-            console.log(JSON.stringify({ zo: 'entity', spelling, kept: kept.results.length }));
+            console.log(JSON.stringify({ zo: 'entity', spelling: guess, kept: kept.results.length }));
+          }
+        }
+        if (!results.results.length) {
+          const room = SEARCH_CALL_CAP + (scope.ledger.bonus ?? 0) - searchCalls(scope.ledger);
+          if (room < 2) scope.ledger.bonus = (scope.ledger.bonus ?? 0) + (2 - room);
+          const org = contextTerms(query).join(' ');
+          const looked = await searchWithLate({ q: org, freshness: 'any', count: 8, lite: true, ungated: true }, env, scope);
+          const spelling = correctedPersonQuery(query, looked.response.results);
+          if (spelling && spelling.toLowerCase() !== `${person} ${swapped}`.toLowerCase()) {
+            const named = await searchWithLate({ q: spelling, freshness: 'any', count: 10, lite: true }, env, scope);
+            const kept = applyPickGate(query, applyRelevance(query, { ...named.response, query }, scope.ledger));
+            if (kept.results.length) {
+              results = kept;
+              late = named.late;
+              recovered = 'entity';
+              console.log(JSON.stringify({ zo: 'entity', spelling, kept: kept.results.length }));
+            }
           }
         }
       }

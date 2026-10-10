@@ -14,6 +14,7 @@ import {
   commaDetailQuery,
   correctedPersonQuery,
   contextTerms,
+  vowelSwap,
   distinguishingTerms,
   cleanCapture,
   hasFullPersonName,
@@ -1089,4 +1090,6 @@ test('"None of these" keeps the company they typed, including Capital One', () =
     { title: 'About Blueflame AI', url: 'https://www.blueflame.ai/about', snippet: 'Blueflame AI builds software' },
   ]), 'Ricky Cheuk Blueflame');
   assert.equal(correctedPersonQuery('Ricky Cheuk Bleuflame AI', [rugby]), '');
+  assert.equal(vowelSwap('bleuflame'), 'blueflame');
+  assert.equal(vowelSwap('raycon'), '');
 });

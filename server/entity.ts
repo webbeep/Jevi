@@ -377,6 +377,23 @@ export function nearOrgSpelling(term: string, rows: readonly { title?: string; s
  * "Ricky Cheuk Bleuflame AI" plus pages that say Blueflame → "Ricky Cheuk Blueflame".
  * '' when these pages don't show a correctable spelling.
  */
+/**
+ * One adjacent vowel swap ("bleuflame" → "blueflame"). '' when the word has no such pair.
+ * Only worth searching after the typed spelling found nothing.
+ */
+export function vowelSwap(term: string): string {
+  const chars = [...term.toLowerCase()];
+  for (let i = 0; i < chars.length - 1; i++) {
+    const a = chars[i]!;
+    const b = chars[i + 1]!;
+    if (!/[aeiou]/.test(a) || !/[aeiou]/.test(b) || a === b) continue;
+    chars[i] = b;
+    chars[i + 1] = a;
+    return chars.join('');
+  }
+  return '';
+}
+
 export function correctedPersonQuery(query: string, rows: readonly { title?: string; snippet?: string; url?: string }[]): string {
   const name = personSubject(query);
   const term = distinguishingTerms(query, name).find((t) => t.length >= 6);
