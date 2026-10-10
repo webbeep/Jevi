@@ -3,7 +3,8 @@ import type { CardNode } from './card';
 /**
  * The body of a card that is still streaming (T455). Regions are designed in parallel and can arrive out of
  * order; a late earlier node would push everything below it down. So while designing, nodes are revealed in
- * index order: the arrived prefix, then the skeleton of the first gap, and later nodes wait until it fills.
+ * index order: the arrived prefix, and later nodes wait until the gap fills. The gap stays empty — a flashing
+ * skeleton there reads as a fake placeholder rather than work happening.
  * When designing is over, every node that arrived is shown.
  */
 export function liveBody(live: { nodes: (CardNode | undefined)[]; regions: CardNode[] }, stillDesigning: boolean): CardNode[] {
@@ -12,10 +13,8 @@ export function liveBody(live: { nodes: (CardNode | undefined)[]; regions: CardN
   const length = Math.max(live.nodes.length, live.regions.length);
   for (let i = 0; i < length; i++) {
     const node = live.nodes[i];
-    if (node) { out.push(node); continue; }
-    const slot = live.regions[i];
-    if (slot) out.push(slot);
-    break;
+    if (!node) break;
+    out.push(node);
   }
   return out;
 }

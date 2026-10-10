@@ -890,8 +890,7 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
     let base: AnswerCard;
     if (live && (streaming || offlinePartial)) {
       const fillingNow = offlinePartial ? false : turn.filling;
-      const more = fillingNow && !live.regions.length ? [{ type: 'slot' as const, hint: 'more', shape: 'block' as const }] : [];
-      base = { ...skeleton, ...live.head, body: [...liveBody(live, fillingNow), ...more] };
+      base = { ...skeleton, ...live.head, body: liveBody(live, fillingNow) };
     } else if (turn.result) base = turn.result.card;
     else base = { ...skeleton, ...live?.head, body: live?.regions.length ? live.regions : skeleton.body };
     if (!turn.result && !live?.head && turn.kind !== 'search') base = { ...base, title: turn.question };
@@ -900,9 +899,19 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
 
   // The header is showing the question / plan skeleton, not the final title.
   const provisional = !turn.result && !turn.live?.head;
-  // Until the layout is known, a search shows its research as it happens instead of placeholders.
-  const researching = turn.kind === 'search' && turn.filling && !turn.result && !turn.offline && !turn.error && !streaming && !turn.live?.head && !turn.live?.regions.length;
-  const trail = researching ? <ResearchTrail question={turn.question} intent={turn.intent} peek={turn.peek} search={turn.search} designing={turn.designing} /> : undefined;
+  // The whole wait, including while the layout is decided and the answer is written, shows the research
+  // itself. Placeholder blocks only stood in for that work.
+  const waiting = turn.filling && !turn.result && !turn.offline && !turn.error && !streaming;
+  const trail = waiting ? (
+    <ResearchTrail
+      question={turn.question}
+      intent={turn.intent}
+      peek={turn.peek}
+      search={turn.search}
+      designing={turn.designing}
+      writing={!!turn.thinking || !!turn.designing || !!turn.live?.head || !!turn.live?.regions.length}
+    />
+  ) : undefined;
 
   const credits = useMemo(() => {
     const out: Record<string, { credit: string; link: string }> = {};

@@ -5,29 +5,32 @@ import type { PeekRow } from '../sse';
 import { favicon } from '../Sources';
 import { cn } from '@/lib/utils';
 
-type Stage = 'understand' | 'search' | 'read' | 'layout';
-const ORDER: Stage[] = ['understand', 'search', 'read', 'layout'];
+type Stage = 'understand' | 'search' | 'read' | 'write';
+const ORDER: Stage[] = ['understand', 'search', 'read', 'write'];
 
 const shortDomain = (d: string) => d.replace(/^(www|en|m)\./, '');
 const SHOWN_ROWS = 5;
 
 /**
- * What a search is doing before its card can be laid out: the question as understood, the searches and
- * the sources as they land, the reading, then the layout. Every line is real progress from the stream,
- * so the wait shows work instead of a guessed skeleton.
+ * What the wait is actually doing: the question as understood, the searches and the sources as they
+ * land, the reading, then the writing. It stays up until the answer itself arrives, so the wait is
+ * real progress rather than a flashing placeholder.
  */
-export function ResearchTrail({ question, intent, peek, search, designing }: {
+export function ResearchTrail({ question, intent, peek, search, designing, writing }: {
   question: string;
   intent?: { intent: string; queries: string[] };
   peek?: PeekRow[];
   search?: SearchResponse;
   designing?: { pagesRead: number };
+  /** The answer is being written: sources stay on screen and the active step moves to writing. */
+  writing?: boolean;
 }) {
   // Rows already on screen from the first look keep their place; the full search only adds after them.
   const first = peek ?? [];
   const shown = new Set(first.map((r) => r.url));
   const rows: PeekRow[] = [...first, ...(search?.results ?? []).filter((r) => !shown.has(r.url))];
-  const stage: Stage = designing ? 'layout' : search ? 'read' : peek?.length || intent ? 'search' : 'understand';
+  const researched = !!intent || !!peek?.length || !!search || !!designing;
+  const stage: Stage = writing || designing ? 'write' : search ? 'read' : researched ? 'search' : 'understand';
   const at = ORDER.indexOf(stage);
   const state = (s: Stage) => (ORDER.indexOf(s) < at ? 'done' : s === stage ? 'active' : 'todo');
   const queries = [question, ...(intent?.queries ?? [])].filter((q, i, all) => all.findIndex((x) => x.toLowerCase() === q.toLowerCase()) === i).slice(0, 3);
@@ -36,10 +39,10 @@ export function ResearchTrail({ question, intent, peek, search, designing }: {
 
   return (
     <ol data-testid="research-trail" aria-live="polite" className="relative space-y-3.5 text-[13px]">
-      <Step state={state('understand')} label={intent ? 'Understood' : 'Understanding the question'}>
+      <Step state={state('understand')} label={intent ? 'Understood' : researched ? 'Understanding the question' : 'Thinking it through'}>
         {intent?.intent && <p className="text-pretty leading-snug text-muted-foreground animate-in fade-in">{intent.intent}</p>}
       </Step>
-      {at >= 1 && (
+      {researched && at >= 1 && (
         <Step state={state('search')} label={count ? `Found ${count} sources` : 'Searching the web'}>
           <div className="flex flex-wrap gap-1.5">
             {queries.map((q, i) => (
@@ -52,10 +55,12 @@ export function ResearchTrail({ question, intent, peek, search, designing }: {
           {rows.length > 0 && (
             <ul className="mt-2 space-y-1">
               {rows.slice(0, SHOWN_ROWS).map((r, i) => (
-                <li key={r.url} style={{ animationDelay: `${i * 110}ms` }} className="flex min-w-0 items-center gap-2 animate-in fade-in slide-in-from-left-1 fill-mode-both duration-300">
-                  <img src={favicon(r.domain)} alt="" loading="lazy" className="size-3.5 shrink-0 rounded-[3px]" />
-                  <span className="min-w-0 flex-1 truncate">{r.title}</span>
-                  <span className="zo-meta shrink-0">{shortDomain(r.domain)}</span>
+                <li key={r.url} style={{ animationDelay: `${i * 110}ms` }} className="animate-in fade-in slide-in-from-left-1 fill-mode-both duration-300">
+                  <span style={{ animationDelay: `${i * 0.45}s` }} className="zo-read-on flex min-w-0 items-center gap-2 rounded-md px-1.5 py-0.5">
+                    <img src={favicon(r.domain)} alt="" loading="lazy" className="size-3.5 shrink-0 rounded-[3px]" />
+                    <span className="min-w-0 flex-1 truncate">{r.title}</span>
+                    <span className="zo-meta shrink-0">{shortDomain(r.domain)}</span>
+                  </span>
                 </li>
               ))}
               {rows.length > SHOWN_ROWS && <li style={{ animationDelay: `${SHOWN_ROWS * 110}ms` }} className="zo-meta pl-5.5 animate-in fade-in fill-mode-both">+{rows.length - SHOWN_ROWS} more</li>}
@@ -63,8 +68,8 @@ export function ResearchTrail({ question, intent, peek, search, designing }: {
           )}
         </Step>
       )}
-      {at >= 2 && <Step state={state('read')} label={read ? `Read ${read} ${read === 1 ? 'page' : 'pages'}` : 'Reading the sources'} />}
-      {at >= 3 && <Step state={state('layout')} label="Laying out the answer" />}
+      {researched && at >= 2 && <Step state={state('read')} label={read ? `Read ${read} ${read === 1 ? 'page' : 'pages'}` : 'Reading the sources'} />}
+      {at >= 3 && <Step state={state('write')} label="Writing the answer" />}
     </ol>
   );
 }

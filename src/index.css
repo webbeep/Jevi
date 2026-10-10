@@ -240,7 +240,16 @@
   to { background-position: 100% 0; }
 }
 
+/* A source being read: a light passes down the list, one row at a time, while the answer is prepared. */
+.zo-read-on {
+  animation: zo-read 2.8s ease-in-out infinite;
+}
+@keyframes zo-read {
+  0%, 18%, 100% { background-color: transparent; }
+  8% { background-color: color-mix(in oklch, var(--foreground) 8%, transparent); }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .zo-aura::before, .zo-aura::after, .zo-wash, .zo-shimmer, .zo-shimmer-text { animation: none; }
+  .zo-aura::before, .zo-aura::after, .zo-wash, .zo-shimmer, .zo-shimmer-text, .zo-read-on { animation: none; }
   .zo-shimmer-text { color: var(--foreground); }
 }

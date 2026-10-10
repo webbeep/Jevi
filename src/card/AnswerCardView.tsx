@@ -45,7 +45,7 @@ export function AnswerCardView({ card, version, filling, streaming, status, patt
   toolbar?: ReactNode;
   /** The title is still the question / plan skeleton, so the header keeps a stable height. */
   provisional?: boolean;
-  /** Shown in place of the body while the answer is researched, before its layout is known. */
+  /** Shown in place of the body for the whole wait: the sources and the step being worked on. */
   trail?: ReactNode;
 }) {
   const { results, onSources } = useCard();
@@ -92,7 +92,7 @@ export function AnswerCardView({ card, version, filling, streaming, status, patt
         </div>
         <div className="min-w-0 flex-1 self-center">
           <h2 className={cn('text-balance text-[16.5px] font-semibold leading-[1.3] tracking-[-0.02em] sm:text-[17px]', provisional && 'line-clamp-1')}>{card.title}</h2>
-          {filling && !card.subtitle ? (
+          {filling && !card.subtitle && !trail ? (
             <div aria-hidden className="mt-0.5 flex h-[1.375em] items-center text-[13px]"><Skeleton className="h-3 w-32" /></div>
           ) : card.subtitle && (
             <p className={cn('mt-0.5 text-pretty text-[13px] leading-snug text-muted-foreground', provisional && 'line-clamp-1')}>{card.subtitle}</p>
