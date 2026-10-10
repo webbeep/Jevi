@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { entityQuery, relaxQuery, sanitizeSearchQuery } from '../server/queryClean.ts';
+import { entityQuery, relaxQuery, sanitizeSearchQuery, withoutLooseOne } from '../server/queryClean.ts';
 
 const NIQU = 'Nique Clifford Sacramento Kings preseason standout sactownsports.com';
 
@@ -14,6 +14,13 @@ test('sanitize drops domains and a trailing card title, and keeps site filters',
   assert.equal(sanitizeSearchQuery('sactownsports.com'), 'sactownsports.com');
   assert.equal(sanitizeSearchQuery('Who is Datasite, owner of Blueflame AI Blueflame AI at Datasite'), 'Who is Datasite, owner of Blueflame AI at Datasite');
   assert.equal(sanitizeSearchQuery('Walla Walla wineries'), 'Walla Walla wineries');
+});
+
+test('a pointing "one" leaves the query and Capital One stays', () => {
+  assert.equal(withoutLooseOne('Ricky Cheuk one bleuflame'), 'Ricky Cheuk bleuflame');
+  assert.equal(withoutLooseOne('Jaylen Brown Celtics one injuries'), 'Jaylen Brown Celtics injuries');
+  assert.equal(withoutLooseOne('Ricky Cheuk Capital One'), 'Ricky Cheuk Capital One');
+  assert.equal(withoutLooseOne('One Medical clinics'), 'One Medical clinics');
 });
 
 test('relax keeps the entity and entityQuery takes the leading capitalized run', () => {

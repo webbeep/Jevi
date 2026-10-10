@@ -69,6 +69,27 @@ function tidy(q: string): string {
   return collapse(q).replace(TRAIL_PUNCT, '').trim();
 }
 
+/** Brands whose second word is One. A lowercase "one" anywhere else only points at the subject. */
+const ONE_BRAND = /^(capital|square|channel|number|day|plus)$/i;
+
+/**
+ * "Ricky Cheuk one bleuflame" → "Ricky Cheuk bleuflame". "Capital One" stays.
+ * Returns the input when stripping would leave it empty.
+ */
+export function withoutLooseOne(query: string): string {
+  const words = query.split(/\s+/).filter(Boolean);
+  const kept = words.filter((w, i) => {
+    if (!/^ones?$/i.test(w)) return true;
+    const prev = (words[i - 1] ?? '').replace(/[^A-Za-z]/g, '');
+    const next = words[i + 1] ?? '';
+    if (ONE_BRAND.test(prev)) return true;
+    if (i === 0 && /^[A-Z]/.test(next)) return true;
+    return false;
+  });
+  const out = kept.join(' ').trim();
+  return out || query;
+}
+
 /**
  * Drops domains a rewriter appended (unless they are a `site:` filter) and a
  * card title stuck on the end. Never returns an empty string.

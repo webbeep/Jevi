@@ -19,6 +19,7 @@ import {
   nameIsTopic,
   personSourceOk,
   personSubject,
+  commaDetailQuery,
   pickSeeds,
   pickTopic,
   pickTopicQuery,
@@ -468,8 +469,10 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
             fromSeeds = true;
             recovered = 'seeds';
             console.log(JSON.stringify({ zo: 'entity', pickSeeds: seeds.seeds.length, label: seeds.label }));
-          } else if (!seedRows?.length) {
-            // Nothing about the asker's person: re-ask on the bare name and let them pick.
+          } else if (!seedRows?.length && !distinguishingTerms(query).length) {
+            // A bare name with nothing else to go on: re-ask it and let them pick.
+            // A company or role was already named ("Ricky Cheuk Bleuflame AI"): namesakes of the
+            // bare name are a different question, so this falls through to the honest empty card.
             const decision = resolveEntity(`Who is ${person}`, again.response.results, { pattern: 'profile' });
             if (decision.kind === 'choices') {
               const choices = await sharperChoices(decision.choices, again.response.results, env);
@@ -736,6 +739,16 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
   if (req.intent === 'search') {
     // Card/control prompts (incl. Which-one? choice.query) are already the search string — do not LLM-rewrite.
     const picked = req.question.trim();
+    // "None of these" sends "Name, detail". That detail is the new identity ("Capital One"),
+    // not a fragment to mix with the company the namesake list failed to match.
+    const detail = commaDetailQuery(picked);
+    if (detail) {
+      const chosen = `Chosen person: ${personSubject(picked)}`;
+      const pickContext = [topicOnly(req.context), refLine].filter(Boolean).join('\n') || undefined;
+      send('rewrite', { query: detail });
+      await searchAndDesign(send, env, detail, 'any', [chosen, pickContext].filter(Boolean).join('\n'), started, scope, true);
+      return;
+    }
     // A Which-one? pick keeps what the ask was about ("jaylen brown injuries" → that person's injuries, not
     // their profile): search the person and the topic, with the pick locked as the thread's chosen person.
     const person = isPersonAsk(picked);

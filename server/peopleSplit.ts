@@ -10,6 +10,7 @@ Reply as JSON: {"people":[{"name": string, "who": string, "rows": number[], "que
 - rows: the result numbers about this person. A result belongs to one person at most; leave out results that name nobody clearly.
 - query: a web search that finds this person: their name as the results write it plus 1-3 distinguishing words.
 - Results about the same person (same field and employer, or one page calling them by a nickname) are one entry. Different fields, employers or countries are different people unless a result links them.
+- A directory, a people-search page, or "professionals named X" is not a person. A company is not a person. Leave those out.
 - Most covered first. At most 5 people.`;
 
 interface Raw {
@@ -42,6 +43,7 @@ export function readPeople(raw: Raw | undefined, name: string, count: number, mi
     const descriptor = p.who.trim().replace(/\s+/g, ' ').slice(0, 60);
     const query = p.query.trim().replace(/\s+/g, ' ').slice(0, 100);
     if (!seeds.length || !descriptor || !query.toLowerCase().includes(surname)) continue;
+    if (/\b(professionals|people|profiles|users|persons|accounts|members)\s+named\b|\bpeople search\b/i.test(`${descriptor} ${query}`)) continue;
     seeds.forEach((i) => taken.add(i));
     const full = fullName(p.name, name);
     out.push({ name: full, descriptor, query, id: slug(`${full} ${descriptor}`), seeds });

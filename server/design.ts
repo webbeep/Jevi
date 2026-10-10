@@ -200,7 +200,7 @@ const SYSTEM_WHOLE = `${DESIGNER}
 OUTPUT FORMAT — JSON Lines, streamed to the screen as you write:
 Line 1: {"title":string,"subtitle":string,"icon":string,"accent":tone}
 Then exactly one line per top-level body node, each a complete compact JSON object (children nested inside it).
-Last line: {"followups":[4 short follow-up questions, each naming the subject, e.g. "How long does apple pie keep?" not "How long does it keep?"]}
+Last line: {"followups":[4 short follow-up questions a person would actually ask next, each naming the subject so it stands alone, e.g. "How long does apple pie keep?" not "How long does it keep?" Never a fragment, a restatement of the search, or "one" used only to point ("the celtics one", "which one").]}
 No code fences, no prose, no blank lines, no line breaks inside a JSON object.`;
 
 const SYSTEM_REGION = `${DESIGNER}
@@ -515,7 +515,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
   };
 
   const finishCall = () => {
-    const user = `${shared}\n- YOU DESIGN FINISH. Output these lines:\n  1. {"title":string,"subtitle":string,"icon":string,"accent":tone} for the whole card\n  2. only if the answer has something worth adjusting, exploring or testing: one interactive node such as {"type":"pricing",...}, {"type":"choices",...} or {"type":"slider",...} that the regions above don't already cover. For plan or subscription prices this must be a pricing node.\n  3. {"type":"actions","items":[...]} with 2-4 useful next steps (prefer kind "refine" for changes to this card), none repeating an option of line 2\n  4. {"type":"citations","refs":[...]} with the source numbers that matter most\n  5. {"followups":[4 short follow-up questions, each naming the subject so it stands alone]}\n\nQUERY: ${query}`;
+    const user = `${shared}\n- YOU DESIGN FINISH. Output these lines:\n  1. {"title":string,"subtitle":string,"icon":string,"accent":tone} for the whole card\n  2. only if the answer has something worth adjusting, exploring or testing: one interactive node such as {"type":"pricing",...}, {"type":"choices",...} or {"type":"slider",...} that the regions above don't already cover. For plan or subscription prices this must be a pricing node.\n  3. {"type":"actions","items":[...]} with 2-4 useful next steps (prefer kind "refine" for changes to this card), none repeating an option of line 2\n  4. {"type":"citations","refs":[...]} with the source numbers that matter most\n  5. {"followups":[4 short follow-up questions a person would actually ask next, each naming the subject so it stands alone. Never a fragment, a restatement of the search, or "one" used only to point.]}\n\nQUERY: ${query}`;
     let extra = 0;
     return llmLines(env, SYSTEM_REGION, user, 1000, (line) => {
       const parsed = parseLine(line, g, imageCount, req.query, sources, req.followup?.question ?? req.query);

@@ -7,7 +7,7 @@ import { hasLlm, llmJson } from './llm';
 import { askJev, choice, jevKey } from './jev';
 import { askedQuestions, priorEntity } from './entity';
 import { pageText } from './pages';
-import { sanitizeSearchQuery } from './queryClean';
+import { sanitizeSearchQuery, withoutLooseOne } from './queryClean';
 import { clip, type Env } from './util';
 
 /**
@@ -18,15 +18,15 @@ export async function rewriteQuery(original: string, question: string, env: Env,
   const latest = askedQuestions(context)[0] ?? original;
   if (!hasLlm(env)) {
     const raw = question.toLowerCase().includes(latest.toLowerCase()) ? question : `${question} ${latest}`;
-    return keepEntity(sanitizeSearchQuery(raw, fromCard), context, fromCard, question);
+    return keepEntity(withoutLooseOne(sanitizeSearchQuery(raw, fromCard)), context, fromCard, question);
   }
   const { query } = await llmJson<{ query: string }>(
     env,
-    'Rewrite the follow-up into one standalone web search query (4-12 words) for what the person wants next. Keep the subject of the conversation and its qualifiers (dish, product, place, audience, budget, and what they asked about it: injuries, price, news, stats, schedule) unless the follow-up clearly changes topic; resolve references like "it" or "the cheaper one". A follow-up that only says which person or thing they meant keeps the earlier request: after "jaylen brown injuries", "the celtics one" means "Jaylen Brown Celtics injuries", not his profile. A short label such as "apple varieties" asked from a card about apple pie means "best apple varieties for apple pie". If the follow-up names a different person, company or thing, or says the earlier person was the wrong one, search what it names and do not carry the earlier person or their details into the query. Never add website names, domains, or publication names to the query unless the person explicitly asked for that site. Reply as JSON: {"query": string}.',
+    'Rewrite the follow-up into one standalone web search query (4-12 words) for what the person wants next. Keep the subject of the conversation and its qualifiers (dish, product, place, audience, budget, and what they asked about it: injuries, price, news, stats, schedule) unless the follow-up clearly changes topic; resolve references like "it" or "the cheaper one". A follow-up that only says which person or thing they meant keeps the earlier request: after "jaylen brown injuries", "the celtics one" means "Jaylen Brown Celtics injuries", not his profile. Drop the word "one" whenever it only points at the earlier subject ("the celtics one", "which one", "the bleuflame one"). Keep it only when it is part of a proper name they wrote, such as "Capital One". A short label such as "apple varieties" asked from a card about apple pie means "best apple varieties for apple pie". If the follow-up names a different person, company or thing, or says the earlier person was the wrong one, search what it names and do not carry the earlier person or their details into the query. Never add website names, domains, or publication names to the query unless the person explicitly asked for that site. Reply as JSON: {"query": string}.',
     `Conversation started with: ${original}\n${latest && latest !== original ? `Most recent request: ${latest}\n` : ''}${context ? `Conversation so far:\n${context}\n` : ''}${fromCard ? `Asked from the card: ${fromCard}\n` : ''}Follow-up: ${question}`,
     80,
   );
-  return keepEntity(sanitizeSearchQuery(query?.trim() || question, fromCard), context, fromCard, question);
+  return keepEntity(withoutLooseOne(sanitizeSearchQuery(query?.trim() || question, fromCard)), context, fromCard, question);
 }
 
 /**

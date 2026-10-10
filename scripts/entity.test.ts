@@ -11,6 +11,7 @@ import {
   publicChoices,
   resolveEntity,
   disambiguationEntries,
+  commaDetailQuery,
   contextTerms,
   distinguishingTerms,
   cleanCapture,
@@ -1055,4 +1056,32 @@ test('a lowercase detail after "Name," picks that person, never a namesake on an
   assert.equal(personSourceOk('Ed Chu, blueflame ai', blueflame), true);
   assert.equal(personSourceOk('Ed Chu, blueflame ai', scientist), false);
   assert.equal(personSourceOk('Ed Chu, montefiore', oncologist), true);
+});
+
+test('a misspelled company locks that person instead of the namesakes', () => {
+  const rugby: EntityRow = { title: 'Ricky Cheuk - Hong Kong rugby', url: 'https://hkrugby.example/ricky', snippet: 'Former Hong Kong international rugby player Ricky Cheuk, HK Rugby Hall of Fame' };
+  const ted: EntityRow = { title: 'TEDxYouth Ricky Cheuk', url: 'https://tedx.example/ricky', snippet: 'Ricky Cheuk, TEDxYouth@HongKong 2013 speaker' };
+  const directory: EntityRow = { title: 'LinkedIn professionals named Ricky Cheuk', url: 'https://www.linkedin.com/pub/dir/Ricky/Cheuk', snippet: 'LinkedIn professionals named Ricky Cheuk' };
+  const engineer: EntityRow = { title: 'Ricky Cheuk | LinkedIn', url: 'https://www.linkedin.com/in/rickycheuk', snippet: 'Ricky Cheuk. Software Engineer at Blueflame AI. New York.' };
+  const q = 'Ricky Cheuk Bleuflame AI';
+  assert.equal(personSubject(q), 'Ricky Cheuk');
+  assert.deepEqual(distinguishingTerms(q), ['bleuflame']);
+  assert.equal(personSourceOk(q, engineer), true);
+  assert.equal(personSourceOk(q, rugby), false);
+  assert.equal(personSourceOk(q, { title: 'Ricky Cheuk', url: 'https://x.example/a', snippet: 'Ricky Cheuk works at Blue Flame AI in New York' }), true);
+  const d = resolveEntity(q, [rugby, ted, directory, engineer]);
+  assert.equal(d.kind, 'single');
+  if (d.kind !== 'single') return;
+  assert.deepEqual(d.kept, [3]);
+});
+
+test('"None of these" keeps the company they typed, including Capital One', () => {
+  assert.equal(commaDetailQuery('Ricky Cheuk, Capital one'), 'Ricky Cheuk Capital One');
+  assert.equal(commaDetailQuery('Ricky Cheuk, bleuflame ai'), 'Ricky Cheuk Bleuflame AI');
+  assert.equal(commaDetailQuery('Ricky Cheuk, one'), '');
+  assert.deepEqual(distinguishingTerms('Ricky Cheuk, Capital one'), ['capital', 'one']);
+  const bank: EntityRow = { title: 'Ricky Cheuk - Capital One', url: 'https://www.linkedin.com/in/rc', snippet: 'Ricky Cheuk, software engineer at Capital One' };
+  const rugby: EntityRow = { title: 'Ricky Cheuk rugby', url: 'https://hkrugby.example/r', snippet: 'Ricky Cheuk is one of the Hong Kong rugby players' };
+  assert.equal(personSourceOk('Ricky Cheuk, Capital one', bank), true);
+  assert.equal(personSourceOk('Ricky Cheuk, Capital one', rugby), false);
 });

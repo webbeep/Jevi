@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { clearDeadEngines, newLedger, queriesForAsk } from '../server/budget.ts';
 import { cascadeWeb } from '../server/cascade.ts';
-import { askTopic, askedQuestions, formalNameQueries, hasFullPersonName, isPersonAsk, nameIsTopic, personSubject, pickTopic, pickTopicQuery, resolveEntity } from '../server/entity.ts';
+import { askTopic, askedQuestions, commaDetailQuery, formalNameQueries, hasFullPersonName, isPersonAsk, nameIsTopic, personSubject, pickTopic, pickTopicQuery, resolveEntity } from '../server/entity.ts';
 import { readPeople } from '../server/peopleSplit.ts';
 import { coverage } from '../server/search.ts';
 import { cashtags, expandCashtags, relaxQuery, tickerQueries } from '../server/queryClean.ts';
@@ -79,6 +79,11 @@ test('the model split of a shared name becomes choices only when it is usable', 
   assert.deepEqual(choices.map((c) => c.seeds), [[0, 1, 9], [2, 8], [5]]);
   assert.equal(readPeople({ people: [raw.people[0]!] }, 'Ed Chu', 10), undefined);
   assert.equal(readPeople(undefined, 'Ed Chu', 10), undefined);
+  const directory = readPeople({ people: [
+    { who: 'LinkedIn professionals named Ricky Cheuk', rows: [1], query: 'Ricky Cheuk linkedin' },
+    { who: 'Software engineer at Blueflame AI', rows: [2], query: 'Ricky Cheuk Blueflame AI' },
+  ] }, 'Ricky Cheuk', 2);
+  assert.equal(directory, undefined);
 });
 
 test('a company, product or funding ask is not a person ask', () => {
@@ -106,6 +111,11 @@ test('a Which-one? pick keeps the topic of the ask that offered it', () => {
   assert.equal(pickTopic('Ray Lee BlueFlame AI', ['ray lee blueflame ai']), '');
   assert.equal(askTopic('Ray Lee BlueFlame AI', 'Ray Lee'), '');
   assert.equal(askTopic('Jaylen Brown injuries', 'Jaylen Brown'), 'injuries');
+  // "None of these, Capital one" does not inherit the company the list failed to match, and "one" is not a topic.
+  assert.equal(commaDetailQuery('Ricky Cheuk, Capital one'), 'Ricky Cheuk Capital One');
+  assert.equal(pickTopic('Ricky Cheuk, Capital one', ['Ricky Cheuk Bleuflame AI']), '');
+  assert.equal(pickTopicQuery('Jaylen Brown Boston Celtics', 'one injuries'), 'Jaylen Brown boston celtics injuries');
+  assert.equal(askTopic('the celtics one', 'Jaylen Brown'), 'celtics');
 });
 
 const DEBUT_ROWS = [

@@ -317,6 +317,48 @@ export function hasFullPersonName(name: string, row: EntityRow): boolean {
   return true;
 }
 
+/** One insertion, deletion, substitution, or adjacent transposition. Both sides are already long enough. */
+function withinOneEdit(a: string, b: string): boolean {
+  if (a === b) return false;
+  const la = a.length;
+  const lb = b.length;
+  if (Math.abs(la - lb) > 1) return false;
+  if (la === lb) {
+    const diff: number[] = [];
+    for (let i = 0; i < la; i++) if (a[i] !== b[i]) diff.push(i);
+    if (diff.length === 1) return true;
+    const i0 = diff[0]!;
+    return diff.length === 2 && diff[1] === i0 + 1 && a[i0] === b[i0 + 1] && a[i0 + 1] === b[i0];
+  }
+  const [shorter, longer] = la < lb ? [a, b] : [b, a];
+  let i = 0;
+  let j = 0;
+  let skipped = 0;
+  while (i < shorter.length && j < longer.length) {
+    if (shorter[i] === longer[j]) {
+      i++;
+      j++;
+    } else {
+      skipped++;
+      j++;
+      if (skipped > 1) return false;
+    }
+  }
+  return skipped + (longer.length - j) <= 1;
+}
+
+/** "Bleuflame" is "Blueflame", including when the page writes it as two words. */
+function mentionsOrg(term: string, seq: readonly string[]): boolean {
+  if (term.length < 6) return false;
+  for (let i = 0; i < seq.length; i++) {
+    const w = seq[i]!;
+    if (withinOneEdit(term, w)) return true;
+    const nxt = seq[i + 1];
+    if (nxt && w.length >= 3 && nxt.length >= 3 && withinOneEdit(term, w + nxt)) return true;
+  }
+  return false;
+}
+
 /** Source is about this person ask: full name + (>=1 context token when the query gives one). */
 export function personSourceOk(query: string, row: EntityRow, name = personSubject(query)): boolean {
   if (!name || !hasFullPersonName(name, row)) return false;
@@ -326,12 +368,22 @@ export function personSourceOk(query: string, row: EntityRow, name = personSubje
   const need = distinguishingTerms(query, name);
   if (!need.length) return true;
   const raw = `${row.title ?? ''} ${row.snippet ?? ''}`;
-  const body = new Set(tokens(`${raw} ${row.url ?? ''}`));
+  const seq = tokens(`${raw} ${row.url ?? ''}`);
+  const body = new Set(seq);
   // A short detail's other words must sit right after the match ("bf ai" -> "Blueflame AI"), so an
   // author list's "Bernd Fischer" never reads as "bf".
   const tails = new Set(ctx.filter((t) => !need.includes(t)));
   const short = need.some((t) => t.length <= 4) ? initialisms(raw, tails) : new Set<string>();
-  return need.some((t) => body.has(t) || (t.length >= 5 && [...body].some((w) => w.includes(t))) || (t.length <= 4 && short.has(t)));
+  const hit = (t: string) => body.has(t)
+    || (t.length >= 5 && seq.some((w) => w.includes(t)))
+    || (t.length <= 4 && short.has(t))
+    || mentionsOrg(t, seq);
+  // "one" is a pointer. It only counts inside the company it belongs to ("Capital One").
+  const cores = need.filter((t) => !FILLER_TERM.has(t));
+  const particles = need.filter((t) => FILLER_TERM.has(t));
+  if (!cores.some(hit)) return false;
+  if (!particles.length) return true;
+  return particles.some((p) => cores.some((c) => new RegExp(`\\b${c}\\s+${p}\\b|\\b${p}\\s+${c}\\b`, 'i').test(raw)));
 }
 
 /**
@@ -421,21 +473,59 @@ function canonRole(matched: string): { display: string; core: string } {
 /** Generic org words that name no specific organisation ("C2 Education Centers" → "C2"). */
 const GENERIC_ORG = /^(education|centers?|centre|group|global|international|services|solutions|company|holdings|partners|capital|media|studios?|foundation|institute|university|college|school|academy|club|team|labs?|technologies|technology|systems)$/i;
 
+/** Pointer words ("the celtics one", "which one"). They never identify a person on their own. */
+const FILLER_TERM = new Set(['one', 'two', 'guy', 'person', 'someone', 'somebody', 'here', 'there', 'just', 'only', 'same']);
+
 const isRoleWord = (t: string) => ROLE1.has(t) || ROLE2.some((r) => r.split(' ').includes(t));
+
+/**
+ * "Capital One": a generic org word the asker put next to a name-particle is the company.
+ * "C2 Education Centers" has a real core, so this pair is never reached.
+ */
+function brandPair(ctx: string[]): string[] {
+  for (let i = 0; i < ctx.length - 1; i++) {
+    const a = ctx[i]!;
+    const b = ctx[i + 1]!;
+    if ((GENERIC_ORG.test(a) && FILLER_TERM.has(b)) || (FILLER_TERM.has(a) && GENERIC_ORG.test(b))) return [a, b];
+  }
+  return [];
+}
 
 /**
  * Context words that actually tell one person from the next: role words, org tails
  * and generic org words drop out ("C2 Education Centers Founder" → ["c2"]), and a
  * role-only ask keeps its role ("David Kim Violinist" → ["violinist"]).
+ * A lone "one" is a pointer, never the thing that picks the person.
  */
 export function distinguishingTerms(query: string, name = personSubject(query)): string[] {
   const ctx = contextTerms(query, name);
   if (!ctx.length) return [];
-  const specific = ctx.filter((t) => !isRoleWord(t) && !ORG_TAIL.test(t) && !GENERIC_ORG.test(t));
+  const specific = ctx.filter((t) => !isRoleWord(t) && !ORG_TAIL.test(t) && !GENERIC_ORG.test(t) && !FILLER_TERM.has(t));
   if (specific.length) return specific;
-  const noTails = ctx.filter((t) => !isRoleWord(t) && !ORG_TAIL.test(t));
+  const paired = brandPair(ctx);
+  if (paired.length) return paired;
+  const noTails = ctx.filter((t) => !isRoleWord(t) && !ORG_TAIL.test(t) && !FILLER_TERM.has(t));
   if (noTails.length) return noTails;
   return ctx.filter(isRoleWord);
+}
+
+/**
+ * "Ricky Cheuk, Capital one" — the detail after the comma is who they meant.
+ * Title-cased, with short org tails kept as initials ("ai" → "AI"). '' when there is no detail.
+ */
+export function commaDetailQuery(query: string): string {
+  const name = personSubject(query);
+  if (!name) return '';
+  const raw = query.trim().replace(/\?+\s*$/, '');
+  if (!raw.toLowerCase().startsWith(`${name.toLowerCase()},`)) return '';
+  const detail = raw.slice(name.length).replace(/^[\s,]+/, '').replace(/[?.!\s]+$/, '').trim();
+  if (!detail || FILLER_TERM.has(detail.toLowerCase())) return '';
+  const words = detail.split(/\s+/).filter(Boolean).map((w) => {
+    if (ORG_TAIL.test(w) && w.length <= 3) return w.toUpperCase();
+    if (/^[a-z]/.test(w) && w.length > 1) return w[0]!.toUpperCase() + w.slice(1);
+    return w;
+  });
+  return `${name} ${words.join(' ')}`.slice(0, 160);
 }
 
 const title = (s: string) => s.trim().replace(/\s+/g, ' ').replace(/[.,;:!?]+$/, '');
@@ -1303,10 +1393,10 @@ export function resolveEntity(
           };
         })
         // A choice with no descriptor says nothing about the person — never offer it.
-        .filter((c) => c.descriptor !== '')
+        .filter(offerChoice)
         .slice(0, 3);
       // Prefer real clusters when they already give ≥2 choices.
-      const clustered = strong.filter((c) => c.length >= 1).map((c) => toChoice(name, c, rows)).filter((c) => c.descriptor !== '').slice(0, 3);
+      const clustered = strong.filter((c) => c.length >= 1).map((c) => toChoice(name, c, rows)).filter(offerChoice).slice(0, 3);
       const merged = clustered.length >= 2 ? clustered : choices;
       if (merged.length >= 2) return { kind: 'choices', choices: merged };
     }
@@ -1335,14 +1425,14 @@ export function resolveEntity(
           .filter((r) => r.score >= 0.5 * top)
           .slice(0, 3)
           .map((r) => toChoice(name, r.cluster, rows))
-          .filter((c) => c.descriptor !== '');
+          .filter(offerChoice);
         if (choices.length >= 2) return { kind: 'choices', choices };
       }
     } else {
       // Asks with context terms keep the size rule.
       const [first, second] = [strong[0]!, strong[1]!];
       if (first.length >= 2 && second.length >= 2 && second.length >= 0.4 * first.length) {
-        const choices = strong.filter((c) => c.length >= 2).map((c) => toChoice(name, c, rows)).filter((c) => c.descriptor !== '').slice(0, 3);
+        const choices = strong.filter((c) => c.length >= 2).map((c) => toChoice(name, c, rows)).filter(offerChoice).slice(0, 3);
         if (choices.length >= 2) return { kind: 'choices', choices };
       }
     }
@@ -1422,7 +1512,7 @@ export function askTopic(query: string, name: string, caps = false): string {
     const t = w.toLowerCase().replace(/[’']s$/, '');
     if (nameSet.has(t) || COMMON.has(t) || PROFILE_WORDS.has(t) || /^(how|what|when|where|why|which)$/.test(t)) continue;
     if (!caps && /^[A-Z0-9]/.test(w)) continue;
-    if (ROLE1.has(t) || DESCRIPTOR_WORDS.has(t) || ROLE_TAIL.has(t) || ORG_TAIL.test(t) || GENERIC_ORG.test(t) || SPORTS_LEAGUE.test(t)) continue;
+    if (FILLER_TERM.has(t) || ROLE1.has(t) || DESCRIPTOR_WORDS.has(t) || ROLE_TAIL.has(t) || ORG_TAIL.test(t) || GENERIC_ORG.test(t) || SPORTS_LEAGUE.test(t)) continue;
     if (!out.includes(t)) out.push(t);
   }
   return out.join(' ');
@@ -1444,14 +1534,15 @@ export function askedQuestions(context?: string): string[] {
  */
 export function pickTopic(pick: string, asks: string[]): string {
   const name = personSubject(pick);
-  if (!name) return '';
+  // "Name, Capital One" already says who they meant. The earlier company's words stay behind.
+  if (!name || commaDetailQuery(pick)) return '';
   const nameToks = tokens(name);
   const have = new Set(tokens(pick));
   for (const ask of asks) {
     if (!ask || normText(ask) === normText(pick)) continue;
     const toks = new Set(tokens(ask));
     if (!nameToks.every((t) => toks.has(t))) continue;
-    return askTopic(ask, name, true).split(' ').filter((w) => w && !have.has(w)).join(' ');
+    return askTopic(ask, name, true).split(' ').filter((w) => w && !have.has(w) && !FILLER_TERM.has(w)).join(' ');
   }
   return '';
 }
@@ -1462,7 +1553,16 @@ export function pickTopic(pick: string, asks: string[]): string {
  */
 export function pickTopicQuery(pick: string, topic: string): string {
   const name = personSubject(pick);
-  return [name, ...distinguishingTerms(pick, name), topic].filter(Boolean).join(' ').slice(0, 160);
+  const detail = distinguishingTerms(pick, name);
+  const extra = topic.split(' ').filter((w) => w && !FILLER_TERM.has(w) && !detail.includes(w));
+  return [name, ...detail, ...extra].filter(Boolean).join(' ').slice(0, 160);
+}
+
+/** A people-search page ("LinkedIn professionals named Ricky Cheuk") is not a person to pick. */
+const PEOPLE_DIRECTORY = /\b(professionals|people|profiles|users|persons|accounts|members)\s+named\b|\bpeople search\b/i;
+
+function offerChoice(c: EntityChoice): boolean {
+  return c.descriptor !== '' && !PEOPLE_DIRECTORY.test(`${c.descriptor} ${c.query}`);
 }
 
 /** True when this result is about the chosen entity (name + a matching signal, or name only). */
