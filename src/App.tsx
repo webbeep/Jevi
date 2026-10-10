@@ -11,7 +11,7 @@ import { UsageLine } from './auth/UsageLine';
 import { bootAuthOnce, claimBoot } from './auth/resume';
 import { flushPendingSave } from './auth/saves';
 import { clearSyncedHistory, noteDeviceAsk } from './auth/sync';
-import { ArrowUp, CornerDownRight, CornerLeftUp, History, Moon, Pencil, Plus, RotateCw, Search, Shuffle, SlidersHorizontal, Sun, WifiOff, X } from 'lucide-react';
+import { ArrowUp, ChevronDown, CornerDownRight, CornerLeftUp, History, Moon, Pencil, Plus, RotateCw, Search, Shuffle, SlidersHorizontal, Sun, WifiOff, X } from 'lucide-react';
 import type { AnswerCard, CardNode } from '../shared/card';
 import { packHistorySources, type HistorySource } from '../shared/historyCard';
 import { entityOf, type AskRef } from '../shared/askAbout';
@@ -42,6 +42,16 @@ import { Input } from '@/components/ui/input';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 
 const LOADING: CardNode[] = [{ type: 'slot', hint: 'answer', shape: 'hero' }, { type: 'slot', hint: 'details', shape: 'block' }];
+/** Open history stays at three rows. The choice is remembered on this device. */
+const HISTORY_OPEN_KEY = 'zo:history-open';
+
+function readHistoryOpen(): boolean {
+  try {
+    return localStorage.getItem(HISTORY_OPEN_KEY) !== '0';
+  } catch {
+    return true;
+  }
+}
 
 /** What to do with highlighted text. */
 const QUOTE_MODES = [
@@ -152,6 +162,7 @@ export default function App() {
   const [queued, setQueued] = useState<{ q: string; ref?: AskRef; from: number; item?: string } | null>(null);
   const { items: suggestions, shuffle, shuffleEnabled, refresh } = useSuggestions();
   const [histRev, setHistRev] = useState(0);
+  const [historyOpen, setHistoryOpen] = useState(() => (typeof window !== 'undefined' ? readHistoryOpen() : true));
   const inputRef = useRef<HTMLInputElement>(null);
   const [phExamples] = useState(() => placeholderExamples());
   const [phIndex, setPhIndex] = useState(0);
@@ -537,10 +548,30 @@ export default function App() {
               </div>
               {historyItems.length > 0 && (
                 <div className="mt-5 sm:mt-6">
-                  <div className="mb-1.5 px-1">
-                    <h2 className="zo-label">History</h2>
+                  <div className="flex items-center justify-between gap-2 px-1">
+                    <h2 className="zo-label" id="home-history-label">History</h2>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setHistoryOpen((open) => {
+                          const next = !open;
+                          try {
+                            localStorage.setItem(HISTORY_OPEN_KEY, next ? '1' : '0');
+                          } catch {
+                            /* private mode */
+                          }
+                          return next;
+                        });
+                      }}
+                      aria-expanded={historyOpen}
+                      aria-controls="home-history"
+                      aria-label={historyOpen ? 'Collapse history' : 'Show history'}
+                      className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-foreground/[0.04] hover:text-foreground"
+                    >
+                      <ChevronDown className={cn('size-4 transition-transform duration-200', !historyOpen && '-rotate-90')} />
+                    </button>
                   </div>
-                  <ul className="flex max-h-[40dvh] flex-col gap-1 overflow-y-auto" data-testid="home-history">
+                  <ul id="home-history" aria-labelledby="home-history-label" hidden={!historyOpen} className={cn('max-h-36 flex-col gap-1 overflow-y-auto', historyOpen ? 'flex' : 'hidden')} data-testid="home-history">
                     {historyItems.map((item) => (
                       <li key={item.q}>
                         <button
