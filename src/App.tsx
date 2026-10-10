@@ -14,7 +14,7 @@ import { clearSyncedHistory, noteDeviceAsk } from './auth/sync';
 import { ArrowUp, ChevronDown, CornerDownRight, CornerLeftUp, History, Moon, Pencil, Plus, RotateCw, Search, Shuffle, SlidersHorizontal, Sun, WifiOff, X } from 'lucide-react';
 import type { AnswerCard, CardNode } from '../shared/card';
 import { packHistorySources, type HistorySource } from '../shared/historyCard';
-import { topicOf, type AskRef } from '../shared/askAbout';
+import { topicOf, usefulFollowups, type AskRef } from '../shared/askAbout';
 import type { SearchResponse } from '../shared/types';
 import { api } from './api';
 import { AnswerCardView } from './card/AnswerCardView';
@@ -214,6 +214,7 @@ export default function App() {
   };
   const root = turns[0];
   const last = [...turns].reverse().find((t) => t.result);
+  const related = last?.result ? usefulFollowups(last.result.followups, last.result.card.title, last.question) : [];
   const busy = turns.some((t) => t.filling);
   const title = root?.result?.card.title ?? root?.question ?? '';
   const library = useMemo(() => buildLibrary(turns), [turns]);
@@ -661,13 +662,13 @@ export default function App() {
               <main ref={mainRef} className="min-w-0 space-y-8 sm:space-y-10">
                 {turns.map((t, i) => <TurnView key={t.id} turn={t} first={i === 0} search={session.searchOf(t)?.search} actions={session} onSources={openSources} threadBusy={threadBusy} pendingItem={queued?.item} onQueue={setQueued} />)}
 
-                {last?.result && last.result.followups.length > 0 && !busy && (
+                {related.length > 0 && !busy && (
                   <section className="-mt-2 px-4 animate-in fade-in sm:-mt-4 sm:px-6">
                     <h3 className="zo-label mb-0.5">Related</h3>
                     <ul className="divide-y">
-                      {last.result.followups.map((f) => (
+                      {related.map((f) => (
                         <li key={f}>
-                          <button onClick={() => session.followup(f, last.id, 'ask')} className="group flex w-full items-center gap-3 py-3 text-left text-[14px] leading-snug text-foreground/80 transition-colors hover:text-foreground">
+                          <button onClick={() => last && session.followup(f, last.id, 'ask')} className="group flex w-full items-center gap-3 py-3 text-left text-[14px] leading-snug text-foreground/80 transition-colors hover:text-foreground">
                             <CornerDownRight className="size-4 shrink-0 text-muted-foreground" />
                             <span className="flex-1">{f}</span>
                             <Plus className="size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />

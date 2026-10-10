@@ -315,7 +315,10 @@ const normFollow = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').re
 export function usefulFollowups(items: string[], title?: string, query?: string): string[] {
   const titleN = normFollow(title ?? '');
   const queryN = normFollow(query ?? '').replace(/\?$/, '').trim();
-  const lead = normFollow(topicOf(title) ?? topicOf(query) ?? '').split(' ')[0]?.replace(/s$/, '');
+  const rawLead = (topicOf(title) ?? topicOf(query) ?? '').split(' ')[0] ?? '';
+  const lead = normFollow(rawLead).replace(/s$/, '');
+  // NBA, Warriors, Apple: a follow-up that never says it will search the wrong thing. A leftover like "Plays" is not.
+  const distinctive = /^[A-Z0-9]{2,5}$/.test(rawLead) || /^[A-Z][a-z]{3,}/.test(rawLead);
   const seen = new Set<string>();
   const kept: string[] = [];
   for (const item of items) {
@@ -328,6 +331,6 @@ export function usefulFollowups(items: string[], title?: string, query?: string)
     seen.add(n);
     kept.push(text);
   }
-  const named = lead && lead.length >= 3 ? kept.filter((f) => normFollow(f).includes(lead)) : kept;
-  return (named.length ? named : kept).slice(0, 4);
+  const named = lead.length >= 3 ? kept.filter((f) => normFollow(f).includes(lead)) : kept;
+  return (distinctive ? named : named.length ? named : kept).slice(0, 4);
 }

@@ -164,7 +164,7 @@ test('usefulFollowups drops a question that only repeats the card', () => {
     'NBA?',
     'What happened in Oct 7, 2026: Top 10 plays?',
   ];
-  assert.deepEqual(usefulFollowups(items, 'Oct 7, 2026: Top 10 Plays', 'NBA scores'), ['Who led the NBA in scoring on Oct 7?']);
+  assert.deepEqual(usefulFollowups(items, 'NBA Scores Tonight', 'NBA scores tonight'), ['Who led the NBA in scoring on Oct 7?']);
   assert.deepEqual(
     usefulFollowups(['How long does apple pie keep?', 'What is Apple Pie Recipe?'], 'Apple Pie Recipe'),
     ['How long does apple pie keep?'],
