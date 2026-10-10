@@ -14,6 +14,7 @@ import { cacheDb, packSearch, readSearchCache, searchCacheKey, writeSearchCache 
 import { type WebHit, cascadeWeb } from './cascade';
 import { searchDegraded } from './degraded';
 import { diversify } from './diversify';
+import { withinOneEdit } from './entity';
 import { gateResults } from './relevanceGate';
 import { commons, openverse, permitted } from './images';
 import { maybeBluesky, socialSources } from './social';
@@ -97,11 +98,13 @@ const stem = (w: string) => {
  * long, chatty ask ("lebron preseason debut what to expect and how to watch") is rarely repeated whole.
  * Planner rewrites are already precise and keep the plain share.
  */
-export function coverage(query: string, hit: Pick<Hit, 'title' | 'snippet' | 'url'>, typed = false): number {
+export function coverage(query: string, hit: Pick<Hit, 'title' | 'snippet' | 'url'> & { content?: string }, typed = false): number {
   const words = [...new Set(query.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 1 && !QUERY_STOP.has(w)).map(stem))];
   if (!words.length) return 1;
-  const text = `${hit.title} ${hit.snippet} ${hit.url}`.toLowerCase();
-  const found = words.filter((w) => text.includes(w)).length;
+  const text = `${hit.title} ${hit.snippet} ${hit.url} ${(hit.content ?? '').slice(0, 800)}`.toLowerCase();
+  const long = text.split(/[^a-z0-9]+/).filter((w) => w.length >= 6);
+  // "bleuflame" covers a page that says "blueflame".
+  const found = words.filter((w) => text.includes(w) || (w.length >= 6 && long.some((t) => withinOneEdit(w, t)))).length;
   const share = found / words.length;
   return typed && found >= Math.max(2, Math.ceil(words.length / 3)) ? Math.max(0.5, share) : share;
 }

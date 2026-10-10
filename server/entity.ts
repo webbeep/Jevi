@@ -44,6 +44,8 @@ export interface EntityRow {
   title: string;
   url: string;
   snippet?: string;
+  /** Opening of the fetched page. Snippets often omit the company the page itself names. */
+  content?: string;
 }
 
 /** Choices ride on the `done` event: the FE reads {name, descriptor, query, id} (shared/choices.ts). */
@@ -318,7 +320,7 @@ export function hasFullPersonName(name: string, row: EntityRow): boolean {
 }
 
 /** One insertion, deletion, substitution, or adjacent transposition. Both sides are already long enough. */
-function withinOneEdit(a: string, b: string): boolean {
+export function withinOneEdit(a: string, b: string): boolean {
   if (a === b) return false;
   const la = a.length;
   const lb = b.length;
@@ -415,6 +417,11 @@ function mentionsOrg(term: string, seq: readonly string[]): boolean {
   return false;
 }
 
+/** Opening of the fetched page. Enough for "Software Engineer at Blueflame AI", not the whole document. */
+function pageOpening(row: EntityRow): string {
+  return (row.content ?? '').slice(0, 800);
+}
+
 /**
  * LinkedIn often prints "Ricky C." and puts the surname only in the profile URL
  * (`/in/rickycheuk`). With a company on the page, that is still this person.
@@ -424,7 +431,7 @@ function truncatedName(name: string, row: EntityRow): boolean {
   if (parts.length < 2) return false;
   const first = parts[0]!;
   const last = parts[parts.length - 1]!;
-  const text = `${row.title ?? ''} ${row.snippet ?? ''}`;
+  const text = `${row.title ?? ''} ${row.snippet ?? ''} ${pageOpening(row)}`;
   const initial = new RegExp(`\\b${first.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+${last[0]}\\b`, 'i');
   if (initial.test(text)) return true;
   const slug = parts.join('').toLowerCase();
@@ -433,13 +440,17 @@ function truncatedName(name: string, row: EntityRow): boolean {
 
 /** Source is about this person ask: full name + (>=1 context token when the query gives one). */
 export function personSourceOk(query: string, row: EntityRow, name = personSubject(query)): boolean {
-  if (!name || (!hasFullPersonName(name, row) && !truncatedName(name, row))) return false;
+  const opening = pageOpening(row);
+  // The full name is often only in the page text ("Ricky C." in the title, "Ricky Cheuk" in the body).
+  const named = !!name && (hasFullPersonName(name, row) || truncatedName(name, row)
+    || (!!opening && hasFullPersonName(name, { title: opening, url: row.url, snippet: '' })));
+  if (!named) return false;
   const ctx = contextTerms(query, name);
   if (!ctx.length) return true;
   // Only a distinguishing term counts: a picked "Ray Lee Raycon Founder" must name Raycon, not the role.
   const need = distinguishingTerms(query, name);
   if (!need.length) return true;
-  const raw = `${row.title ?? ''} ${row.snippet ?? ''}`;
+  const raw = `${row.title ?? ''} ${row.snippet ?? ''} ${opening}`;
   const seq = tokens(`${raw} ${row.url ?? ''}`);
   const body = new Set(seq);
   // A short detail's other words must sit right after the match ("bf ai" -> "Blueflame AI"), so an

@@ -145,6 +145,12 @@ test('a long chatty ask keeps titles that carry a third of its words', () => {
   assert.ok(coverage(q, debut) < 0.5, 'planner rewrites keep the plain share');
   assert.ok(coverage(q, { title: 'Apple Store hours', snippet: 'Find a store', url: 'https://apple.com' }, true) < 0.5);
   assert.ok(coverage('why rdw dropping', { title: 'Redwire (RDW) stock drops 12%', snippet: '', url: 'https://y.com' }, true) >= 0.5);
+  assert.ok(coverage('Ricky Cheuk Bleuflame AI', {
+    title: 'Ricky C.',
+    snippet: 'View profile',
+    url: 'https://www.linkedin.com/in/rickycheuk',
+    content: 'Software Engineer at Blueflame AI in New York.',
+  }, true) >= 0.5);
 });
 
 test('askedQuestions reads the conversation digest newest first', () => {

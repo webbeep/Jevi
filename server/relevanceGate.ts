@@ -43,6 +43,7 @@ export interface GateHit {
   title: string;
   url: string;
   snippet?: string;
+  content?: string;
 }
 
 interface Profile {
@@ -201,6 +202,11 @@ export function gateResults<T extends GateHit>(query: string, rows: readonly T[]
         // No name-only fallback — an empty pool hands the ask to stream.ts.
         ok = clean.filter((row) => personSourceOk(query, row, name));
         if (!ok.length) return { kept: [], dropped: rows.length };
+        // The page already names this person and that org. The term score cannot see a
+        // one-letter company misspelling, or a name that is only in the page text.
+        const profile = termsOf(query);
+        const kept = ok.filter((row) => !judge(profile, row).hard);
+        return { kept, dropped: rows.length - kept.length };
       } else {
         const ctx = contextTerms(query, name);
         const withCtx = clean.filter((row) => hasFullPersonName(name, row) && (

@@ -51,6 +51,19 @@ test('a coffee and heart ask keeps the heart page and the caffeine page', () => 
   assert.equal(gated.dropped, 0);
 });
 
+test('a misspelled company keeps the page whose text, not its snippet, names the company', () => {
+  const q = 'Ricky Cheuk Bleuflame AI';
+  const linkedin = hit(
+    'Ricky C.',
+    'View Ricky’s profile on LinkedIn.',
+    'https://www.linkedin.com/in/rickycheuk',
+  );
+  (linkedin as { content?: string }).content = 'Software Engineer at Blueflame AI. New York. Building AI stuff.';
+  const rugby = hit('Ricky Cheuk - Hong Kong rugby', 'Former Hong Kong international rugby player.', 'https://hkrugby.example/ricky');
+  const gated = gateResults(q, [rugby, linkedin]);
+  assert.deepEqual(gated.kept.map((r) => r.url), [linkedin.url]);
+});
+
 test('a misspelled company keeps the LinkedIn page that prints only a last initial', () => {
   const q = 'Ricky Cheuk Bleuflame AI';
   const linkedin = hit('Ricky C.', 'Software Engineer at Blueflame AI. New York.', 'https://www.linkedin.com/in/rickycheuk');
