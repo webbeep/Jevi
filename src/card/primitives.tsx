@@ -449,8 +449,8 @@ export function KeyValue({ node }: { node: Of<'keyvalue'> }) {
       {node.items.map((i) => (
         // Side by side when there is room; label above value in narrow spots so neither gets squeezed.
         <div key={i.label} className="flex flex-col gap-0.5 px-3 py-2 text-sm @xs:flex-row @xs:items-center @xs:justify-between @xs:gap-3 sm:px-4 sm:py-2.5">
-          <dt className="flex shrink-0 items-center gap-2 text-muted-foreground @xs:max-w-[45%]"><Icon name={i.icon} className="size-3.5 shrink-0" />{i.label}</dt>
-          <dd className="min-w-0 font-medium @xs:text-right"><RichText text={i.value} inline /></dd>
+          <dt className="flex min-w-0 items-center gap-2 text-muted-foreground @xs:flex-1"><Icon name={i.icon} className="size-3.5 shrink-0" />{i.label}</dt>
+          <dd className="min-w-0 font-medium @xs:max-w-[60%] @xs:shrink-0 @xs:text-right"><RichText text={i.value} inline /></dd>
         </div>
       ))}
     </dl>
