@@ -8,8 +8,8 @@ const shortDomain = (d: string) => d.replace(/^(www|en|m)\./, '');
 const MAX_ROWS = 8;
 
 /**
- * The wait before a layout exists, inside the card: first the searches themselves ("Searching for"
- * the question and its expanded queries), then the sources, each new one animating onto the list.
+ * The wait before a layout exists, inside the card: the searches themselves, then the sources,
+ * each one settling into place. The label never changes, so the list can arrive under it.
  */
 export function ResearchTrail({ question, intent, peek, search }: {
   question: string;
@@ -29,17 +29,14 @@ export function ResearchTrail({ question, intent, peek, search }: {
     rows.push(row);
     if (rows.length === MAX_ROWS) break;
   }
-  const searching = rows.length === 0;
 
   return (
-    <div data-testid="research-trail" aria-live="polite" className="space-y-3">
+    <div data-testid="research-trail" aria-live="polite" className="space-y-3.5">
       <div>
-        <p className={searching ? 'zo-shimmer-text text-[13px] font-medium' : 'text-[12.5px] font-medium text-muted-foreground'}>
-          {searching ? 'Searching for' : 'Searched'}
-        </p>
-        <ul className="mt-1.5 space-y-1">
+        <p className="zo-shimmer-text text-[13px] font-medium">Searching for</p>
+        <ul className="mt-2 space-y-1">
           {queries.map((q, i) => (
-            <li key={q} style={{ animationDelay: `${i * 80}ms` }} className="flex min-w-0 items-center gap-2 text-[13.5px] leading-snug animate-in fade-in slide-in-from-bottom-1 fill-mode-both duration-300">
+            <li key={q} style={{ animationDelay: `${i * 70}ms` }} className="zo-rise flex min-w-0 items-center gap-2 text-[13.5px] leading-snug text-foreground/85">
               <Search className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
               <span className="truncate">{q}</span>
             </li>
@@ -47,10 +44,10 @@ export function ResearchTrail({ question, intent, peek, search }: {
         </ul>
       </div>
       {rows.length > 0 && (
-        <ul className="divide-y overflow-hidden rounded-xl border">
+        <ul className="space-y-0.5">
           {rows.map((r, i) => (
-            <li key={r.url} style={{ animationDelay: `${Math.min(i, 6) * 50}ms` }} className="flex min-w-0 items-center gap-2.5 px-3 py-2 animate-in fade-in slide-in-from-bottom-2 fill-mode-both duration-300">
-              <img src={favicon(r.domain)} alt="" loading="lazy" className="size-4 shrink-0 rounded-[3px]" />
+            <li key={r.url} style={{ animationDelay: `${Math.min(i, 5) * 55}ms` }} className="zo-rise flex min-w-0 items-center gap-2.5 rounded-lg px-1.5 py-1.5">
+              <img src={favicon(r.domain)} alt="" loading="lazy" className="size-4 shrink-0 rounded-[4px]" />
               <span className="min-w-0 flex-1 truncate text-[13.5px]">{r.title}</span>
               <span className="zo-meta shrink-0">{shortDomain(r.domain)}</span>
             </li>

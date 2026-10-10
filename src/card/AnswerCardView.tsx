@@ -135,9 +135,20 @@ export function AnswerCardView({ card, version, filling, streaming, status, patt
         </div>
       )}
 
-      <div className={cn('px-4 pb-5 pt-3.5 transition-[opacity,filter] duration-300 sm:px-6 sm:pb-6 sm:pt-4', status && !streaming && 'pointer-events-none opacity-50 blur-[1px]', cited.length && 'pb-4 sm:pb-5')}>
+      <div className={cn('px-4 pb-5 pt-3.5 transition-[opacity,filter] duration-500 sm:px-6 sm:pb-6 sm:pt-4', status && !streaming && 'pointer-events-none opacity-50 blur-[1px]', cited.length && 'pb-4 sm:pb-5')}>
         <CardTitle.Provider value={card.title}>
-          {trail ?? <Nodes key={version} nodes={body} className="gap-5" stagger={revealLayout || !streaming} />}
+          <div className="relative">
+            {(!trail || revealLayout) && (
+              <div className={cn(revealLayout && 'zo-layout')}>
+                <Nodes key={version} nodes={body} className="gap-5" stagger={revealLayout || !streaming} />
+              </div>
+            )}
+            {trail && (
+              <div aria-hidden={revealLayout || undefined} className={cn('transition-opacity duration-500 ease-out', revealLayout ? 'pointer-events-none absolute inset-x-0 top-0 opacity-0' : 'opacity-100')}>
+                {trail}
+              </div>
+            )}
+          </div>
         </CardTitle.Provider>
       </div>
 

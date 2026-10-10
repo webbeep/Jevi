@@ -909,7 +909,7 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
   // Until the layout is chosen, a search shows its queries and then the sources as they arrive.
   // Once the layout exists and the answer is still being written, the card shows that layout instead.
   const searching = turn.kind === 'search' || !!turn.peek?.length || !!turn.search || !!turn.intent?.queries?.length;
-  const waiting = turn.filling && !turn.result && !turn.offline && !turn.error && !answerStarted && !turn.live?.regions.length;
+  const waiting = turn.filling && !turn.result && !turn.offline && !turn.error && !answerStarted;
   const trail = waiting && searching ? (
     <ResearchTrail question={turn.question} intent={turn.intent} peek={turn.peek} search={turn.search} />
   ) : undefined;

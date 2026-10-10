@@ -164,6 +164,19 @@
   to { background-position: 0 0; }
 }
 
+/* Entrances while a card is prepared: a short rise that settles, nothing that snaps or bounces. */
+.zo-rise {
+  animation: zo-rise 640ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes zo-rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+/* The layout, once chosen, breathes instead of flashing. */
+.zo-layout .zo-shimmer {
+  animation-duration: 2.8s;
+}
+
 /* The step being worked on: its words shimmer the way a placeholder does. */
 .zo-shimmer-text {
   background: linear-gradient(100deg, var(--muted-foreground) 35%, var(--foreground) 50%, var(--muted-foreground) 65%);
@@ -250,6 +263,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .zo-aura::before, .zo-aura::after, .zo-wash, .zo-shimmer, .zo-shimmer-text, .zo-read-on { animation: none; }
+  .zo-aura::before, .zo-aura::after, .zo-wash, .zo-shimmer, .zo-shimmer-text, .zo-read-on, .zo-rise { animation: none; }
   .zo-shimmer-text { color: var(--foreground); }
 }
