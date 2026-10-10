@@ -14,6 +14,7 @@ import { entityOf, type AskRef } from '../shared/askAbout';
 import type { SearchResponse } from '../shared/types';
 import { api } from './api';
 import { AnswerCardView } from './card/AnswerCardView';
+import { ResearchTrail } from './card/ResearchTrail';
 import { CardContext, type CardContextValue } from './card/context';
 import { Icon } from './card/Icon';
 import { WhichOne } from './card/WhichOne';
@@ -882,7 +883,9 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
   const streaming = !!turn.live?.nodes.some(Boolean);
   const offlinePartial = Boolean(turn.offline && (turn.live?.head || streaming));
   const card: AnswerCard = useMemo(() => {
-    const skeleton = turn.plan?.skeleton ?? { title: turn.question, body: LOADING };
+    // The plan's guessed layout often differs from the card that is designed, so placeholders follow the
+    // real layout (`regions`) once it is known and stay neutral until then.
+    const skeleton = { title: turn.question, body: LOADING };
     const live = turn.live;
     let base: AnswerCard;
     if (live && (streaming || offlinePartial)) {
@@ -893,10 +896,13 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
     else base = { ...skeleton, ...live?.head, body: live?.regions.length ? live.regions : skeleton.body };
     if (!turn.result && !live?.head && turn.kind !== 'search') base = { ...base, title: turn.question };
     return turn.pins.length ? { ...base, body: [...base.body, { type: 'section', title: 'Pinned by you', icon: 'pin', children: turn.pins }] } : base;
-  }, [streaming, offlinePartial, turn.live, turn.result, turn.plan, turn.question, turn.kind, turn.pins, turn.filling]);
+  }, [streaming, offlinePartial, turn.live, turn.result, turn.question, turn.kind, turn.pins, turn.filling]);
 
   // The header is showing the question / plan skeleton, not the final title.
   const provisional = !turn.result && !turn.live?.head;
+  // Until the layout is known, a search shows its research as it happens instead of placeholders.
+  const researching = turn.kind === 'search' && turn.filling && !turn.result && !turn.offline && !turn.error && !streaming && !turn.live?.head && !turn.live?.regions.length;
+  const trail = researching ? <ResearchTrail question={turn.question} intent={turn.intent} peek={turn.peek} search={turn.search} designing={turn.designing} /> : undefined;
 
   const credits = useMemo(() => {
     const out: Record<string, { credit: string; link: string }> = {};
@@ -994,6 +1000,7 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
               onRetry={() => actions.retry(id)}
               toolbar={!turn.filling && !offlinePartial && turn.result ? <SaveButton query={turn.question} title={card.title} card={card} /> : undefined}
               provisional={provisional}
+              trail={trail}
             />
           </CardContext.Provider>}
           {choices && !turn.filling && <WhichOne choices={choices} onPick={(text) => void actions.followup(text, id, 'search')} />}

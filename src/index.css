@@ -164,6 +164,16 @@
   to { background-position: 0 0; }
 }
 
+/* The step being worked on: its words shimmer the way a placeholder does. */
+.zo-shimmer-text {
+  background: linear-gradient(100deg, var(--muted-foreground) 35%, var(--foreground) 50%, var(--muted-foreground) 65%);
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: zo-shimmer 1.8s ease-in-out infinite;
+}
+
 /* Generating aura: a slow rotating multi-hue light around the card, blurred into a glow. */
 @property --zo-angle {
   syntax: '<angle>';
@@ -231,5 +241,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .zo-aura::before, .zo-aura::after, .zo-wash, .zo-shimmer { animation: none; }
+  .zo-aura::before, .zo-aura::after, .zo-wash, .zo-shimmer, .zo-shimmer-text { animation: none; }
+  .zo-shimmer-text { color: var(--foreground); }
 }

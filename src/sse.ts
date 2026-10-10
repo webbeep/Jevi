@@ -11,9 +11,18 @@ export type StreamBody =
   | { kind: 'design'; query: string; pattern: string; depth: LayoutPlan['depth']; readPages: boolean; search: SearchResponse; simple?: boolean; followup?: FollowupContext; context?: string }
   | { kind: 'followup'; question: string; original: string; search: SearchResponse; cards: { id: number; title: string; card?: AnswerCard; pattern?: string }[]; context?: string; intent?: FollowupIntent; from?: number; ref?: AskRef };
 
+/** A first look at the literal search's rows, before the full search lands. */
+export interface PeekRow {
+  title: string;
+  url: string;
+  domain: string;
+  date?: string;
+}
+
 export type StreamEvent =
   | { event: 'plan'; data: LayoutPlan }
   | { event: 'search'; data: SearchResponse }
+  | { event: 'peek'; data: PeekRow[] }
   | { event: 'pages'; data: { n: number; url: string; text: string }[] }
   | { event: 'images'; data: ImageResult[] }
   | { event: 'designing'; data: { pagesRead: number; ms: number } }

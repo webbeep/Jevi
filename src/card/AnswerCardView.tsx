@@ -26,7 +26,7 @@ import { Icon } from './Icon';
 import { Nodes } from './render';
 import { CardTitle } from './primitives';
 
-export function AnswerCardView({ card, version, filling, streaming, status, pattern, alternatives, onPattern, simple, onSimple, onRegenerate, onRetry, toolbar, provisional = false }: {
+export function AnswerCardView({ card, version, filling, streaming, status, pattern, alternatives, onPattern, simple, onSimple, onRegenerate, onRetry, toolbar, provisional = false, trail }: {
   card: AnswerCard;
   /** Changes whenever a fresh design starts, replaying the entrance animation. */
   version: string;
@@ -45,6 +45,8 @@ export function AnswerCardView({ card, version, filling, streaming, status, patt
   toolbar?: ReactNode;
   /** The title is still the question / plan skeleton, so the header keeps a stable height. */
   provisional?: boolean;
+  /** Shown in place of the body while the answer is researched, before its layout is known. */
+  trail?: ReactNode;
 }) {
   const { results, onSources } = useCard();
   const [toast, setToast] = useState<string | null>(null);
@@ -136,7 +138,7 @@ export function AnswerCardView({ card, version, filling, streaming, status, patt
 
       <div className={cn('px-4 pb-5 pt-3.5 transition-[opacity,filter] duration-300 sm:px-6 sm:pb-6 sm:pt-4', status && !streaming && 'pointer-events-none opacity-50 blur-[1px]', cited.length && 'pb-4 sm:pb-5')}>
         <CardTitle.Provider value={card.title}>
-          <Nodes key={version} nodes={body} className="gap-5" stagger={!streaming} />
+          {trail ?? <Nodes key={version} nodes={body} className="gap-5" stagger={!streaming} />}
         </CardTitle.Provider>
       </div>
 

@@ -192,6 +192,7 @@ function askDetail(query: string, subject: string): string {
 }
 
 const QUOTE_EXTRAS_MS = 700;
+const PEEK_ROWS = 8;
 
 const WHO_ASK = /^\s*(who\s+is|who\s+was|who's)\b/i;
 
@@ -325,7 +326,10 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   void understood.then((x) => { intentNow = x?.intent; });
   let earlyBrief: Promise<EarlyBrief | undefined> | undefined;
   const onLiteral = (hits: WebHit[]) => {
-    earlyBrief ??= quoting.then(async (quote) => {
+    if (earlyBrief) return;
+    // A first look at what the search found, shown while the rest of the search and the layout finish.
+    send('peek', gateResults(query, hits.map(webRow)).kept.slice(0, PEEK_ROWS).map(({ title, url, domain, date }) => ({ title, url, domain, date })));
+    earlyBrief = quoting.then(async (quote) => {
       const rows = [...(quote ? [quoteRow(quote)] : []), ...gateResults(query, hits.map(webRow)).kept].slice(0, BRIEF_ROWS);
       const brief = await briefSources({ query, intent: intentNow, context, results: rows, isLive: isQuoteRow, shown: quote ? TICKER_SHOWN : undefined }, env);
       mark(scope.ledger, 'brief');

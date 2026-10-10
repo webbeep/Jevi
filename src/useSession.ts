@@ -12,7 +12,7 @@ import type { NoSourcesNotice, SearchResponse, SearchResult } from '../shared/ty
 import { api } from './api';
 import { withBrowserFallback } from './fallback';
 import { reportNeedSignin } from './auth/gatebus';
-import { NeedSigninError, StreamError, type StreamBody, type StreamEvent, shouldAutoRetry, stream } from './sse';
+import { NeedSigninError, StreamError, type StreamBody, type PeekRow, type StreamEvent, shouldAutoRetry, stream } from './sse';
 
 export { liveBody } from '../shared/liveBody';
 
@@ -50,6 +50,10 @@ export interface Turn {
   intent?: { intent: string; queries: string[] };
   pattern?: string;
   search?: SearchResponse;
+  /** The literal search's first rows, shown while the full search and the layout finish. */
+  peek?: PeekRow[];
+  /** Set once the answer is being laid out, with how many pages were read for it. */
+  designing?: { pagesRead: number };
   /** The card as it streams in; replaced by `result` when complete. */
   live?: LiveCard;
   result?: CardResponse;
@@ -255,8 +259,10 @@ export function useSession() {
           if (!target?.search) return;
           return update(target.id, { search: { ...target.search, images: e.data } });
         }
+        case 'peek':
+          return update(route, { peek: e.data });
         case 'designing':
-          return;
+          return update(route, { designing: { pagesRead: e.data.pagesRead } });
         case 'thinking':
           return update(route, { thinking: true });
         case 'layout':
@@ -310,7 +316,7 @@ export function useSession() {
     try {
       let attempt = 0;
       for (;;) {
-        update(id, { notice: undefined });
+        update(id, { notice: undefined, peek: undefined, designing: undefined });
         try {
           await stream(body, onEvent, controller.signal, { retry: opts?.retry || attempt > 0, refresh: opts?.refresh });
           break;
