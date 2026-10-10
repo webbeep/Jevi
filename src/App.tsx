@@ -1,8 +1,11 @@
 import { type FormEvent, type RefObject, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { skipInitialQuery } from './auth/boot';
+import { getAuthQuery, skipInitialQuery } from './auth/boot';
 import { registerSnapshot } from './auth/bridge';
 import { AuthHeader, AuthRoot } from './auth/chrome';
-import { getAuth } from './auth/store';
+import { getAuth, useAuth } from './auth/store';
+import { lsGet, lsSet } from './auth/storage';
+import { OnboardingCard } from './OnboardingCard';
+import { ONBOARD_DEVICE_KEY, ONBOARD_USERS_KEY, completeOnboarding, readOnboardedUsers, shouldShowOnboarding } from './onboarding';
 import { SaveButton } from './auth/SaveButton';
 import { UsageLine } from './auth/UsageLine';
 import { bootAuthOnce, claimBoot } from './auth/resume';
@@ -15,6 +18,7 @@ import type { SearchResponse } from '../shared/types';
 import { api } from './api';
 import { AnswerCardView } from './card/AnswerCardView';
 import { ResearchTrail } from './card/ResearchTrail';
+import { showWaitingLayout } from './card/waitingLayout';
 import { CardContext, type CardContextValue } from './card/context';
 import { Icon } from './card/Icon';
 import { WhichOne } from './card/WhichOne';
@@ -168,6 +172,25 @@ export default function App() {
     }
   }, [histRev]);
   const hasHistory = recents.length > 0 || historyCount > 0;
+  // History already on this device at load means it is not new. Asking during this visit must not hide the steps.
+  const [usedBefore] = useState(hasHistory);
+  const auth = useAuth();
+  const [onboardRev, setOnboardRev] = useState(0);
+  const showOnboarding = useMemo(() => shouldShowOnboarding({
+    deviceDone: lsGet(ONBOARD_DEVICE_KEY) === '1',
+    userIds: readOnboardedUsers(lsGet(ONBOARD_USERS_KEY)),
+    hasUsedApp: usedBefore,
+    isNewUser: getAuthQuery().isNew,
+    userId: auth.user?.id || null,
+  }), [usedBefore, auth.user?.id, onboardRev]);
+  const finishOnboarding = () => {
+    const store = {
+      getItem: (key: string) => lsGet(key),
+      setItem: (key: string, value: string) => lsSet(key, value),
+    };
+    completeOnboarding(store, auth.user?.id || null);
+    setOnboardRev((n) => n + 1);
+  };
   const root = turns[0];
   const last = [...turns].reverse().find((t) => t.result);
   const busy = turns.some((t) => t.filling);
@@ -456,6 +479,11 @@ export default function App() {
                 )}
               </form>
               </div>
+              {showOnboarding && (
+                <div className="mt-5 sm:mt-6">
+                  <OnboardingCard onDone={finishOnboarding} />
+                </div>
+              )}
               {recents.length > 0 && (
                 <div className="mt-5 sm:mt-6">
                   <div className="mb-1.5 flex items-center justify-between gap-2 px-1">
@@ -890,7 +918,16 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
   // event (a profile override, a video lead) replaces it with the skeleton the card will actually fill.
   const chosenLayout = turn.live?.regions.length ? turn.live.regions : turn.plan?.skeleton.body ?? [];
   const sourcesSettled = !!turn.search;
-  const layoutReady = !answerStarted && chosenLayout.length > 0 && (turn.kind !== 'search' || sourcesSettled);
+  // The skeleton is the wait only. A finished card clears `live`, which used to make this true again
+  // and put the placeholder back on top of the result.
+  const layoutReady = showWaitingLayout({
+    filling: turn.filling,
+    hasResult: !!turn.result,
+    answerStarted,
+    layoutCount: chosenLayout.length,
+    needsSources: turn.kind === 'search',
+    sourcesSettled,
+  });
   const card: AnswerCard = useMemo(() => {
     const skeleton = { title: turn.question, body: LOADING };
     const live = turn.live;

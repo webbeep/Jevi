@@ -16,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cardPlainText } from '../../shared/cardText';
+import { publicShareUrl } from '../../shared/publicUrl';
 import { tickerBody } from '../../shared/tickerNotes';
 import { citedRefs } from '../library';
 import { LogoMark } from '../Logo';
@@ -88,7 +89,7 @@ export function AnswerCardView({ card, version, filling, streaming, status, patt
   };
   // Native share sheet where there is one; otherwise (or if it fails) the link is copied. Cancelling the sheet is silent.
   const share = async () => {
-    const url = window.location.href;
+    const url = publicShareUrl(window.location.href);
     if (typeof navigator.share === 'function') {
       try {
         await navigator.share({ title: card.title, text: card.subtitle ?? card.title, url });
