@@ -367,7 +367,10 @@ const COMPARE_ASK = /\b(?:vs\.?|versus|compare[sd]?|comparison)\b/i;
 /** Words in a query, as personSubject splits them. */
 const wordCount = (s: string) => s.trim().split(/\s+/).filter(Boolean).length;
 
+const MACHINE_ADDRESS = /\b(?:\d{1,3}\.){3}\d{1,3}\b|\b(?:[0-9a-f]{1,4}:){2,}/i;
+
 export function isPersonAsk(query: string, pattern?: string): boolean {
+  if (MACHINE_ADDRESS.test(query)) return false;
   if (COMPARE_ASK.test(query) && !WHO_IS.test(query.trim())) return false;
   const subject = personSubject(query);
   if (pattern === 'profile') return subject !== '';

@@ -48,7 +48,8 @@ import { entityQuery, plainQuotes, relaxQuery, tickerQueries } from './queryClea
 import { type LateExtras, normalizeUrl, searchWithLate } from './search';
 import type { WebHit } from './cascade';
 import { domainOf } from './util';
-import { choicesIn, distinctActions, repeatsCallout, subjectWords } from './chips';
+import { choicesIn, distinctActions, subjectWords } from './chips';
+import { cryptographyHint, faithfulQuery, isWritingAsk, quickPlan, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
 import { isOwnSite, orcidSite, pickOwnSite, probeOwnSite, RESEARCH_ASK, withOwnSite } from './ownSite';
 import { quoteAsk } from '../shared/quoteAsk';
 import { scholarlyResults, withScholarly } from './scholarly';
@@ -264,9 +265,14 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     },
     node: (node, index) => {
       if (req.website) node = withWebsite(node, req.website);
-      if (repeatsCallout(node, [...shown].filter(([at]) => at !== index).map(([, n]) => n))) return;
+      const priorNodes = [...shown].filter(([at]) => at !== index).map(([, n]) => n);
+      const keptNode = withoutRepeatedCallouts(node, priorNodes);
+      if (!keptNode) return;
+      node = keptNode;
       if (node.type === 'actions') {
-        const kept = distinctActions(node, choicesIn([...shown.values()]), subject);
+        const clean = withoutLeakActions(node);
+        if (!clean) return;
+        const kept = distinctActions(clean, choicesIn([...shown.values()]), subject);
         if (!kept) return;
         node = kept;
       }
@@ -660,7 +666,8 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   }
   send('search', results);
   const boost = imageBoost(pattern, results, env, scope, boostQuery);
-  await design(send, env, { query, pattern, depth: plan.depth, readPages: plan.readPages || deep || fromSeeds, search: results, context: designContext, intent: u?.intent, deep, boost, entityHint, ticker: quote ? tickerNode(quote) : undefined, earlyBrief, website }, started, scope, late);
+  const crypto = cryptographyHint(query, results.results);
+  await design(send, env, { query, pattern, depth: plan.depth, readPages: plan.readPages || deep || fromSeeds, search: results, context: [designContext, crypto].filter(Boolean).join('\n') || undefined, intent: u?.intent, deep, boost, entityHint, ticker: quote ? tickerNode(quote) : undefined, earlyBrief, website }, started, scope, late);
 }
 
 /** The profile on the card, wherever the layout put it, links the person's own website. */
@@ -713,8 +720,17 @@ function engineErrors(engines: EngineStatus[]): string[] {
 
 async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind: 'followup' }>, started: number, scope: AskScope) {
   const refLine = req.ref ? refContext(req.ref) : '';
-  const context = [req.context?.slice(0, 4000), refLine].filter(Boolean).join('\n') || undefined;
+  const context = scrubLeak([req.context?.slice(0, 4000), refLine].filter(Boolean).join('\n')) || undefined;
   const from = req.cards.find((c) => c.id === req.from);
+
+  // Writing ("draft an email") is answered directly. A planner that calls it a search, then a rewriter,
+  // is what turned "Draft the unblock email" into a lookup for the paper title and a banned IP address.
+  if (req.intent !== 'search' && req.intent !== 'adjust' && isWritingAsk(req.question)) {
+    const plan = quickPlan(req.question, 'chat');
+    send('plan', plan);
+    await design(send, env, { query: req.original, pattern: plan.pattern, depth: plan.depth, readPages: false, search: req.search, followup: { mode: 'chat', question: req.question }, context }, started, scope);
+    return;
+  }
 
   // A search button on a card: always resolve it against the conversation ("apple varieties" → "best apples for apple pie").
   if (req.intent === 'search') {
@@ -774,14 +790,16 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
   }
 
   // Classify and speculatively rewrite at the same time; the rewrite is only used if Jev says a new search is needed.
-  const rewritten = req.intent === 'adjust' ? Promise.resolve(req.question) : rewriteQuery(req.original, req.question, env, context, from?.title).catch(() => req.question);
+  const rewritten = req.intent === 'adjust' || standsAlone(req.question)
+    ? Promise.resolve(req.question)
+    : rewriteQuery(req.original, req.question, env, context, from?.title).catch(() => req.question);
   const plan = await planLayout(req.question, env, { original: req.original, cards: req.cards.map(({ id, title }) => ({ id, title })), context });
   const mode = req.intent === 'adjust' ? 'refine' : req.intent === 'ask' && plan.mode === 'refine' ? 'answer' : plan.mode ?? 'chat';
 
   switch (mode) {
     case 'search': {
       send('plan', plan);
-      const query = withRef(await rewritten, req.ref);
+      const query = faithfulQuery(req.question, withRef(await rewritten, req.ref));
       send('rewrite', { query });
       await searchAndDesign(send, env, query, 'any', context, started, scope, true, req.ref ? req.search?.results : undefined);
       return;
