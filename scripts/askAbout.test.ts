@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { askQuestion, cleanRef, entityOf, refContext, withRef, REF_MAX, type Box } from '../shared/askAbout.ts';
+import { askQuestion, cleanRef, entityOf, refContext, topicOf, usefulFollowups, withRef, REF_MAX, type Box } from '../shared/askAbout.ts';
 
 const cases: [Box, string][] = [
   // tile: label + value + entity (the t453 repro)
@@ -55,6 +55,7 @@ const cases: [Box, string][] = [
   [{ kind: 'list', label: 'Clifford scored 18 off the bench in every preseason game so far [3]' }, 'Explain "Clifford scored 18 off the bench in every preseason game so far"'],
   [{ kind: 'link', label: 'ESPN preseason tracker' }, 'What is ESPN preseason tracker?'],
   [{ kind: 'timeline', label: 'Series A', when: '2024' }, 'What happened in 2024: Series A?'],
+  [{ kind: 'timeline', label: 'Top 10 plays', when: 'Oct 7, 2026', entity: 'NBA' }, 'What happened with NBA on Oct 7, 2026 (Top 10 plays)?'],
   // T453 ship: game tiles on sports cards
   [{ kind: 'tile', label: 'vs Trail Blazers', value: 'L 118-123' }, 'What happened in the game vs Trail Blazers (L 118-123)?'],
   [{ kind: 'tile', label: 'vs LA Clippers', value: 'Upcoming' }, 'What should I know about the game vs LA Clippers?'],
@@ -138,4 +139,34 @@ test('withRef keeps the tapped thing and entity in the search query', () => {
   assert.equal(withRef('AMP BlueFlame AI agent', { value: 'AMP', entity: 'BlueFlame AI' }), 'AMP BlueFlame AI agent');
   assert.equal(withRef('pricing', { label: 'Pricing' }), 'pricing');
   assert.equal(withRef('q', undefined), 'q');
+  // A sentence-long row blurb is what turned "Top 10 plays" into an NFL schedule search.
+  assert.equal(
+    withRef('What happened in Oct 7, 2026: Top 10 plays?', { label: 'Oct 7, 2026: Top 10 plays', value: 'Seven preseason games on the Oct 7 schedule.', entity: 'NBA' }),
+    'What happened in Oct 7, 2026: Top 10 plays? NBA',
+  );
+});
+
+test('topicOf keeps the subject of a topic title', () => {
+  assert.equal(topicOf('NBA Scores Tonight'), 'NBA');
+  assert.equal(topicOf('Warriors Preseason 2026 Results'), 'Warriors');
+  assert.equal(topicOf('2026 NBA preseason'), 'NBA');
+  assert.equal(topicOf('Best apples for apple pie'), 'apples apple pie');
+  assert.equal(topicOf('BlueFlame AI'), 'BlueFlame AI');
+  assert.equal(topicOf('iPhone 17 Pro'), 'iPhone 17 Pro');
+  assert.equal(topicOf('How to ripen avocados'), 'ripen avocados');
+  assert.equal(topicOf(undefined), undefined);
+});
+
+test('usefulFollowups drops a question that only repeats the card', () => {
+  const items = [
+    'What happened in Oct 7, 2026: Top 10 plays?',
+    'Who led the NBA in scoring on Oct 7?',
+    'NBA?',
+    'What happened in Oct 7, 2026: Top 10 plays?',
+  ];
+  assert.deepEqual(usefulFollowups(items, 'Oct 7, 2026: Top 10 Plays', 'NBA scores'), ['Who led the NBA in scoring on Oct 7?']);
+  assert.deepEqual(
+    usefulFollowups(['How long does apple pie keep?', 'What is Apple Pie Recipe?'], 'Apple Pie Recipe'),
+    ['How long does apple pie keep?'],
+  );
 });

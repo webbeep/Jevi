@@ -14,7 +14,7 @@ import { clearSyncedHistory, noteDeviceAsk } from './auth/sync';
 import { ArrowUp, ChevronDown, CornerDownRight, CornerLeftUp, History, Moon, Pencil, Plus, RotateCw, Search, Shuffle, SlidersHorizontal, Sun, WifiOff, X } from 'lucide-react';
 import type { AnswerCard, CardNode } from '../shared/card';
 import { packHistorySources, type HistorySource } from '../shared/historyCard';
-import { entityOf, type AskRef } from '../shared/askAbout';
+import { topicOf, type AskRef } from '../shared/askAbout';
 import type { SearchResponse } from '../shared/types';
 import { api } from './api';
 import { AnswerCardView } from './card/AnswerCardView';
@@ -1022,7 +1022,7 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
     return out;
   }, [search?.images, turn.live?.credits, card.credits]);
 
-  const entity = useMemo(() => profileName(card.body) ?? entityOf(card.title), [card.body, card.title]);
+  const entity = useMemo(() => profileName(card.body) ?? topicOf(card.title), [card.body, card.title]);
 
   const id = turn.id;
   const pendingRefine = useRef<string | null>(null);

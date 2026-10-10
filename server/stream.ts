@@ -33,11 +33,12 @@ import { fetchWikiDisambiguation, fetchWikiLeadImage } from './wikiSearch';
 import { type EntityHint, mentionsAny } from './imageGate';
 import type { RowImagePlan } from './pictures';
 import type { AnswerCard, CardNode, FollowupContext, FollowupIntent, LayoutPlan } from '../shared/card';
-import { type AskRef, refContext, withRef } from '../shared/askAbout';
+import { type AskRef, refContext, topicOf, usefulFollowups, withRef } from '../shared/askAbout';
 import type { EngineStatus, Freshness, ImageResult, SearchResponse, SearchResult } from '../shared/types';
 import { rewriteQuery } from './ai';
 import { type DesignRequest, designParallel, designStream, gateNode } from './design';
 import { BRIEF_ROWS, briefSources, remapBrief, type SourceBrief } from './brief';
+import { onTopicCount, rescueQuery, sourcesMiss } from './rescue';
 import { keepPictures, reviewCard } from './review';
 import { permitted } from './images';
 import { hasLlm } from './llm';
@@ -124,6 +125,8 @@ interface DesignArgs {
   ticker?: CardNode;
   /** The source check, started on the literal search's rows while the rewrites were still searching. */
   earlyBrief?: Promise<EarlyBrief | undefined>;
+  /** A search that just ran. A wrong result set gets one different search before the card says nothing was found. */
+  allowRescue?: boolean;
   /** Source number of the person's own website, linked from the profile. */
   website?: number;
 }
@@ -213,6 +216,24 @@ async function sharperChoices(choices: EntityChoice[], rows: SearchResult[], env
   return split ?? choices;
 }
 
+/** One more search, only when its rows are actually about the goal. The old "missing" note is not reused: its source numbers belonged to the rows that were wrong. */
+async function rescueSources(send: Send, env: Env, req: DesignArgs, brief: SourceBrief, scope: AskScope): Promise<{ search: SearchResponse; brief: SourceBrief } | undefined> {
+  const alt = rescueQuery(req.query, brief);
+  if (!alt) return undefined;
+  const before = onTopicCount(req.search.results, brief);
+  const room = SEARCH_CALL_CAP + (scope.ledger.bonus ?? 0) - searchCalls(scope.ledger);
+  if (room < 1) scope.ledger.bonus = (scope.ledger.bonus ?? 0) + (1 - room);
+  const again = await searchWithLate({ q: alt, freshness: req.search.freshness === 'any' ? guessFreshness(req.query) : req.search.freshness, count: 12, lite: true }, env, scope);
+  const gated = applyRelevance(alt, { ...again.response, query: alt }, scope.ledger);
+  const after = onTopicCount(gated.results, brief);
+  console.log(JSON.stringify({ zo: 'rescue', alt, before, after, kept: gated.results.length }));
+  if (!(after > before) || !gated.results.length) return undefined;
+  send('peek', gated.results.slice(0, PEEK_ROWS).map(({ title, url, domain, date }) => ({ title, url, domain, date })));
+  send('search', gated);
+  const next = await briefSources({ query: req.query, intent: req.intent, context: req.context, results: gated.results, isLive: isQuoteRow, shown: req.ticker ? TICKER_SHOWN : undefined }, env, 1200);
+  return { search: gated, brief: next ?? { goal: brief.goal, use: [], stale: [], offTopic: [], conflicts: [] } };
+}
+
 async function design(send: Send, env: Env, req: DesignArgs, started: number, scope: AskScope, late?: Promise<LateExtras>) {
   // Follow-ups keep the sources already gated for the original question.
   if (!req.followup) req = { ...req, search: applyRelevance(req.query, req.search, scope.ledger) };
@@ -223,19 +244,30 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   // Conversation turns reason from what is already known; everything else reads pages first.
   const chat = req.followup?.mode === 'chat';
   const budget = chat ? { count: 3, need: 0, budgetMs: 0 } : req.deep ? DEEP_PAGES : pageBudget(req.readPages);
-  // The source check runs while pages are read, so it costs little or no extra time.
   // Usually it already ran on the literal search's rows while the rewrites were searching.
   const briefing = !newSearch || chat ? undefined
-    : req.earlyBrief ? req.earlyBrief.then((early) => early && remapBrief(early.brief, early.judged, req.search.results))
+    : req.earlyBrief ? req.earlyBrief.then((early) => early ? remapBrief(early.brief, early.judged, req.search.results) : undefined)
     : briefSources({ query: req.query, intent: req.intent, context: req.context, results: req.search.results, isLive: isQuoteRow, shown: req.ticker ? TICKER_SHOWN : undefined }, env);
-  const [pages, brief] = await Promise.all([collectPages(req.search.results, env, budget, late, scope).finally(() => mark(scope.ledger, 'pages')), briefing?.finally(() => mark(scope.ledger, 'brief'))]);
+  // The check usually finished during the search. Waiting for it before reading pages means a wrong
+  // result set is replaced first, instead of fetching the pages and then saying they don't answer.
+  let brief = await briefing?.finally(() => mark(scope.ledger, 'brief'));
   if (brief) console.log(JSON.stringify({ zo: 'brief', use: brief.use.length, stale: brief.stale, offTopic: brief.offTopic, conflicts: brief.conflicts.length, missing: !!brief.missing }));
+  let rescued = false;
+  if (req.allowRescue && brief && !chat && sourcesMiss(brief)) {
+    const again = await rescueSources(send, env, req, brief, scope);
+    if (again) {
+      req = { ...req, search: again.search };
+      brief = again.brief;
+      rescued = true;
+    }
+  }
+  const pages = await collectPages(req.search.results, env, budget, rescued ? undefined : late, scope).finally(() => mark(scope.ledger, 'pages'));
   const fresh = pages.filter((p) => !req.search.results[p.n - 1]?.content);
   if (fresh.length) send('pages', fresh.map(({ n, url, text }) => ({ n, url, text })));
 
   // Page preview images and images from engines that answered late are often the most relevant ones.
-  const lateImages = late ? await Promise.race([late.then((l) => l.images), new Promise<ImageResult[]>((r) => setTimeout(() => r([]), 150))]) : [];
-  const boosted = req.boost ? await Promise.race([req.boost, new Promise<ImageResult[]>((r) => setTimeout(() => r([]), 1500))]) : [];
+  const lateImages = !rescued && late ? await Promise.race([late.then((l) => l.images), new Promise<ImageResult[]>((r) => setTimeout(() => r([]), 150))]) : [];
+  const boosted = !rescued && req.boost ? await Promise.race([req.boost, new Promise<ImageResult[]>((r) => setTimeout(() => r([]), 1500))]) : [];
   const pageImgs = pages.filter((p) => p.image).map((p) => {
     const source = req.search.results[p.n - 1]?.domain ?? '';
     return { url: p.url, thumb: p.image!, title: req.search.results[p.n - 1]?.title ?? '', source, license: 'source' as const, credit: source };
@@ -293,8 +325,8 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       }
     },
     followups: (items) => {
-      followups = items;
-      send('followups', items);
+      followups = usefulFollowups(items, head?.title, req.followup?.question ?? req.query);
+      if (followups.length) send('followups', followups);
     },
     credit: (credit) => send('credit', credit),
   });
@@ -690,7 +722,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   send('search', results);
   const boost = imageBoost(pattern, results, env, scope, boostQuery);
   const crypto = cryptographyHint(query, results.results);
-  await design(send, env, { query, pattern, depth: plan.depth, readPages: plan.readPages || deep || fromSeeds, search: results, context: [designContext, crypto].filter(Boolean).join('\n') || undefined, intent: u?.intent, deep, boost, entityHint, ticker: quote ? tickerNode(quote) : undefined, earlyBrief, website }, started, scope, late);
+  await design(send, env, { query, pattern, depth: plan.depth, readPages: plan.readPages || deep || fromSeeds, search: results, context: [designContext, crypto].filter(Boolean).join('\n') || undefined, intent: u?.intent, deep, boost, entityHint, ticker: quote ? tickerNode(quote) : undefined, earlyBrief, website, allowRescue: true }, started, scope, late);
 }
 
 /** The profile on the card, wherever the layout put it, links the person's own website. */
@@ -832,7 +864,10 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
   switch (mode) {
     case 'search': {
       send('plan', plan);
-      const query = faithfulQuery(req.question, withRef(await rewritten, req.ref));
+      const host = req.cards.find((c) => c.id === req.from);
+      const entity = req.ref?.entity ?? topicOf(host?.card?.title) ?? topicOf(host?.title);
+      const ref = req.ref ? { ...req.ref, ...(entity ? { entity } : {}) } : undefined;
+      const query = faithfulQuery(req.question, withRef(await rewritten, ref));
       send('rewrite', { query });
       await searchAndDesign(send, env, query, 'any', context, started, scope, true, req.ref ? req.search?.results : undefined);
       return;

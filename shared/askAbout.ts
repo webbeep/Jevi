@@ -192,7 +192,10 @@ export function askQuestion(box: Box): string {
     if (!label) return 'What is this?';
     return out(value ? `Who is ${label}, ${lowerFirst(cut(value, 60))}?` : `Who is ${label}?`);
   }
-  if (box.kind === 'timeline' && label && box.when) return out(`What happened in ${cut(clean(box.when), 40)}: ${label}?`);
+  if (box.kind === 'timeline' && label && box.when) {
+    const when = cut(clean(box.when), 40);
+    return out(E ? `What happened with ${E} on ${when} (${label})?` : `What happened in ${when}: ${label}?`);
+  }
   if ((box.kind === 'verdict' || isVerdict(value)) && label && value) return out(verdictQuestion(label, value, E));
   // An entity the value already names adds nothing ("Company: BlueFlame AI" on a BlueFlame AI card).
   if (E && value && mentions(value, E)) E = undefined;
@@ -232,7 +235,26 @@ export function entityOf(title: string | undefined): string | undefined {
 
 const TOPIC_WORD = /^(results?|scores?|schedule|standings|preseason|season|playoffs?|highlights|recap|news|stats|statistics|rankings?|odds|picks|predictions?|vs\.?|tonight|today|week|weekend|guide|comparison|review|reviews|deals?|prices?)$/i;
 const TOPIC_START = /^(best|top|cheapest|latest|new|how|why|when|where|which|what|who|should|is|are|can|do|does|ways|tips|guide|list|ranking)$/i;
-const SMALL = new Set(['of', 'the', 'and', 'for', 'de', 'la', 'del', 'von', 'van', 'to', 'in', 'on', 'at', '&']);
+const SMALL = new Set(['of', 'the', 'and', 'for', 'de', 'la', 'del', 'von', 'van', 'to', 'in', 'on', 'at', '&', 'this', 'these', 'that']);
+const MONTH = /^(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)\.?$/i;
+const DATE_WORD = (w: string) => MONTH.test(w) || /^(19|20)\d{2}$/.test(w) || /^\d{1,2}(?:st|nd|rd|th)?$/.test(w);
+
+/**
+ * What a follow-up must keep naming. A card title that is a topic ("NBA Scores Tonight") is not an
+ * entity, but the tap still has to say NBA — otherwise "Top 10 plays" searches the wrong sport.
+ */
+export function topicOf(title: string | undefined): string | undefined {
+  const named = entityOf(title);
+  if (named) return named;
+  let t = clean(title);
+  t = t.replace(/^(what|who|how)\s+(is|are|was|were|to|do|does|did)\s+/i, '').replace(/^about\s+/i, '').replace(/\?+$/, '').trim();
+  const parts = t.split(/:\s/);
+  if (parts.length > 1 && parts[0].split(/\s+/).some((w) => !DATE_WORD(w.replace(/[,.]/g, '')) && !TOPIC_WORD.test(w))) t = parts[0];
+  t = t.split(/\s[—–|]\s|\s\(/)[0].trim();
+  const kept = t.split(/\s+/).map((w) => w.replace(/[,.]+$/g, '')).filter((w) => w && !DATE_WORD(w) && !TOPIC_WORD.test(w) && !TOPIC_START.test(w) && !SMALL.has(w.toLowerCase()));
+  if (!kept.length) return undefined;
+  return kept.slice(0, 3).join(' ');
+}
 
 const refText = (v: unknown) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, REF_MAX).trim() : '');
 
@@ -271,12 +293,41 @@ export function refContext(ref: AskRef): string {
   return lines.join('\n');
 }
 
+/** A short value is a name or a number worth searching. A sentence is the row's own blurb, and searching it pulls in the wrong pages. */
+const shortThing = (thing: string) => thing.split(/\s+/).length <= 6 && !/[.!?]$/.test(thing);
+
 /** A search query that still names the tapped thing and its entity. */
 export function withRef(query: string, ref: AskRef | undefined): string {
   if (!ref) return query;
   let q = query;
   const thing = ref.value ?? ref.label;
-  if (thing && !mentions(q, thing)) q = `${q} ${thing}`;
+  if (thing && shortThing(thing) && !mentions(q, thing)) q = `${q} ${thing}`;
   if (ref.entity && !mentions(q, ref.entity)) q = `${q} ${ref.entity}`;
   return q.replace(/\s+/g, ' ').trim().slice(0, 300);
+}
+
+const normFollow = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+/**
+ * Suggested questions that are worth showing: they name the card's subject and they are not the title
+ * asked again ("What happened in Oct 7, 2026: Top 10 plays?").
+ */
+export function usefulFollowups(items: string[], title?: string, query?: string): string[] {
+  const titleN = normFollow(title ?? '');
+  const queryN = normFollow(query ?? '').replace(/\?$/, '').trim();
+  const lead = normFollow(topicOf(title) ?? topicOf(query) ?? '').split(' ')[0]?.replace(/s$/, '');
+  const seen = new Set<string>();
+  const kept: string[] = [];
+  for (const item of items) {
+    const text = item.trim();
+    const n = normFollow(text).replace(/\?$/, '').trim();
+    if (n.split(' ').length < 4 || seen.has(n)) continue;
+    if (titleN && (n === titleN || n === `what happened in ${titleN}` || n === `what is ${titleN}` || n === `what happened with ${titleN}`)) continue;
+    if (queryN && n === queryN) continue;
+    if (titleN.length > 12 && n.includes(titleN) && n.length <= titleN.length + 24) continue;
+    seen.add(n);
+    kept.push(text);
+  }
+  const named = lead && lead.length >= 3 ? kept.filter((f) => normFollow(f).includes(lead)) : kept;
+  return (named.length ? named : kept).slice(0, 4);
 }
