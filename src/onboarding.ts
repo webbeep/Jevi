@@ -2,10 +2,11 @@
 export const ONBOARD_DEVICE_KEY = 'zo-onboarded';
 export const ONBOARD_USERS_KEY = 'zo-onboarded-users';
 
+/** One idea per card. The picture plays what the app does; the line under it only names it. */
 export const ONBOARD_STEPS = [
-  { title: 'Ask anything', detail: 'Type a question. ZO looks it up and answers in a card you can read.' },
-  { title: 'Compare and tweak', detail: 'Change the layout, or ask a follow-up on the same card.' },
-  { title: 'Keep it', detail: 'Save an answer. Sign in and it follows you to a new device.' },
+  { id: 'ask', title: 'Ask anything', line: 'Type a question. That\'s the whole start.' },
+  { id: 'look', title: 'Watch it look it up', line: 'The search opens while the card is made.' },
+  { id: 'card', title: 'A card you can use', line: 'Compare it, change it, and save it.' },
 ] as const;
 
 export interface OnboardStore {

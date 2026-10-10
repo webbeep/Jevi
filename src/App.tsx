@@ -190,6 +190,7 @@ export default function App() {
     };
     completeOnboarding(store, auth.user?.id || null);
     setOnboardRev((n) => n + 1);
+    requestAnimationFrame(() => inputRef.current?.focus());
   };
   const root = turns[0];
   const last = [...turns].reverse().find((t) => t.result);
@@ -418,11 +419,11 @@ export default function App() {
 
         {home ? (
           <>
-            <header className="flex h-14 items-center justify-end gap-1 px-3 sm:px-5">
+            <header inert={showOnboarding || undefined} className="flex h-14 items-center justify-end gap-1 px-3 sm:px-5">
               <AuthHeader />
               <ThemeToggle dark={dark} onToggle={() => setDark(!dark)} />
             </header>
-            <main className="relative mx-auto flex w-full max-w-[640px] flex-col px-4 pb-16 pt-[10dvh] sm:pt-[16dvh]">
+            <main inert={showOnboarding || undefined} className="relative mx-auto flex w-full max-w-[640px] flex-col px-4 pb-16 pt-[10dvh] sm:pt-[16dvh]">
               <h1 className="flex justify-center">
                 <Wordmark className="text-[40px] sm:text-[48px]" />
                 <span className="sr-only">ZO</span>
@@ -450,7 +451,7 @@ export default function App() {
                   role="combobox"
                   enterKeyHint="send"
                   autoComplete="off"
-                  autoFocus
+                  autoFocus={!showOnboarding}
                   className="h-14 rounded-2xl border-input bg-card pl-12 pr-14 text-base shadow-card transition-shadow focus-visible:shadow-float focus-visible:ring-0 md:text-base"
                 />
                 <Button type="submit" size="icon" className="absolute right-2 top-1/2 size-10 -translate-y-1/2 rounded-xl" disabled={!input.trim()} aria-label="Send">
@@ -479,11 +480,6 @@ export default function App() {
                 )}
               </form>
               </div>
-              {showOnboarding && (
-                <div className="mt-5 sm:mt-6">
-                  <OnboardingCard onDone={finishOnboarding} />
-                </div>
-              )}
               {recents.length > 0 && (
                 <div className="mt-5 sm:mt-6">
                   <div className="mb-1.5 flex items-center justify-between gap-2 px-1">
@@ -568,6 +564,7 @@ export default function App() {
                 </ul>
               </div>
             </main>
+            {showOnboarding && <OnboardingCard onDone={finishOnboarding} />}
           </>
         ) : (
           <>

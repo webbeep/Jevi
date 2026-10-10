@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { ONBOARD_DEVICE_KEY, ONBOARD_USERS_KEY, completeOnboarding, shouldShowOnboarding, type OnboardStore } from '../src/onboarding.ts';
+import { ONBOARD_DEVICE_KEY, ONBOARD_STEPS, ONBOARD_USERS_KEY, completeOnboarding, shouldShowOnboarding, type OnboardStore } from '../src/onboarding.ts';
 
 function memory(): OnboardStore & { dump: Record<string, string> } {
   const dump: Record<string, string> = {};
@@ -12,6 +12,13 @@ function memory(): OnboardStore & { dump: Record<string, string> } {
 }
 
 const fresh = { deviceDone: false, userIds: [] as string[], hasUsedApp: false, isNewUser: false, userId: null };
+
+test('the intro is three steps, one idea each', () => {
+  assert.deepEqual(ONBOARD_STEPS.map((step) => step.id), ['ask', 'look', 'card']);
+  for (const step of ONBOARD_STEPS) {
+    assert.ok(step.title.length > 0 && step.line.length > 0 && step.line.length < 80);
+  }
+});
 
 test('a new device with no history sees the steps', () => {
   assert.equal(shouldShowOnboarding(fresh), true);
