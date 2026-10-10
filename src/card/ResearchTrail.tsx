@@ -23,7 +23,10 @@ export function ResearchTrail({ question, intent, peek, search, designing }: {
   search?: SearchResponse;
   designing?: { pagesRead: number };
 }) {
-  const rows: PeekRow[] = search?.results.length ? search.results : peek ?? [];
+  // Rows already on screen from the first look keep their place; the full search only adds after them.
+  const first = peek ?? [];
+  const shown = new Set(first.map((r) => r.url));
+  const rows: PeekRow[] = [...first, ...(search?.results ?? []).filter((r) => !shown.has(r.url))];
   const stage: Stage = designing ? 'layout' : search ? 'read' : peek?.length || intent ? 'search' : 'understand';
   const at = ORDER.indexOf(stage);
   const state = (s: Stage) => (ORDER.indexOf(s) < at ? 'done' : s === stage ? 'active' : 'todo');
@@ -55,7 +58,7 @@ export function ResearchTrail({ question, intent, peek, search, designing }: {
                   <span className="zo-meta shrink-0">{shortDomain(r.domain)}</span>
                 </li>
               ))}
-              {rows.length > SHOWN_ROWS && <li className="zo-meta pl-5.5 animate-in fade-in">+{rows.length - SHOWN_ROWS} more</li>}
+              {rows.length > SHOWN_ROWS && <li style={{ animationDelay: `${SHOWN_ROWS * 110}ms` }} className="zo-meta pl-5.5 animate-in fade-in fill-mode-both">+{rows.length - SHOWN_ROWS} more</li>}
             </ul>
           )}
         </Step>
