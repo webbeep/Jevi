@@ -323,7 +323,9 @@ async function checkAnswer(send: Send, env: Env, req: DesignRequest, shown: Map<
   }
   const warning = review.note ? gateNode({ type: 'callout', tone: 'warning', icon: 'triangle-alert', text: review.note }, req) : undefined;
   const leadIndex = [...shown.keys()].sort((a, b) => a - b).find((i) => !['actions', 'citations'].includes(shown.get(i)!.type));
-  if (warning && leadIndex !== undefined) {
+  const lead = leadIndex === undefined ? undefined : shown.get(leadIndex);
+  const leadWarns = lead?.type === 'callout' && lead.tone === 'warning' || (lead?.type === 'stack' && lead.children[0]?.type === 'callout' && lead.children[0].tone === 'warning');
+  if (warning && leadIndex !== undefined && !leadWarns) {
     send('node', { index: leadIndex, node: { type: 'stack', direction: 'col', gap: 'sm', children: [warning, shown.get(leadIndex)!] } });
   }
   console.log(JSON.stringify({ zo: 'review', ok: review.ok, problems: review.problems, fixed, followups: !!review.followups, warned: !!warning, ms: Date.now() - at, total: Date.now() - started }));
