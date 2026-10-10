@@ -61,7 +61,7 @@ export function categorize(q: string): Category {
   const s = q.toLowerCase();
   if (/\bvs\b|\bversus\b|\bcompare\b/.test(s)) return 'compare';
   if (/\bhow to\b|\bsteps\b|\brecipe\b/.test(s)) return 'howto';
-  if (/\bshould i\b|\bworth it\b|\blease or\b/.test(s)) return 'decision';
+  if (/\bshould i\b|\bworth it\b|\blease or\b|\bpros and cons\b/.test(s)) return 'decision';
   if (/\bplan\b|\bitinerary\b|\bschedule\b|\bweek\b/.test(s)) return 'plan';
   if (/\bbest\b|\bunder\s*\$|\bcheap\b|\bbuy\b/.test(s)) return 'shopping';
   return 'other';
@@ -158,7 +158,7 @@ const SPORTS = /\b(injur\w*|stats?|games?|score[sd]?|trade[sd]?|contract|season|
 
 /** Splits an ask into its subject and what was asked about it. */
 export function subjectOf(q: string): Subject {
-  let s = q.trim().replace(/[?!.]+$/, '').replace(/\s+/g, ' ');
+  let s = peelFrame(q).replace(/[?!.]+$/, '').replace(/\s+/g, ' ');
   const who = /^(?:who\s+(?:is|was)|tell me about)\b/i.test(s);
   for (let i = 0; i < 3 && LEAD.test(s); i++) s = s.replace(LEAD, '');
   const ticker = /(?:^|\s)\$([A-Za-z]{1,5})\b/.exec(s)?.[1];
@@ -181,15 +181,49 @@ function nameCase(subject: string, kind: SubjectKind): string {
   return subject.replace(/\b[a-z]/g, (c) => c.toUpperCase());
 }
 
-/** Next asks for one subject, best first. */
+/** Labels glued onto an ask ("pros and cons:", "which is better value:"). Stripped before a new suggestion is built. */
+const FRAME = /^(?:pros and cons(?:\s+of)?|which is better(?:\s+value)?|compare(?:\s+top picks for)?|how to|should i|is it worth(?: it)?(?: to)?)\s*[:\-—]?\s*/i;
+
+/** Drops a repeated lead and a framing prefix, more than once ("pros and cons: pros and cons of heat pumps" → "heat pumps"). */
+export function peelFrame(text: string): string {
+  let s = text.trim().replace(/\s+/g, ' ');
+  for (let i = 0; i < 4; i++) {
+    const next = withoutRepeatedLead(s).replace(FRAME, '').replace(/\s+/g, ' ').trim();
+    if (!next || next === s) break;
+    s = next;
+  }
+  return s || text.trim();
+}
+
+function tidySuggestion(text: string): string {
+  let s = text.trim().replace(/\s+/g, ' ');
+  for (let i = 0; i < 4; i++) {
+    const next = withoutRepeatedLead(s)
+      .replace(/\bpros and cons:\s*(?=pros and cons\b)/gi, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (next === s) break;
+    s = next;
+  }
+  return clip70(s);
+}
+
+/** Next asks for one subject, best first. A frame already on the question is not added again. */
 function ideasFor(item: HistoryItem): { text: string; icon: string }[] {
   const ask = item.q.trim();
+  const bare = peelFrame(ask);
+  const pros = /\bpros and cons\b/i.test(ask);
   switch (item.cat) {
-    case 'shopping': return [{ text: `compare top picks for ${ask}`, icon: 'scale' }];
-    case 'howto': return [{ text: `${ask} — common mistakes`, icon: 'list-checks' }];
-    case 'decision': return [{ text: `pros and cons: ${ask}`, icon: 'scale' }];
-    case 'compare': return [{ text: withoutRepeatedLead(/^(which is better|compare)\b/i.test(ask) ? ask : `which is better value: ${ask}`), icon: 'scale' }];
-    case 'plan': return [{ text: `${ask}: checklist`, icon: 'list-checks' }];
+    case 'shopping': return [
+      { text: `compare top picks for ${bare}`, icon: 'scale' },
+      { text: `which ${bare} are worth keeping`, icon: 'scale' },
+    ];
+    case 'howto': return [{ text: `${bare} — common mistakes`, icon: 'list-checks' }];
+    case 'decision': return pros
+      ? [{ text: `the cost of ${bare}`, icon: 'scale' }, { text: `alternatives to ${bare}`, icon: 'shuffle' }]
+      : [{ text: `pros and cons of ${bare}`, icon: 'scale' }, { text: `the cost of ${bare}`, icon: 'scale' }];
+    case 'compare': return [{ text: /^(which is better|compare)\b/i.test(bare) ? bare : `which is better value: ${bare}`, icon: 'scale' }];
+    case 'plan': return [{ text: `${bare}: checklist`, icon: 'list-checks' }];
     case 'other': break;
     default: {
       const unknown: never = item.cat;
@@ -257,8 +291,8 @@ export function writeRelated(storage: Storage, subject: string, list: string[], 
   writeRaw(storage, RELATED_KEY, JSON.stringify(Object.fromEntries(keep)));
 }
 
-/** Distinct subjects of the newest asks, newest first: what "Try one" builds on. */
-export function recentSubjects(history: HistoryItem[], max = 3): { item: HistoryItem; subject: Subject }[] {
+/** Distinct subjects across recent asks, newest first. The home list draws on this window, not only the last two. */
+export function recentSubjects(history: HistoryItem[], max = 8): { item: HistoryItem; subject: Subject }[] {
   const seen = new Set<string>();
   const out: { item: HistoryItem; subject: Subject }[] = [];
   for (const item of history) {
@@ -276,7 +310,7 @@ export function recentSubjects(history: HistoryItem[], max = 3): { item: History
  * The subjects worth a related-searches lookup (people, teams, tickers and topics, not how-tos or
  * shopping lists): the cache key and the search that finds what people ask about it next.
  */
-export function relatedSubjects(history: HistoryItem[], related: Related, max = 2): { key: string; query: string }[] {
+export function relatedSubjects(history: HistoryItem[], related: Related, max = 4): { key: string; query: string }[] {
   return recentSubjects(history)
     .filter(({ item, subject }) => item.cat === 'other' && subject.subject.length >= 2 && !(subject.subject.toLowerCase() in related))
     .slice(0, max)
@@ -316,26 +350,32 @@ function rankedGenerics(history: HistoryItem[]): Suggestion[] {
 }
 
 /**
- * The personalized list: next asks built from the subjects of the newest asks (round-robin, so
- * one topic never fills the list), popular related searches for those subjects first, then
- * curated starters ranked by the categories asked most. Nothing already asked is offered.
+ * The personalized list: one next ask per recent subject, newest first, so the row is not two
+ * variations of the last question. A popular related search leads that subject when it adds
+ * something new. Curated starters fill only the slots history does not cover.
  */
 export function computeItems(history: HistoryItem[], related: Related = {}, want = 4): Suggestion[] {
   const asked = new Set(history.map((h) => norm(h.q)));
-  const lanes = recentSubjects(history).map(({ item, subject }) => {
-    const pop = freshRelated(related[subject.subject.toLowerCase()] ?? [], subject, asked).slice(0, 2).map((text) => ({ text, icon: 'search' }));
-    return [...pop, ...ideasFor(item)];
+  const lanes = recentSubjects(history).flatMap(({ item, subject }) => {
+    const pop = freshRelated(related[subject.subject.toLowerCase()] ?? [], subject, asked).slice(0, 1).map((text) => ({ text, icon: 'search' }));
+    const local = ideasFor(item).filter((idea) => {
+      const text = tidySuggestion(idea.text);
+      const key = norm(text);
+      return !!key && !asked.has(key) && !/pros and cons\W+pros and cons/i.test(text);
+    });
+    const first = pop[0] ?? local[0];
+    return first ? [[first]] : [];
   });
   const out: Suggestion[] = [];
   const seen = new Set<string>(asked);
-  const personal = Math.max(1, want - 1);
-  for (let round = 0; out.length < personal && lanes.some((l) => l.length > round); round++) {
+  const fromHistory = Math.min(want, lanes.length);
+  for (let round = 0; out.length < fromHistory && lanes.some((l) => l.length > round); round++) {
     for (const lane of lanes) {
       const idea = lane[round];
-      if (!idea || out.length >= personal) continue;
-      const text = clip70(idea.text);
+      if (!idea || out.length >= fromHistory) continue;
+      const text = tidySuggestion(idea.text);
       const key = norm(text);
-      if (seen.has(key)) continue;
+      if (!key || seen.has(key) || /pros and cons\W+pros and cons/i.test(text)) continue;
       seen.add(key);
       out.push({ id: `p-${out.length}-${key.replace(/\s+/g, '-').slice(0, 40)}`, text, icon: idea.icon, group: 'broad' });
     }

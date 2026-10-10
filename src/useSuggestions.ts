@@ -27,9 +27,9 @@ function missingRelated(): { key: string; query: string }[] {
 }
 
 /**
- * Home starters. Cold start is the curated Strategy set. Once this device has ask history, the list
- * is built on-device from the newest asks, then enriched with popular related searches for those
- * subjects (the free suggest endpoint, cached 6h). Shuffle stays off until the pool rule is met.
+ * Home starters. Cold start is the curated Strategy set. Once this device has ask history, each
+ * shown row is the next ask for a different recent subject (not only the last two), enriched with
+ * popular related searches (the free suggest endpoint, cached 6h). Shuffle stays off until the pool rule is met.
  */
 export function useSuggestions(): {
   items: Suggestion[];

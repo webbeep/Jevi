@@ -66,6 +66,31 @@ test('subjectOf pulls tickers, sports names, people, and general topics', () => 
   assert.equal(subjectOf('best cheap headphones').kind, 'general');
 });
 
+test('phone suggestions use a different recent question per row, not only the last two', () => {
+  const storage = memory();
+  recordAsk(storage, 'why $rdw dropping', 1);
+  recordAsk(storage, 'jaylen brown injuries', 2);
+  recordAsk(storage, 'best cheap headphones', 3);
+  recordAsk(storage, 'pros and cons of heat pumps', 4);
+  recordAsk(storage, 'nba game highlights yesterday', 5);
+  const shown = personalizedStarters(storage, 390, 9_000);
+  const texts = shown.items.map((item) => item.text);
+  assert.equal(texts.length, 3);
+  assert.equal(new Set(texts).size, 3);
+  assert.ok(texts.every((t) => !/^best wireless earbuds\b/i.test(t)), texts.join(' | '));
+  assert.ok(texts.some((t) => /headphones/i.test(t)), texts.join(' | '));
+});
+
+test('a pros and cons question is not labeled pros and cons again', () => {
+  const history = [
+    { q: 'pros and cons:pros and cons of heat pumps', t: 2, cat: 'decision' as const },
+    { q: 'pros and cons of renting vs buying', t: 1, cat: 'compare' as const },
+  ];
+  const texts = computeItems(history, {}, 4).map((item) => item.text);
+  for (const text of texts) assert.doesNotMatch(text, /pros and cons\W+pros and cons/i);
+  assert.ok(texts.some((t) => /heat pumps/i.test(t) && !/^pros and cons\b/i.test(t)), texts.join(' | '));
+});
+
 test('related searches lead each subject lane, skipping restated topics and other names', () => {
   const history = [
     { q: 'jaylen brown injuries', t: 2, cat: 'other' as const },
