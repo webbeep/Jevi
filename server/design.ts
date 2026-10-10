@@ -185,7 +185,8 @@ RULES
 - Plan and subscription prices always go in a pricing node, as the published per-seat or flat amount with its source number. Set billing to annual when the source says billed annually, even if the number is per month. Never multiply by people or seats, and never write a dollar amount or team total anywhere else on the card. If the sources do not state a price, leave that amount out.
 - If the sources don't contain what the person asked for (for example a live reading or a price), say so honestly in a short callout and point to the best sources to check.
 - Put citations like [2] inside text nodes where useful. Prefer visual components (hero, tiles, stats, charts, tables, timelines) over paragraphs; keep text short.
-- Nesting depth at most 4.`;
+- Nesting depth at most 4.
+- Follow-up questions and action queries may only assume what this card states. Never build one on an event the sources don't date to now: a piece about "October 10" from an earlier year (an anniversary, "one year on", "will it repeat?") is not today's news, and a number from it is not today's move.`;
 
 /** Both system prompts are identical across requests so the provider can cache them. */
 const SYSTEM_WHOLE = `${DESIGNER}

@@ -247,6 +247,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   const designReq: DesignRequest = { ...req, pages, brief, context: req.context?.slice(0, 4000), rowImages };
   const shown = new Map<number, CardNode>();
   let head: Omit<AnswerCard, 'body'> | undefined;
+  let followups: string[] = [];
   const summary = await designer(designReq, env, {
     thinking: () => send('thinking', {}),
     layout: (regions) => send('layout', regions),
@@ -258,19 +259,22 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       shown.set(index, node);
       send('node', { index, node });
     },
-    followups: (items) => send('followups', items),
+    followups: (items) => {
+      followups = items;
+      send('followups', items);
+    },
     credit: (credit) => send('credit', credit),
   });
   mark(scope.ledger, 'designed');
   if (!chat && req.followup?.mode !== 'refine' && summary.engine === 'composed') {
-    await checkAnswer(send, env, designReq, shown, head, started);
+    await checkAnswer(send, env, designReq, shown, head, followups, started);
     mark(scope.ledger, 'reviewed');
   }
   send('done', { ...summary, pagesRead: pages.length, ms: Date.now() - started });
 }
 
 /** The finished card, read once against the goal before it is saved: wrong nodes are corrected in place. */
-async function checkAnswer(send: Send, env: Env, req: DesignRequest, shown: Map<number, CardNode>, head: Omit<AnswerCard, 'body'> | undefined, started: number) {
+async function checkAnswer(send: Send, env: Env, req: DesignRequest, shown: Map<number, CardNode>, head: Omit<AnswerCard, 'body'> | undefined, followups: string[], started: number) {
   const at = Date.now();
   const review = await reviewCard({
     query: req.followup?.question ?? req.query,
@@ -281,8 +285,10 @@ async function checkAnswer(send: Send, env: Env, req: DesignRequest, shown: Map<
     isLive: isQuoteRow,
     head,
     nodes: shown,
+    followups,
   }, env);
   if (!review) return;
+  if (review.followups) send('followups', review.followups);
   let fixed = 0;
   for (const fix of review.fixes) {
     const gated = gateNode(fix.node, req);
@@ -297,7 +303,7 @@ async function checkAnswer(send: Send, env: Env, req: DesignRequest, shown: Map<
   if (warning && leadIndex !== undefined) {
     send('node', { index: leadIndex, node: { type: 'stack', direction: 'col', gap: 'sm', children: [warning, shown.get(leadIndex)!] } });
   }
-  console.log(JSON.stringify({ zo: 'review', ok: review.ok, problems: review.problems, fixed, warned: !!warning, ms: Date.now() - at, total: Date.now() - started }));
+  console.log(JSON.stringify({ zo: 'review', ok: review.ok, problems: review.problems, fixed, followups: !!review.followups, warned: !!warning, ms: Date.now() - at, total: Date.now() - started }));
 }
 
 /**

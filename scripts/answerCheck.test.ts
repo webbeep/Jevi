@@ -77,6 +77,13 @@ describe('answer review', () => {
     assert.equal(readReview({ verdict: 'fix', problems: ['Node 0 price is from June'], fixes: [], note: 'No result gives a price from today.' }, shown)?.note, 'No result gives a price from today.');
   });
 
+  test('a false-premise follow-up is replaced', () => {
+    const review = readReview({ verdict: 'fix', problems: ['Follow-up 2 says Bitcoin dropped 17% today; the card shows -0.4%'], fixes: [], note: '', followups: ['What moved Bitcoin this week?', ' ', 42, 'What is the 52-week range?'] }, shown);
+    assert.equal(review?.ok, false);
+    assert.deepEqual(review?.followups, ['What moved Bitcoin this week?', 'What is the 52-week range?']);
+    assert.equal(readReview({ verdict: 'ok', problems: [], fixes: [], note: '', followups: ['x'] }, shown)?.followups, undefined);
+  });
+
   test('unreadable replies are ignored', () => {
     assert.equal(readReview({ verdict: 'maybe' }, shown), undefined);
     assert.equal(readReview(undefined, shown), undefined);

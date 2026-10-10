@@ -16,20 +16,23 @@ Flag only real errors that would mislead the reader:
 - it presents an old value or old news as current (check dates against today), or contradicts a LIVE result or newer results;
 - a stated fact, number or date is not supported by the results, or is attributed to the wrong thing;
 - it carries over facts from the conversation that belong to a different subject;
-- two nodes show the same fact, number or chart (fix the later one with something else the results support, or a short text node).
+- two nodes show the same fact, number or chart (fix the later one with something else the results support, or a short text node);
+- a suggested follow-up or action assumes something false or unsupported: an event that didn't happen, an older event presented as today's, a number the card doesn't show.
 You see the result snippets and the page text the writer read (clipped). A fact found in neither may come from a part of a page you can't see: flag it only when the results contradict it, or when it is a current value (price, score, date of an event) that nothing supports.
 Style, wording, layout and missing nice-to-haves are not errors. For a "today" or "latest" ask, anything from the past 36 hours is current: don't flag it, and don't warn that nothing is dated exactly today.
-Reply as JSON: {"verdict":"ok"|"fix","problems":[string],"fixes":[{"node":number,"replace":object}],"note":string}
+Reply as JSON: {"verdict":"ok"|"fix","problems":[string],"fixes":[{"node":number,"replace":object}],"note":string,"followups":[string]}
 - problems: one short line per error, naming the node number.
 - fixes: for each wrong node you can correct from the results, a full replacement node in the same JSON shape as the original (same "type" when possible), with facts only from the results and citations like [2]. Keep every supported fact of the original; never blank a value out with "—" or drop a comparison side. At most 3.
 - note: only when the results themselves leave the answer uncertain (no current figure, sources disagree, the person can't be identified): one plain sentence for the reader about that uncertainty. Never describe the card's own mistakes in the note (no "the card says…", "the card mixes…"): fix those nodes instead. Otherwise "".
-- verdict "ok" with empty problems, fixes and note when the card is right.`;
+- followups: only when a suggested follow-up is wrong: the full list of 4 again, with each wrong one replaced by a question the card supports. Otherwise [].
+- verdict "ok" with empty problems, fixes, note and followups when the card is right.`;
 
 interface Raw {
   verdict?: unknown;
   problems?: unknown;
   fixes?: unknown;
   note?: unknown;
+  followups?: unknown;
 }
 
 export interface Review {
@@ -37,6 +40,8 @@ export interface Review {
   problems: string[];
   fixes: { index: number; node: unknown }[];
   note?: string;
+  /** Replacement follow-up questions, when a suggested one was wrong. */
+  followups?: string[];
 }
 
 const SELF_REMARK = /\b(the|this) (card|answer)('s)?\b|\bnode \d/i;
@@ -59,8 +64,11 @@ export function readReview(raw: Raw | undefined, indices: Set<number>): Review |
   const said = typeof raw.note === 'string' ? raw.note.trim().replace(/\s+/g, ' ').slice(0, 240) : '';
   // A note about the card's own wording is an editor's remark, not something the reader should see.
   const note = said && !SELF_REMARK.test(said) ? said : undefined;
-  const ok = raw.verdict === 'ok' || (!fixes.length && !note);
-  return { ok, problems, fixes: ok ? [] : fixes, note: ok ? undefined : note };
+  const followups = Array.isArray(raw.followups)
+    ? raw.followups.filter((f): f is string => typeof f === 'string' && !!f.trim()).map((f) => f.trim().slice(0, 120)).slice(0, 4)
+    : [];
+  const ok = raw.verdict === 'ok' || (!fixes.length && !note && !followups.length);
+  return { ok, problems, fixes: ok ? [] : fixes, note: ok ? undefined : note, ...(!ok && followups.length ? { followups } : {}) };
 }
 
 const PICTURE_KEYS = ['imageSrc', 'imageRef', 'imageQuery'] as const;
@@ -86,10 +94,12 @@ function cardText(head: Omit<AnswerCard, 'body'> | undefined, nodes: Map<number,
   const lines = [`Title: ${head?.title ?? ''}${head?.subtitle ? ` — ${head.subtitle}` : ''}`];
   let used = 0;
   for (const [index, node] of [...nodes].sort((a, b) => a[0] - b[0])) {
-    if (node.type === 'actions' || node.type === 'citations' || node.type === 'gallery' || node.type === 'image' || node.type === 'video') continue;
+    if (node.type === 'citations' || node.type === 'gallery' || node.type === 'image' || node.type === 'video') continue;
     const json = node.type === 'ticker'
       ? JSON.stringify({ type: 'ticker', note: 'live price chart from the quote feed (correct by construction)', name: node.name, price: node.series.price, at: node.series.at })
-      : JSON.stringify(node).slice(0, NODE_CHARS);
+      : node.type === 'actions'
+        ? JSON.stringify({ type: 'actions', items: node.items.map(({ label, query, kind }) => ({ label, query, kind })) })
+        : JSON.stringify(node).slice(0, NODE_CHARS);
     if (used + json.length > CARD_CHARS) break;
     used += json.length;
     lines.push(`Node ${index}: ${json}`);
@@ -108,6 +118,7 @@ export async function reviewCard(
     isLive: (r: SearchResult) => boolean;
     head?: Omit<AnswerCard, 'body'>;
     nodes: Map<number, CardNode>;
+    followups?: string[];
   },
   env: Env,
   timeoutMs = 4000,
@@ -123,6 +134,7 @@ export async function reviewCard(
     `Results:\n${args.results.slice(0, BRIEF_ROWS).map((r, i) => rowLine(r, i, args.isLive(r))).join('\n')}`,
     args.pages?.length ? `Page text the writer read:\n${args.pages.slice(0, 5).map((p) => `[${p.n}] ${p.text.replace(/\s+/g, ' ').slice(0, PAGE_CHARS)}`).join('\n')}` : '',
     `CARD\n${cardText(args.head, args.nodes)}`,
+    args.followups?.length ? `Suggested follow-ups:\n${args.followups.map((f, i) => `${i + 1}. ${f}`).join('\n')}` : '',
   ].filter(Boolean).join('\n');
   const call = llmJson<Raw>(env, SYSTEM, user, 1200).catch((err) => {
     console.log(JSON.stringify({ zo: 'review', failed: String(err).slice(0, 120) }));
