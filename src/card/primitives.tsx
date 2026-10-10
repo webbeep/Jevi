@@ -508,6 +508,9 @@ function MediaList({ node }: { node: Of<'list'> }) {
   );
 }
 
+/** A list badge this short ("9 Oct 2026", "$199") fits beside the text on wide screens; anything longer goes under it. */
+const SIDE_META = 12;
+
 export function List({ node }: { node: Of<'list'> }) {
   const { results, entity } = useCard();
   const rowClick = useRowClick();
@@ -530,8 +533,13 @@ export function List({ node }: { node: Of<'list'> }) {
                   : style === 'icon' && item.icon ? <Icon name={item.icon} className="text-muted-foreground" />
                   : <span className="size-1.5 rounded-full bg-foreground/40" />}
               </span>
-              <span className="relative flex-1 text-foreground/85"><RichText text={item.text} /></span>
-              {item.meta && <span className="relative shrink-0 text-xs text-muted-foreground">{item.meta}</span>}
+              <span className="relative min-w-0 flex-1 text-foreground/85">
+                <RichText text={item.text} />
+                {item.meta && (
+                  <span className={cn('block text-xs leading-snug text-muted-foreground', item.meta.length <= SIDE_META && 'sm:hidden')}>{item.meta}</span>
+                )}
+              </span>
+              {item.meta && item.meta.length <= SIDE_META && <span className="relative mt-0.5 hidden shrink-0 text-xs text-muted-foreground sm:block">{item.meta}</span>}
               {/* Rows are >=44px and flush; the chip's 44×44 hit box is anchored to the row's top (ROW_CHIP), so it stays inside its own row. */}
               {r && <span className="mt-[3px] flex shrink-0"><SourceChip result={r} n={item.source!} className={ROW_CHIP} /></span>}
             </div>
