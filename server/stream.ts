@@ -541,6 +541,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
         const detail = askDetail(query, subject);
         console.log(JSON.stringify({ zo: 'entity', pickEmpty: true }));
         send('search', { ...results, results: [] });
+        if (scope.ledger.gateSample?.length) send('gate', scope.ledger.gateSample);
         send('head', { title: subject, subtitle: label || detail });
         const text = detail
           ? `I couldn't find a page that connects ${subject} to “${detail}”. Try the full name of the company, school or city.`
