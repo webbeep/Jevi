@@ -120,6 +120,8 @@ interface DesignArgs {
   ticker?: CardNode;
   /** The source check, started on the literal search's rows while the rewrites were still searching. */
   earlyBrief?: Promise<EarlyBrief | undefined>;
+  /** Source number of the person's own website, linked from the profile. */
+  website?: number;
 }
 
 interface EarlyBrief {
@@ -261,6 +263,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       send('head', h);
     },
     node: (node, index) => {
+      if (req.website) node = withWebsite(node, req.website);
       if (node.type === 'actions') {
         const kept = distinctActions(node, choicesIn([...shown.values()]), subject);
         if (!kept) return;
@@ -601,6 +604,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   let entityHint: ((entity: string) => EntityHint | undefined) | undefined;
   let boostQuery = query;
   let pattern = plan.pattern;
+  let website: number | undefined;
   if (decision.kind === 'single') {
     scope.ledger.entity = { kind: 'single', id: decision.entity.id, dropped: decision.dropped.length };
     console.log(JSON.stringify({ zo: 'entity', kind: 'single', id: decision.entity.id, kept: decision.kept.length, dropped: decision.dropped.length }));
@@ -616,7 +620,8 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     if (site) {
       const placed = withOwnSite(results.results, site);
       results = { ...results, results: placed.rows };
-      designContext = [entityContextLine(decision.entity), `Own website: source [${placed.n}] (${site.domain}). Link it in the profile as their website and prefer it for who they are and what they do now.`, context].filter(Boolean).join('\n');
+      website = placed.n;
+      designContext = [entityContextLine(decision.entity), `Own website: source [${placed.n}] (${site.domain}); the profile links it. Prefer it for who they are and what they do now, and cite it.`, context].filter(Boolean).join('\n');
       console.log(JSON.stringify({ zo: 'entity', ownSite: site.engines[0], n: placed.n }));
     } else {
       designContext = [entityContextLine(decision.entity), context].filter(Boolean).join('\n');
@@ -652,7 +657,14 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   }
   send('search', results);
   const boost = imageBoost(pattern, results, env, scope, boostQuery);
-  await design(send, env, { query, pattern, depth: plan.depth, readPages: plan.readPages || deep || fromSeeds, search: results, context: designContext, intent: u?.intent, deep, boost, entityHint, ticker: quote ? tickerNode(quote) : undefined, earlyBrief }, started, scope, late);
+  await design(send, env, { query, pattern, depth: plan.depth, readPages: plan.readPages || deep || fromSeeds, search: results, context: designContext, intent: u?.intent, deep, boost, entityHint, ticker: quote ? tickerNode(quote) : undefined, earlyBrief, website }, started, scope, late);
+}
+
+/** The profile on the card, wherever the layout put it, links the person's own website. */
+function withWebsite(node: CardNode, website: number): CardNode {
+  if (node.type === 'profile') return { ...node, website };
+  if ('children' in node && Array.isArray(node.children)) return { ...node, children: node.children.map((c) => withWebsite(c, website)) } as CardNode;
+  return node;
 }
 
 const SITE_WAIT_MS = 700;

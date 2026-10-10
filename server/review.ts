@@ -76,7 +76,8 @@ const hasPicture = (o: Record<string, unknown>) => o.imageSrc !== undefined || o
 
 /**
  * Pictures are placed after the card is written and nothing places them after the review: a corrected
- * node keeps the picture of the node it replaces, part by part, wherever it has none of its own.
+ * node keeps the picture of the node it replaces, part by part, wherever it has none of its own,
+ * and a profile keeps its website link the same way.
  */
 export function keepPictures(before: unknown, after: unknown): unknown {
   if (Array.isArray(before) && Array.isArray(after)) return after.map((item, i) => keepPictures(before[i], item));
@@ -85,6 +86,7 @@ export function keepPictures(before: unknown, after: unknown): unknown {
   const now = { ...(after as Record<string, unknown>) };
   if (was.type !== now.type) return after;
   if (!hasPicture(now) && hasPicture(was)) for (const k of PICTURE_KEYS) now[k] = was[k];
+  if (now.website === undefined && was.website !== undefined) now.website = was.website;
   for (const k of ['children', 'items']) if (Array.isArray(now[k])) now[k] = keepPictures(was[k], now[k]);
   return now;
 }

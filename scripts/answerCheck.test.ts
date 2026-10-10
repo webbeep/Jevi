@@ -145,6 +145,10 @@ describe('review fixes keep pictures', () => {
     const after = { type: 'text', text: 'x' };
     assert.equal(keepPictures({ type: 'profile', name: 'A', imageSrc: 'u' }, after), after);
   });
+
+  test('a corrected profile keeps its website link', () => {
+    assert.deepEqual(keepPictures({ type: 'profile', name: 'A', website: 2 }, { type: 'profile', name: 'A B' }), { type: 'profile', name: 'A B', website: 2 });
+  });
 });
 
 describe('early source check', () => {

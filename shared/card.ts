@@ -59,7 +59,7 @@ export type CardNode =
   /** Pictures reference IMAGES by index, or name what they show (`query`) for the server to find. */
   | { type: 'image'; ref?: number; query?: string; src?: string; link?: string; caption?: string; aspect?: 'wide' | 'square' | 'tall' }
   | { type: 'gallery'; refs: number[]; query?: string; pics?: { src: string; link: string; title: string }[] }
-  | { type: 'profile'; name: string; subtitle?: string; imageRef?: number; imageQuery?: string; imageSrc?: string; facts?: { label: string; value: string }[] }
+  | { type: 'profile'; name: string; subtitle?: string; imageRef?: number; imageQuery?: string; imageSrc?: string; facts?: { label: string; value: string }[]; /** Source number of the person's own website. */ website?: number }
   | { type: 'actions'; items: { label: string; icon?: string; query: string; kind?: ActionKind }[] }
   // Interactive
   | { type: 'choices'; label?: string; options: { label: string; prompt: string; selected?: boolean }[] }

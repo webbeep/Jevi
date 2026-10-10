@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useId, useRef, useState } from 'react';
 import type { MouseEvent } from 'react';
-import { Check, ChevronLeft, ChevronRight, Copy, Minus, Play, Star, ThumbsDown, ThumbsUp, TrendingDown, TrendingUp } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, Copy, Globe, Minus, Play, Star, ThumbsDown, ThumbsUp, TrendingDown, TrendingUp } from 'lucide-react';
 import { askQuestion, type AskRef, type Box } from '../../shared/askAbout';
 import type { CardNode, Tone } from '../../shared/card';
 import { initials } from '../../shared/initials';
@@ -799,6 +799,8 @@ export function Profile({ node }: { node: Of<'profile'> }) {
   const nameRef: AskRef = { label: node.name, value: node.subtitle, entity: node.name };
   // The card header already says the name: the profile then leads with what it adds.
   const repeatsTitle = sameName(useContext(CardTitle), node.name);
+  const { results } = useCard();
+  const site = node.website ? results[node.website - 1] : undefined;
   return (
     <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-3 sm:gap-x-4">
       <span className="relative shrink-0 sm:row-span-2 sm:self-start">
@@ -820,6 +822,11 @@ export function Profile({ node }: { node: Of<'profile'> }) {
             </>
           )}
         </div>
+        {site && (
+          <a href={site.url} target="_blank" rel="noopener noreferrer" className="relative mt-1 inline-flex min-h-7 items-center gap-1.5 text-sm font-medium text-primary hover:underline">
+            <Globe className="size-3.5" />{domainLabel(site.domain)}
+          </a>
+        )}
       </div>
       {node.facts && node.facts.length > 0 && (
         <dl className="col-span-2 grid grid-cols-2 gap-x-3 sm:col-span-1 sm:col-start-2">
