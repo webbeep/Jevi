@@ -1,4 +1,4 @@
-import { handleHistoryItem } from '../../../server/auth/history';
+import { handleHistoryItem, handleHistoryTouch } from '../../../server/auth/history';
 import type { Env } from '../../../server/util';
 
 function itemId(params: Record<string, string | string[]>): string {
@@ -7,3 +7,5 @@ function itemId(params: Record<string, string | string[]>): string {
 }
 
 export const onRequestGet: PagesFunction<Env> = ({ request, env, params }) => handleHistoryItem(request, env, itemId(params));
+
+export const onRequestPost: PagesFunction<Env> = ({ request, env, params }) => handleHistoryTouch(request, env, itemId(params));

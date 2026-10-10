@@ -13,6 +13,7 @@ import { flushPendingSave } from './auth/saves';
 import { clearSyncedHistory, noteDeviceAsk } from './auth/sync';
 import { ArrowUp, CornerDownRight, CornerLeftUp, History, Moon, Pencil, Plus, RotateCw, Search, Shuffle, SlidersHorizontal, Sun, WifiOff, X } from 'lucide-react';
 import type { AnswerCard, CardNode } from '../shared/card';
+import { packHistorySources, type HistorySource } from '../shared/historyCard';
 import { entityOf, type AskRef } from '../shared/askAbout';
 import type { SearchResponse } from '../shared/types';
 import { api } from './api';
@@ -31,7 +32,7 @@ import { loadSnapshot, normalizeAnswerQuery, purgeDegradedSnapshots, saveSnapsho
 import { cacheTtlS } from '../shared/cacheTtl';
 import { turnDegraded, turnsDegraded } from '../shared/degraded';
 import { MANUAL_RETRY_AFTER, OFFLINE_MESSAGE, clearPending, loadPending, savePending } from '../shared/offline';
-import { RECENT_KEY, clearHistory, readHistory, recordAsk } from '../shared/personal';
+import { clearHistory, readHistory, recordAsk, touchHistory } from '../shared/personal';
 import { placeholderExamples } from '../shared/starters';
 import { useSuggestions } from './useSuggestions';
 import { clearTypeaheadClientCache, useTypeahead } from './useTypeahead';
@@ -98,23 +99,30 @@ function writeAnswerCache(query: string, turns: Turn[]) {
   }
 }
 
-function readRecents(): string[] {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]') as unknown;
-    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string' && x.trim().length > 0) : [];
-  } catch {
-    return [];
-  }
-}
-
-function pushRecent(q: string): string[] {
-  const next = [q, ...readRecents().filter((r) => r.toLowerCase() !== q.toLowerCase())].slice(0, 3);
-  try {
-    localStorage.setItem(RECENT_KEY, JSON.stringify(next));
-  } catch {
-    /* ignore quota */
-  }
-  return next;
+/** A history card plus the sources its video and citations point at. */
+function turnFromHistory(query: string, card: AnswerCard, sources: HistorySource[] | undefined): Turn {
+  const results = (sources ?? []).map((r) => ({
+    title: r.title,
+    url: r.url,
+    snippet: r.snippet || '',
+    domain: r.domain || '',
+    engines: ['web'],
+    ...(r.image ? { image: r.image } : {}),
+    ...(r.date ? { date: r.date } : {}),
+  }));
+  return {
+    id: 1,
+    kind: 'search',
+    question: query,
+    searchId: 1,
+    ...(results.length ? { search: { query, freshness: 'any' as const, results, images: [], discussions: [], engines: [] } } : {}),
+    result: { card, followups: [], engine: 'composed', pagesRead: 0, removed: 0, ms: 0 },
+    variants: {},
+    version: 1,
+    filling: false,
+    simple: false,
+    pins: [],
+  };
 }
 
 function useTheme() {
@@ -143,7 +151,6 @@ export default function App() {
   const threadBusy = turns.some((t) => t.filling);
   const [queued, setQueued] = useState<{ q: string; ref?: AskRef; from: number; item?: string } | null>(null);
   const { items: suggestions, shuffle, shuffleEnabled, refresh } = useSuggestions();
-  const [recents, setRecents] = useState<string[]>(() => (typeof window !== 'undefined' ? readRecents() : []));
   const [histRev, setHistRev] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const [phExamples] = useState(() => placeholderExamples());
@@ -157,23 +164,25 @@ export default function App() {
   const mainRef = useRef<HTMLDivElement>(null);
   const home = turns.length === 0;
   const startSearchRef = useRef<(q: string) => void>(() => undefined);
-  // Tapping a suggestion (or Enter on a highlighted one) searches it right away.
-  const fillFromTypeahead = useCallback((text: string) => {
+  const openHistoryRef = useRef<(q: string) => void>(() => undefined);
+  const openGen = useRef(0);
+  // A history row reopens that answer. Anything else searches.
+  const fillFromTypeahead = useCallback((text: string, source?: 'history' | 'web' | 'fallback') => {
     setInput(text);
     inputRef.current?.blur();
-    startSearchRef.current(text);
+    if (source === 'history') openHistoryRef.current(text);
+    else startSearchRef.current(text);
   }, []);
   const typeahead = useTypeahead(home ? input : '', fillFromTypeahead, histRev);
-  const historyCount = useMemo(() => {
+  const historyItems = useMemo(() => {
     try {
-      return readHistory(localStorage).length;
+      return readHistory(localStorage);
     } catch {
-      return 0;
+      return [];
     }
   }, [histRev]);
-  const hasHistory = recents.length > 0 || historyCount > 0;
   // History already on this device at load means it is not new. Asking during this visit must not hide the steps.
-  const [usedBefore] = useState(hasHistory);
+  const [usedBefore] = useState(historyItems.length > 0);
   const auth = useAuth();
   const [onboardRev, setOnboardRev] = useState(0);
   const showOnboarding = useMemo(() => shouldShowOnboarding({
@@ -219,9 +228,9 @@ export default function App() {
   const startSearch = (q: string) => {
     const query = q.trim();
     if (!query) return;
+    openGen.current += 1;
     shown.current = query;
     savePending(localStorage, query);
-    setRecents(pushRecent(query));
     recordAsk(localStorage, query);
     noteDeviceAsk();
     setHistRev((n) => n + 1);
@@ -232,11 +241,56 @@ export default function App() {
   };
   startSearchRef.current = startSearch;
 
+  const touchServer = (query: string) =>
+    fetch('/api/history/touch', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query }),
+    });
+
+  /** Reopen a past question. The list moves it to the front, and the card comes back with its video. */
+  const openHistory = (q: string) => {
+    const query = q.trim();
+    if (!query) return;
+    const gen = ++openGen.current;
+    touchHistory(localStorage, query);
+    noteDeviceAsk();
+    setHistRev((n) => n + 1);
+    typeahead.close();
+    shown.current = query;
+    history.pushState(null, '', `?${new URLSearchParams({ q: query })}`);
+    const cached = readAnswerCache(query);
+    if (cached?.length) {
+      session.restore(cached);
+      void touchServer(query).catch(() => undefined);
+      return;
+    }
+    const authNow = getAuth();
+    if (!authNow.enabled || !authNow.signedIn) {
+      session.search(query, { reset: true });
+      return;
+    }
+    void touchServer(query)
+      .then(async (res) => (res.ok ? ((await res.json()) as { card?: AnswerCard | null; results?: HistorySource[] }) : null))
+      .then((data) => {
+        if (gen !== openGen.current) return;
+        if (data?.card && Array.isArray(data.card.body)) session.restore([turnFromHistory(query, data.card, data.results)]);
+        else session.search(query, { reset: true });
+      })
+      .catch(() => {
+        if (gen !== openGen.current) return;
+        session.search(query, { reset: true });
+      });
+  };
+  openHistoryRef.current = openHistory;
+
   const editStarter = (text: string) => {
     setInput(text);
   };
 
   const newChat = () => {
+    openGen.current += 1;
     session.clear();
     resetUi();
     setInput('');
@@ -262,11 +316,12 @@ export default function App() {
       if (reported.current.has(key)) continue;
       reported.current.add(key);
       streamed.current.delete(t.id);
+      const owner = turns.find((x) => x.id === t.searchId);
       void fetch('/api/history/card', {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ query: t.question, card }),
+        body: JSON.stringify({ query: t.question, card, results: packHistorySources(owner?.search?.results) }),
       }).catch(() => undefined);
     }
   }, [turns]);
@@ -406,7 +461,7 @@ export default function App() {
     clearHistory(localStorage);
     clearTypeaheadClientCache();
     void clearSyncedHistory();
-    setRecents([]);
+    void fetch('/api/history', { method: 'DELETE', credentials: 'same-origin' }).catch(() => undefined);
     setHistRev((n) => n + 1);
     refresh();
     typeahead.close();
@@ -465,7 +520,7 @@ export default function App() {
                           type="button"
                           tabIndex={-1}
                           onMouseDown={(e) => e.preventDefault()}
-                          onClick={() => typeahead.pick(row.text)}
+                          onClick={() => typeahead.pick(row.text, row.source)}
                           className={cn(
                             'flex min-h-11 w-full min-w-0 items-center gap-3 px-4 text-left text-[14px] leading-snug text-foreground/80 hover:bg-foreground/[0.04] hover:text-foreground',
                             i === typeahead.active && 'bg-foreground/[0.04] text-foreground',
@@ -480,30 +535,21 @@ export default function App() {
                 )}
               </form>
               </div>
-              {recents.length > 0 && (
+              {historyItems.length > 0 && (
                 <div className="mt-5 sm:mt-6">
-                  <div className="mb-1.5 flex items-center justify-between gap-2 px-1">
-                    <h2 className="zo-label">Recent</h2>
-                    {hasHistory && (
-                      <button
-                        type="button"
-                        onClick={wipeHistory}
-                        className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl px-3 text-[13px] text-muted-foreground transition-colors hover:bg-foreground/[0.04] hover:text-foreground"
-                      >
-                        Clear history
-                      </button>
-                    )}
+                  <div className="mb-1.5 px-1">
+                    <h2 className="zo-label">History</h2>
                   </div>
-                  <ul className="flex flex-col gap-1">
-                    {recents.slice(0, 3).map((r, i) => (
-                      <li key={r} className={cn(i >= 2 && 'hidden sm:block')}>
+                  <ul className="flex max-h-[40dvh] flex-col gap-1 overflow-y-auto" data-testid="home-history">
+                    {historyItems.map((item) => (
+                      <li key={item.q}>
                         <button
                           type="button"
-                          onClick={() => startSearch(r)}
+                          onClick={() => openHistory(item.q)}
                           className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[14px] leading-snug text-foreground/70 transition-colors hover:bg-foreground/[0.04] hover:text-foreground"
                         >
-                          <RotateCw className="size-4 shrink-0 text-muted-foreground" />
-                          <span className="min-w-0 flex-1 break-words">{r}</span>
+                          <History className="size-4 shrink-0 text-muted-foreground" />
+                          <span className="min-w-0 flex-1 break-words">{item.q}</span>
                         </button>
                       </li>
                     ))}
@@ -516,15 +562,6 @@ export default function App() {
                     <h2 className="zo-label">Try one</h2>
                   </div>
                   <div className="flex shrink-0 items-center">
-                    {hasHistory && recents.length === 0 && (
-                      <button
-                        type="button"
-                        onClick={wipeHistory}
-                        className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl px-3 text-[13px] text-muted-foreground transition-colors hover:bg-foreground/[0.04] hover:text-foreground"
-                      >
-                        Clear history
-                      </button>
-                    )}
                     {shuffleEnabled && (
                       <button
                         type="button"
@@ -640,20 +677,18 @@ export default function App() {
             setInput(q);
             window.dispatchEvent(new CustomEvent('zo-draft', { detail: q }));
           }}
+          onClearHistory={wipeHistory}
+          onReopenHistory={openHistory}
           onOpenSaved={(saved) => {
-            const id = 1;
-            session.restore([{
-              id,
-              kind: 'search',
-              question: saved.query,
-              searchId: id,
-              result: { card: saved.card, followups: [], engine: 'composed', pagesRead: 0, removed: 0, ms: 0 },
-              variants: {},
-              version: 1,
-              filling: false,
-              simple: false,
-              pins: [],
-            }]);
+            openGen.current += 1;
+            if (saved.fromHistory) {
+              touchHistory(localStorage, saved.query);
+              noteDeviceAsk();
+              setHistRev((n) => n + 1);
+            }
+            const cached = saved.fromHistory ? readAnswerCache(saved.query) : undefined;
+            if (cached?.length) session.restore(cached);
+            else session.restore([turnFromHistory(saved.query, saved.card, saved.results)]);
             shown.current = saved.query;
             history.pushState(null, '', `?${new URLSearchParams({ q: saved.query })}`);
             window.scrollTo({ top: 0 });

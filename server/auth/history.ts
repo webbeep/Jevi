@@ -1,3 +1,5 @@
+import { packHistoryPayload, packHistorySources, unpackHistoryPayload } from '../../shared/historyCard.ts';
+import type { AnswerCard } from '../../shared/card.ts';
 import { randomId } from './crypto.ts';
 import { authEnabled, d1 } from './env.ts';
 import { readFacingUsage } from './gate.ts';
@@ -129,13 +131,14 @@ export async function handleHistoryItem(request: Request, env: Env, id: string):
       .bind(id, user.id)
       .first<Row>();
     if (!row) return json({ error: 'Not found' }, 404);
-    let card: unknown = null;
+    let raw: unknown = null;
     try {
-      card = JSON.parse(row.card_json || 'null');
+      raw = JSON.parse(row.card_json || 'null');
     } catch {
-      card = null;
+      raw = null;
     }
-    return json({ id: row.id, query: row.query, kind: row.kind, created_at: row.created_at, card }, 200, { 'cache-control': 'private, no-store' });
+    const unpacked = unpackHistoryPayload(raw);
+    return json({ id: row.id, query: row.query, kind: row.kind, created_at: row.created_at, card: unpacked.card, results: unpacked.results }, 200, { 'cache-control': 'private, no-store' });
   } catch (err) {
     console.error('history get failed', err instanceof Error ? err.name : 'error');
     return json({ error: 'Something went wrong. Please try again.' }, 500);
@@ -148,15 +151,16 @@ export async function handleHistoryCard(request: Request, env: Env, now = new Da
   if (disabled) return disabled;
   const user = await signedUser(request, env);
   if (!user) return json({ need_signin: true }, 401);
-  let body: { query?: unknown; card?: unknown };
+  let body: { query?: unknown; card?: unknown; results?: unknown };
   try {
-    body = (await request.json()) as { query?: unknown; card?: unknown };
+    body = (await request.json()) as { query?: unknown; card?: unknown; results?: unknown };
   } catch {
     return json({ error: 'Invalid JSON body' }, 400);
   }
   const query = typeof body.query === 'string' ? body.query.trim().slice(0, QUERY_MAX) : '';
   if (!query || !body.card || typeof body.card !== 'object') return json({ error: 'Invalid card' }, 400);
-  const cardJson = JSON.stringify(body.card);
+  const results = packHistorySources(Array.isArray(body.results) ? body.results : []);
+  const cardJson = JSON.stringify(packHistoryPayload(body.card as AnswerCard, results));
   if (new TextEncoder().encode(cardJson).length > CARD_MAX) return json({ error: 'Card is too large' }, 413);
   try {
     const since = new Date(now.getTime() - ATTACH_MS).toISOString();
@@ -170,6 +174,82 @@ export async function handleHistoryCard(request: Request, env: Env, now = new Da
     return json({ ok: true, attached: (result.meta?.changes ?? 0) > 0 });
   } catch (err) {
     console.error('history card failed', err instanceof Error ? err.name : 'error');
+    return json({ error: 'Something went wrong. Please try again.' }, 500);
+  }
+}
+
+function parsedCard(raw: string | null | undefined): ReturnType<typeof unpackHistoryPayload> {
+  try {
+    return unpackHistoryPayload(JSON.parse(raw || 'null'));
+  } catch {
+    return { card: null, results: [] };
+  }
+}
+
+/** POST /api/history/:id: opening that row moves it to the front. */
+export async function handleHistoryTouch(request: Request, env: Env, id: string, now = new Date()): Promise<Response> {
+  const disabled = off(env);
+  if (disabled) return disabled;
+  const user = await signedUser(request, env);
+  if (!user) return json({ need_signin: true }, 401);
+  if (!id) return json({ error: 'Not found' }, 404);
+  try {
+    const result = await d1(env)!
+      .prepare(`UPDATE ask_history SET created_at = ?1 WHERE id = ?2 AND user_id = ?3`)
+      .bind(now.toISOString(), id, user.id)
+      .run();
+    return json({ ok: true, moved: (result.meta?.changes ?? 0) > 0 });
+  } catch (err) {
+    console.error('history touch failed', err instanceof Error ? err.name : 'error');
+    return json({ error: 'Something went wrong. Please try again.' }, 500);
+  }
+}
+
+/**
+ * POST /api/history/touch { query }: move that question to the front and return its card.
+ * A miss is `{ moved: false, card: null }` so the client can search instead.
+ */
+export async function handleHistoryTouchQuery(request: Request, env: Env, now = new Date()): Promise<Response> {
+  const disabled = off(env);
+  if (disabled) return disabled;
+  const user = await signedUser(request, env);
+  if (!user) return json({ need_signin: true }, 401);
+  let body: { query?: unknown };
+  try {
+    body = (await request.json()) as { query?: unknown };
+  } catch {
+    return json({ error: 'Invalid JSON body' }, 400);
+  }
+  const query = typeof body.query === 'string' ? body.query.trim().slice(0, QUERY_MAX) : '';
+  if (!query) return json({ error: 'Invalid query' }, 400);
+  try {
+    const db = d1(env)!;
+    const row = await db
+      .prepare(`SELECT id, query, card_json FROM ask_history WHERE user_id = ?1 AND query_hash = ?2 ORDER BY created_at DESC, id DESC LIMIT 1`)
+      .bind(user.id, await hashOf(query))
+      .first<Row>();
+    if (!row) return json({ ok: true, moved: false, card: null, results: [] });
+    const at = now.toISOString();
+    await db.prepare(`UPDATE ask_history SET created_at = ?1 WHERE id = ?2 AND user_id = ?3`).bind(at, row.id, user.id).run();
+    const unpacked = parsedCard(row.card_json);
+    return json({ ok: true, moved: true, id: row.id, query: row.query, created_at: at, card: unpacked.card, results: unpacked.results });
+  } catch (err) {
+    console.error('history touch failed', err instanceof Error ? err.name : 'error');
+    return json({ error: 'Something went wrong. Please try again.' }, 500);
+  }
+}
+
+/** DELETE /api/history: drop this account's ask history. Device history is cleared by the client. */
+export async function handleHistoryDelete(request: Request, env: Env): Promise<Response> {
+  const disabled = off(env);
+  if (disabled) return disabled;
+  const user = await signedUser(request, env);
+  if (!user) return json({ need_signin: true }, 401);
+  try {
+    await d1(env)!.prepare(`DELETE FROM ask_history WHERE user_id = ?1`).bind(user.id).run();
+    return json({ ok: true });
+  } catch (err) {
+    console.error('history delete failed', err instanceof Error ? err.name : 'error');
     return json({ error: 'Something went wrong. Please try again.' }, 500);
   }
 }

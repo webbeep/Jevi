@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Trash2 } from 'lucide-react';
 import type { AnswerCard } from '../../shared/card';
+import type { HistorySource } from '../../shared/historyCard';
 import { COPY } from './copy';
 import { track } from './events';
 import { CloseButton, Panel, useBackToClose } from './panel';
@@ -11,6 +12,10 @@ export interface OpenedSave {
   query: string;
   title: string;
   card: AnswerCard;
+  /** Search rows a video or citation on this card points at. */
+  results?: HistorySource[];
+  /** Set when this came from ask history, so opening it moves that question to the front. */
+  fromHistory?: boolean;
 }
 
 interface SaveRow {

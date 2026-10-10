@@ -17,6 +17,7 @@ import {
   personalizedStarters,
   readHistory,
   recordAsk,
+  touchHistory,
   type Storage,
 } from '../shared/personal.ts';
 import { PASSING_TEXTS } from '../shared/starters.ts';
@@ -130,6 +131,22 @@ test('history is newest-first, deduped, and capped at 50', () => {
   assert.equal(history.length, 50);
   assert.equal(history[0].q, 'how to task 59');
   assert.equal(storage.getItem(ASKCOUNT_KEY), '62');
+});
+
+test('opening an older question moves it to the front and does not count a new ask', () => {
+  const storage = memory();
+  recordAsk(storage, 'older', 1);
+  recordAsk(storage, 'newer', 2);
+  const count = storage.getItem(ASKCOUNT_KEY);
+  const next = touchHistory(storage, 'Older', 9);
+  assert.equal(next[0]?.q, 'older');
+  assert.equal(next[0]?.t, 9);
+  assert.equal(next[1]?.q, 'newer');
+  assert.equal(storage.getItem(ASKCOUNT_KEY), count);
+
+  touchHistory(storage, 'brand new', 10);
+  assert.equal(readHistory(storage)[0]?.q, 'brand new');
+  assert.equal(storage.getItem(ASKCOUNT_KEY), String(Number(count) + 1));
 });
 
 test('clearHistory wipes history, starters, related, ask count, recents, and the typeahead key', () => {

@@ -53,6 +53,7 @@ export const COPY = {
   today: 'Today',
   resets: (time: string) => `Resets ${time}`,
   historyTitle: 'History',
+  clearHistory: 'Clear history',
   emptyHistory: 'No questions yet.',
   historyError: "Couldn't load history.",
 } as const;

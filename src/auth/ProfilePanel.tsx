@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { AnswerCard } from '../../shared/card';
+import { packHistorySources } from '../../shared/historyCard';
 import { COPY } from './copy';
 import { CloseButton, Panel, useBackToClose } from './panel';
 import type { OpenedSave } from './SavedPanel';
@@ -55,12 +56,15 @@ export default function ProfilePanel({
   open,
   onOpenChange,
   onOpen,
-  onDraft,
+  onReopen,
+  onClear,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onOpen: (saved: OpenedSave) => void;
-  onDraft: (question: string) => void;
+  /** No stored card: reopen from this device's copy, or search if there isn't one. */
+  onReopen: (question: string) => void;
+  onClear: () => void;
 }) {
   const [usage, setUsage] = useState<Usage | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
@@ -105,11 +109,25 @@ export default function ProfilePanel({
     setOpening(row.id);
     try {
       const res = await fetch(`/api/history/${encodeURIComponent(row.id)}`, { credentials: 'same-origin' });
-      const data = res.ok ? ((await res.json()) as { query?: unknown; card?: AnswerCard | null }) : null;
-      if (data?.card && typeof data.card === 'object') onOpen({ id: row.id, query: row.query, title: data.card.title || row.query, card: data.card });
-      else onDraft(row.query);
+      const data = res.ok ? ((await res.json()) as { query?: unknown; card?: AnswerCard | null; results?: unknown }) : null;
+      if (data?.card && typeof data.card === 'object' && Array.isArray(data.card.body)) {
+        const now = new Date().toISOString();
+        setRows((prev) => {
+          const hit = prev.find((item) => item.id === row.id) ?? row;
+          return [{ ...hit, created_at: now }, ...prev.filter((item) => item.id !== row.id)];
+        });
+        void fetch(`/api/history/${encodeURIComponent(row.id)}`, { method: 'POST', credentials: 'same-origin' }).catch(() => undefined);
+        onOpen({
+          id: row.id,
+          query: row.query,
+          title: data.card.title || row.query,
+          card: data.card,
+          results: packHistorySources(Array.isArray(data.results) ? data.results : []),
+          fromHistory: true,
+        });
+      } else onReopen(row.query);
     } catch {
-      onDraft(row.query);
+      onReopen(row.query);
     } finally {
       setOpening(null);
     }
@@ -130,7 +148,22 @@ export default function ProfilePanel({
         </div>
         <span className="min-h-4 text-xs text-muted-foreground">{usage?.resetAt ? COPY.resets(clock(usage.resetAt)) : ''}</span>
       </section>
-      <h3 className="px-1 pt-1 text-xs font-medium text-muted-foreground">{COPY.historyTitle}</h3>
+      <div className="flex items-center justify-between gap-2 px-1 pt-1">
+        <h3 className="text-xs font-medium text-muted-foreground">{COPY.historyTitle}</h3>
+        <button
+          type="button"
+          onClick={() => {
+            setRows([]);
+            setNext(null);
+            setError(null);
+            onClear();
+          }}
+          className="inline-flex min-h-11 items-center rounded-lg px-2 text-xs text-muted-foreground hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          data-testid="clear-history"
+        >
+          {COPY.clearHistory}
+        </button>
+      </div>
       {error && <p className="px-1 text-[13px] leading-snug text-muted-foreground">{error}</p>}
       {!loading && rows.length === 0 && !error && <p className="px-1 text-sm text-muted-foreground">{COPY.emptyHistory}</p>}
       <ul className="-mt-1 flex max-h-[52dvh] flex-col gap-0.5 overflow-y-auto sm:max-h-none sm:min-h-0 sm:flex-1" data-testid="profile-history">

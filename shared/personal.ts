@@ -108,6 +108,21 @@ export function recordAsk(storage: Storage, q: string, now = Date.now()): Histor
   return next;
 }
 
+/**
+ * Opening a past question moves it to the front. It does not count as a new ask.
+ * A question that is not in the list yet is recorded.
+ */
+export function touchHistory(storage: Storage, q: string, now = Date.now()): HistoryItem[] {
+  const query = q.trim();
+  if (!query) return readHistory(storage);
+  const prev = readHistory(storage);
+  const hit = prev.find((h) => h.q.toLowerCase() === query.toLowerCase());
+  if (!hit) return recordAsk(storage, query, now);
+  const next = [{ ...hit, t: now }, ...prev.filter((h) => h !== hit)];
+  writeRaw(storage, HISTORY_KEY, JSON.stringify(next));
+  return next;
+}
+
 function kindCategory(kind: StarterKind): Category {
   switch (kind) {
     case 'ranked': return 'shopping';

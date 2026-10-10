@@ -95,14 +95,22 @@ export function AuthHeader() {
 export function AuthRoot({
   onDraft,
   onOpenSaved,
+  onClearHistory,
+  onReopenHistory,
 }: {
   onDraft: (question: string) => void;
   onOpenSaved: (saved: OpenedSave) => void;
+  onClearHistory: () => void;
+  onReopenHistory: (question: string) => void;
 }) {
   const draftRef = useRef(onDraft);
   const openRef = useRef(onOpenSaved);
+  const clearRef = useRef(onClearHistory);
+  const reopenRef = useRef(onReopenHistory);
   draftRef.current = onDraft;
   openRef.current = onOpenSaved;
+  clearRef.current = onClearHistory;
+  reopenRef.current = onReopenHistory;
   const auth = useAuth();
   const [sheet, setSheet] = useState({ open: false, waiting: false });
   const [savesOpen, setSavesOpen] = useState(false);
@@ -158,10 +166,11 @@ export function AuthRoot({
               setProfileOpen(false);
               openRef.current(saved);
             }}
-            onDraft={(q) => {
+            onReopen={(q) => {
               setProfileOpen(false);
-              draftRef.current(q);
+              reopenRef.current(q);
             }}
+            onClear={() => clearRef.current()}
           />
         </Suspense>
       )}

@@ -7,6 +7,7 @@ import {
   matchLocal,
   mergeSuggestions,
   normalizePrefix,
+  type TypeaheadSuggestion,
 } from '../shared/typeahead';
 
 const FALLBACK = STARTERS.map((s) => s.text);
@@ -19,7 +20,7 @@ export function clearTypeaheadClientCache(): void {
   clientCache.clear();
 }
 
-export function useTypeahead(input: string, onFill: (text: string) => void, revision: number) {
+export function useTypeahead(input: string, onFill: (text: string, source?: TypeaheadSuggestion['source']) => void, revision: number) {
   const [remote, setRemote] = useState<string[]>([]);
   const [dismissed, setDismissed] = useState(false);
   const [active, setActive] = useState(-1);
@@ -94,9 +95,9 @@ export function useTypeahead(input: string, onFill: (text: string) => void, revi
     setActive(-1);
   };
 
-  const pick = (text: string) => {
+  const pick = (text: string, source?: TypeaheadSuggestion['source']) => {
     skipOpen.current = true;
-    onFillRef.current(text);
+    onFillRef.current(text, source);
     setDismissed(true);
     setActive(-1);
   };
@@ -124,7 +125,7 @@ export function useTypeahead(input: string, onFill: (text: string) => void, revi
     }
     if (e.key === 'Enter' && open && active >= 0 && rows[active]) {
       e.preventDefault();
-      pick(rows[active].text);
+      pick(rows[active].text, rows[active].source);
     }
   };
 
