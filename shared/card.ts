@@ -74,7 +74,7 @@ export type CardNode =
   | { type: 'reveal'; items: { front: string; back: string }[] }
   | { type: 'citations'; refs: number[] }
   // Placeholder rendered while content is on its way
-  | { type: 'slot'; hint: string; shape?: 'hero' | 'line' | 'block' | 'tile' | 'chart' | 'row' };
+  | { type: 'slot'; hint: string; shape?: 'hero' | 'line' | 'block' | 'tile' | 'chart' | 'row' | 'table' | 'steps' | 'proscons' | 'timeline'; cols?: number; rows?: number };
 
 export type NodeType = CardNode['type'];
 
@@ -150,4 +150,16 @@ export interface CardResponse {
   degradedReason?: string;
   /** "Which one?" options the answer came with, when a name was ambiguous. */
   choices?: Disambiguation;
+}
+
+/** Drops a clause written twice at the start ("Which Is Better Value: Which Is Better Value: …"). */
+export function withoutRepeatedLead(text: string): string {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  const norm = (w: string) => w.toLowerCase().replace(/[:?.!,]+$/g, '');
+  for (let n = 3; n <= Math.floor(words.length / 2); n++) {
+    const lead = words.slice(0, n).map(norm).join(' ');
+    const again = words.slice(n, n * 2).map(norm).join(' ');
+    if (lead && lead === again) return words.slice(n).join(' ');
+  }
+  return text.trim();
 }

@@ -1,4 +1,4 @@
-import type { AnswerCard, CardNode, Tone } from '../shared/card';
+import { withoutRepeatedLead, type AnswerCard, type CardNode, type Tone } from '../shared/card';
 import { inferSeats, priceAsOf, sameSource, type BillingBasis, type Price, type PricePeriod, type PriceUnit } from '../shared/pricing';
 
 const TONES: Tone[] = ['default', 'muted', 'primary', 'positive', 'negative', 'warning'];
@@ -325,7 +325,7 @@ function sanitizePricing(n: Raw, ctx?: { sources?: PriceSource[]; query?: string
 export function sanitizeCard(raw: unknown, imageCount: number, fallbackTitle: string): AnswerCard {
   const c = (raw && typeof raw === 'object' ? raw : {}) as Raw;
   return {
-    title: str(c.title, 120) ?? fallbackTitle,
+    title: withoutRepeatedLead(str(c.title, 120) ?? fallbackTitle),
     subtitle: str(c.subtitle, 160),
     icon: icon(c.icon),
     accent: tone(c.accent),

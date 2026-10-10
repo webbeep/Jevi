@@ -1,11 +1,31 @@
-import type { AnswerCard, CardNode, CardPattern } from '../shared/card';
+import { withoutRepeatedLead, type AnswerCard, type CardNode, type CardPattern } from '../shared/card';
 import { isBriefingQuery } from '../shared/recency';
 
 interface PatternDef extends CardPattern {
   skeleton: CardNode[];
 }
 
-const slot = (hint: string, shape: Extract<CardNode, { type: 'slot' }>['shape'] = 'line'): CardNode => ({ type: 'slot', hint, shape });
+const slot = (hint: string, shape: Extract<CardNode, { type: 'slot' }>['shape'] = 'line', size?: { cols?: number; rows?: number }): CardNode => ({ type: 'slot', hint, shape, ...size });
+
+/** How many sides a comparison names ("renting vs buying" is 2). Two when it doesn't say. */
+export function compareCount(query: string): 2 | 3 | 4 {
+  const stripped = query.replace(/^(?:which is better(?: value)?|compare)\s*:\s*/i, '').trim();
+  const parts = stripped.split(/\s+(?:vs\.?|versus)\s+/i).map((p) => p.trim()).filter(Boolean);
+  if (parts.length >= 4) return 4;
+  if (parts.length === 3) return 3;
+  return 2;
+}
+
+/** Tiles for each side, then a table with one column per side plus the factor column. */
+function compareSkeleton(query: string): CardNode[] {
+  const n = compareCount(query);
+  const tiles = Array.from({ length: n }, (_, i) => slot(`option ${i + 1}`, 'tile'));
+  return [
+    grid(n, ...tiles),
+    slot('comparison table: one row per factor, first column the factor, then one column per option', 'table', { cols: n + 1, rows: 4 }),
+    slot('verdict', 'line'),
+  ];
+}
 const row = (...children: CardNode[]): CardNode => ({ type: 'stack', direction: 'row', gap: 'md', children });
 const grid = (cols: 2 | 3 | 4, ...children: CardNode[]): CardNode => ({ type: 'grid', cols, gap: 'md', children });
 const section = (title: string, ...children: CardNode[]): CardNode => ({ type: 'section', title, children });
@@ -37,7 +57,7 @@ export const PATTERNS: PatternDef[] = [
     id: 'compare',
     label: 'Side by side',
     description: 'Two or more options compared attribute by attribute, ending with a verdict',
-    skeleton: [grid(2, slot('option A', 'tile'), slot('option B', 'tile')), slot('comparison table', 'block'), slot('verdict', 'line')],
+    skeleton: compareSkeleton(''),
   },
   {
     id: 'ranked',
@@ -49,13 +69,13 @@ export const PATTERNS: PatternDef[] = [
     id: 'steps',
     label: 'Step by step',
     description: 'How to do or make something: requirements, ordered steps and tips',
-    skeleton: [row(slot('time or difficulty', 'tile'), slot('requirements', 'tile'), slot('result', 'tile')), slot('steps', 'block'), slot('tip', 'line')],
+    skeleton: [row(slot('time or difficulty', 'tile'), slot('requirements', 'tile'), slot('result', 'tile')), slot('steps', 'steps', { rows: 4 }), slot('tip', 'line')],
   },
   {
     id: 'timeline',
     label: 'Timeline',
     description: 'A story that unfolds over time: history, a sequence of events or how something developed',
-    skeleton: [slot('overview', 'block'), slot('timeline', 'block'), slot('why it matters', 'line')],
+    skeleton: [slot('overview', 'block'), slot('timeline', 'timeline', { rows: 4 }), slot('why it matters', 'line')],
   },
   {
     id: 'dataset',
@@ -103,7 +123,7 @@ export const PATTERNS: PatternDef[] = [
     id: 'decision',
     label: 'Decision helper',
     description: 'Helping decide whether to do or choose something: pros and cons, key considerations and a verdict',
-    skeleton: [slot('verdict', 'hero'), slot('pros and cons', 'block'), slot('considerations', 'block')],
+    skeleton: [slot('verdict', 'hero'), slot('pros and cons', 'proscons'), slot('considerations', 'block')],
   },
 ];
 
@@ -113,8 +133,14 @@ export function patternById(id: string): PatternDef {
   return PATTERNS.find((p) => p.id === id) ?? PATTERNS[1];
 }
 
+/** The skeleton for this ask. A comparison grows a column and a tile for each side it names. */
+export function patternSkeleton(id: string, query = ''): CardNode[] {
+  if (id === 'compare') return compareSkeleton(query);
+  return patternById(id).skeleton;
+}
+
 export function skeletonCard(query: string, patternId: string): AnswerCard {
-  return { title: query, subtitle: patternById(patternId).label, body: patternById(patternId).skeleton };
+  return { title: withoutRepeatedLead(query), subtitle: patternById(patternId).label, body: patternSkeleton(patternId, query) };
 }
 
 /** Layouts where the answer is something produced for the person rather than facts from the web. */

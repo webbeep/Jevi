@@ -1,4 +1,4 @@
-import type { AnswerCard, CardNode, FollowupContext, ImageCredit, LayoutPlan } from '../shared/card';
+import { withoutRepeatedLead, type AnswerCard, type CardNode, type FollowupContext, type ImageCredit, type LayoutPlan } from '../shared/card';
 import { knowledgeMatches } from '../shared/relevance';
 import type { SearchResponse } from '../shared/types';
 import { hasLlm, llmLines } from './llm';
@@ -7,7 +7,7 @@ import { Grounding, groundNodes } from './ground';
 import { PictureResolver, type RowImagePlan } from './pictures';
 import { Polisher } from './polish';
 import type { PageText } from './pages';
-import { patternById } from './patterns';
+import { patternById, patternSkeleton } from './patterns';
 import { sanitizeCard, sanitizeNodes, type PriceSource } from './sanitize';
 import { clip, type Env } from './util';
 import { VerdictSession } from './verdict';
@@ -382,7 +382,7 @@ export async function designStream(req: DesignRequest, env: Env, on: DesignEvent
   const pictures = new PictureResolver(env, req.search.images, on.credit, req.query, undefined, req.rowImages && { ...req.rowImages, results: req.search.results });
   const emitNode = bindVerdict(req, on.node);
   const base = req.followup?.mode === 'refine' && req.followup.baseCard ? `CURRENT CARD\n${JSON.stringify(req.followup.baseCard).slice(0, 12000)}\n\n` : '';
-  const user = `${sourcesBlock(req.search, req.pages)}\n\n${base}SKELETON\n${JSON.stringify(patternById(req.pattern).skeleton)}\n\nTASK\n${taskBlock(req)}\n\nQUERY: ${req.followup?.question ?? req.query}`;
+  const user = `${sourcesBlock(req.search, req.pages)}\n\n${base}SKELETON\n${JSON.stringify(patternSkeleton(req.pattern, req.followup?.question ?? req.query))}\n\nTASK\n${taskBlock(req)}\n\nQUERY: ${req.followup?.question ?? req.query}`;
 
   let headSent = false;
   let index = 0;
@@ -448,12 +448,13 @@ const SMALL_WORDS = new Set(['a', 'an', 'and', 'as', 'at', 'by', 'for', 'in', 'o
 
 /** "symptoms of vitamin d deficiency" → "Symptoms of Vitamin D Deficiency", for when the model sends no title. */
 function titleCase(q: string): string {
-  return q
+  const cased = q
     .trim()
     .replace(/[?.!]+$/, '')
     .split(/\s+/)
     .map((w, i) => (i > 0 && SMALL_WORDS.has(w.toLowerCase()) ? w.toLowerCase() : w === w.toLowerCase() ? w[0].toUpperCase() + w.slice(1) : w))
     .join(' ');
+  return withoutRepeatedLead(cased);
 }
 
 /** Plain-language summary of what a skeleton region is for, from its slot hints. */
@@ -482,7 +483,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
   if (!hasLlm(env)) return extractive(req, on);
 
   const lead = videoLead(req);
-  const skeleton = patternById(req.pattern).skeleton;
+  const skeleton = patternSkeleton(req.pattern, req.followup?.question ?? req.query);
   const regions = lead ? [lead, ...skeleton] : skeleton;
   on.layout(regions);
   const sources = priceSources(req);
@@ -498,7 +499,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
 
   let headSentAny = false;
   const regionCall = (region: CardNode, i: number, offset: number) => {
-    const user = `${shared}\n- YOU DESIGN R${i + 1}: ${JSON.stringify(region)}. The person is already looking at this arrangement, so keep it: a grid stays that grid, a stack stays that stack, a section keeps its title. Replace each slot with the component its hint describes (a hero slot becomes a hero or stat, a tile stays a tile, a block becomes text, keyvalue, list or steps).${i === 0 ? ' R1 is the lead: it must answer the question at a glance.' : ''}\n- Output exactly one line: one JSON node.\n\nQUERY: ${query}`;
+    const user = `${shared}\n- YOU DESIGN R${i + 1}: ${JSON.stringify(region)}. The person is already looking at this arrangement, so keep it: a grid stays that grid, a stack stays that stack, a section keeps its title. Replace each slot with the component its shape names: a tile stays a tile, a table becomes a table with the same number of columns, steps stay steps, proscons stays proscons, a timeline stays a timeline, a hero becomes a hero or stat, a block becomes text, keyvalue or list.${i === 0 ? ' R1 is the lead: it must answer the question at a glance.' : ''}\n- Output exactly one line: one JSON node.\n\nQUERY: ${query}`;
     let done = false;
     return llmLines(env, SYSTEM_REGION, user, 1200, (line) => {
       if (done) return;

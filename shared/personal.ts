@@ -2,6 +2,7 @@
  * On-device personalization. Storage is injected so this stays unit-testable
  * without localStorage or the DOM.
  */
+import { withoutRepeatedLead } from './card.ts';
 import {
   PASSING_STARTERS,
   STARTERS,
@@ -187,7 +188,7 @@ function ideasFor(item: HistoryItem): { text: string; icon: string }[] {
     case 'shopping': return [{ text: `compare top picks for ${ask}`, icon: 'scale' }];
     case 'howto': return [{ text: `${ask} — common mistakes`, icon: 'list-checks' }];
     case 'decision': return [{ text: `pros and cons: ${ask}`, icon: 'scale' }];
-    case 'compare': return [{ text: `which is better value: ${ask}`, icon: 'scale' }];
+    case 'compare': return [{ text: withoutRepeatedLead(/^(which is better|compare)\b/i.test(ask) ? ask : `which is better value: ${ask}`), icon: 'scale' }];
     case 'plan': return [{ text: `${ask}: checklist`, icon: 'list-checks' }];
     case 'other': break;
     default: {

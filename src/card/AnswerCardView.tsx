@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ChevronRight, Copy, Loader2, MoreHorizontal, RefreshCw, RotateCw, Share2 } from 'lucide-react';
-import type { AnswerCard, CardNode, CardPattern } from '../../shared/card';
+import { withoutRepeatedLead, type AnswerCard, type CardNode, type CardPattern } from '../../shared/card';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -116,7 +116,7 @@ export function AnswerCardView({ card, version, filling, streaming, status, patt
           {filling && !card.icon ? <LogoMark className="size-4 animate-pulse" /> : <Icon name={card.icon} fallback="layout-grid" className="size-4 text-foreground/80 sm:size-[18px]" />}
         </div>
         <div className="min-w-0 flex-1 self-center">
-          <h2 className={cn('text-balance text-[16.5px] font-semibold leading-[1.3] tracking-[-0.02em] sm:text-[17px]', provisional && 'line-clamp-1')}>{card.title}</h2>
+          <h2 className={cn('text-balance text-[16.5px] font-semibold leading-[1.3] tracking-[-0.02em] sm:text-[17px]', provisional && 'line-clamp-1')}>{withoutRepeatedLead(card.title)}</h2>
           {card.subtitle && (
             <p className={cn('mt-0.5 text-pretty text-[13px] leading-snug text-muted-foreground', provisional && 'line-clamp-1')}>{card.subtitle}</p>
           )}
