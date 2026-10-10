@@ -152,7 +152,7 @@ const TAIL = new Set([
   'age', 'height', 'wife', 'husband', 'girlfriend', 'boyfriend', 'schedule', 'score', 'scores', 'highlights', 'trade',
   'rumors', 'rumours', 'dropping', 'falling', 'rising', 'up', 'down', 'crashing', 'surging', 'drop', 'fall', 'rise',
   'jump', 'jumping', 'explained', 'meaning', 'profile', 'bio', 'career', 'record', 'status', 'return', 'game', 'games',
-  'so', 'going', 'doing', 'today?',
+  'so', 'going', 'doing', 'today?', 'yesterday', 'tomorrow', 'recap', 'recaps',
 ]);
 const SPORTS = /\b(injur\w*|stats?|games?|score[sd]?|trade[sd]?|contract|season|playoffs?|nba|nfl|mlb|nhl|wnba|draft|roster|highlights)\b/i;
 

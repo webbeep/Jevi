@@ -64,6 +64,7 @@ test('subjectOf pulls tickers, sports names, people, and general topics', () => 
   assert.deepEqual(subjectOf('jaylen brown injuries'), { subject: 'jaylen brown', topic: 'injuries', kind: 'sports' });
   assert.equal(subjectOf('who is Ed chu').kind, 'person');
   assert.equal(subjectOf('best cheap headphones').kind, 'general');
+  assert.equal(subjectOf('nba game highlights yesterday').subject, 'nba');
 });
 
 test('phone suggestions use a different recent question per row, not only the last two', () => {
