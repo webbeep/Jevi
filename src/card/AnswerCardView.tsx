@@ -15,7 +15,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Skeleton } from '@/components/ui/skeleton';
 import { cardPlainText } from '../../shared/cardText';
 import { tickerBody } from '../../shared/tickerNotes';
 import { citedRefs } from '../library';
@@ -26,7 +25,7 @@ import { Icon } from './Icon';
 import { Nodes } from './render';
 import { CardTitle } from './primitives';
 
-export function AnswerCardView({ card, version, filling, streaming, status, pattern, alternatives, onPattern, simple, onSimple, onRegenerate, onRetry, toolbar, provisional = false, trail }: {
+export function AnswerCardView({ card, version, filling, streaming, status, pattern, alternatives, onPattern, simple, onSimple, onRegenerate, onRetry, toolbar, provisional = false, trail, revealLayout = false }: {
   card: AnswerCard;
   /** Changes whenever a fresh design starts, replaying the entrance animation. */
   version: string;
@@ -45,8 +44,10 @@ export function AnswerCardView({ card, version, filling, streaming, status, patt
   toolbar?: ReactNode;
   /** The title is still the question / plan skeleton, so the header keeps a stable height. */
   provisional?: boolean;
-  /** Shown in place of the body for the whole wait: the sources and the step being worked on. */
+  /** Shown in place of the body while the searches and their results are still arriving. */
   trail?: ReactNode;
+  /** The chosen layout is on screen and the answer has not been written yet, so its pieces animate in. */
+  revealLayout?: boolean;
 }) {
   const { results, onSources } = useCard();
   const [toast, setToast] = useState<string | null>(null);
@@ -92,9 +93,7 @@ export function AnswerCardView({ card, version, filling, streaming, status, patt
         </div>
         <div className="min-w-0 flex-1 self-center">
           <h2 className={cn('text-balance text-[16.5px] font-semibold leading-[1.3] tracking-[-0.02em] sm:text-[17px]', provisional && 'line-clamp-1')}>{card.title}</h2>
-          {filling && !card.subtitle && !trail ? (
-            <div aria-hidden className="mt-0.5 flex h-[1.375em] items-center text-[13px]"><Skeleton className="h-3 w-32" /></div>
-          ) : card.subtitle && (
+          {card.subtitle && (
             <p className={cn('mt-0.5 text-pretty text-[13px] leading-snug text-muted-foreground', provisional && 'line-clamp-1')}>{card.subtitle}</p>
           )}
         </div>
@@ -138,7 +137,7 @@ export function AnswerCardView({ card, version, filling, streaming, status, patt
 
       <div className={cn('px-4 pb-5 pt-3.5 transition-[opacity,filter] duration-300 sm:px-6 sm:pb-6 sm:pt-4', status && !streaming && 'pointer-events-none opacity-50 blur-[1px]', cited.length && 'pb-4 sm:pb-5')}>
         <CardTitle.Provider value={card.title}>
-          {trail ?? <Nodes key={version} nodes={body} className="gap-5" stagger={!streaming} />}
+          {trail ?? <Nodes key={version} nodes={body} className="gap-5" stagger={revealLayout || !streaming} />}
         </CardTitle.Provider>
       </div>
 

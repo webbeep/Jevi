@@ -890,30 +890,28 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
     // real layout (`regions`) once it is known and stay neutral until then.
     const skeleton = { title: turn.question, body: LOADING };
     const live = turn.live;
+    const layoutReady = !!live?.regions.length && !answerStarted;
     let base: AnswerCard;
-    if (live && (streaming || offlinePartial)) {
+    // The chosen layout animates in once it exists and the answer is not written yet. Before that the
+    // body is the searches and their results (the trail), never a generic skeleton.
+    if (layoutReady) base = { ...skeleton, ...live?.head, body: live?.regions ?? [] };
+    else if (live && (streaming || offlinePartial)) {
       const fillingNow = offlinePartial ? false : turn.filling;
       base = { ...skeleton, ...live.head, body: liveBody(live, fillingNow) };
     } else if (turn.result) base = turn.result.card;
-    else base = { ...skeleton, ...live?.head, body: live?.regions.length ? live.regions : skeleton.body };
+    else base = { ...skeleton, ...live?.head, body: [] };
     if (!turn.result && !live?.head && turn.kind !== 'search') base = { ...base, title: turn.question };
     return turn.pins.length ? { ...base, body: [...base.body, { type: 'section', title: 'Pinned by you', icon: 'pin', children: turn.pins }] } : base;
-  }, [streaming, offlinePartial, turn.live, turn.result, turn.question, turn.kind, turn.pins, turn.filling]);
+  }, [streaming, offlinePartial, answerStarted, turn.live, turn.result, turn.question, turn.kind, turn.pins, turn.filling]);
 
   // The header is showing the question / plan skeleton, not the final title.
   const provisional = !turn.result && !turn.live?.head;
-  // The whole wait, including while the layout is decided and the answer is written, shows the research
-  // itself. Placeholder blocks only stood in for that work.
-  const waiting = turn.filling && !turn.result && !turn.offline && !turn.error && !answerStarted;
-  const trail = waiting ? (
-    <ResearchTrail
-      question={turn.question}
-      intent={turn.intent}
-      peek={turn.peek}
-      search={turn.search}
-      designing={turn.designing}
-      writing={!!turn.thinking || !!turn.designing || !!turn.live?.head || !!turn.live?.regions.length}
-    />
+  // Until the layout is chosen, a search shows its queries and then the sources as they arrive.
+  // Once the layout exists and the answer is still being written, the card shows that layout instead.
+  const searching = turn.kind === 'search' || !!turn.peek?.length || !!turn.search || !!turn.intent?.queries?.length;
+  const waiting = turn.filling && !turn.result && !turn.offline && !turn.error && !answerStarted && !turn.live?.regions.length;
+  const trail = waiting && searching ? (
+    <ResearchTrail question={turn.question} intent={turn.intent} peek={turn.peek} search={turn.search} />
   ) : undefined;
 
   const credits = useMemo(() => {
@@ -1013,6 +1011,7 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
               toolbar={!turn.filling && !offlinePartial && turn.result ? <SaveButton query={turn.question} title={card.title} card={card} /> : undefined}
               provisional={provisional}
               trail={trail}
+              revealLayout={!!turn.live?.regions.length && !answerStarted}
             />
           </CardContext.Provider>}
           {choices && !turn.filling && <WhichOne choices={choices} onPick={(text) => void actions.followup(text, id, 'search')} />}

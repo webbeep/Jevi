@@ -57,8 +57,9 @@ export function Nodes({ nodes, className, stagger = false }: { nodes: CardNode[]
         if (!placeholder) seen[n.type] = (seen[n.type] ?? 0) + 1;
         const key = placeholder ? `placeholder-${i}-${real}` : `${n.type}-${seen[n.type]}`;
         if (!placeholder) real += 1;
+        const enter = !placeholder || stagger;
         return (
-          <div key={key} className={cn('min-w-0', !placeholder && 'animate-in fade-in slide-in-from-bottom-2 fill-mode-backwards duration-500')} style={stagger ? { animationDelay: `${i * 70}ms` } : undefined}>
+          <div key={key} className={cn('min-w-0', enter && 'animate-in fade-in slide-in-from-bottom-2 fill-mode-backwards duration-500')} style={enter && stagger ? { animationDelay: `${i * 90}ms` } : undefined}>
             <NodeBoundary>
               <NodeView node={n} />
             </NodeBoundary>

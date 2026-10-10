@@ -1,89 +1,62 @@
-import type { ReactNode } from 'react';
-import { Check, Search } from 'lucide-react';
+import { Search } from 'lucide-react';
 import type { SearchResponse } from '../../shared/types';
 import type { PeekRow } from '../sse';
 import { favicon } from '../Sources';
-import { cn } from '@/lib/utils';
-
-type Stage = 'understand' | 'search' | 'read' | 'write';
-const ORDER: Stage[] = ['understand', 'search', 'read', 'write'];
 
 const shortDomain = (d: string) => d.replace(/^(www|en|m)\./, '');
-const SHOWN_ROWS = 5;
+/** The list grows as results arrive, and stops adding once it would take over the card. */
+const MAX_ROWS = 8;
 
 /**
- * What the wait is actually doing: the question as understood, the searches and the sources as they
- * land, the reading, then the writing. It stays up until the answer itself arrives, so the wait is
- * real progress rather than a flashing placeholder.
+ * The wait before a layout exists, inside the card: first the searches themselves ("Searching for"
+ * the question and its expanded queries), then the sources, each new one animating onto the list.
  */
-export function ResearchTrail({ question, intent, peek, search, designing, writing }: {
+export function ResearchTrail({ question, intent, peek, search }: {
   question: string;
   intent?: { intent: string; queries: string[] };
   peek?: PeekRow[];
   search?: SearchResponse;
-  designing?: { pagesRead: number };
-  /** The answer is being written: sources stay on screen and the active step moves to writing. */
-  writing?: boolean;
 }) {
-  // Rows already on screen from the first look keep their place; the full search only adds after them.
-  const first = peek ?? [];
-  const shown = new Set(first.map((r) => r.url));
-  const rows: PeekRow[] = [...first, ...(search?.results ?? []).filter((r) => !shown.has(r.url))];
-  const researched = !!intent || !!peek?.length || !!search || !!designing;
-  const stage: Stage = writing || designing ? 'write' : search ? 'read' : researched ? 'search' : 'understand';
-  const at = ORDER.indexOf(stage);
-  const state = (s: Stage) => (ORDER.indexOf(s) < at ? 'done' : s === stage ? 'active' : 'todo');
-  const queries = [question, ...(intent?.queries ?? [])].filter((q, i, all) => all.findIndex((x) => x.toLowerCase() === q.toLowerCase()) === i).slice(0, 3);
-  const read = designing?.pagesRead ?? search?.results.filter((r) => r.content).length ?? 0;
-  const count = search?.results.length ?? 0;
+  const queries = [question, ...(intent?.queries ?? [])]
+    .map((q) => q.trim())
+    .filter((q, i, all) => q && all.findIndex((x) => x.toLowerCase() === q.toLowerCase()) === i)
+    .slice(0, 4);
+  const seen = new Set<string>();
+  const rows: PeekRow[] = [];
+  for (const row of [...(peek ?? []), ...(search?.results ?? [])]) {
+    if (!row.url || seen.has(row.url)) continue;
+    seen.add(row.url);
+    rows.push(row);
+    if (rows.length === MAX_ROWS) break;
+  }
+  const searching = rows.length === 0;
 
   return (
-    <ol data-testid="research-trail" aria-live="polite" className="relative space-y-3.5 text-[13px]">
-      <Step state={state('understand')} label={intent ? 'Understood' : researched ? 'Understanding the question' : 'Thinking it through'}>
-        {intent?.intent && <p className="text-pretty leading-snug text-muted-foreground animate-in fade-in">{intent.intent}</p>}
-      </Step>
-      {researched && at >= 1 && (
-        <Step state={state('search')} label={count ? `Found ${count} sources` : 'Searching the web'}>
-          <div className="flex flex-wrap gap-1.5">
-            {queries.map((q, i) => (
-              <span key={q} style={{ animationDelay: `${i * 90}ms` }} className="inline-flex max-w-full items-center gap-1 rounded-full bg-foreground/[0.05] px-2.5 py-1 text-[12px] text-muted-foreground animate-in fade-in slide-in-from-bottom-1 fill-mode-both">
-                <Search className="size-3 shrink-0" aria-hidden />
-                <span className="truncate">{q}</span>
-              </span>
-            ))}
-          </div>
-          {rows.length > 0 && (
-            <ul className="mt-2 space-y-1">
-              {rows.slice(0, SHOWN_ROWS).map((r, i) => (
-                <li key={r.url} style={{ animationDelay: `${i * 110}ms` }} className="animate-in fade-in slide-in-from-left-1 fill-mode-both duration-300">
-                  <span style={{ animationDelay: `${i * 0.45}s` }} className="zo-read-on flex min-w-0 items-center gap-2 rounded-md px-1.5 py-0.5">
-                    <img src={favicon(r.domain)} alt="" loading="lazy" className="size-3.5 shrink-0 rounded-[3px]" />
-                    <span className="min-w-0 flex-1 truncate">{r.title}</span>
-                    <span className="zo-meta shrink-0">{shortDomain(r.domain)}</span>
-                  </span>
-                </li>
-              ))}
-              {rows.length > SHOWN_ROWS && <li style={{ animationDelay: `${SHOWN_ROWS * 110}ms` }} className="zo-meta pl-5.5 animate-in fade-in fill-mode-both">+{rows.length - SHOWN_ROWS} more</li>}
-            </ul>
-          )}
-        </Step>
-      )}
-      {researched && at >= 2 && <Step state={state('read')} label={read ? `Read ${read} ${read === 1 ? 'page' : 'pages'}` : 'Reading the sources'} />}
-      {at >= 3 && <Step state={state('write')} label="Writing the answer" />}
-    </ol>
-  );
-}
-
-function Step({ state, label, children }: { state: 'done' | 'active' | 'todo'; label: string; children?: ReactNode }) {
-  return (
-    <li className="flex gap-2.5 animate-in fade-in slide-in-from-bottom-1 duration-300">
-      <span aria-hidden className={cn('mt-[3px] flex size-4 shrink-0 items-center justify-center rounded-full', state === 'done' ? 'bg-foreground/10 text-foreground/70' : 'border border-foreground/20')}>
-        {state === 'done' ? <Check className="size-2.5" strokeWidth={3} /> : state === 'active' ? <span className="size-1.5 animate-pulse rounded-full bg-foreground/60" /> : null}
-      </span>
-      <div className="min-w-0 flex-1 space-y-1.5">
-        <p className={cn('font-medium leading-snug', state === 'active' ? 'zo-shimmer-text' : 'text-foreground/80')}>{label}</p>
-        {children}
+    <div data-testid="research-trail" aria-live="polite" className="space-y-3">
+      <div>
+        <p className={searching ? 'zo-shimmer-text text-[13px] font-medium' : 'text-[12.5px] font-medium text-muted-foreground'}>
+          {searching ? 'Searching for' : 'Searched'}
+        </p>
+        <ul className="mt-1.5 space-y-1">
+          {queries.map((q, i) => (
+            <li key={q} style={{ animationDelay: `${i * 80}ms` }} className="flex min-w-0 items-center gap-2 text-[13.5px] leading-snug animate-in fade-in slide-in-from-bottom-1 fill-mode-both duration-300">
+              <Search className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+              <span className="truncate">{q}</span>
+            </li>
+          ))}
+        </ul>
       </div>
-    </li>
+      {rows.length > 0 && (
+        <ul className="divide-y overflow-hidden rounded-xl border">
+          {rows.map((r, i) => (
+            <li key={r.url} style={{ animationDelay: `${Math.min(i, 6) * 50}ms` }} className="flex min-w-0 items-center gap-2.5 px-3 py-2 animate-in fade-in slide-in-from-bottom-2 fill-mode-both duration-300">
+              <img src={favicon(r.domain)} alt="" loading="lazy" className="size-4 shrink-0 rounded-[3px]" />
+              <span className="min-w-0 flex-1 truncate text-[13.5px]">{r.title}</span>
+              <span className="zo-meta shrink-0">{shortDomain(r.domain)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
