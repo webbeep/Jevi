@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ChevronRight, Copy, Loader2, MoreHorizontal, RefreshCw, RotateCw, Share2 } from 'lucide-react';
-import type { AnswerCard, CardPattern } from '../../shared/card';
+import type { AnswerCard, CardNode, CardPattern } from '../../shared/card';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -58,6 +58,30 @@ export function AnswerCardView({ card, version, filling, streaming, status, patt
   }, [toast]);
   // Cards saved before the server dropped them can still carry a "no chart" note beside the live chart.
   const body = useMemo(() => tickerBody(card.body), [card.body]);
+  // The layout that was just on screen, kept for one beat so the answer can arrive over it
+  // instead of the skeleton vanishing first.
+  const layoutSnap = useRef<CardNode[]>([]);
+  const frameRef = useRef<HTMLDivElement>(null);
+  const [seenLayout, setSeenLayout] = useState(revealLayout);
+  const [handoff, setHandoff] = useState<CardNode[] | null>(null);
+  const [heldHeight, setHeldHeight] = useState(0);
+  if (revealLayout) layoutSnap.current = body;
+  if (revealLayout !== seenLayout) {
+    setSeenLayout(revealLayout);
+    setHandoff(!revealLayout && layoutSnap.current.length ? layoutSnap.current : null);
+  }
+  useEffect(() => {
+    if (!revealLayout || !frameRef.current) return;
+    setHeldHeight(frameRef.current.offsetHeight);
+  }, [revealLayout, body, trail]);
+  useEffect(() => {
+    if (!handoff) return;
+    const timer = window.setTimeout(() => {
+      setHandoff(null);
+      setHeldHeight(0);
+    }, 760);
+    return () => window.clearTimeout(timer);
+  }, [handoff]);
   const cited = useMemo(() => (filling ? [] : citedRefs(card).flatMap((n) => (results[n - 1] ? [results[n - 1]] : []))), [filling, card, results]);
   const copyAnswer = () => {
     navigator.clipboard.writeText(cardPlainText(card, results)).then(() => setToast('Copied'), () => setToast("Couldn't copy"));
@@ -137,15 +161,20 @@ export function AnswerCardView({ card, version, filling, streaming, status, patt
 
       <div className={cn('px-4 pb-5 pt-3.5 transition-[opacity,filter] duration-500 sm:px-6 sm:pb-6 sm:pt-4', status && !streaming && 'pointer-events-none opacity-50 blur-[1px]', cited.length && 'pb-4 sm:pb-5')}>
         <CardTitle.Provider value={card.title}>
-          <div className="relative">
-            {(!trail || revealLayout) && (
-              <div className={cn(revealLayout && 'zo-layout')}>
-                <Nodes key={version} nodes={body} className="gap-5" stagger={revealLayout || !streaming} />
+          <div ref={frameRef} className="grid [&>*]:col-start-1 [&>*]:row-start-1" style={!revealLayout && heldHeight ? { minHeight: heldHeight } : undefined}>
+            {trail && (
+              <div aria-hidden={revealLayout || undefined} className={cn(revealLayout && 'pointer-events-none')}>
+                {trail}
               </div>
             )}
-            {trail && (
-              <div aria-hidden={revealLayout || undefined} className={cn('transition-opacity duration-500 ease-out', revealLayout ? 'pointer-events-none absolute inset-x-0 top-0 opacity-0' : 'opacity-100')}>
-                {trail}
+            {handoff && (
+              <div aria-hidden className="zo-veil zo-layout pointer-events-none bg-card">
+                <Nodes nodes={handoff} className="gap-5" />
+              </div>
+            )}
+            {(!trail || revealLayout || handoff) && (
+              <div className={cn(revealLayout && 'zo-cover zo-layout bg-card')}>
+                <Nodes key={version} nodes={body} className="gap-5" stagger={!revealLayout && (!streaming || !!handoff)} />
               </div>
             )}
           </div>

@@ -59,7 +59,7 @@ export function Nodes({ nodes, className, stagger = false }: { nodes: CardNode[]
         if (!placeholder) real += 1;
         const enter = !placeholder || stagger;
         return (
-          <div key={key} className={cn('min-w-0', enter && 'zo-rise')} style={enter && stagger ? { animationDelay: `${80 + i * 70}ms` } : undefined}>
+          <div key={key} className={cn('min-w-0', enter && 'zo-rise')} style={enter && stagger ? { animationDelay: `${i * 55}ms` } : undefined}>
             <NodeBoundary>
               <NodeView node={n} />
             </NodeBoundary>

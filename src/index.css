@@ -172,6 +172,32 @@
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: none; }
 }
+/* A new row opens its own space, so the card grows instead of jumping taller. */
+.zo-row {
+  display: grid;
+  animation: zo-row 560ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes zo-row {
+  from { grid-template-rows: 0fr; opacity: 0; }
+  to { grid-template-rows: 1fr; opacity: 1; }
+}
+.zo-row > * { min-height: 0; overflow: hidden; }
+/* The chosen layout dissolves in over the sources. The surface fades as a whole, so the list never drops out first. */
+.zo-cover {
+  animation: zo-cover 720ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes zo-cover {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+/* The layout stays put while the answer arrives, then dissolves once the words are there. */
+.zo-veil {
+  animation: zo-veil 760ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+@keyframes zo-veil {
+  0%, 30% { opacity: 1; }
+  100% { opacity: 0; }
+}
 /* The layout, once chosen, breathes instead of flashing. */
 .zo-layout .zo-shimmer {
   animation-duration: 2.8s;
@@ -254,6 +280,9 @@
 }
 
 /* A source being read: a light passes down the list, one row at a time, while the answer is prepared. */
+.zo-read-once {
+  animation: zo-read 1.6s ease-in-out 1 both;
+}
 .zo-read-on {
   animation: zo-read 2.8s ease-in-out infinite;
 }
@@ -263,6 +292,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .zo-aura::before, .zo-aura::after, .zo-wash, .zo-shimmer, .zo-shimmer-text, .zo-read-on, .zo-rise { animation: none; }
+  .zo-aura::before, .zo-aura::after, .zo-wash, .zo-shimmer, .zo-shimmer-text, .zo-read-on, .zo-read-once, .zo-rise, .zo-row, .zo-cover, .zo-veil { animation: none; }
   .zo-shimmer-text { color: var(--foreground); }
 }
