@@ -16,6 +16,33 @@ function words(label: string, subject: ReadonlySet<string>): Set<string> {
   );
 }
 
+type Callout = Extract<CardNode, { type: 'callout' }>;
+
+function calloutsIn(nodes: readonly CardNode[]): Callout[] {
+  return nodes.flatMap((n): Callout[] => {
+    if (n.type === 'callout') return [n];
+    if (n.type === 'tabs') return n.tabs.flatMap((t) => calloutsIn(t.children));
+    return 'children' in n && Array.isArray(n.children) ? calloutsIn(n.children) : [];
+  });
+}
+
+const textWords = (text: string) => new Set(text.toLowerCase().replace(/\[\d+\]/g, '').split(/[^a-z0-9]+/).filter((w) => w.length >= 4).map(stem));
+
+/**
+ * A callout that says what one already on the card says. Regions are written in parallel, so a
+ * "no recent news" finding otherwise opens the card, then returns in every region below it.
+ */
+export function repeatsCallout(node: CardNode, shown: readonly CardNode[]): boolean {
+  if (node.type !== 'callout') return false;
+  const own = textWords(`${node.title ?? ''} ${node.text}`);
+  if (own.size < 3) return false;
+  return calloutsIn(shown).some((c) => {
+    const other = textWords(`${c.title ?? ''} ${c.text}`);
+    const shared = [...own].filter((w) => other.has(w)).length;
+    return shared / Math.min(own.size, other.size) >= 0.5;
+  });
+}
+
 /** Every choices control in these nodes, including ones nested in layout nodes. */
 export function choicesIn(nodes: readonly CardNode[]): Choices[] {
   return nodes.flatMap((n): Choices[] => {

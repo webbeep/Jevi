@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { choicesIn, distinctActions, subjectWords } from '../server/chips.ts';
+import { choicesIn, distinctActions, repeatsCallout, subjectWords } from '../server/chips.ts';
 import type { CardNode } from '../shared/card.ts';
 
 const choices: Extract<CardNode, { type: 'choices' }> = {
@@ -36,4 +36,10 @@ test('all-duplicate actions leave nothing, distinct ones stay untouched', () => 
 test('choices nested in layout nodes are found', () => {
   const nodes: CardNode[] = [{ type: 'section', children: [{ type: 'tabs', tabs: [{ label: 'a', children: [choices] }] }] }];
   assert.equal(choicesIn(nodes).length, 1);
+});
+
+test('a callout repeating one already on the card is dropped, a different one stays', () => {
+  const shown: CardNode[] = [{ type: 'stack', children: [{ type: 'callout', tone: 'warning', title: 'No recent news', text: 'No dated news about Jessica Chen at NYU and cryptocurrency. The only relevant result is an undated cryptography paper [1].' }] }];
+  assert.equal(repeatsCallout({ type: 'callout', tone: 'warning', title: 'No recent news', text: 'The only relevant result [1] is an undated cryptography paper, not a news story.' }, shown), true);
+  assert.equal(repeatsCallout({ type: 'callout', tone: 'info', text: 'Proof-of-work grinding makes Fiat–Shamir transforms harder to attack.' }, shown), false);
 });

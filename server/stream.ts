@@ -48,7 +48,7 @@ import { entityQuery, plainQuotes, relaxQuery, tickerQueries } from './queryClea
 import { type LateExtras, normalizeUrl, searchWithLate } from './search';
 import type { WebHit } from './cascade';
 import { domainOf } from './util';
-import { choicesIn, distinctActions, subjectWords } from './chips';
+import { choicesIn, distinctActions, repeatsCallout, subjectWords } from './chips';
 import { isOwnSite, orcidSite, pickOwnSite, probeOwnSite, RESEARCH_ASK, withOwnSite } from './ownSite';
 import { quoteAsk } from '../shared/quoteAsk';
 import { scholarlyResults, withScholarly } from './scholarly';
@@ -264,6 +264,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     },
     node: (node, index) => {
       if (req.website) node = withWebsite(node, req.website);
+      if (repeatsCallout(node, [...shown].filter(([at]) => at !== index).map(([, n]) => n))) return;
       if (node.type === 'actions') {
         const kept = distinctActions(node, choicesIn([...shown.values()]), subject);
         if (!kept) return;
