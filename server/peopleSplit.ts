@@ -65,5 +65,16 @@ export async function splitPeople(name: string, rows: SearchResult[], env: Env, 
   const skip = exclude ? `\nThe searcher said they do NOT mean this person, so leave them and their results out: ${exclude}` : '';
   const call = llmJson<Raw>(env, SYSTEM, `Name: ${name}${skip}\nResults:\n${list}`, 500).catch(() => undefined);
   const timeout = new Promise<undefined>((r) => setTimeout(() => r(undefined), timeoutMs));
-  return readPeople(await Promise.race([call, timeout]), name, Math.min(rows.length, 20), min);
+  const people = readPeople(await Promise.race([call, timeout]), name, Math.min(rows.length, 20), min);
+  return exclude ? notRejected(people, exclude, min) : people;
+}
+
+const nameKey = (s: string) => s.toLowerCase().replace(/[^a-z ]/g, '').replace(/\s+/g, ' ').trim();
+
+/** The model sometimes lists the person just turned down anyway; "Ricky Martin — singer" drops every Ricky Martin choice. */
+export function notRejected(people: EntityChoice[] | undefined, rejected: string, min = 1): EntityChoice[] | undefined {
+  const who = nameKey(rejected.split(/\s+[—–-]\s+/)[0] ?? '');
+  if (!people || who.split(' ').length < 2) return people;
+  const kept = people.filter((p) => nameKey(p.name) !== who);
+  return kept.length >= min ? kept : undefined;
 }

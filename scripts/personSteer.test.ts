@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { movesOn } from '../server/ai.ts';
 import { personSubject } from '../server/entity.ts';
-import { readPeople } from '../server/peopleSplit.ts';
+import { notRejected, readPeople } from '../server/peopleSplit.ts';
 import { personSteer, threadPerson, topicOnly, withoutChosen } from '../server/personSteer.ts';
 import { plainQuotes } from '../server/queryClean.ts';
 
@@ -46,6 +46,15 @@ test('people choices carry the full name the results use, never a stray one', ()
   ] };
   const out = readPeople(rows, 'Ricky', 3);
   assert.deepEqual(out?.map((c) => c.name), ['Ricky Gervais', 'Ricky']);
+});
+
+test('the person just turned down is never offered again', () => {
+  const people = [
+    { name: 'Ricky Gervais', descriptor: 'Comedian', query: 'Ricky Gervais', id: 'g' },
+    { name: 'Ricky Martin', descriptor: 'Singer', query: 'Ricky Martin singer', id: 'm' },
+  ];
+  assert.deepEqual(notRejected(people, 'Ricky Martin — Puerto Rican singer')?.map((p) => p.name), ['Ricky Gervais']);
+  assert.equal(notRejected(people, 'Ricky')?.length, 2);
 });
 
 test('a picked person searches with the topic only, never the earlier cards', () => {

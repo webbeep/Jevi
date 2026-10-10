@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { isOwnSite, pickOwnSite, siteGuesses, withOwnSite } from '../server/ownSite.ts';
+import { isOwnSite, pickOrcid, pickOwnSite, RESEARCH_ASK, siteGuesses, withOwnSite } from '../server/ownSite.ts';
 import type { SearchResult } from '../shared/types.ts';
 
 const row = (url: string, title = 'Jessica Hamrick', snippet = ''): SearchResult => ({ url, title, snippet, domain: new URL(url).hostname, engines: ['web'] });
@@ -29,6 +29,21 @@ test('a guessed site counts only when it names the person and says what the resu
   assert.equal(pickOwnSite([namesake, site], 'Jessica Hamrick', ['deepmind', 'google'])?.url, 'https://www.jesshamrick.com/');
   assert.equal(pickOwnSite([namesake], 'Jessica Hamrick', ['deepmind']), undefined);
   assert.equal(pickOwnSite([site], 'Jessica Hamrick', []), undefined, 'no evidence, no site');
+});
+
+test('the ORCID record must be at an institution the results name', () => {
+  const hits = [
+    { 'orcid-id': '0000-0002-7207-2412', 'given-names': 'Jessica', 'family-names': 'Hamrick', 'institution-name': ['East Carolina University'] },
+    { 'orcid-id': '0000-0002-3860-0429', 'given-names': 'Jessica', 'family-names': 'Hamrick', 'institution-name': ['DeepMind', 'Massachusetts Institute of Technology'] },
+  ];
+  assert.equal(pickOrcid(hits, 'Jessica Hamrick', ['google', 'deepmind'])?.['orcid-id'], '0000-0002-3860-0429');
+  assert.equal(pickOrcid(hits, 'Jessica Hamrick', ['stanford']), undefined);
+  assert.equal(pickOrcid(hits, 'Jess Hamrick', ['deepmind'])?.['orcid-id'], '0000-0002-3860-0429');
+});
+
+test('research asks are told apart from other person asks', () => {
+  assert.equal(RESEARCH_ASK.test('Jessica Hamrick Google DeepMind research scientist'), true);
+  assert.equal(RESEARCH_ASK.test('Ray Lee BlueFlame AI founder'), false);
 });
 
 test('the own site moves right after the lead row', () => {

@@ -124,6 +124,64 @@ export function pickOwnSite(candidates: SiteCandidate[], name: string, terms: st
   return undefined;
 }
 
+const ORCID = 'https://pub.orcid.org/v3.0';
+const ORCID_MS = 1500;
+
+interface OrcidHit {
+  'orcid-id'?: string;
+  'given-names'?: string;
+  'family-names'?: string;
+  'credit-name'?: string | null;
+  'institution-name'?: string[];
+}
+
+/** Researchers' asks: "research scientist", "professor", a lab or a PhD. */
+export const RESEARCH_ASK = /\b(research(er)?|scientist|professor|prof|phd|postdoc|lab|universit(y|ies)|lecturer|academic|scholar|faculty)\b/i;
+
+async function orcidJson<T>(path: string): Promise<T | undefined> {
+  try {
+    const res = await fetch(`${ORCID}${path}`, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(ORCID_MS) });
+    return res.ok ? ((await res.json()) as T) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The ORCID record of this person: their name, at an institution the results also name. */
+export function pickOrcid(hits: OrcidHit[], name: string, terms: string[]): OrcidHit | undefined {
+  const parts = nameParts(name);
+  const wanted = terms.map((t) => t.toLowerCase()).filter((t) => t.length >= 3);
+  if (!parts || !wanted.length) return undefined;
+  return hits.find((h) => letters(h['family-names'] ?? '') === parts.last
+    && parts.firsts.includes(letters((h['given-names'] ?? '').split(/\s+/)[0] ?? ''))
+    && (h['institution-name'] ?? []).some((inst) => wanted.some((t) => inst.toLowerCase().includes(t))));
+}
+
+/**
+ * A researcher's website as they list it on their own ORCID record (keyless, two small calls).
+ * Their homepage on a scholar profile is what search engines miss, and the profile pages themselves
+ * refuse datacenter fetches; ORCID's public API does not.
+ */
+export async function orcidSite(name: string, terms: string[]): Promise<SearchResult | undefined> {
+  const parts = nameParts(name);
+  if (!parts) return undefined;
+  const q = encodeURIComponent(`given-names:${parts.firsts[0]} AND family-name:${parts.last}`);
+  const found = await orcidJson<{ 'expanded-result'?: OrcidHit[] | null }>(`/expanded-search/?q=${q}&rows=10`);
+  const hit = pickOrcid(found?.['expanded-result'] ?? [], name, terms);
+  const id = hit?.['orcid-id'];
+  if (!id || !/^[\d-]{15,}X?$/.test(id)) return undefined;
+  const urls = await orcidJson<{ 'researcher-url'?: { url?: { value?: string } }[] }>(`/${id}/researcher-urls`);
+  const url = (urls?.['researcher-url'] ?? []).map((u) => u.url?.value ?? '').find((u) => {
+    if (!isFetchable(u)) return false;
+    const host = new URL(u).hostname.toLowerCase();
+    return host === 'sites.google.com' || !host.split('.').some((label) => HUBS.has(label));
+  });
+  if (!url) return undefined;
+  const who = hit['credit-name'] || name;
+  const where = (hit['institution-name'] ?? []).slice(0, 3).join(', ');
+  return { title: `${who} — personal website`, url, snippet: `${who}'s own website, as listed on their ORCID profile${where ? ` (${where})` : ''}.`, domain: domainOf(url), engines: ['orcid'] };
+}
+
 /** Moves the person's own website right after the lead row, where the designer and the reader see it. */
 export function withOwnSite(rows: SearchResult[], site: SearchResult): { rows: SearchResult[]; n: number } {
   const rest = rows.filter((r) => r.url !== site.url);
