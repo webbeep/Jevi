@@ -444,9 +444,29 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
       // Picked-choice / person+descriptor: search the bare name and gate on the name so
       // context filters never drop every source (live Which-one? taps → no-sources).
       const person = isPersonAsk(query) ? personSubject(query) : '';
+      // A long company word that matched nothing is usually a misspelling ("Bleuflame").
+      // The two recovery calls learn the spelling the pages use, then search the person
+      // with it. The bare name would spend those calls on namesakes.
+      const orgWord = person ? distinguishingTerms(query).find((t) => t.length >= 6) : undefined;
+      if (orgWord) {
+        triedEntity = true;
+        const org = contextTerms(query).join(' ');
+        const looked = await searchWithLate({ q: org, freshness: 'any', count: 8, lite: true, ungated: true }, env, scope);
+        const spelling = correctedPersonQuery(query, looked.response.results);
+        if (spelling) {
+          const named = await searchWithLate({ q: spelling, freshness: 'any', count: 10, lite: true }, env, scope);
+          const kept = applyPickGate(query, applyRelevance(query, { ...named.response, query }, scope.ledger));
+          if (kept.results.length) {
+            results = kept;
+            late = named.late;
+            recovered = 'entity';
+            console.log(JSON.stringify({ zo: 'entity', spelling, kept: kept.results.length }));
+          }
+        }
+      }
       const entity = (person && person.toLowerCase() !== query.trim().toLowerCase() ? person : '') || entityQuery(query);
       const lower = entity.toLowerCase();
-      if (entity && lower !== query.trim().toLowerCase() && lower !== relaxed.toLowerCase()) {
+      if (!results.results.length && entity && lower !== query.trim().toLowerCase() && lower !== relaxed.toLowerCase()) {
         triedEntity = true;
         const again = await searchWithLate({ q: entity, freshness: 'any', count: 20 }, env, scope);
         const gateQ = person || query;
@@ -460,28 +480,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
           results = { ...gated, results: picked };
           late = again.late;
           recovered = 'entity';
-        } else if (pickPerson) {
-          // "Bleuflame" is one transposition from Blueflame. The pages already in hand, or one
-          // lookup of the company words, give the spelling the engines actually rank, and a
-          // second search uses it. Namesakes of the bare name are not a substitute.
-          let spelling = correctedPersonQuery(query, [...found.response.results, ...again.response.results]);
-          if (!spelling) {
-            const org = contextTerms(query).join(' ');
-            if (org) {
-              const looked = await searchWithLate({ q: org, freshness: 'any', count: 8 }, env, scope);
-              spelling = correctedPersonQuery(query, looked.response.results);
-            }
-          }
-          if (spelling) {
-            const named = await searchWithLate({ q: spelling, freshness: 'any', count: 10 }, env, scope);
-            const kept = applyPickGate(query, applyRelevance(query, { ...named.response, query }, scope.ledger));
-            if (kept.results.length) {
-              results = kept;
-              late = named.late;
-              recovered = 'entity';
-              console.log(JSON.stringify({ zo: 'entity', spelling, kept: kept.results.length }));
-            }
-          }
+        } else if (pickPerson && !orgWord) {
           // EN4 part 8: the tap that offered these choices is still in hand, so re-ask on the rows
           // behind the picked choice before offering the same choices again (live "Ray Lee Raycon
           // Founder" → the LinkedIn/ZoomInfo rows, never "No results for this search").

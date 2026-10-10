@@ -38,6 +38,12 @@ interface Query {
   extrasCutMs?: number;
   /** The literal search's rows, as soon as they land (not called on a cache hit). */
   onLiteral?: (hits: WebHit[]) => void;
+  /**
+   * Return the engine rows before the relevance gate. A spelling lookup needs the pages
+   * that do not repeat the mistyped word ("Bleuflame" → pages that say Blueflame).
+   * Never read from or written to the search cache.
+   */
+  ungated?: boolean;
 }
 
 interface Hit {
@@ -251,7 +257,9 @@ export async function searchWithLate(q: Query, env: Env, scope?: AskScope): Prom
   const key = searchCacheKey(q.q, q.freshness, q.count);
   const db = cacheDb(env);
 
-  if (ask.bypass) {
+  if (q.ungated) {
+    // A spelling lookup must see pages the gate would drop, and must not replace the cached search.
+  } else if (ask.bypass) {
     ask.ledger.cache = 'bypass';
   } else if (ask.refresh) {
     ask.ledger.cache = db ? 'miss' : 'off';
@@ -300,7 +308,7 @@ export async function searchWithLate(q: Query, env: Env, scope?: AskScope): Prom
   const extra = socialSources(social.posts).filter((r) => !webUrls.has(normalizeUrl(r.url))).slice(0, 5);
   // Lead with posts so a time-sensitive card can cite them inside the same result cap.
   // Relevance runs after diversify and before the cap, so a junk hit cannot take a slot the model will read.
-  const pooled = gateResults(q.q, [...extra, ...web12]);
+  const pooled = q.ungated ? { kept: [...extra, ...web12], dropped: 0 } : gateResults(q.q, [...extra, ...web12]);
   ask.ledger.relevanceDropped = (ask.ledger.relevanceDropped ?? 0) + pooled.dropped;
   const results = pooled.kept.slice(0, q.count);
   const knowledge = (instant && knowledgeMatches(q.q, instant.title, instant.description) ? instant : undefined)
@@ -330,7 +338,7 @@ export async function searchWithLate(q: Query, env: Env, scope?: AskScope): Prom
   const degraded = searchDegraded(response);
   if (degraded) Object.assign(response, { degraded: true, degradedReason: degraded });
   // T424: never cache a degraded search.
-  if (!ask.bypass && ask.ledger.cache === 'miss' && db && response.results.length && !degraded) {
+  if (!q.ungated && !ask.bypass && ask.ledger.cache === 'miss' && db && response.results.length && !degraded) {
     const payload = packSearch(response);
     const pending = writeSearchCache(db, key, payload).catch(() => undefined);
     if (ask.waitUntil) ask.waitUntil(pending);
