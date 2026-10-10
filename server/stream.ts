@@ -5,6 +5,7 @@ import {
   askTopic,
   askedQuestions,
   contextTerms,
+  correctedPersonQuery,
   distinguishingTerms,
   entityContextLine,
   type Entity,
@@ -460,35 +461,36 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
           late = again.late;
           recovered = 'entity';
         } else if (pickPerson) {
+          // "Bleuflame" is one transposition from Blueflame. The pages already in hand, or one
+          // lookup of the company words, give the spelling the engines actually rank, and a
+          // second search uses it. Namesakes of the bare name are not a substitute.
+          let spelling = correctedPersonQuery(query, [...found.response.results, ...again.response.results]);
+          if (!spelling) {
+            const org = contextTerms(query).join(' ');
+            if (org) {
+              const looked = await searchWithLate({ q: org, freshness: 'any', count: 8 }, env, scope);
+              spelling = correctedPersonQuery(query, looked.response.results);
+            }
+          }
+          if (spelling) {
+            const named = await searchWithLate({ q: spelling, freshness: 'any', count: 10 }, env, scope);
+            const kept = applyPickGate(query, applyRelevance(query, { ...named.response, query }, scope.ledger));
+            if (kept.results.length) {
+              results = kept;
+              late = named.late;
+              recovered = 'entity';
+              console.log(JSON.stringify({ zo: 'entity', spelling, kept: kept.results.length }));
+            }
+          }
           // EN4 part 8: the tap that offered these choices is still in hand, so re-ask on the rows
           // behind the picked choice before offering the same choices again (live "Ray Lee Raycon
           // Founder" → the LinkedIn/ZoomInfo rows, never "No results for this search").
-          const seeds = seedRows?.length && isPersonAsk(query) ? pickSeeds(query, seedRows) : undefined;
+          const seeds = !results.results.length && seedRows?.length && isPersonAsk(query) ? pickSeeds(query, seedRows) : undefined;
           if (seeds?.seeds.length) {
             results = { ...results, results: seeds.seeds.map((i) => seedRows![i]!), knowledge: undefined };
             fromSeeds = true;
             recovered = 'seeds';
             console.log(JSON.stringify({ zo: 'entity', pickSeeds: seeds.seeds.length, label: seeds.label }));
-          } else if (!seedRows?.length && !distinguishingTerms(query).length) {
-            // A bare name with nothing else to go on: re-ask it and let them pick.
-            // A company or role was already named ("Ricky Cheuk Bleuflame AI"): namesakes of the
-            // bare name are a different question, so this falls through to the honest empty card.
-            const decision = resolveEntity(`Who is ${person}`, again.response.results, { pattern: 'profile' });
-            if (decision.kind === 'choices') {
-              const choices = await sharperChoices(decision.choices, again.response.results, env);
-              scope.ledger.entity = { kind: 'choices', choices: choices.length };
-              send('search', { ...again.response, query });
-              // Choices ride on the done event (FE readChoices() in shared/choices.ts); never cached.
-              send('done', {
-                engine: 'extractive',
-                removed: 0,
-                pagesRead: 0,
-                ms: Date.now() - started,
-                choices: publicChoices(choices),
-              });
-              console.log(JSON.stringify({ zo: 'entity', pickNoMatch: true, rechoices: choices.length }));
-              return;
-            }
           }
         }
         if (person) console.log(JSON.stringify({ zo: 'entity', nameFallback: true, kept: picked.length, gatedOut }));

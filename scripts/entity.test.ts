@@ -12,6 +12,7 @@ import {
   resolveEntity,
   disambiguationEntries,
   commaDetailQuery,
+  correctedPersonQuery,
   contextTerms,
   distinguishingTerms,
   cleanCapture,
@@ -1084,4 +1085,8 @@ test('"None of these" keeps the company they typed, including Capital One', () =
   const rugby: EntityRow = { title: 'Ricky Cheuk rugby', url: 'https://hkrugby.example/r', snippet: 'Ricky Cheuk is one of the Hong Kong rugby players' };
   assert.equal(personSourceOk('Ricky Cheuk, Capital one', bank), true);
   assert.equal(personSourceOk('Ricky Cheuk, Capital one', rugby), false);
+  assert.equal(correctedPersonQuery('Ricky Cheuk Bleuflame AI', [
+    { title: 'About Blueflame AI', url: 'https://www.blueflame.ai/about', snippet: 'Blueflame AI builds software' },
+  ]), 'Ricky Cheuk Blueflame');
+  assert.equal(correctedPersonQuery('Ricky Cheuk Bleuflame AI', [rugby]), '');
 });

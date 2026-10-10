@@ -347,6 +347,45 @@ function withinOneEdit(a: string, b: string): boolean {
   return skipped + (longer.length - j) <= 1;
 }
 
+/**
+ * The spelling the pages actually use for a company the asker mistyped ("bleuflame" → "blueflame").
+ * '' when nothing on these pages is one edit away.
+ */
+export function nearOrgSpelling(term: string, rows: readonly { title?: string; snippet?: string; url?: string }[]): string {
+  if (term.length < 6) return '';
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    const seq = tokens(`${row.title ?? ''} ${row.snippet ?? ''} ${row.url ?? ''}`);
+    for (let i = 0; i < seq.length; i++) {
+      const w = seq[i]!;
+      const cands = [w];
+      const nxt = seq[i + 1];
+      if (nxt && w.length >= 3 && nxt.length >= 3) cands.push(w + nxt);
+      for (const cand of cands) {
+        if (cand.length < 6 || cand === term || !withinOneEdit(term, cand)) continue;
+        counts.set(cand, (counts.get(cand) ?? 0) + 1);
+      }
+    }
+  }
+  let best = '';
+  let n = 0;
+  for (const [cand, count] of counts) if (count > n) { best = cand; n = count; }
+  return best;
+}
+
+/**
+ * "Ricky Cheuk Bleuflame AI" plus pages that say Blueflame → "Ricky Cheuk Blueflame".
+ * '' when these pages don't show a correctable spelling.
+ */
+export function correctedPersonQuery(query: string, rows: readonly { title?: string; snippet?: string; url?: string }[]): string {
+  const name = personSubject(query);
+  const term = distinguishingTerms(query, name).find((t) => t.length >= 6);
+  if (!name || !term) return '';
+  const spelling = nearOrgSpelling(term, rows);
+  if (!spelling) return '';
+  return `${name} ${spelling[0]!.toUpperCase()}${spelling.slice(1)}`;
+}
+
 /** "Bleuflame" is "Blueflame", including when the page writes it as two words. */
 function mentionsOrg(term: string, seq: readonly string[]): boolean {
   if (term.length < 6) return false;
