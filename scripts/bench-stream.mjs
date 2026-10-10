@@ -20,22 +20,36 @@ const cached = args.includes('--cached');
 export const QUERIES = [
   { q: 'Btc Usd', kind: 'quote' },
   { q: 'tesla stock price', kind: 'quote' },
+  { q: 'AAPL stock', kind: 'quote' },
   { q: 'AI news today', kind: 'news' },
+  { q: 'NBA scores tonight', kind: 'news' },
   { q: 'Lebron preseason debut', kind: 'news' },
+  { q: 'what happened in the NBA Top 10 Plays on October 7 2026', kind: 'news' },
   { q: 'who is Ed Chu', kind: 'person' },
+  { q: 'who is Marie Curie', kind: 'person' },
   { q: 'how do mRNA vaccines work', kind: 'explain' },
-  { q: 'iphone 17 vs pixel 10', kind: 'compare' },
-  { q: 'how to make sourdough starter', kind: 'howto' },
   { q: 'what is RAG in AI', kind: 'explain' },
+  { q: 'symptoms of vitamin D deficiency', kind: 'explain' },
+  { q: 'iphone 17 vs pixel 10', kind: 'compare' },
+  { q: 'is renting or buying a home cheaper in 2026', kind: 'compare' },
+  { q: 'how to make sourdough starter', kind: 'howto' },
+  { q: 'python read a json file', kind: 'howto' },
   { q: 'why $rdw dropping', kind: 'news' },
   { q: 'best budget noise cancelling headphones 2026', kind: 'ranked' },
+  { q: 'best coffee shops in Seattle', kind: 'ranked' },
   { q: 'write a short apology email for missing a meeting', kind: 'made' },
+  { q: 'draft a short text asking to reschedule dinner', kind: 'made' },
 ];
 
 export const FOLLOWUPS = [
   { seed: 'how do mRNA vaccines work', q: 'explain it like I am 10', kind: 'chat' },
   { seed: 'iphone 17 vs pixel 10', q: 'which one has better battery life?', kind: 'chat' },
   { seed: 'AI news today', q: 'what about Google?', kind: 'chat' },
+  { seed: 'how to make sourdough starter', q: 'can I use rye flour instead?', kind: 'chat' },
+  { seed: 'Btc Usd', q: 'why is it moving today?', kind: 'chat' },
+  { seed: 'best budget noise cancelling headphones 2026', q: 'which is lightest for travel?', kind: 'chat' },
+  { seed: 'NBA scores tonight', q: 'who scored the most?', kind: 'chat' },
+  { seed: 'write a short apology email for missing a meeting', q: 'make it shorter', kind: 'chat' },
 ];
 
 async function run({ q, kind, body }) {
@@ -145,8 +159,21 @@ const pct = (xs, p) => {
 };
 const col = (k) => rows.map((x) => x[k]);
 const summary = {};
-for (const k of ['search', 'designing', 'head', 'firstNode', 'done']) summary[k] = { p50: pct(col(k), 50), p90: pct(col(k), 90) };
-console.table(rows.map(({ q, search, designing, head, firstNode, done, nodes, repeats, warning, sources }) => ({ q: q.slice(0, 34), search, designing, head, firstNode, done, nodes, repeats, warning, sources })));
+for (const k of ['search', 'designing', 'head', 'firstNode', 'done']) {
+  summary[k] = { p50: pct(col(k), 50), p90: pct(col(k), 90), p95: pct(col(k), 95) };
+}
+const warned = rows.filter((x) => x.warning).length;
+const empty = rows.filter((x) => !x.nodes && !x.choices && !x.error).length;
+const withSources = rows.filter((x) => typeof x.sources === 'number');
+summary.quality = {
+  n: rows.length,
+  warned,
+  empty,
+  errors: rows.filter((x) => x.error).length,
+  meanSources: withSources.length ? Math.round(withSources.reduce((a, x) => a + x.sources, 0) / withSources.length) : 0,
+  meanRepeats: Math.round(rows.reduce((a, x) => a + (x.repeats ?? 0), 0) / Math.max(1, rows.length) * 10) / 10,
+};
+console.table(rows.map(({ q, search, designing, head, firstNode, done, nodes, repeats, warning, sources, choices }) => ({ q: q.slice(0, 34), search, designing, head, firstNode, done, nodes, repeats, warning, sources, choices })));
 console.log(JSON.stringify(summary));
 const stages = rows.filter((x) => x.t).map((x) => ({ q: x.q.slice(0, 26), ...x.t }));
 if (stages.length) console.table(stages);

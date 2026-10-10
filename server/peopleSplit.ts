@@ -58,7 +58,7 @@ export function readPeople(raw: Raw | undefined, name: string, count: number, mi
  * Undefined when there is no model, it is slow, or it finds fewer than two people.
  */
 export async function splitPeople(name: string, rows: SearchResult[], env: Env, opts: { timeoutMs?: number; exclude?: string; min?: number } = {}): Promise<EntityChoice[] | undefined> {
-  const { timeoutMs = 2500, exclude, min = 2 } = opts;
+  const { timeoutMs = 1500, exclude, min = 2 } = opts;
   if (!hasLlm(env) || rows.length < min) return undefined;
   const list = rows
     .slice(0, 20)

@@ -61,36 +61,39 @@ interface WikiSummary {
  * Tries `Name (disambiguation)` then `Name`; returns a synthetic hit when the
  * page is type=disambiguation or the extract says "may refer to".
  */
+const DISAMBIG_MS = 1200;
+
+async function wikiSummary(title: string): Promise<WikiHit | null> {
+  const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title.replace(/ /g, '_'))}`;
+  try {
+    const data = await fetchJsonCapped<WikiSummary>(
+      url,
+      { headers: { 'User-Agent': WIKI_UA, Accept: 'application/json' } },
+      DISAMBIG_MS,
+      WIKI_BODY_CAP,
+    );
+    const extract = (data.extract ?? '').trim();
+    // Require a real "may refer to" list — thin "(disambiguation)" pages (Obama) must not poison a famous name.
+    if (!/\bmay refer to\b/i.test(extract) || extract.length < 40) return null;
+    const page =
+      data.content_urls?.desktop?.page ??
+      `https://en.wikipedia.org/wiki/${encodeURIComponent((data.title ?? title).replace(/ /g, '_'))}`;
+    return {
+      title: data.title ?? title,
+      url: page,
+      snippet: clip(extract.replace(/\s+/g, ' '), 480),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchWikiDisambiguation(name: string): Promise<WikiHit | null> {
   const clean = name.trim().replace(/\s+/g, ' ');
   if (!clean || clean.split(' ').length < 2) return null;
-  const titles = [`${clean} (disambiguation)`, clean];
-  for (const title of titles) {
-    const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title.replace(/ /g, '_'))}`;
-    try {
-      const data = await fetchJsonCapped<WikiSummary>(
-        url,
-        { headers: { 'User-Agent': WIKI_UA, Accept: 'application/json' } },
-        ENGINE_TIMEOUT_MS,
-        WIKI_BODY_CAP,
-      );
-      const extract = (data.extract ?? '').trim();
-      // Require a real "may refer to" list — thin "(disambiguation)" pages (Obama) must not poison a famous name.
-      const isDis = /\bmay refer to\b/i.test(extract);
-      if (!isDis || extract.length < 40) continue;
-      const page =
-        data.content_urls?.desktop?.page ??
-        `https://en.wikipedia.org/wiki/${encodeURIComponent((data.title ?? title).replace(/ /g, '_'))}`;
-      return {
-        title: data.title ?? title,
-        url: page,
-        snippet: clip(extract.replace(/\s+/g, ' '), 480),
-      };
-    } catch {
-      // 404 / network — try the next title.
-    }
-  }
-  return null;
+  // Both titles at once. The old loop waited out a slow 404 before trying the name itself.
+  const [listed, plain] = await Promise.all([wikiSummary(`${clean} (disambiguation)`), wikiSummary(clean)]);
+  return listed ?? plain;
 }
 
 

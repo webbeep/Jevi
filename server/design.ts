@@ -123,6 +123,11 @@ export interface DesignEvents {
   followups: (items: string[]) => void;
   /** Attribution for a picture placed on the card. */
   credit: (credit: ImageCredit) => void;
+  /**
+   * The card text is written. Starts the answer review so it runs while pictures resolve.
+   * The caller applies the review after pictures, so a picture patch cannot overwrite a fix.
+   */
+  beginReview?: () => void;
 }
 
 export interface DesignSummary {
@@ -437,12 +442,14 @@ export async function designStream(req: DesignRequest, env: Env, on: DesignEvent
     console.error('Design stream failed', err);
     failure = err instanceof Error ? err.message : String(err);
   }
-  await pictures.flush();
   if (!contentNodes) {
+    await pictures.flush();
     // One line per fallback so `wrangler pages deployment tail` shows why the model gave no card.
     console.warn('design fallback', JSON.stringify({ via: via ?? null, lines, unparsed, removed, head: headSent, failure: failure?.slice(0, 200) ?? null }));
     return extractive(req, on);
   }
+  if (!chat) on.beginReview?.();
+  await pictures.flush();
   return { engine: chat ? 'reasoning' : 'composed', removed, via };
 }
 
@@ -560,8 +567,12 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
   const results = await Promise.allSettled([...skeleton.map((region, i) => regionCall(region, i, offset)), finishCall()]);
   if (!headSentAny) on.head({ title: titleCase(req.query) });
   results.filter((r) => r.status === 'rejected').forEach((r) => console.error('region failed', (r as PromiseRejectedResult).reason));
+  if (!contentNodes) {
+    await pictures.flush();
+    return extractive(req, on);
+  }
+  on.beginReview?.();
   await pictures.flush();
-  if (!contentNodes) return extractive(req, on);
   const via = [...new Set(results.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : [])))].join(' + ') || undefined;
   return { engine: 'composed', removed, via };
 }

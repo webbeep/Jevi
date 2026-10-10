@@ -63,6 +63,21 @@ describe('search fallback', { concurrency: 1 }, () => {
       assert.equal(out.hits[1]?.snippet, clip(cleanMarkdown(PAGE), 320));
       assert.equal(out.hits[1]?.content, cleanMarkdown(PAGE));
       assert.equal(ledger.bonus, undefined);
+      clearDeadEngines();
+      calls.length = 0;
+      const rewritten = newLedger();
+      await cascadeWeb(
+        { q: 'open source database', more: ['postgresql vs mysql'], freshness: 'any', count: 8 },
+        { LANGSEARCH_API_KEY: 'l' } as Env,
+        rewritten,
+      );
+      const bodies = calls
+        .filter((c) => c.url.includes('api.langsearch.com'))
+        .map((c) => JSON.parse(c.body ?? '{}') as { query?: string; contents?: { text?: { maxCharacters?: number } } });
+      const literal = bodies.find((b) => b.query === 'open source database');
+      const rewrite = bodies.find((b) => b.query === 'postgresql vs mysql');
+      assert.equal(literal?.contents?.text?.maxCharacters, 6000);
+      assert.equal(rewrite?.contents, undefined);
 
       clearDeadEngines();
       const failed = newLedger();

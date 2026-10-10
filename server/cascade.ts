@@ -58,7 +58,11 @@ const NOISY_ROWS = 8;
 /** With a good literal search, rewrites still join if the intent read lands this soon after the cascade starts. */
 const EXTRAS_WAIT_MS = 1200;
 /** With a good literal search, a rewrite's results are used only if they arrive this soon after the literal ones. */
-const EXTRA_RESULTS_WAIT_MS = 1500;
+const EXTRA_RESULTS_WAIT_MS = 800;
+/** A thin literal search still waits for its rewrites, but not for a stuck engine call. */
+const THIN_EXTRAS_WAIT_MS = 1800;
+/** A noisy first list gets one quick second look. A slow one is dropped; the source check can still search again. */
+const SECOND_OPINION_WAIT_MS = 1200;
 
 const NO_EXTRAS: { extras: string[]; fresh?: Freshness } = { extras: [] };
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -167,7 +171,7 @@ async function tavilySearch(q: Query, env: Env): Promise<{ hits: WebHit[]; image
   };
 }
 
-async function langSearch(q: Query, env: Env): Promise<{ hits: WebHit[]; images: ImageResult[] }> {
+async function langSearch(q: Query & { extract?: boolean }, env: Env): Promise<{ hits: WebHit[]; images: ImageResult[] }> {
   const data = await fetchJson<{
     code?: number | string;
     msg?: string;
@@ -182,7 +186,9 @@ async function langSearch(q: Query, env: Env): Promise<{ hits: WebHit[]; images:
         query: q.q,
         count: 10,
         freshness: q.freshness === 'any' ? 'noLimit' : LANG_FRESH[q.freshness],
-        contents: { text: { maxCharacters: 6000 } },
+        // Page text is worth the wait on the literal search. Rewrites and the second opinion
+        // only need snippets, or they hold the answer for a full page extract.
+        ...(q.extract === false ? {} : { contents: { text: { maxCharacters: 6000 } } }),
       }),
     },
     ENGINE_TIMEOUT_MS,
@@ -390,9 +396,9 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUnt
   };
   const statuses: EngineStatus[] = [];
   const share = (name: string) => (name === 'serper' && bucket === 'prod' ? ledger.serperShare ?? 1 : 1);
-  const catalog = new Map<SearchEngine, { name: SearchEngine; enabled: boolean; run: (text: string, fresh?: Freshness) => Promise<{ hits: WebHit[]; images: ImageResult[] }> }>([
+  const catalog = new Map<SearchEngine, { name: SearchEngine; enabled: boolean; run: (text: string, fresh?: Freshness, extract?: boolean) => Promise<{ hits: WebHit[]; images: ImageResult[] }> }>([
     ['exa', { name: 'exa', enabled: hasKey(env, 'EXA_API_KEY'), run: (text, fresh = q.freshness) => exaSearch({ ...q, q: text, freshness: fresh }, env) }],
-    ['langsearch', { name: 'langsearch', enabled: hasKey(env, 'LANGSEARCH_API_KEY'), run: (text, fresh = q.freshness) => langSearch({ ...q, q: text, freshness: fresh }, env) }],
+    ['langsearch', { name: 'langsearch', enabled: hasKey(env, 'LANGSEARCH_API_KEY'), run: (text, fresh = q.freshness, extract = true) => langSearch({ ...q, q: text, freshness: fresh, extract }, env) }],
     ['tavily', { name: 'tavily', enabled: hasKey(env, 'TAVILY_API_KEY'), run: (text, fresh = q.freshness) => tavilySearch({ ...q, q: text, freshness: fresh }, env) }],
     ['firecrawl', { name: 'firecrawl', enabled: hasKey(env, 'FIRECRAWL_API_KEY'), run: (text, fresh = q.freshness) => firecrawlSearch({ ...q, q: text, freshness: fresh }, env) }],
     ['serper', { name: 'serper', enabled: hasKey(env, 'SERPER_API_KEY'), run: (text, fresh = q.freshness) => serperSearch({ ...q, q: text, freshness: fresh }, env) }],
@@ -511,9 +517,39 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUnt
     ledger.search[step.name] += 1;
     if (held) heldTried = true;
     const started = Date.now();
+    // One short second look. Snippets only, so a slow page extract cannot hold the answer.
+    if (held) {
+      const opinion = await Promise.race([
+        settled(step.run(q.q, q.freshness, false)),
+        sleep(SECOND_OPINION_WAIT_MS).then(() => 'late' as const),
+      ]);
+      if (opinion === 'late') {
+        ledger.fellThrough.push(`${step.name}:opinion-late`);
+        statuses.push({ name: step.name, ok: false, count: 0, ms: SECOND_OPINION_WAIT_MS, error: 'late' });
+        break;
+      }
+      try {
+        if (!opinion.ok) throw opinion.error;
+        const hits = opinion.value.hits.filter((h) => h.url && h.title);
+        statuses.push({ name: step.name, ok: hits.length > 0, count: hits.length, ms: Date.now() - started, ...(hits.length ? {} : { error: 'empty' }) });
+        if (hits.length) {
+          const done = finish({ engine: step.name, hits, more: [], wikiHits: [], images: opinion.value.images, statuses }, step.name);
+          if (done) return done;
+        }
+      } catch (err) {
+        const failure = failureOf(err);
+        await noteFailure(step.name, failure, true);
+        ledger.fellThrough.push(`${step.name}:${failure.reason}`);
+        statuses.push({ name: step.name, ok: false, count: 0, ms: Date.now() - started, error: failure.reason });
+      }
+      break;
+    }
     const landed = (r: Settled): Settled => {
       mark(ledger, 'literal');
-      if (r.ok && q.onLiteral && literalGood(r)) q.onLiteral(r.value.hits.filter((h) => h.url && h.title));
+      const hits = r.ok ? r.value.hits.filter((h) => h.url && h.title) : [];
+      // Any rows are enough to start the source check. It used to wait for four, so a thin
+      // literal search only began that check after the rewrites had already finished.
+      if (hits.length && q.onLiteral) q.onLiteral(hits);
       return r;
     };
     const early = q.later && KEYED.has(step.name) ? settled(step.run(q.q)).then(landed) : undefined;
@@ -531,7 +567,7 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUnt
         if (searchCalls(ledger) >= callCap(ledger)) break;
         if (!(await takeSlot(env, step.name, bucket, undefined, share(step.name)))) break;
         ledger.search[step.name] += 1;
-        parallel.push({ text, task: settled(step.run(text, ready.fresh)), at: Date.now() });
+        parallel.push({ text, task: settled(step.run(text, ready.fresh, false)), at: Date.now() });
       }
     }
     try {
@@ -584,8 +620,9 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUnt
         return failure.dead;
       };
       if (parallel) {
-        // A good literal search never waits out a slow rewrite: what has not landed by the cut is dropped.
-        const cut = !q.waitExtras && parallel.length && literalGood({ ok: true, value: out }) ? sleep(q.extrasCutMs ?? EXTRA_RESULTS_WAIT_MS).then(() => 'late' as const) : undefined;
+        // A good literal search waits briefly for rewrites. A thin one waits longer, still not for a stuck call.
+        const cutMs = literalGood({ ok: true, value: out }) ? (q.extrasCutMs ?? EXTRA_RESULTS_WAIT_MS) : THIN_EXTRAS_WAIT_MS;
+        const cut = !q.waitExtras && parallel.length ? sleep(cutMs).then(() => 'late' as const) : undefined;
         for (const p of parallel) {
           const done = cut ? await Promise.race([p.task, cut]) : await p.task;
           if (done === 'late') {

@@ -163,6 +163,8 @@ export function useSession() {
   const epoch = useRef(0);
   const controllers = useRef(new Map<number, AbortController>());
   const bodies = useRef(new Map<number, StreamBody>());
+  /** Sparse design slots for the settled card, so a late review can correct a node in place. */
+  const settledSlots = useRef(new Map<number, (CardNode | undefined)[]>());
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const reconnectDebounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const restoreRef = useRef<(incoming: Turn[]) => void>(() => {});
@@ -207,6 +209,7 @@ export function useSession() {
   /** `refresh`: the person pressed Retry, so the server skips its saved answer and search. */
   const run = useCallback(async (id: number, body: StreamBody, opts?: { retry?: boolean; refresh?: boolean }) => {
     bodies.current.set(id, body);
+    settledSlots.current.delete(id);
     controllers.current.get(id)?.abort();
     const controller = new AbortController();
     controllers.current.set(id, controller);
@@ -273,12 +276,24 @@ export function useSession() {
         case 'node':
           sawContent = true;
           return update(route, (t) => {
-            const live = takeLive(t);
             const results = ref.current.find((x) => x.id === t.searchId)?.search?.results ?? [];
+            const slots = t.result ? settledSlots.current.get(route) : undefined;
+            if (t.result && slots) {
+              const placed = placeNode({ regions: [], nodes: slots, raw: slots, followups: t.result.followups, credits: t.result.card.credits ?? [] }, e.data.index, e.data.node, t.question, results);
+              settledSlots.current.set(route, placed.raw);
+              const body = placed.nodes.filter((n): n is CardNode => !!n);
+              const result: CardResponse = { ...t.result, card: { ...t.result.card, body } };
+              return { result, variants: { ...t.variants, [variantKey(t.pattern, t.simple)]: result }, live: undefined, filling: false, thinking: false, version: t.version + 1 };
+            }
+            const live = takeLive(t);
             return { live: placeNode(live, e.data.index, e.data.node, t.question, results), thinking: false, version: live.nodes.some(Boolean) ? t.version : t.version + 1 };
           });
         case 'followups':
-          return update(route, (t) => ({ live: { ...(t.live ?? emptyLive()), followups: e.data } }));
+          return update(route, (t) => {
+            if (!t.result) return { live: { ...(t.live ?? emptyLive()), followups: e.data } };
+            const result = { ...t.result, followups: e.data };
+            return { result, variants: { ...t.variants, [variantKey(t.pattern, t.simple)]: result }, version: t.version + 1 };
+          });
         case 'done':
           return update(route, (t) => {
             if (!t.live?.nodes.some(Boolean)) {
@@ -290,6 +305,7 @@ export function useSession() {
               }
               return { live: undefined, filling: false, status: undefined, thinking: false, offline: undefined, reconnects: undefined, ...emptyDoneState(Boolean(t.result)) };
             }
+            settledSlots.current.set(route, t.live.raw);
             const choices = readChoices(e.data, t.live.head);
             const result: CardResponse = {
               card: { title: t.live.head?.title ?? t.question, ...t.live.head, body: liveBody(t.live, false), credits: t.live.credits },

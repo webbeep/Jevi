@@ -104,7 +104,7 @@ export function rowLine(r: SearchResult, i: number, live: boolean): string {
 export async function briefSources(
   args: { query: string; intent?: string; context?: string; results: SearchResult[]; isLive: (r: SearchResult) => boolean; shown?: string },
   env: Env,
-  timeoutMs = 1800,
+  timeoutMs = 1400,
 ): Promise<SourceBrief | undefined> {
   const rows = args.results.slice(0, BRIEF_ROWS);
   if (!hasLlm(env) || rows.length < 2) return undefined;

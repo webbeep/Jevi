@@ -123,7 +123,7 @@ export async function reviewCard(
     followups?: string[];
   },
   env: Env,
-  timeoutMs = 4000,
+  timeoutMs = 2200,
 ): Promise<Review | undefined> {
   if (!hasLlm(env) || !args.nodes.size) return undefined;
   const user = [

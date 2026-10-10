@@ -39,7 +39,7 @@ import { rewriteQuery } from './ai';
 import { type DesignRequest, designParallel, designStream, gateNode } from './design';
 import { BRIEF_ROWS, briefSources, remapBrief, type SourceBrief } from './brief';
 import { onTopicCount, rescueQuery, sourcesMiss } from './rescue';
-import { keepPictures, reviewCard } from './review';
+import { keepPictures, reviewCard, type Review } from './review';
 import { permitted } from './images';
 import { hasLlm } from './llm';
 import { collectPages, ogImageOf } from './pages';
@@ -175,7 +175,7 @@ function imageBoost(pattern: string, search: SearchResponse, env: Env, scope: As
 }
 
 /** How many pages to read and how long to wait for them before designing. At most five pages per ask. */
-const pageBudget = (readPages: boolean) => (readPages ? { count: 5, need: 3, budgetMs: 2200 } : { count: 3, need: 2, budgetMs: 1000 });
+const pageBudget = (readPages: boolean) => (readPages ? { count: 5, need: 3, budgetMs: 1600 } : { count: 3, need: 2, budgetMs: 800 });
 
 /** The model is scored against the person's question, including hits a looser retry brought back. */
 function applyRelevance(query: string, response: SearchResponse, ledger: CallLedger): SearchResponse {
@@ -248,8 +248,8 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   const briefing = !newSearch || chat ? undefined
     : req.earlyBrief ? req.earlyBrief.then((early) => early ? remapBrief(early.brief, early.judged, req.search.results) : undefined)
     : briefSources({ query: req.query, intent: req.intent, context: req.context, results: req.search.results, isLive: isQuoteRow, shown: req.ticker ? TICKER_SHOWN : undefined }, env);
-  // The check usually finished during the search. Waiting for it before reading pages means a wrong
-  // result set is replaced first, instead of fetching the pages and then saying they don't answer.
+  // Page reads overlap the source check. A rescue throws those pages away and reads the new rows.
+  const reading = collectPages(req.search.results, env, budget, late, scope);
   let brief = await briefing?.finally(() => mark(scope.ledger, 'brief'));
   if (brief) console.log(JSON.stringify({ zo: 'brief', use: brief.use.length, stale: brief.stale, offTopic: brief.offTopic, conflicts: brief.conflicts.length, missing: !!brief.missing }));
   let rescued = false;
@@ -259,9 +259,11 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       req = { ...req, search: again.search };
       brief = again.brief;
       rescued = true;
+      void reading.catch(() => undefined);
     }
   }
-  const pages = await collectPages(req.search.results, env, budget, rescued ? undefined : late, scope).finally(() => mark(scope.ledger, 'pages'));
+  const pages = rescued ? await collectPages(req.search.results, env, budget, undefined, scope) : await reading;
+  mark(scope.ledger, 'pages');
   const fresh = pages.filter((p) => !req.search.results[p.n - 1]?.content);
   if (fresh.length) send('pages', fresh.map(({ n, url, text }) => ({ n, url, text })));
 
@@ -291,6 +293,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   const subject = subjectWords(req.query, req.followup?.question);
   let head: Omit<AnswerCard, 'body'> | undefined;
   let followups: string[] = [];
+  let pendingReview: Promise<Review | undefined> | undefined;
   const summary = await designer(designReq, env, {
     thinking: () => send('thinking', {}),
     layout: (regions) => send('layout', regions),
@@ -329,30 +332,43 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       if (followups.length) send('followups', followups);
     },
     credit: (credit) => send('credit', credit),
+    beginReview: !chat && req.followup?.mode !== 'refine' ? () => {
+      pendingReview = reviewCard({
+        query: designReq.followup?.question ?? designReq.query,
+        context: designReq.context,
+        brief: designReq.brief,
+        results: designReq.search.results,
+        pages: designReq.pages,
+        isLive: isQuoteRow,
+        head,
+        nodes: shown,
+        followups,
+      }, env);
+    } : undefined,
   });
   mark(scope.ledger, 'designed');
-  if (!chat && req.followup?.mode !== 'refine' && summary.engine === 'composed') {
-    await checkAnswer(send, env, designReq, shown, head, followups, started);
+  // The review ran while pictures were resolving. Apply it before done when it already
+  // landed; otherwise publish the card and correct it in place when the review arrives.
+  const arrived = pendingReview
+    ? await Promise.race([
+        pendingReview.then((review) => ({ ready: true as const, review })),
+        Promise.resolve({ ready: false as const, review: undefined }),
+      ])
+    : { ready: true as const, review: undefined };
+  if (arrived.ready && arrived.review) applyReview(send, designReq, shown, arrived.review, started);
+  send('done', { ...summary, pagesRead: pages.length, ms: Date.now() - started });
+  if (pendingReview && !arrived.ready) {
+    const review = await pendingReview;
+    if (review) applyReview(send, designReq, shown, review, started);
+    mark(scope.ledger, 'reviewed');
+  } else if (pendingReview) {
     mark(scope.ledger, 'reviewed');
   }
-  send('done', { ...summary, pagesRead: pages.length, ms: Date.now() - started });
 }
 
-/** The finished card, read once against the goal before it is saved: wrong nodes are corrected in place. */
-async function checkAnswer(send: Send, env: Env, req: DesignRequest, shown: Map<number, CardNode>, head: Omit<AnswerCard, 'body'> | undefined, followups: string[], started: number) {
+/** The finished card, read once against the goal: wrong nodes are corrected in place. */
+function applyReview(send: Send, req: DesignRequest, shown: Map<number, CardNode>, review: Review, started: number) {
   const at = Date.now();
-  const review = await reviewCard({
-    query: req.followup?.question ?? req.query,
-    context: req.context,
-    brief: req.brief,
-    results: req.search.results,
-    pages: req.pages,
-    isLive: isQuoteRow,
-    head,
-    nodes: shown,
-    followups,
-  }, env);
-  if (!review) return;
   if (review.followups) send('followups', review.followups);
   let fixed = 0;
   for (const fix of review.fixes) {
@@ -703,7 +719,10 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     // title/source carry the article title + snippet, so the chosen person's name/org must be on it.
     const wikiRow = results.results.find((r) => /^https:\/\/en\.wikipedia\.org\/wiki\//i.test(r.url) && !isDisambiguationPage(r));
     if (wikiRow && !results.images.some((i) => i.url === wikiRow.url)) {
-      const lead = await fetchWikiLeadImage(wikiRow.url).catch(() => null);
+      const lead = await Promise.race([
+        fetchWikiLeadImage(wikiRow.url).catch(() => null),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 500)),
+      ]);
       if (lead) {
         scope.ledger.search.wikipedia += 1;
         const pic: ImageResult = {
