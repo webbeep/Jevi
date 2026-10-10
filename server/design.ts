@@ -193,7 +193,7 @@ const SYSTEM_WHOLE = `${DESIGNER}
 - Start from the SKELETON layout given in the TASK. Replace every slot with real components; you may add, drop or rearrange nodes if it serves the answer better.
 - Lead with the answer: the first body node must be small and already useful on its own (a hero or a one-sentence answer), so it appears on screen immediately.
 - Include at least one interactive node (choices, slider, scaler, pricing, accordion or reveal) whenever the answer has something worth adjusting, exploring or testing. For plan prices, the interactive node is pricing.
-- Finish with an actions node (2-4 useful next steps; prefer "refine" for changes to this card) and a citations node when sources were used.
+- Finish with an actions node (2-4 useful next steps; prefer "refine" for changes to this card; never repeat an option the choices node already offers) and a citations node when sources were used.
 
 OUTPUT FORMAT — JSON Lines, streamed to the screen as you write:
 Line 1: {"title":string,"subtitle":string,"icon":string,"accent":tone}
@@ -512,7 +512,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
   };
 
   const finishCall = () => {
-    const user = `${shared}\n- YOU DESIGN FINISH. Output these lines:\n  1. {"title":string,"subtitle":string,"icon":string,"accent":tone} for the whole card\n  2. only if the answer has something worth adjusting, exploring or testing: one interactive node such as {"type":"pricing",...}, {"type":"choices",...} or {"type":"slider",...} that the regions above don't already cover. For plan or subscription prices this must be a pricing node.\n  3. {"type":"actions","items":[...]} with 2-4 useful next steps (prefer kind "refine" for changes to this card)\n  4. {"type":"citations","refs":[...]} with the source numbers that matter most\n  5. {"followups":[4 short follow-up questions, each naming the subject so it stands alone]}\n\nQUERY: ${query}`;
+    const user = `${shared}\n- YOU DESIGN FINISH. Output these lines:\n  1. {"title":string,"subtitle":string,"icon":string,"accent":tone} for the whole card\n  2. only if the answer has something worth adjusting, exploring or testing: one interactive node such as {"type":"pricing",...}, {"type":"choices",...} or {"type":"slider",...} that the regions above don't already cover. For plan or subscription prices this must be a pricing node.\n  3. {"type":"actions","items":[...]} with 2-4 useful next steps (prefer kind "refine" for changes to this card), none repeating an option of line 2\n  4. {"type":"citations","refs":[...]} with the source numbers that matter most\n  5. {"followups":[4 short follow-up questions, each naming the subject so it stands alone]}\n\nQUERY: ${query}`;
     let extra = 0;
     return llmLines(env, SYSTEM_REGION, user, 1000, (line) => {
       const parsed = parseLine(line, g, imageCount, req.query, sources, req.followup?.question ?? req.query);

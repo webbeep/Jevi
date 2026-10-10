@@ -29,12 +29,16 @@ export function personSteer(question: string): PersonSteer | undefined {
   return REJECT.test(q) || OTHER_NAMED.test(q) ? { kind: 'reject' } : undefined;
 }
 
-/** The person a thread is about: the first ask when it named one, else the thread's chosen person. */
+/**
+ * The name a thread asked about: the first ask when it named someone, else the thread's chosen person.
+ * A first name alone counts ("Who's Ricky" asked about anyone called Ricky; the Ricky Cheuk on the card
+ * was only one pick), so "not this" offers the other Rickys rather than namesakes of the one on screen.
+ */
 export function threadPerson(original: string, context?: string): string {
   for (const ask of [original, ...askedQuestions(context).reverse()]) {
     if (isPersonAsk(ask)) {
       const name = personSubject(ask);
-      if (name.split(/\s+/).length >= 2) return name;
+      if (name.split(/\s+/).length >= 2 || /^[A-Z][a-z]/.test(name)) return name;
     }
   }
   return priorEntity(context)?.name ?? '';

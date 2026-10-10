@@ -4,7 +4,8 @@ import { hasLlm, llmJson } from './llm';
 import type { Env } from './util';
 
 const SYSTEM = `You sort web search results about a name into the distinct real people they describe, so the searcher can pick the one they mean.
-Reply as JSON: {"people":[{"who": string, "rows": number[], "query": string}]}
+Reply as JSON: {"people":[{"name": string, "who": string, "rows": number[], "query": string}]}
+- name: the person's full name as the results write it (e.g. "Ricky Gervais" for the name "Ricky").
 - who: 3-8 words that tell this person apart at a glance: field or role plus employer, place or best-known work, e.g. "Oncologist, Montefiore cancer center director" or "EPA regional deputy administrator". No name, no filler.
 - rows: the result numbers about this person. A result belongs to one person at most; leave out results that name nobody clearly.
 - query: a web search that finds this person: their name as the results write it plus 1-3 distinguishing words.
@@ -12,7 +13,15 @@ Reply as JSON: {"people":[{"who": string, "rows": number[], "query": string}]}
 - Most covered first. At most 5 people.`;
 
 interface Raw {
-  people?: { who?: unknown; rows?: unknown; query?: unknown }[];
+  people?: { name?: unknown; who?: unknown; rows?: unknown; query?: unknown }[];
+}
+
+/** The model's full name for the person when it keeps every word of the asked name; the asked name otherwise. */
+function fullName(raw: unknown, asked: string): string {
+  const full = typeof raw === 'string' ? raw.trim().replace(/\s+/g, ' ').slice(0, 60) : '';
+  const has = new Set(full.toLowerCase().split(/[^a-z0-9'-]+/));
+  const nameLike = full.split(' ').length <= 5 && !/\b(who|whos|who's|what|is|was|the)\b/i.test(full);
+  return nameLike && asked.toLowerCase().split(/\s+/).every((w) => has.has(w)) ? full : asked;
 }
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -34,7 +43,8 @@ export function readPeople(raw: Raw | undefined, name: string, count: number, mi
     const query = p.query.trim().replace(/\s+/g, ' ').slice(0, 100);
     if (!seeds.length || !descriptor || !query.toLowerCase().includes(surname)) continue;
     seeds.forEach((i) => taken.add(i));
-    out.push({ name, descriptor, query, id: slug(`${name} ${descriptor}`), seeds });
+    const full = fullName(p.name, name);
+    out.push({ name: full, descriptor, query, id: slug(`${full} ${descriptor}`), seeds });
     if (out.length === 5) break;
   }
   return out.length >= min ? out : undefined;

@@ -62,7 +62,7 @@ const COMMON = new Set([
   'fact-check', 'factcheck', 'check', 'verify', 'summarize', 'summarise', 'recommend', 'explain', 'define', 'describe',
 ]);
 
-const WHO_IS = /^(who\s+is|who\s+was)\b\s*/i;
+const WHO_IS = /^(who\s+is|who\s+was|who's|whos)\b\s*/i;
 const ABOUT = /^(tell\s+me\s+about|profile\s+of|biography\s+of|bio\s+of)\s+/i;
 /** "How is Nique Clifford…" / "What is …" — strip so Cap runs start at the name. */
 const LEAD_Q = /^(who|what|when|where|why|how)\s+(is|are|was|were|did|does|do)\b\s*/i;

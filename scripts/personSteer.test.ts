@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { movesOn } from '../server/ai.ts';
+import { personSubject } from '../server/entity.ts';
+import { readPeople } from '../server/peopleSplit.ts';
 import { personSteer, threadPerson, topicOnly, withoutChosen } from '../server/personSteer.ts';
+import { plainQuotes } from '../server/queryClean.ts';
 
 test('"not this" and friends reject the person on screen', () => {
   for (const q of ['not this', 'Not this one', 'wrong person', 'no, someone else', 'not him', 'a different Ed Chu?']) {
@@ -27,6 +30,22 @@ test('the thread person comes from the first ask, and the chosen-person lock can
   assert.equal(threadPerson('Who Is Ed Chu', '- Q: Ed Chu cancer center director Montefiore Einstein → Edward Chu'), 'Ed Chu');
   assert.equal(threadPerson('best pizza nyc', 'Chosen person: Ray Lee — Founder @ BlueFlame AI'), 'Ray Lee');
   assert.equal(withoutChosen('Chosen person: Ed Chu — Oncologist\n- Q: who is ed chu → Edward Chu'), '- Q: who is ed chu → Edward Chu');
+});
+
+test('"not this" after a first-name ask offers the other people with that name', () => {
+  assert.equal(threadPerson("Who's Ricky", 'Chosen person: Ricky Cheuk — Hong Kong rugby'), 'Ricky');
+  assert.equal(threadPerson(plainQuotes('Who’s Ricky'), 'Chosen person: Ricky Cheuk — Hong Kong rugby'), 'Ricky');
+  assert.equal(personSubject(plainQuotes('Who’s Ricky')), 'Ricky');
+  assert.equal(personSubject('whos Jessica Hamrick'), 'Jessica Hamrick');
+});
+
+test('people choices carry the full name the results use, never a stray one', () => {
+  const rows = { people: [
+    { name: 'Ricky Gervais', who: 'English comedian, The Office co-creator', rows: [1], query: 'Ricky Gervais comedian' },
+    { name: 'Who is Ricky', who: 'Dancer, Ariana Grande tour', rows: [2], query: 'Ricky Alvarez dancer' },
+  ] };
+  const out = readPeople(rows, 'Ricky', 3);
+  assert.deepEqual(out?.map((c) => c.name), ['Ricky Gervais', 'Ricky']);
 });
 
 test('a picked person searches with the topic only, never the earlier cards', () => {

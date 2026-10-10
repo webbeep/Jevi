@@ -43,10 +43,11 @@ import { planLayout } from './plan';
 import type { AskScope, CallLedger } from './budget';
 import { logAsk, mark, moreQueries, newLedger, queriesForAsk } from './budget';
 import { gateResults } from './relevanceGate';
-import { entityQuery, relaxQuery, tickerQueries } from './queryClean';
+import { entityQuery, plainQuotes, relaxQuery, tickerQueries } from './queryClean';
 import { type LateExtras, normalizeUrl, searchWithLate } from './search';
 import type { WebHit } from './cascade';
 import { domainOf } from './util';
+import { choicesIn, distinctActions, subjectWords } from './chips';
 import { quoteAsk } from '../shared/quoteAsk';
 import { scholarlyResults, withScholarly } from './scholarly';
 import { videoResults, withVideos } from './videoSearch';
@@ -247,6 +248,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   const rowImages = chat || quoteCard ? undefined : rowImagePlan(req, env, scope);
   const designReq: DesignRequest = { ...req, pages, brief, context: req.context?.slice(0, 4000), rowImages };
   const shown = new Map<number, CardNode>();
+  const subject = subjectWords(req.query, req.followup?.question);
   let head: Omit<AnswerCard, 'body'> | undefined;
   let followups: string[] = [];
   const summary = await designer(designReq, env, {
@@ -257,8 +259,23 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       send('head', h);
     },
     node: (node, index) => {
+      if (node.type === 'actions') {
+        const kept = distinctActions(node, choicesIn([...shown.values()]), subject);
+        if (!kept) return;
+        node = kept;
+      }
       shown.set(index, node);
       send('node', { index, node });
+      const choices = choicesIn([node]);
+      if (!choices.length) return;
+      for (const [at, prior] of shown) {
+        if (prior.type !== 'actions') continue;
+        const kept = distinctActions(prior, choices, subject);
+        if (kept === prior) continue;
+        if (kept) shown.set(at, kept);
+        else shown.delete(at);
+        send('node', { index: at, node: kept ?? { type: 'actions', items: [] } });
+      }
     },
     followups: (items) => {
       followups = items;
@@ -751,8 +768,25 @@ export interface StreamOpts {
   waitUntil?: (promise: Promise<unknown>) => void;
 }
 
-export async function runStream(req: StreamRequest, env: Env, rawSend: Send, opts?: StreamOpts): Promise<void> {
+/** The person's own words with straight quotes, so "Who’s Ricky" reads like "Who's Ricky". */
+function plainRequest(req: StreamRequest): StreamRequest {
+  const context = req.context === undefined ? undefined : plainQuotes(req.context);
+  switch (req.kind) {
+    case 'search':
+    case 'design':
+      return { ...req, query: plainQuotes(req.query), context };
+    case 'followup':
+      return { ...req, question: plainQuotes(req.question), original: plainQuotes(req.original), context };
+    default: {
+      const unreachable: never = req;
+      return unreachable;
+    }
+  }
+}
+
+export async function runStream(raw: StreamRequest, env: Env, rawSend: Send, opts?: StreamOpts): Promise<void> {
   const started = Date.now();
+  const req = plainRequest(raw);
   const ledger = newLedger();
   // Provider and model names never reach the client (t432); the model goes to the server log.
   ledger.stages = { at: started, ms: {} };

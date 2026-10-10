@@ -138,3 +138,6 @@ export function expandCashtags(query: string): string {
 export function tickerQueries(query: string): string[] {
   return cashtags(query).slice(0, 2).map((t) => `${t.toUpperCase()} stock news today`);
 }
+
+/** Phone keyboards type curly quotes ("Who’s Ricky"); every rule here is written with straight ones. */
+export const plainQuotes = (text: string) => text.replace(/[\u2018\u2019\u201B\u2032]/g, "'").replace(/[\u201C\u201D\u201F\u2033]/g, '"');
