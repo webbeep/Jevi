@@ -41,8 +41,6 @@ export interface CallLedger {
   entity?: { kind: string; id?: string; dropped?: number; choices?: number };
   /** Milliseconds from the ask's start to the first time each stage was reached (server log and `done`). */
   stages?: { at: number; ms: Record<string, number> };
-  /** Temporary: pages a person+company gate dropped, so an empty card can be diagnosed. */
-  gateSample?: { q: string; rows: { d: string; t: string; s: string; len: number; hit: boolean }[] }[];
 }
 
 /** Records the first time this ask reached `stage`. */
