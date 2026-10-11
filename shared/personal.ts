@@ -511,6 +511,11 @@ export function writeIdeaCache(storage: Storage, items: Suggestion[], soft: bool
   writeRaw(storage, IDEAS_KEY, JSON.stringify({ at: now, soft, items: items.slice(0, 4) }));
 }
 
+/** History is waiting on a fresh set: the day's cache is missing or past its time. */
+export function ideasPending(storage: Storage, now = Date.now()): boolean {
+  return readHistory(storage).length > 0 && !readIdeaCache(storage, now);
+}
+
 export function clearHistory(storage: Storage): void {
   for (const key of [HISTORY_KEY, STARTERS_CACHE_KEY, ASKCOUNT_KEY, RECENT_KEY, TYPEAHEAD_CACHE_KEY, RELATED_KEY, FOLLOWUPS_KEY, IDEAS_KEY]) {
     try {

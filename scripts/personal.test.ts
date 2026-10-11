@@ -17,6 +17,7 @@ import {
   IDEAS_TTL_MS,
   IDEAS_SOFT_TTL_MS,
   ideaBrief,
+  ideasPending,
   readIdeaCache,
   rememberFollowups,
   writeIdeaCache,
@@ -165,6 +166,8 @@ test('follow-ups are kept for the asks they belong to, and the idea cache lasts 
   const brief = ideaBrief(storage);
   assert.deepEqual(brief.asks, ['jaylen brown injuries']);
   assert.deepEqual(brief.followups, ['Jaylen Brown next game']);
+  assert.equal(ideasPending(storage, 10), true);
+  assert.equal(ideasPending(memory(), 10), false);
   const idea = { id: 'i-1', text: 'Celtics trade options this season', icon: 'newspaper', group: 'broad' as const };
   writeIdeaCache(storage, [idea], false, 10);
   assert.equal(readIdeaCache(storage, 10 + IDEAS_TTL_MS - 1)?.[0]?.text, idea.text);
@@ -172,6 +175,8 @@ test('follow-ups are kept for the asks they belong to, and the idea cache lasts 
   writeIdeaCache(storage, [idea], true, 10);
   assert.equal(readIdeaCache(storage, 10 + IDEAS_SOFT_TTL_MS - 1)?.[0]?.text, idea.text);
   assert.equal(readIdeaCache(storage, 10 + IDEAS_SOFT_TTL_MS), null);
+  assert.equal(ideasPending(storage, 10), false);
+  assert.equal(ideasPending(storage, 10 + IDEAS_TTL_MS), true);
   assert.ok(storage.getItem(FOLLOWUPS_KEY));
   assert.ok(storage.getItem(IDEAS_KEY));
 });

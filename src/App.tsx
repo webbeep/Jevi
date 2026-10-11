@@ -40,6 +40,7 @@ import { clearTypeaheadClientCache, useTypeahead } from './useTypeahead';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Skeleton } from '@/components/ui/skeleton';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 
 const LOADING: CardNode[] = [{ type: 'slot', hint: 'answer', shape: 'hero' }, { type: 'slot', hint: 'details', shape: 'block' }];
@@ -181,7 +182,7 @@ export default function App() {
   // t447 + T455: item taps send right away; a tap while any answer in the thread is still streaming is queued and fires when it finishes.
   const threadBusy = turns.some((t) => t.filling);
   const [queued, setQueued] = useState<{ q: string; ref?: AskRef; from: number; item?: string } | null>(null);
-  const { items: suggestions, shuffle, shuffleEnabled, refresh } = useSuggestions();
+  const { items: suggestions, rows: suggestionRows, shuffle, shuffleEnabled, pending: ideasLoading, refresh } = useSuggestions();
   const [histRev, setHistRev] = useState(0);
   const [historyOpen, setHistoryOpen] = useState(() => (typeof window !== 'undefined' ? readHistoryOpen() : true));
   const inputRef = useRef<HTMLInputElement>(null);
@@ -634,8 +635,18 @@ export default function App() {
                     )}
                   </div>
                 </div>
-                <ul className="flex flex-col gap-1 sm:grid sm:grid-cols-2 sm:gap-x-3 sm:gap-y-1">
-                  {suggestions.map((s, i) => (
+                {ideasLoading && <p className="sr-only" aria-live="polite">Loading suggestions</p>}
+                <ul className="flex flex-col gap-1 sm:grid sm:grid-cols-2 sm:gap-x-3 sm:gap-y-1" aria-busy={ideasLoading || undefined} data-testid="try-one">
+                  {ideasLoading
+                    ? Array.from({ length: suggestionRows }, (_, i) => (
+                        <li key={`idea-wait-${i}`} className="zo-rise" style={{ animationDelay: `${i * 70}ms` }} data-testid="idea-placeholder">
+                          <div className="flex min-h-11 items-center gap-3 rounded-xl px-3 py-2.5" aria-hidden="true">
+                            <Skeleton className="size-4 shrink-0 rounded-md" />
+                            <Skeleton className="h-3 rounded-full" style={{ width: `${52 + (i % 3) * 14}%` }} />
+                          </div>
+                        </li>
+                      ))
+                    : suggestions.map((s, i) => (
                     <li key={s.id} className="animate-in fade-in fill-mode-backwards duration-500" style={{ animationDelay: `${i * 40}ms` }}>
                       <div className="flex min-h-11 items-stretch gap-0.5 rounded-xl hover:bg-foreground/[0.04]">
                         <button
