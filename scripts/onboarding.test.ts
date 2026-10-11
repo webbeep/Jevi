@@ -14,10 +14,14 @@ function memory(): OnboardStore & { dump: Record<string, string> } {
 const fresh = { deviceDone: false, userIds: [] as string[], hasUsedApp: false, isNewUser: false, userId: null };
 
 test('the intro is three feature steps, one idea each', () => {
-  assert.deepEqual(ONBOARD_STEPS.map((step) => step.id), ['shape', 'tap', 'live']);
+  assert.deepEqual(ONBOARD_STEPS.map((step) => step.id), ['shape', 'tap', 'highlight']);
   for (const step of ONBOARD_STEPS) {
     assert.ok(step.title.length > 0 && step.line.length > 0 && step.line.length < 80);
+    assert.equal(/second search|live prices/i.test(`${step.title} ${step.line}`), false);
   }
+  assert.match(ONBOARD_STEPS[0]!.line, /chart/i);
+  assert.match(ONBOARD_STEPS[1]!.line, /section/i);
+  assert.match(ONBOARD_STEPS[2]!.line, /box/i);
 });
 
 test('a new device with no history sees the steps', () => {
