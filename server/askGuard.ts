@@ -2,7 +2,7 @@ import { askFacet } from '../shared/askAbout';
 import type { CardNode, FollowupMode, LayoutPlan } from '../shared/card';
 import { isBlockPage } from './blockPage';
 import { repeatsCallout } from './chips';
-import { heuristicPattern, patternById, skeletonCard } from './patterns';
+import { compareSides, heuristicPattern, patternById, skeletonCard } from './patterns';
 
 const IP = /\b(?:\d{1,3}\.){3}\d{1,3}\b|\b(?:[0-9a-f]{1,4}:){2,}[0-9a-f:]*/i;
 
@@ -31,6 +31,14 @@ export function isWritingAsk(question: string): boolean {
 export function standsAlone(question: string): boolean {
   const words = question.trim().split(/\s+/);
   return words.length >= 5 && !PRONOUN.test(question);
+}
+
+/**
+ * A follow-up that names the things to compare ("A vs B vs C") needs its own search.
+ * "Compare this with that" still depends on the card on screen, so it stays a conversation turn.
+ */
+export function asksToCompare(question: string): boolean {
+  return compareSides(question).length >= 2 && !PRONOUN.test(question);
 }
 
 /**

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { cryptographyHint, faithfulQuery, isWritingAsk, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from '../server/askGuard.ts';
+import { asksToCompare, cryptographyHint, faithfulQuery, isWritingAsk, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from '../server/askGuard.ts';
 import { isPersonAsk } from '../server/entity.ts';
 import type { CardNode } from '../shared/card.ts';
 
@@ -10,6 +10,8 @@ test('a writing request is answered, not searched, and a complete question is no
   assert.equal(isWritingAsk('how do mRNA vaccines work'), false);
   assert.equal(standsAlone('How to use the IACR API'), true);
   assert.equal(standsAlone('explain it like I am 10'), false);
+  assert.equal(asksToCompare('AJ Dybantsa vs 2026 NBA rookies vs past draft classes'), true);
+  assert.equal(asksToCompare('compare this with that'), false);
 });
 
 test('a rewrite that drops the question, or picks up a banned address, is thrown out', () => {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { withoutRepeatedLead } from '../shared/card.ts';
-import { compareCount, patternSkeleton } from '../server/patterns.ts';
+import { compareCount, compareSideQueries, patternSkeleton } from '../server/patterns.ts';
 
 test('a title lead written twice is kept once', () => {
   assert.equal(
@@ -14,6 +14,7 @@ test('a title lead written twice is kept once', () => {
 test('a comparison placeholder has one tile per side and a table with a factor column', () => {
   assert.equal(compareCount('which is better value: renting vs buying a home'), 2);
   assert.equal(compareCount('tea vs coffee vs water'), 3);
+  assert.deepEqual(compareSideQueries('AJ Dybantsa vs 2026 NBA rookies vs past draft classes'), ['2026 NBA rookies', 'NBA past draft classes']);
   const body = patternSkeleton('compare', 'renting vs buying a home');
   assert.equal(body[0]?.type, 'grid');
   if (body[0]?.type === 'grid') assert.equal(body[0].children.length, 2);

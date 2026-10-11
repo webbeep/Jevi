@@ -9,15 +9,55 @@ const norm = (s: string) =>
     .trim()
     .slice(0, 80);
 
+/**
+ * A decimal ("25.5") is one token. A dot ends a sentence only when it is not
+ * between digits, so "25.5 ppg" is never split into "25." and "5 ppg".
+ */
+const SENTENCE_SRC = String.raw`(?:\d+\.\d+|[^.!?]|(?<!\d)[.!?](?=\d))+[.!?]+(?:\s*\[\d+\])*\s*`;
+
+/** Complete sentences that form a prefix of `text`. A fragment after the last period is left out. */
+function sentencePrefix(text: string): string[] {
+  const re = new RegExp(SENTENCE_SRC, 'y');
+  const out: string[] = [];
+  let at = 0;
+  while (at < text.length) {
+    re.lastIndex = at;
+    const m = re.exec(text);
+    if (!m || m.index !== at) break;
+    out.push(m[0]);
+    at = re.lastIndex;
+  }
+  return out;
+}
+
+/**
+ * Drops a trailing ellipsis and the unfinished words in front of it
+ * ("First player in Big 12 …"), keeping the last sentence that actually ended.
+ * A short clause with no sentence at all is left out; a longer one is kept without the ellipsis.
+ */
+export function completeSentences(text: string): string {
+  const trimmed = text.replace(/\s+/g, ' ').trim();
+  if (!trimmed) return '';
+  if (!/(?:\.{3}|…)\s*$/.test(trimmed)) return trimmed;
+  const body = trimmed.replace(/(?:\.{3}|…)\s*$/, '').replace(/[\s,;:·•|–—-]+$/g, '').trim();
+  const done = sentencePrefix(body).join('').trim();
+  if (done) return done;
+  return body.length >= 40 ? body : '';
+}
+
 function trimToSentences(text: string, max: number): string {
-  if (text.length <= max) return text;
-  const sentences = text.match(/[^.!?]+[.!?]+(\s*\[\d+\])*\s*/g) ?? [text];
+  const clean = completeSentences(text);
+  if (!clean || clean.length <= max) return clean;
+  const parts = sentencePrefix(clean);
+  if (!parts.length) return clean.length <= 600 ? clean : clean.slice(0, 600).replace(/\s+\S*$/, '').trim();
   let out = '';
-  for (const s of sentences) {
-    if ((out + s).length > max && out) break;
+  for (const s of parts) {
+    const next = (out + s).trim();
+    if (next.length > max && out) break;
+    if (!out && next.length > 600) return next.slice(0, 600).replace(/\s+\S*$/, '').trim();
     out += s;
   }
-  return out.trim() || `${text.slice(0, max - 1)}…`;
+  return out.trim();
 }
 
 /**
@@ -44,7 +84,9 @@ export class Polisher {
 
   /** Keeps only sentences not seen before; returns '' when nothing new remains. */
   private fresh(text: string): string {
-    const sentences = text.match(/[^.!?]+[.!?]*(\s*\[\d+\])*\s*/g) ?? [text];
+    const parts = sentencePrefix(text);
+    const rest = text.slice(parts.join('').length);
+    const sentences = rest.trim() ? [...parts, rest] : parts.length ? parts : [text];
     const kept = sentences.filter((s) => {
       const key = norm(s);
       if (key.length < 12) return true;
@@ -116,4 +158,67 @@ export class Polisher {
         return node;
     }
   }
+}
+
+/** Every sentence on the node ends. A text node that was only an unfinished tail is dropped. */
+export function withFinishedSentences(node: CardNode): CardNode | undefined {
+  if (node.type === 'text' || node.type === 'callout' || node.type === 'quote') {
+    const text = completeSentences(node.text);
+    if (!text) return undefined;
+    return text === node.text ? node : { ...node, text };
+  }
+  if (node.type === 'hero') {
+    if (!node.caption) return node;
+    const caption = completeSentences(node.caption);
+    return caption === node.caption ? node : { ...node, caption: caption || undefined };
+  }
+  if (node.type === 'list') {
+    const items = node.items.flatMap((item) => {
+      const text = completeSentences(item.text);
+      return text ? [{ ...item, text }] : [];
+    });
+    if (!items.length) return undefined;
+    return items.length === node.items.length && items.every((item, i) => item.text === node.items[i]?.text) ? node : { ...node, items };
+  }
+  if (node.type === 'steps') {
+    const items = node.items.map((step) => {
+      const detail = step.detail ? completeSentences(step.detail) || undefined : undefined;
+      return detail === step.detail ? step : { ...step, detail };
+    });
+    return items.every((step, i) => step === node.items[i]) ? node : { ...node, items };
+  }
+  if (node.type === 'accordion') {
+    const items = node.items.flatMap((item) => {
+      const text = completeSentences(item.text);
+      return text ? [{ ...item, text }] : [];
+    });
+    if (!items.length) return undefined;
+    return { ...node, items };
+  }
+  if (node.type === 'section' || node.type === 'stack' || node.type === 'grid' || node.type === 'scroller') {
+    const children = node.children.flatMap((child) => {
+      const next = withFinishedSentences(child);
+      return next ? [next] : [];
+    });
+    if (!children.length) return undefined;
+    return children.length === node.children.length && children.every((child, i) => child === node.children[i]) ? node : { ...node, children };
+  }
+  if (node.type === 'tabs') {
+    const tabs = node.tabs
+      .map((tab) => ({
+        ...tab,
+        children: tab.children.flatMap((child) => {
+          const next = withFinishedSentences(child);
+          return next ? [next] : [];
+        }),
+      }))
+      .filter((tab) => tab.children.length);
+    if (!tabs.length) return undefined;
+    return { ...node, tabs };
+  }
+  if (node.type === 'table') {
+    const rows = node.rows.map((row) => row.map((cell) => completeSentences(cell) || (/(?:\.{3}|…)\s*$/.test(cell) ? '' : cell)));
+    return { ...node, rows };
+  }
+  return node;
 }

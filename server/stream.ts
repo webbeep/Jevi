@@ -43,7 +43,7 @@ import { keepPictures, reviewCard, type Review } from './review';
 import { permitted } from './images';
 import { hasLlm } from './llm';
 import { collectPages, ogImageOf } from './pages';
-import { MADE_PATTERNS, skeletonCard } from './patterns';
+import { MADE_PATTERNS, compareSideQueries, skeletonCard } from './patterns';
 import { planLayout } from './plan';
 import type { AskScope, CallLedger } from './budget';
 import { SEARCH_CALL_CAP, logAsk, mark, moreQueries, newLedger, queriesForAsk, searchCalls } from './budget';
@@ -53,7 +53,9 @@ import { type LateExtras, normalizeUrl, searchWithLate } from './search';
 import type { WebHit } from './cascade';
 import { domainOf } from './util';
 import { choicesIn, distinctActions, subjectWords } from './chips';
-import { cryptographyHint, faithfulQuery, isWritingAsk, quickPlan, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
+import { asksToCompare, cryptographyHint, faithfulQuery, isWritingAsk, quickPlan, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
+import { comparisonRepair, comparisonTitle } from './compareAnswer';
+import { withFinishedSentences } from './polish';
 import { isOwnSite, orcidSite, pickOwnSite, probeOwnSite, RESEARCH_ASK, withOwnSite } from './ownSite';
 import { quoteAsk } from '../shared/quoteAsk';
 import { scholarlyResults, withScholarly } from './scholarly';
@@ -305,10 +307,15 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     thinking: () => send('thinking', {}),
     layout: (regions) => send('layout', regions),
     head: (h) => {
-      head = h;
-      send('head', h);
+      const question = designReq.followup?.question ?? designReq.query;
+      const title = designReq.pattern === 'compare' ? comparisonTitle(question, h.title) : h.title;
+      head = title === h.title ? h : { ...h, title };
+      send('head', head);
     },
     node: (node, index) => {
+      const finished = withFinishedSentences(node);
+      if (!finished) return;
+      node = finished;
       if (req.website) node = withWebsite(node, req.website);
       const priorNodes = [...shown].filter(([at]) => at !== index).map(([, n]) => n);
       const keptNode = withoutRepeatedCallouts(node, priorNodes);
@@ -362,11 +369,28 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
         Promise.resolve({ ready: false as const, review: undefined }),
       ])
     : { ready: true as const, review: undefined };
+  const settleComparison = () => {
+    if (designReq.pattern !== 'compare') return;
+    const question = designReq.followup?.question ?? designReq.query;
+    const title = comparisonTitle(question, head?.title ?? question);
+    if (head && title !== head.title) {
+      head = { ...head, title };
+      send('head', head);
+    }
+    const patches = comparisonRepair(question, designReq.search, shown);
+    if (!patches) return;
+    for (const patch of patches) {
+      shown.set(patch.index, patch.node);
+      send('node', { index: patch.index, node: patch.node });
+    }
+  };
   if (arrived.ready && arrived.review) applyReview(send, designReq, shown, arrived.review, started);
+  settleComparison();
   send('done', { ...summary, pagesRead: pages.length, ms: Date.now() - started });
   if (pendingReview && !arrived.ready) {
     const review = await pendingReview;
     if (review) applyReview(send, designReq, shown, review, started);
+    settleComparison();
     mark(scope.ledger, 'reviewed');
   } else if (pendingReview) {
     mark(scope.ledger, 'reviewed');
@@ -440,6 +464,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   const videos = videoResults(query);
   // Searches that need no model ("$rdw" → "RDW stock news today") lead the rewrites.
   const instant = [...tickerQueries(query), ...formalNameQueries(query)];
+  const sides = compareSideQueries(query);
   if (!rewritten) {
     // SPD2 (t457): every ask searches its literal words at once; the understood rewrites join the same
     // engine when the intent read lands (~1 s), instead of the whole search waiting for it. A time-sensitive
@@ -447,17 +472,17 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     const literalFresh = freshness === 'any' ? guessFreshness(query) : freshness;
     const later = understood.then((x) => {
       if (x) send('intent', { intent: x.intent, queries: x.queries });
-      return { more: routeExtras(route, moreQueries(query, [...instant, ...extraQueries(query, x)])), freshness: freshness === 'any' ? x?.freshness ?? literalFresh : freshness };
+      return { more: routeExtras(route, moreQueries(query, [...sides, ...instant, ...extraQueries(query, x)])), freshness: freshness === 'any' ? x?.freshness ?? literalFresh : freshness };
     });
     // A price ask is answered by the live quote; the rewrites only add the news around it.
-    found = await searchWithLate({ q: queriesForAsk(query, []), more: routeExtras(route, moreQueries(query, instant)), later, freshness: literalFresh, count: 20, waitExtras: deep, extrasCutMs: quoteAsk(query) ? QUOTE_EXTRAS_MS : undefined, onLiteral }, env, scope);
+    found = await searchWithLate({ q: queriesForAsk(query, []), more: routeExtras(route, moreQueries(query, [...sides, ...instant])), later, freshness: literalFresh, count: 20, waitExtras: deep, extrasCutMs: quoteAsk(query) ? QUOTE_EXTRAS_MS : undefined, onLiteral }, env, scope);
     mark(scope.ledger, 'found');
     u = await understood;
   } else {
     u = undefined;
     // Literal question first. Planner rewrites are the later calls, still inside the cap.
     const q = queriesForAsk(query, instant);
-    const more = routeExtras(route, moreQueries(query, instant));
+    const more = routeExtras(route, moreQueries(query, [...sides, ...instant]));
     found = await searchWithLate({ q, more, freshness: freshness === 'any' ? guessFreshness(query) : freshness, count: 20, onLiteral }, env, scope);
   }
   let results = applyPickGate(query, applyRelevance(query, { ...found.response, query }, scope.ledger));
@@ -811,6 +836,15 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
     const plan = quickPlan(req.question, 'chat');
     send('plan', plan);
     await design(send, env, { query: req.original, pattern: plan.pattern, depth: plan.depth, readPages: false, search: req.search, followup: { mode: 'chat', question: req.question }, context }, started, scope);
+    return;
+  }
+
+  // "A vs B vs C" is a new question. Answering it from the card already on screen repeats that card
+  // under a "Side by side" label. Search the comparison itself; each other side gets its own query.
+  if (req.intent !== 'adjust' && asksToCompare(req.question)) {
+    const query = req.question.trim();
+    send('rewrite', { query });
+    await searchAndDesign(send, env, query, 'any', context, started, scope, false);
     return;
   }
 

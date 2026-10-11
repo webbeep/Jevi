@@ -8,7 +8,8 @@ import { Grounding, groundNodes } from './ground';
 import { PictureResolver, type RowImagePlan } from './pictures';
 import { Polisher } from './polish';
 import type { PageText } from './pages';
-import { patternById, patternSkeleton } from './patterns';
+import { comparisonNodes, comparisonTitle } from './compareAnswer';
+import { compareSides, patternById, patternSkeleton } from './patterns';
 import { sanitizeCard, sanitizeNodes, type PriceSource } from './sanitize';
 import { clip, type Env } from './util';
 import { VerdictSession } from './verdict';
@@ -161,7 +162,7 @@ STYLE — visual first, minimal text
 - Show, don't tell: numbers, icons, pictures, charts, tables and timelines carry the answer; words only label them. The card should be understood in a 3-second glance.
 - Never restate the card title as a heading; the header already shows it.
 - If the sources only support a few facts, make the card shorter: drop any skeleton slot you cannot fill with new information instead of rephrasing something already shown.
-- Text budget: labels 1-4 words; tile and stat values as short as possible; subtitles under 10 words; a text node is 1-2 short sentences. Never repeat the same fact in two places. No filler ("Here is", "In summary", "It is important to note").
+- Text budget: labels 1-4 words; tile and stat values as short as possible; subtitles under 10 words; a text node is 1-2 short sentences. Never repeat the same fact in two places. No filler ("Here is", "In summary", "It is important to note"). Never end a sentence with an ellipsis: finish it, or leave the unfinished tail out.
 - When the person wants to understand something (why/how/what is, or an explainer layout), explanation is the content: use clear, plain sentences in short paragraphs or an accordion, keep every step of the reasoning (don't skip what a newcomer needs), and add a one-line analogy. Still concise.
 - Predict what they will want next: offer the 1-3 most likely adjustments as controls (choices, slider, scaler) or "refine" actions — e.g. a different budget, size, date range, audience or level of detail — so they never have to type a clarification.
 - Pictures: every picture must show the specific item it sits next to — each product, place, dish or person gets its own imageQuery with its exact name. Use pictures where seeing the item helps (products, places, food, people, animals, landmarks, designs); skip them for abstract topics. Never reuse one picture for several items and never use a general stock-style photo. Never use an IMAGES index for an item when the image's description names another item or says vs/compare; give each item its own imageQuery instead.
@@ -182,7 +183,7 @@ FIT THE KIND OF REQUEST
 - Plans (trip, workout, study, meals): key numbers as tiles, then the plan in tabs by day or phase.
 
 HEADER
-- title: 2-6 words, at most 40 characters, naming the subject like an app screen title ("Apple Pie Recipe", "Tokyo in 3 Days") — never a question or a full sentence.
+- title: 2-6 words naming the subject like an app screen title ("Apple Pie Recipe", "Tokyo in 3 Days") — never a question or a full sentence. A comparison names its sides ("Dybantsa vs Draft Classes") and may pass 40 characters to do that; every other title stays within 40 characters. Never title the card with an earlier question.
 - subtitle: at most 8 words of useful context (what kind of answer, for whom, or how fresh), never a repeat of the title.
 
 RULES
@@ -255,8 +256,11 @@ function timeRules(req: DesignRequest): string {
 
 function taskBlock(req: DesignRequest): string {
   const pattern = patternById(req.pattern);
+  const asked = req.followup?.question ?? req.query;
+  const sides = req.pattern === 'compare' ? compareSides(asked) : [];
   return [
     `- Pre-selected layout: "${pattern.label}" (${pattern.description}).`,
+    sides.length >= 2 ? `- Compare exactly these sides, not an earlier topic: ${sides.join(' | ')}. The title names the sides. Use a table, or one section per side, with only facts from the sources. A biography of one side does not answer. If the sources never line the sides up, say so in one callout and still show what each side's sources do say. Never end a sentence with an ellipsis.` : '',
     `- ${DEPTH_HINT[req.depth]}`,
     req.intent ? `- What the person wants: ${req.intent} Answer that; sources that only match their words but not this are background at most.` : '',
     req.simple ? '- Write for a 10-year-old: plain words and a friendly analogy.' : '',
@@ -580,6 +584,14 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
 /** Builds a card straight from snippet sentences when no generator is available. */
 function extractive(req: DesignRequest, on: DesignEvents): DesignSummary {
   const { search, pattern: patternId, query } = req;
+  const asked = req.followup?.question ?? query;
+  const compared = patternId === 'compare' ? comparisonNodes(asked, search) : [];
+  if (compared.length) {
+    on.head({ title: comparisonTitle(asked, asked), subtitle: patternById(patternId).label });
+    const emitNode = bindVerdict(req, on.node);
+    compared.forEach((node, i) => emitNode(node, i));
+    return { engine: 'extractive', removed: 0 };
+  }
   const cands = candidates(search);
   const stats = extractStats(cands, 4);
   const timeline = extractTimeline(cands);

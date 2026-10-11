@@ -7,12 +7,33 @@ interface PatternDef extends CardPattern {
 
 const slot = (hint: string, shape: Extract<CardNode, { type: 'slot' }>['shape'] = 'line', size?: { cols?: number; rows?: number }): CardNode => ({ type: 'slot', hint, shape, ...size });
 
+/** The things a comparison names ("AJ Dybantsa vs 2026 NBA rookies vs past draft classes" is three). */
+export function compareSides(query: string): string[] {
+  const stripped = query.replace(/^(?:which is better(?: value)?|compare)\s*:\s*/i, '').trim();
+  const versus = stripped.split(/\s+(?:vs\.?|versus)\s+/i).map((p) => p.trim()).filter((p) => p.length >= 2);
+  if (versus.length >= 2) return versus;
+  const compared = stripped.match(/^compare\s+(.+?)\s+(?:and|with|to)\s+(.+)$/i);
+  if (!compared) return [];
+  return [compared[1]!, compared[2]!].map((p) => p.trim()).filter((p) => p.length >= 2);
+}
+
+/**
+ * Searches for every side except the first. The literal question already leads with that
+ * name, and a "vs" page is usually about the first name alone.
+ * A league named on another side ("NBA") is added when this side doesn't say it.
+ */
+export function compareSideQueries(query: string): string[] {
+  const sides = compareSides(query);
+  if (sides.length < 2) return [];
+  const league = query.match(/\b(?:NBA|NFL|MLB|NHL|WNBA)\b/i)?.[0]?.toUpperCase();
+  return sides.slice(1, 3).map((side) => (league && !new RegExp(`\\b${league}\\b`, 'i').test(side) ? `${league} ${side}` : side));
+}
+
 /** How many sides a comparison names ("renting vs buying" is 2). Two when it doesn't say. */
 export function compareCount(query: string): 2 | 3 | 4 {
-  const stripped = query.replace(/^(?:which is better(?: value)?|compare)\s*:\s*/i, '').trim();
-  const parts = stripped.split(/\s+(?:vs\.?|versus)\s+/i).map((p) => p.trim()).filter(Boolean);
-  if (parts.length >= 4) return 4;
-  if (parts.length === 3) return 3;
+  const n = compareSides(query).length;
+  if (n >= 4) return 4;
+  if (n === 3) return 3;
   return 2;
 }
 

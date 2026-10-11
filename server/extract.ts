@@ -1,5 +1,6 @@
 import type { KeyPoint, SearchResponse, Stat, TimelineItem } from '../shared/types';
 import { isBlockPage, tidyBibtex } from './blockPage';
+import { completeSentences } from './polish';
 import { clip } from './util';
 
 export interface Candidate extends KeyPoint {
@@ -18,9 +19,9 @@ export function candidates(search: SearchResponse, limit = 40): Candidate[] {
   for (const src of sources) {
     if (isBlockPage(src.text)) continue;
     for (const raw of tidyBibtex(src.text).split(/(?<=[.!?])\s+(?=[A-Z0-9"])/)) {
-      const text = raw.replace(/^\W*(\w{3} \d{1,2}, \d{4}\s*[-—·]\s*)?/, '').trim();
+      const text = completeSentences(raw.replace(/^\W*(\w{3} \d{1,2}, \d{4}\s*[-—·]\s*)?/, '').trim());
       const key = text.toLowerCase().slice(0, 60);
-      if (text.length < 35 || text.length > 260 || seen.has(key) || (/(\.\.\.|…)$/.test(text) && text.length < 60)) continue;
+      if (text.length < 35 || text.length > 260 || seen.has(key)) continue;
       seen.add(key);
       out.push({ id: `s${out.length}`, text, url: src.url, domain: src.domain });
       if (out.length >= limit) return out;
