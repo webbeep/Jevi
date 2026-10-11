@@ -114,7 +114,7 @@ export function AnswerCardView({ card, ask = '', version, filling, streaming, st
     <div role="status" aria-live="polite" className="pointer-events-none absolute right-3 top-3 z-20">
       {toast && <span className="block rounded-lg bg-foreground px-3 py-1.5 text-xs font-medium text-background shadow-float animate-in fade-in">{toast}</span>}
     </div>
-    <Card className="relative gap-0 overflow-hidden rounded-2xl py-0 shadow-card">
+    <Card className="relative min-w-0 max-w-full gap-0 overflow-hidden rounded-2xl py-0 shadow-card">
       <div className="flex items-start gap-2.5 pb-1 pl-4 pr-2 pt-3.5 sm:gap-3 sm:pl-6 sm:pr-3 sm:pt-5">
         <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg border bg-background sm:size-9">
           {filling && !card.icon ? <LogoMark className="size-4 animate-pulse" /> : <Icon name={card.icon} fallback="layout-grid" className="size-4 text-foreground/80 sm:size-[18px]" />}
@@ -163,9 +163,9 @@ export function AnswerCardView({ card, ask = '', version, filling, streaming, st
         </div>
       )}
 
-      <div className={cn('px-4 pb-5 pt-3.5 transition-[opacity,filter] duration-500 sm:px-6 sm:pb-6 sm:pt-4', status && !streaming && 'pointer-events-none opacity-50 blur-[1px]', cited.length && 'pb-4 sm:pb-5')}>
+      <div className={cn('min-w-0 px-4 pb-5 pt-3.5 transition-[opacity,filter] duration-500 sm:px-6 sm:pb-6 sm:pt-4', status && !streaming && 'pointer-events-none opacity-50 blur-[1px]', cited.length && 'pb-4 sm:pb-5')}>
         <CardTitle.Provider value={card.title}>
-          <div ref={frameRef} className="grid [&>*]:col-start-1 [&>*]:row-start-1" style={!revealLayout && heldHeight ? { minHeight: heldHeight } : undefined}>
+          <div ref={frameRef} className="grid w-full min-w-0 [&>*]:col-start-1 [&>*]:row-start-1 [&>*]:min-w-0" style={!revealLayout && heldHeight ? { minHeight: heldHeight } : undefined}>
             {trail && (
               <div aria-hidden={revealLayout || undefined} className={cn(revealLayout && 'pointer-events-none')}>
                 {trail}

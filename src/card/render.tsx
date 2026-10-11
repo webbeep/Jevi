@@ -51,7 +51,7 @@ export function Nodes({ nodes, className, stagger = false }: { nodes: CardNode[]
   const seen: Record<string, number> = {};
   let real = 0;
   return (
-    <div className={cn('flex flex-col gap-4', className)}>
+    <div className={cn('flex w-full min-w-0 flex-col gap-4', className)}>
       {nodes.filter((n) => n.type !== 'citations').map((n, i) => {
         const placeholder = hasSlot(n);
         if (!placeholder) seen[n.type] = (seen[n.type] ?? 0) + 1;
@@ -88,7 +88,7 @@ export function NodeView({ node }: { node: CardNode }): ReactNode {
       }
       return (
         <TilePictures.Provider value={node.children.some(wantsPicture)}>
-          <div className={cn('flex min-w-0', GAP[node.gap ?? 'md'], compact ? 'no-scrollbar flex-row overflow-x-auto overscroll-x-contain' : row ? cn('flex-col sm:flex-row', ALIGN[node.align ?? 'start'], node.wrap && 'sm:flex-wrap') : 'flex-col')}>
+          <div className={cn('flex min-w-0 max-w-full', GAP[node.gap ?? 'md'], compact ? 'touch-pan-x overflow-x-auto overscroll-x-contain' : row ? cn('flex-col sm:flex-row', ALIGN[node.align ?? 'start'], node.wrap && 'sm:flex-wrap') : 'flex-col')}>
             {node.children.map((c, i) => <div key={i} className={cn('flex min-w-0 flex-col [&>*]:flex-1', compact ? 'flex-1' : row && 'sm:flex-1')}><NodeView node={c} /></div>)}
           </div>
         </TilePictures.Provider>
@@ -98,7 +98,7 @@ export function NodeView({ node }: { node: CardNode }): ReactNode {
       // Only small cells (tiles, stats) stay two-up on phones; larger blocks get the full width.
       return (
         <TilePictures.Provider value={node.children.some(wantsPicture)}>
-          <div className={cn('grid', node.children.every(isCompact) ? COLS[node.cols] : WIDE_COLS[node.cols], GAP[node.gap ?? 'md'], '[&>*]:h-full')}>{node.children.map((c, i) => <NodeView key={i} node={c} />)}</div>
+          <div className={cn('grid min-w-0', node.children.every(isCompact) ? COLS[node.cols] : WIDE_COLS[node.cols], GAP[node.gap ?? 'md'], '[&>*]:h-full [&>*]:min-w-0')}>{node.children.map((c, i) => <NodeView key={i} node={c} />)}</div>
         </TilePictures.Provider>
       );
     case 'section':
@@ -126,8 +126,14 @@ export function NodeView({ node }: { node: CardNode }): ReactNode {
     case 'scroller':
       return (
         <TilePictures.Provider value={node.children.some(wantsPicture)}>
-          <div className="no-scrollbar -mx-4 overflow-x-auto overscroll-x-contain px-4 sm:-mx-6 sm:px-6">
-            <div className="flex w-max min-w-full gap-2 [&>*]:flex-1">{node.children.map((c, i) => <NodeView key={i} node={c} />)}</div>
+          <div className="@container min-w-0 max-w-full touch-pan-x snap-x snap-mandatory overflow-x-auto overscroll-x-contain">
+            <div className="flex w-max gap-2">
+              {node.children.map((c, i) => (
+                <div key={i} className="w-[78cqw] max-w-72 shrink-0 snap-start sm:w-[calc((100cqw-1rem)/3)] sm:max-w-none">
+                  <NodeView node={c} />
+                </div>
+              ))}
+            </div>
           </div>
         </TilePictures.Provider>
       );

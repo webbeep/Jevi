@@ -426,7 +426,7 @@ export function Tile({ node }: { node: Of<'tile'> }) {
       data-item=""
       data-tile-kind={kind}
       className={cn(
-        'relative flex min-w-[72px] flex-col items-center gap-0.5 rounded-xl border px-2 py-2.5 text-center transition-colors has-[>button:hover]:border-foreground/20 sm:min-w-[84px] sm:gap-1 sm:px-3 sm:py-3',
+        'relative flex min-w-0 max-w-full flex-col items-center gap-0.5 overflow-hidden rounded-xl border px-2 py-2.5 text-center transition-colors has-[>button:hover]:border-foreground/20 sm:gap-1 sm:px-3 sm:py-3',
         node.active ? 'border-foreground/25 bg-muted ring-1 ring-foreground/10' : 'bg-card',
       )}
     >
@@ -450,7 +450,7 @@ export function Tile({ node }: { node: Of<'tile'> }) {
       </span>
       {!slot && !img && !pending && isVerdict(node.value) && <Icon name={icon} className="pointer-events-none relative size-[18px] text-foreground/70 sm:size-5" />}
       {node.value && <span className="pointer-events-none relative max-w-full text-[15px] font-semibold tracking-tight [overflow-wrap:anywhere] sm:text-base" style={{ color: returnColor(plain(node.value), label) }}>{plain(node.value)}</span>}
-      {node.sub && <span className="pointer-events-none relative text-[11px] leading-tight text-muted-foreground"><RichText text={node.sub} inline noLinks /></span>}
+      {node.sub && <span className="pointer-events-none relative max-w-full text-pretty text-[11px] leading-tight text-muted-foreground [overflow-wrap:anywhere]"><RichText text={node.sub} inline noLinks /></span>}
     </div>
   );
 }
@@ -459,14 +459,14 @@ const LONG_VALUE = 26;
 
 export function KeyValue({ node }: { node: Of<'keyvalue'> }) {
   return (
-    <dl className="@container divide-y rounded-xl border bg-card">
+    <dl className="@container min-w-0 divide-y rounded-xl border bg-card">
       {node.items.map((i) => {
         // Side by side when there is room; label above value in narrow spots, or when the value is a title-length phrase that would wrap into a column.
         const long = plain(i.value).length > LONG_VALUE;
         return (
-          <div key={i.label} className={cn('flex flex-col gap-0.5 px-3 py-2 text-sm sm:px-4 sm:py-2.5', !long && '@xs:flex-row @xs:items-center @xs:justify-between @xs:gap-3')}>
-            <dt className={cn('flex min-w-0 items-center gap-2 text-muted-foreground', !long && '@xs:flex-1')}><Icon name={i.icon} className="size-3.5 shrink-0" />{i.label}</dt>
-            <dd className={cn('min-w-0 font-medium', !long && '@xs:max-w-[60%] @xs:shrink-0 @xs:text-right')}><RichText text={i.value} inline /></dd>
+          <div key={i.label} className={cn('flex min-w-0 flex-col gap-0.5 px-3 py-2 text-sm sm:px-4 sm:py-2.5', !long && '@xs:flex-row @xs:items-center @xs:justify-between @xs:gap-3')}>
+            <dt className={cn('flex min-w-0 items-center gap-2 text-muted-foreground', !long && '@xs:shrink')}><Icon name={i.icon} className="size-3.5 shrink-0" /><span className="min-w-0">{i.label}</span></dt>
+            <dd className={cn('min-w-0 font-medium [overflow-wrap:anywhere]', !long && '@xs:max-w-[60%] @xs:text-right')}><RichText text={i.value} inline /></dd>
           </div>
         );
       })}
@@ -610,7 +610,7 @@ export function TableView({ node }: { node: Of<'table'> }) {
   const width = Math.max(node.columns.length, ...node.rows.map((r) => r.length));
   const columns = [...Array(width - node.columns.length).fill(''), ...node.columns];
   return (
-    <div className="overflow-hidden rounded-xl border bg-card">
+    <div className="min-w-0 max-w-full overflow-hidden rounded-xl border bg-card">
       <Table>
         <TableHeader>
           <TableRow className="hover:bg-transparent">
