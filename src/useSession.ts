@@ -7,7 +7,7 @@ import { cardDigest } from '../shared/digest';
 import { MAX_AUTO_RECONNECTS, OFFLINE_MESSAGE, friendlyError, isConnectionError, reconnectDelay } from '../shared/offline';
 import { billingFromSources, settleCardPrices } from '../shared/pricing';
 import { emptyDoneState } from '../shared/sse-parse';
-import { liveBody } from '../shared/liveBody';
+import { isBlankLayout, liveBody } from '../shared/liveBody';
 import type { NoSourcesNotice, SearchResponse, SearchResult } from '../shared/types';
 import { api } from './api';
 import { withBrowserFallback } from './fallback';
@@ -290,7 +290,7 @@ export function useSession() {
               // bump remounts every section, replays the entrance, and resets a video already playing.
               const placed = placeNode({ regions: [], nodes: slots, raw: slots, followups: t.result.followups, credits: t.result.card.credits ?? [] }, e.data.index, e.data.node, t.question, results);
               settledSlots.current.set(route, placed.raw);
-              const body = placed.nodes.filter((n): n is CardNode => !!n);
+              const body = placed.nodes.filter((n): n is CardNode => !!n && !isBlankLayout(n));
               const result: CardResponse = { ...t.result, card: { ...t.result.card, body } };
               return { result, variants: { ...t.variants, [variantKey(t.pattern, t.simple)]: result }, live: undefined, filling: false, thinking: false };
             }

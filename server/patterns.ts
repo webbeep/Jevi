@@ -1,6 +1,7 @@
 import { personName } from '../shared/askAbout';
 import { withoutRepeatedLead, type AnswerCard, type CardNode, type CardPattern } from '../shared/card';
 import { isBriefingQuery } from '../shared/recency';
+import { asksLocalConditions } from './readings';
 
 interface PatternDef extends CardPattern {
   skeleton: CardNode[];
@@ -48,6 +49,28 @@ function compareSkeleton(query: string): CardNode[] {
     slot('verdict', 'line'),
   ];
 }
+/**
+ * A local reading has one current value. The spotlight row (hero beside a context
+ * block, then a series, then a detail grid) makes every region restate that value.
+ * The place is the card title, so the hero is the temperature and the sky only.
+ */
+function weatherSkeleton(): CardNode[] {
+  return [
+    slot('current temperature: the value is the temperature and the caption is the sky only. Do not put the place, humidity, dew point, wind, or pressure here', 'hero'),
+    {
+      type: 'scroller',
+      children: [
+        slot('a later period only (tonight, tomorrow, or a later day) with its own temperature — never the current reading and never a Now card', 'tile'),
+        slot('the next later period', 'tile'),
+        slot('the next later period', 'tile'),
+        slot('the next later period', 'tile'),
+        slot('the next later period', 'tile'),
+      ],
+    },
+    grid(2, slot('one extra reading not in the hero, such as humidity, wind, or pressure', 'tile'), slot('a different extra reading', 'tile'), slot('a different extra reading', 'tile'), slot('a different extra reading', 'tile')),
+  ];
+}
+
 const row = (...children: CardNode[]): CardNode => ({ type: 'stack', direction: 'row', gap: 'md', children });
 const grid = (cols: 2 | 3 | 4, ...children: CardNode[]): CardNode => ({ type: 'grid', cols, gap: 'md', children });
 const section = (title: string, ...children: CardNode[]): CardNode => ({ type: 'section', title, children });
@@ -158,6 +181,7 @@ export function patternById(id: string): PatternDef {
 /** The skeleton for this ask. A comparison grows a column and a tile for each side it names. */
 export function patternSkeleton(id: string, query = ''): CardNode[] {
   if (id === 'compare') return compareSkeleton(query);
+  if (id === 'spotlight' && asksLocalConditions(query)) return weatherSkeleton();
   return patternById(id).skeleton;
 }
 
@@ -172,6 +196,7 @@ export function heuristicPattern(q: string): string {
   const s = q.toLowerCase();
   if (/^(write|draft|rewrite|reword|compose|proofread|polish|make (this|it) (sound|more))\b/.test(s) || /\b(email|cover letter|caption|linkedin post|toast|speech) (to|for|about)\b/.test(s)) return 'draft';
   if (/\b(code|function|script|regex|sql|query|python|javascript|typescript|bash|excel formula|error|exception|bug)\b/.test(s) && /^(write|fix|how (do|to|can)|convert|debug|why does|what does)/.test(s)) return 'code';
+  if ((/\b(weather|forecast)\b/.test(s) || (/\btemperature\b/.test(s) && !/^(what is|what are|explain|define)/.test(s))) && !/\b(how (?:do|does)|why (?:do|does|is)|climate|historical|history)\b/.test(s)) return 'spotlight';
   if (/\b(itinerary|workout plan|meal plan|study plan|schedule|routine|\d+[- ]day)\b/.test(s)) return 'plan';
   if (/\b(vs\.?|versus|compare|or)\b/.test(s) && /\b(vs\.?|versus|compare)\b/.test(s)) return 'compare';
   if (/^(how (to|do i|can i)|steps to|recipe|guide)/.test(s)) return 'steps';
@@ -180,7 +205,8 @@ export function heuristicPattern(q: string): string {
   if (isBriefingQuery(s)) return 'briefing';
   if (/\b(history|timeline|origin|evolution)\b/.test(s)) return 'timeline';
   if (/\b(scores|box scores?|highlights|fixtures|slate|tip-?offs?|kick-?offs?)\b/.test(s)) return 'briefing';
-  if (/\b(current|right now|price|score|rate|forecast)\b/.test(s)) return 'spotlight';
+  if (/\b(current|right now|price|score|rate)\b/.test(s)) return 'spotlight';
+  if (/\btemperature\b/.test(s) && !/^(what is|what are|explain|define)/.test(s)) return 'spotlight';
   if (/\b(statistics|stats|population|how many|growth|trend)\b/.test(s)) return 'dataset';
   const named = q.match(/^(?:what|who)\s+(?:is|was)\s+(.+?)\s*\??$/i);
   if (named && personName(named[1].trim())) return 'profile';

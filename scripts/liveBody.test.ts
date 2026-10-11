@@ -57,6 +57,14 @@ test('actions after the layout show once the finish prefix is contiguous, and a 
   assert.deepEqual(liveBody({ nodes: ready, regions }, true), [text('lead'), text('rest'), actions, citations([1])]);
 });
 
+test('a collapsed region is dropped and does not bring its skeleton back', () => {
+  const regions = [slot('hero'), slot('series'), slot('details')];
+  const blank: CardNode = { type: 'stack', children: [] };
+  const nodes: (CardNode | undefined)[] = [text('89°'), blank, blank];
+  assert.deepEqual(liveBody({ nodes, regions }, true), [text('89°')]);
+  assert.deepEqual(liveBody({ nodes, regions }, false), [text('89°')]);
+});
+
 test('every node arrived while designing shows them all, no skeleton', () => {
   const regions = [slot('0'), slot('1'), slot('2')];
   const nodes: (CardNode | undefined)[] = [text('0'), text('1'), text('2')];

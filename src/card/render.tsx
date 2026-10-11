@@ -89,6 +89,7 @@ export function Nodes({ nodes, className, stagger = false }: { nodes: CardNode[]
 export function NodeView({ node }: { node: CardNode }): ReactNode {
   switch (node.type) {
     case 'stack': {
+      if (!node.children.length) return null;
       const row = node.direction === 'row';
       const compact = row && node.children.every(isCompact);
       // Three or more small cells can't share a phone's width (labels overflowed ~90px tiles): two-up there, one row from sm.
@@ -111,6 +112,7 @@ export function NodeView({ node }: { node: CardNode }): ReactNode {
       );
     }
     case 'grid':
+      if (!node.children.length) return null;
       // Only small cells (tiles, stats) stay two-up on phones; larger blocks get the full width.
       return (
         <TilePictures.Provider value={node.children.some(wantsPicture)}>
@@ -140,6 +142,7 @@ export function NodeView({ node }: { node: CardNode }): ReactNode {
         </Tabs>
       );
     case 'scroller':
+      if (!node.children.length) return null;
       return (
         <TilePictures.Provider value={node.children.some(wantsPicture)}>
           <div className="@container min-w-0 max-w-full touch-pan-x snap-x snap-mandatory overflow-x-auto overscroll-x-contain">

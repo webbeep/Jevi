@@ -4,6 +4,7 @@ import { cleanRef } from '../../shared/askAbout';
 import type { Freshness, SearchResponse } from '../../shared/types';
 import { bindAiWaitUntil } from '../../server/aiBudget';
 import { serveStream } from '../../server/answerCache';
+import { queryWithPlace, readerPlace } from '../../server/readings';
 import { type StreamRequest, runStream } from '../../server/stream';
 import { Env, errorJson, json, readJson } from '../../server/util';
 
@@ -77,12 +78,15 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env, waitUnti
   if (!gate.ok) return json(gate.body, 401);
   const body = clean(raw);
   if (!body) return stamp(errorJson('Invalid request', 400), gate.headers);
-  const req = body;
   // T446: every signed-in search/follow-up goes into the account's ask history.
-  if (gate.userId && (req.kind === 'search' || req.kind === 'followup')) {
-    const q = req.kind === 'search' ? req.query : req.question;
-    if (typeof q === 'string' && q.trim()) waitUntil(recordAsk(env, gate.userId, q, req.kind));
+  if (gate.userId && (body.kind === 'search' || body.kind === 'followup')) {
+    const q = body.kind === 'search' ? body.query : body.question;
+    if (typeof q === 'string' && q.trim()) waitUntil(recordAsk(env, gate.userId, q, body.kind));
   }
+  // A bare "weather" is cached and searched for the reader's city, so two cities never share an answer.
+  const cf = (request as Request & { cf?: { city?: unknown; region?: unknown; regionCode?: unknown } }).cf;
+  const req = body.kind === 'search' ? { ...body, query: queryWithPlace(body.query, readerPlace(cf)) } : body;
+  const typed = body.kind === 'search' && req.kind === 'search' && req.query !== body.query ? body.query : undefined;
   bindAiWaitUntil(env, waitUntil);
-  return stamp(await serveStream({ request, env, req, run: (send) => runStream(req, env, send, { request, signedIn: !!gate.userId, waitUntil: (p) => waitUntil(p) }), waitUntil }), gate.headers);
+  return stamp(await serveStream({ request, env, req, run: (send) => runStream(req, env, send, { request, signedIn: !!gate.userId, waitUntil: (p) => waitUntil(p), typed }), waitUntil }), gate.headers);
 };

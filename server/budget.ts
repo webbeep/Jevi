@@ -58,6 +58,8 @@ export interface AskScope {
   eval?: boolean;
   /** Engine that answered, when a search ran. */
   served?: string;
+  /** Reader's city from the edge, when the network supplied one. */
+  place?: string;
 }
 
 export function newLedger(): CallLedger {

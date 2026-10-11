@@ -1,8 +1,19 @@
 import type { CardNode } from './card';
 
-/** A section that is actually an answer, not a placeholder or the source list. */
+/** A region the server collapsed away. It is not a skeleton waiting to be filled. */
+export function isBlankLayout(node: CardNode | undefined): boolean {
+  if (!node) return false;
+  if (node.type === 'stack' || node.type === 'grid' || node.type === 'scroller') return node.children.length === 0;
+  if (node.type === 'section') return node.children.length === 0 && !node.title;
+  if (node.type === 'tabs') return node.tabs.length === 0;
+  if (node.type === 'keyvalue') return node.items.length === 0;
+  if (node.type === 'actions') return node.items.length === 0;
+  return false;
+}
+
+/** A section that is actually an answer, not a placeholder, a collapsed region, or the source list. */
 function showsAnswer(node: CardNode | undefined): node is CardNode {
-  return !!node && node.type !== 'slot' && node.type !== 'citations';
+  return !!node && node.type !== 'slot' && node.type !== 'citations' && !isBlankLayout(node);
 }
 
 /**
@@ -16,15 +27,18 @@ function showsAnswer(node: CardNode | undefined): node is CardNode {
  * When designing is over, every node that arrived is shown and gaps are dropped.
  */
 export function liveBody(live: { nodes: (CardNode | undefined)[]; regions: CardNode[] }, stillDesigning: boolean): CardNode[] {
-  if (!stillDesigning) return live.nodes.filter((n): n is CardNode => !!n);
+  if (!stillDesigning) return live.nodes.filter((n): n is CardNode => !!n && !isBlankLayout(n));
   if (!live.nodes.some(showsAnswer)) return [];
   const out: CardNode[] = [];
   for (let i = 0; i < live.regions.length; i++) {
-    out.push(live.nodes[i] ?? live.regions[i] ?? { type: 'slot', hint: 'answer', shape: 'block' });
+    const node = live.nodes[i];
+    if (isBlankLayout(node)) continue;
+    out.push(node ?? live.regions[i] ?? { type: 'slot', hint: 'answer', shape: 'block' });
   }
   for (let i = live.regions.length; i < live.nodes.length; i++) {
     const node = live.nodes[i];
     if (!node) break;
+    if (isBlankLayout(node)) continue;
     out.push(node);
   }
   return out;

@@ -56,6 +56,7 @@ import { choicesIn, distinctActions, subjectWords } from './chips';
 import { asksToCompare, cryptographyHint, faithfulQuery, isWritingAsk, needsOwnSearch, personQuestion, quickPlan, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
 import { comparisonRepair, comparisonTitle } from './compareAnswer';
 import { withFinishedSentences } from './polish';
+import { queryWithPlace, readerPlace, settleReadings } from './readings';
 import { isOwnSite, orcidSite, pickOwnSite, probeOwnSite, RESEARCH_ASK, withOwnSite } from './ownSite';
 import { quoteAsk } from '../shared/quoteAsk';
 import { scholarlyResults, withScholarly } from './scholarly';
@@ -303,14 +304,39 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   let head: Omit<AnswerCard, 'body'> | undefined;
   let followups: string[] = [];
   let pendingReview: Promise<Review | undefined> | undefined;
+  const sentNode = new Map<number, string>();
+  let sentHead = '';
+  const questionOf = () => designReq.followup?.question ?? designReq.query;
+  // Regions are designed in parallel and cannot see each other, so a reading shows up
+  // in every region. Publish the collapsed card, and retitle a local reading with its place.
+  const publishReadings = () => {
+    const indexes = [...shown.keys()].sort((a, b) => a - b);
+    const settled = settleReadings(indexes.map((index) => shown.get(index)), head, questionOf());
+    if (head) {
+      if (settled.head) head = { ...head, title: settled.head.title, subtitle: settled.head.subtitle };
+      const key = JSON.stringify(head);
+      if (key !== sentHead) {
+        sentHead = key;
+        send('head', head);
+      }
+    }
+    indexes.forEach((index, i) => {
+      const node = settled.nodes[i] ?? { type: 'stack' as const, children: [] };
+      shown.set(index, node);
+      const key = JSON.stringify(node);
+      if (sentNode.get(index) === key) return;
+      sentNode.set(index, key);
+      send('node', { index, node });
+    });
+  };
   const summary = await designer(designReq, env, {
     thinking: () => send('thinking', {}),
     layout: (regions) => send('layout', regions),
     head: (h) => {
-      const question = designReq.followup?.question ?? designReq.query;
+      const question = questionOf();
       const title = designReq.pattern === 'compare' ? comparisonTitle(question, h.title) : h.title;
       head = title === h.title ? h : { ...h, title };
-      send('head', head);
+      publishReadings();
     },
     node: (node, index) => {
       const finished = withFinishedSentences(node);
@@ -329,17 +355,17 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
         node = kept;
       }
       shown.set(index, node);
-      send('node', { index, node });
       const choices = choicesIn([node]);
-      if (!choices.length) return;
-      for (const [at, prior] of shown) {
-        if (prior.type !== 'actions') continue;
-        const kept = distinctActions(prior, choices, subject);
-        if (kept === prior) continue;
-        if (kept) shown.set(at, kept);
-        else shown.delete(at);
-        send('node', { index: at, node: kept ?? { type: 'actions', items: [] } });
+      if (choices.length) {
+        for (const [at, prior] of shown) {
+          if (prior.type !== 'actions') continue;
+          const kept = distinctActions(prior, choices, subject);
+          if (kept === prior) continue;
+          if (kept) shown.set(at, kept);
+          else shown.set(at, { type: 'actions', items: [] });
+        }
       }
+      publishReadings();
     },
     followups: (items) => {
       followups = usefulFollowups(items, head?.title, req.followup?.question ?? req.query);
@@ -386,11 +412,13 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   };
   if (arrived.ready && arrived.review) applyReview(send, designReq, shown, arrived.review, started);
   settleComparison();
+  publishReadings();
   send('done', { ...summary, pagesRead: pages.length, ms: Date.now() - started });
   if (pendingReview && !arrived.ready) {
     const review = await pendingReview;
     if (review) applyReview(send, designReq, shown, review, started);
     settleComparison();
+    publishReadings();
     mark(scope.ledger, 'reviewed');
   } else if (pendingReview) {
     mark(scope.ledger, 'reviewed');
@@ -427,6 +455,11 @@ function applyReview(send: Send, req: DesignRequest, shown: Map<number, CardNode
  * Rewritten follow-ups already say what they mean, so they skip the understanding step.
  */
 async function searchAndDesign(send: Send, env: Env, query: string, freshness: Freshness, context: string | undefined, started: number, scope: AskScope, rewritten = false, seedRows?: SearchResult[], steer?: { avoid: Set<string>; rejected: string }) {
+  const located = queryWithPlace(query, scope.place);
+  if (located !== query) {
+    send('rewrite', { query: located });
+    query = located;
+  }
   const understood = rewritten ? Promise.resolve(undefined) : understand(query, env, context).finally(() => mark(scope.ledger, 'understood'));
   // The layout is chosen from the question itself, so it runs with the search instead of after the intent read.
   const planned = planLayout(query, env, {}).then((plan) => {
@@ -972,11 +1005,20 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
 
 const TIMED_EVENTS = new Set(['intent', 'plan', 'search', 'designing', 'head', 'node']);
 
+function requestCf(request: Request | undefined): { city?: unknown; region?: unknown; regionCode?: unknown } | undefined {
+  if (!request || !('cf' in request)) return undefined;
+  const cf = (request as { cf?: unknown }).cf;
+  if (!cf || typeof cf !== 'object') return undefined;
+  return cf as { city?: unknown; region?: unknown; regionCode?: unknown };
+}
+
 export interface StreamOpts {
   request?: Request;
   /** Signed-in ask (gate userId). Signed-out asks draw on at most SERPER_ANON_SHARE of the Serper prod day. */
   signedIn?: boolean;
   waitUntil?: (promise: Promise<unknown>) => void;
+  /** The words they typed, when a bare local ask was aimed at their city before the search. */
+  typed?: string;
 }
 
 /** The person's own words with straight quotes, so "Who’s Ricky" reads like "Who's Ricky". */
@@ -1016,10 +1058,12 @@ export async function runStream(raw: StreamRequest, env: Env, rawSend: Send, opt
     refresh: opts?.request ? wantsRefresh(opts.request) : false,
     waitUntil: opts?.waitUntil,
     eval: opts?.request ? validTestToken(opts.request.headers.get('x-zo-test-token'), env.ZO_TEST_TOKEN) : false,
+    place: readerPlace(requestCf(opts?.request)),
   };
   try {
     switch (req.kind) {
       case 'search':
+        if (opts?.typed && opts.typed !== req.query) send('rewrite', { query: req.query });
         await searchAndDesign(send, env, req.query, req.freshness, req.context, started, scope);
         return;
       case 'design':

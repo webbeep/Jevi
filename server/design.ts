@@ -10,6 +10,7 @@ import { Polisher } from './polish';
 import type { PageText } from './pages';
 import { comparisonNodes, comparisonTitle } from './compareAnswer';
 import { compareSides, patternById, patternSkeleton } from './patterns';
+import { asksLocalConditions } from './readings';
 import { sanitizeCard, sanitizeNodes, type PriceSource } from './sanitize';
 import { clip, type Env } from './util';
 import { VerdictSession } from './verdict';
@@ -261,6 +262,7 @@ function taskBlock(req: DesignRequest): string {
   return [
     `- Pre-selected layout: "${pattern.label}" (${pattern.description}).`,
     sides.length >= 2 ? `- Compare exactly these sides, not an earlier topic: ${sides.join(' | ')}. The title names the sides. Use a table, or one section per side, with only facts from the sources. A biography of one side does not answer. If the sources never line the sides up, say so in one callout and still show what each side's sources do say. Never end a sentence with an ellipsis.` : '',
+    asksLocalConditions(asked) ? '- Local reading: the title is the place (city and region), never the word Weather or Forecast. The hero is the current temperature and the sky only — do not repeat the place as a hero label. Every other reading (humidity, wind, pressure, a later hour) appears once. A series is later periods, never another copy of right now.' : '',
     `- ${DEPTH_HINT[req.depth]}`,
     req.intent ? `- What the person wants: ${req.intent} Answer that; sources that only match their words but not this are background at most.` : '',
     req.simple ? '- Write for a 10-year-old: plain words and a friendly analogy.' : '',
