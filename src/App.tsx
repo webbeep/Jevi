@@ -6,12 +6,13 @@ import { getAuth, useAuth } from './auth/store';
 import { lsGet, lsSet } from './auth/storage';
 import { OnboardingCard } from './OnboardingCard';
 import { ONBOARD_DEVICE_KEY, ONBOARD_USERS_KEY, completeOnboarding, readOnboardedUsers, shouldShowOnboarding } from './onboarding';
+import { THEME_KEY, parseThemeChoice, resolvedDark, type ThemeChoice } from './theme';
 import { SaveButton } from './auth/SaveButton';
 import { UsageLine } from './auth/UsageLine';
 import { bootAuthOnce, claimBoot } from './auth/resume';
 import { flushPendingSave } from './auth/saves';
 import { clearSyncedHistory, noteDeviceAsk } from './auth/sync';
-import { ArrowUp, ChevronDown, CornerDownRight, CornerLeftUp, History, Moon, Pencil, Plus, RotateCw, Search, Shuffle, SlidersHorizontal, Sun, WifiOff, X } from 'lucide-react';
+import { ArrowUp, ChevronDown, CornerDownRight, CornerLeftUp, History, Pencil, Plus, RotateCw, Search, Shuffle, SlidersHorizontal, WifiOff, X } from 'lucide-react';
 import type { AnswerCard, CardNode } from '../shared/card';
 import { packHistorySources, type HistorySource } from '../shared/historyCard';
 import { topicOf, usefulFollowups, type AskRef } from '../shared/askAbout';
@@ -135,13 +136,33 @@ function turnFromHistory(query: string, card: AnswerCard, sources: HistorySource
   };
 }
 
+function systemDark() {
+  return typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches;
+}
+
 function useTheme() {
-  const [dark, setDark] = useState(() => localStorage.getItem('theme') === 'dark' || (!localStorage.getItem('theme') && matchMedia('(prefers-color-scheme: dark)').matches));
+  const [choice, setChoice] = useState<ThemeChoice>(() => {
+    const next = parseThemeChoice(localStorage.getItem(THEME_KEY));
+    document.documentElement.classList.toggle('dark', resolvedDark(next, systemDark()));
+    return next;
+  });
+  const [system, setSystem] = useState(systemDark);
+  useEffect(() => {
+    const mq = matchMedia('(prefers-color-scheme: dark)');
+    const onChange = () => setSystem(mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  const dark = resolvedDark(choice, system);
   useEffect(() => {
     document.documentElement.classList.toggle('dark', dark);
-    localStorage.setItem('theme', dark ? 'dark' : 'light');
   }, [dark]);
-  return [dark, setDark] as const;
+  const choose = (next: ThemeChoice) => {
+    setChoice(next);
+    if (next === 'system') localStorage.removeItem(THEME_KEY);
+    else localStorage.setItem(THEME_KEY, next);
+  };
+  return { choice, choose };
 }
 
 /** The sources sheet gets a history entry so the back button closes it instead of leaving the chat. */
@@ -155,7 +176,7 @@ const popOverlay = () => {
 
 export default function App() {
   const initial = useMemo(() => new URLSearchParams(location.search), []);
-  const [dark, setDark] = useTheme();
+  const { choice, choose } = useTheme();
   const { turns, actions: session } = useSession();
   // t447 + T455: item taps send right away; a tap while any answer in the thread is still streaming is queued and fires when it finishes.
   const threadBusy = turns.some((t) => t.filling);
@@ -487,8 +508,7 @@ export default function App() {
         {home ? (
           <>
             <header inert={showOnboarding || undefined} className="flex h-14 items-center justify-end gap-1 px-3 sm:px-5">
-              <AuthHeader />
-              <ThemeToggle dark={dark} onToggle={() => setDark(!dark)} />
+              <AuthHeader theme={choice} onTheme={choose} />
             </header>
             <main inert={showOnboarding || undefined} className="relative mx-auto flex w-full max-w-[640px] flex-col px-4 pb-16 pt-[10dvh] sm:pt-[16dvh]">
               <h1 className="flex justify-center">
@@ -653,8 +673,7 @@ export default function App() {
                   <Plus className="size-4" />
                   <span className="hidden sm:inline">New chat</span>
                 </Button>
-                <AuthHeader />
-                <ThemeToggle dark={dark} onToggle={() => setDark(!dark)} />
+                <AuthHeader theme={choice} onTheme={choose} />
               </div>
             </header>
 
@@ -777,14 +796,6 @@ function isTurnList(data: unknown): data is Turn[] {
 const SHELL = 'mx-auto w-full max-w-[1120px] px-3 sm:px-6';
 /** Single column; from lg a fixed-width sources rail sits beside a 720px reading column. */
 const GRID = 'mx-auto max-w-[720px] lg:grid lg:max-w-[1120px] lg:grid-cols-[minmax(0,720px)_300px] lg:justify-center lg:gap-12';
-
-function ThemeToggle({ dark, onToggle }: { dark: boolean; onToggle: () => void }) {
-  return (
-    <Button variant="ghost" size="icon" className="size-8 shrink-0 rounded-lg text-muted-foreground hover:text-foreground" onClick={onToggle} aria-label="Toggle theme">
-      {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
-    </Button>
-  );
-}
 
 /** The follow-up box. Its own component so typing doesn't re-render the conversation; remounted per chat. */
 function Composer({ actions, topic, mainRef }: { actions: SessionActions; topic: string; mainRef: RefObject<HTMLDivElement | null> }) {

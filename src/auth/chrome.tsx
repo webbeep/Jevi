@@ -1,14 +1,18 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { Monitor, Moon, Sun } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { COPY } from './copy';
+import { parseThemeChoice, type ThemeChoice } from '../theme';
 import { track } from './events';
 import { GateSheet } from './GateSheet';
 import { onGate, registerProfileOpener, registerSavesOpener, registerSheetOpener, requestProfile, requestSaves } from './gatebus';
@@ -20,10 +24,53 @@ import { isLeaving, startSignIn } from './signin';
 import { getAuth, markSignedOut, useAuth } from './store';
 import { resetSyncLocal, setSyncEnabled, useSyncEnabled } from './sync';
 
+function themeIcon(theme: ThemeChoice) {
+  switch (theme) {
+    case 'system': return Monitor;
+    case 'light': return Sun;
+    case 'dark': return Moon;
+    default: {
+      const unknown: never = theme;
+      return unknown;
+    }
+  }
+}
+
 const SavedPanel = lazy(() => import('./SavedPanel'));
 const ProfilePanel = lazy(() => import('./ProfilePanel'));
 
-export function AuthHeader() {
+function ThemeChoices({ theme, onTheme }: { theme: ThemeChoice; onTheme: (next: ThemeChoice) => void }) {
+  const pick = (value: string) => onTheme(parseThemeChoice(value));
+  return (
+    <>
+      <DropdownMenuLabel>{COPY.appearance}</DropdownMenuLabel>
+      <DropdownMenuRadioGroup value={theme} onValueChange={pick}>
+        <DropdownMenuRadioItem className="min-h-11" value="system"><Monitor className="size-4" />{COPY.themeSystem}</DropdownMenuRadioItem>
+        <DropdownMenuRadioItem className="min-h-11" value="light"><Sun className="size-4" />{COPY.themeLight}</DropdownMenuRadioItem>
+        <DropdownMenuRadioItem className="min-h-11" value="dark"><Moon className="size-4" />{COPY.themeDark}</DropdownMenuRadioItem>
+      </DropdownMenuRadioGroup>
+    </>
+  );
+}
+
+/** Appearance when there is no account menu yet. Signed-in accounts get the same choices inside that menu. */
+function AppearanceMenu({ theme, onTheme }: { theme: ThemeChoice; onTheme: (next: ThemeChoice) => void }) {
+  const Icon = themeIcon(theme);
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" className="size-8 shrink-0 rounded-lg text-muted-foreground hover:text-foreground" aria-label={COPY.appearance}>
+          <Icon className="size-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-44">
+        <ThemeChoices theme={theme} onTheme={onTheme} />
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+export function AuthHeader({ theme, onTheme }: { theme: ThemeChoice; onTheme: (next: ThemeChoice) => void }) {
   const auth = useAuth();
   const syncOn = useSyncEnabled();
   const [broken, setBroken] = useState(false);
@@ -31,14 +78,17 @@ export function AuthHeader() {
     setBroken(false);
   }, [auth.user?.avatar]);
 
-  if (!auth.enabled || !auth.ready) return null;
+  if (!auth.enabled || !auth.ready) return <AppearanceMenu theme={theme} onTheme={onTheme} />;
 
   if (!auth.signedIn || !auth.user) {
     return (
-      <Button variant="outline" className="h-11 shrink-0 gap-1.5 rounded-full px-3 text-[13px]" onClick={() => startSignIn('header')}>
-        <GoogleMark className="size-4" />
-        {COPY.signIn}
-      </Button>
+      <>
+        <Button variant="outline" className="h-11 shrink-0 gap-1.5 rounded-full px-3 text-[13px]" onClick={() => startSignIn('header')}>
+          <GoogleMark className="size-4" />
+          {COPY.signIn}
+        </Button>
+        <AppearanceMenu theme={theme} onTheme={onTheme} />
+      </>
     );
   }
 
@@ -85,6 +135,8 @@ export function AuthHeader() {
             <span className={`size-5 rounded-full bg-background shadow-sm transition-transform ${syncOn ? 'translate-x-5' : ''}`} />
           </span>
         </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <ThemeChoices theme={theme} onTheme={onTheme} />
         <DropdownMenuSeparator />
         <DropdownMenuItem className="min-h-11" onSelect={signOut}>{COPY.signOut}</DropdownMenuItem>
       </DropdownMenuContent>
