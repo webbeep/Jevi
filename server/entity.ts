@@ -1619,6 +1619,9 @@ export function pickTopic(pick: string, asks: string[]): string {
   const name = personSubject(pick);
   // "Name, Capital One" already says who they meant. The earlier company's words stay behind.
   if (!name || commaDetailQuery(pick)) return '';
+  // "AJ Dybantsa preseason highlights" already says what to look up. The earlier ask's topic
+  // ("stats") is a different question, and inheriting it is what replaced the highlights tap.
+  if (askTopic(pick, name)) return '';
   const nameToks = tokens(name);
   const have = new Set(tokens(pick));
   for (const ask of asks) {

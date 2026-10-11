@@ -17,6 +17,10 @@ test('a rewrite that drops the question, or picks up a banned address, is thrown
   assert.equal(faithfulQuery('Draft the unblock email', 'Takes Two proofs of work'), 'Draft the unblock email');
   assert.equal(faithfulQuery('explain it like I am 10', 'mRNA vaccines explained for a child'), 'mRNA vaccines explained for a child');
   assert.equal(faithfulQuery('apple varieties', 'best apple varieties for apple pie'), 'best apple varieties for apple pie');
+  assert.equal(
+    faithfulQuery('AJ Dybantsa preseason highlights', 'AJ Dybantsa Wizards washington stats'),
+    'AJ Dybantsa preseason highlights',
+  );
 });
 
 test('ban notices and addresses are scrubbed, and the chip that offers them never shows', () => {

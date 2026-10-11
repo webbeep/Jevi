@@ -1,3 +1,4 @@
+import { queryForLabel } from '../shared/askAbout';
 import { withoutRepeatedLead, type AnswerCard, type CardNode, type Tone } from '../shared/card';
 import { inferSeats, priceAsOf, sameSource, type BillingBasis, type Price, type PricePeriod, type PriceUnit } from '../shared/pricing';
 
@@ -202,7 +203,13 @@ function sanitizeNode(raw: unknown, imageCount: number, depth: number, ctx?: { s
     }
     case 'actions': {
       const items = arr(n.items)
-        .map((i) => ({ label: str((i as Raw)?.label, 40) ?? '', query: str((i as Raw)?.query, 200) ?? '', icon: icon((i as Raw)?.icon), kind: oneOf((i as Raw)?.kind, ['search', 'ask', 'refine'] as const) }))
+        .map((i) => {
+          const label = str((i as Raw)?.label, 40) ?? '';
+          const kind = oneOf((i as Raw)?.kind, ['search', 'ask', 'refine'] as const);
+          const raw = str((i as Raw)?.query, 200) ?? '';
+          const query = kind === 'refine' || !label || !raw ? raw : queryForLabel(label, raw);
+          return { label, query, icon: icon((i as Raw)?.icon), kind };
+        })
         .filter((i) => i.label && i.query);
       return items.length ? { type, items } : undefined;
     }

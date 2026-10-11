@@ -1,3 +1,4 @@
+import { askFacet } from '../shared/askAbout';
 import type { CardNode, FollowupMode, LayoutPlan } from '../shared/card';
 import { isBlockPage } from './blockPage';
 import { repeatsCallout } from './chips';
@@ -41,6 +42,10 @@ export function faithfulQuery(question: string, rewritten: string): string {
   if (!next) return question;
   if (IP.test(next)) return question;
   if (LEAK.test(next) && !LEAK.test(question)) return question;
+  // "preseason highlights" rewritten as "… stats" kept the name and dropped the tap.
+  const askedFor = askFacet(question);
+  const rewrittenAs = askFacet(next);
+  if (askedFor && rewrittenAs && askedFor !== rewrittenAs) return question;
   const asked = contentWords(question);
   const got = contentWords(next);
   const shared = [...asked].filter((w) => got.has(w) || [...got].some((g) => g.startsWith(w) || w.startsWith(g)));

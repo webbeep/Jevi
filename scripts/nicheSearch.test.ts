@@ -99,6 +99,8 @@ test('a Which-one? pick keeps the topic of the ask that offered it', () => {
   const context = 'Topic: jaylen brown injuries\nCard they are acting on (Q: jaylen brown injuries): Which one?';
   const asks = [...askedQuestions(context), 'jaylen brown injuries'];
   assert.equal(pickTopic('Jaylen Brown Boston Celtics', asks), 'injuries');
+  // A highlights tap already says what to look up. Inheriting "stats" is the wrong next card.
+  assert.equal(pickTopic('AJ Dybantsa preseason highlights', ['AJ Dybantsa Wizards washington stats']), '');
   assert.equal(pickTopicQuery('Jaylen Brown Boston Celtics', 'injuries'), 'Jaylen Brown boston celtics injuries');
   assert.equal(pickTopicQuery('Jaylen Brown Basketball Player', 'injuries'), 'Jaylen Brown basketball injuries');
   // The search stays an ask about that one person, and it is not a who-is ask.

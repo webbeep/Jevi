@@ -326,6 +326,51 @@ export function withRef(query: string, ref: AskRef | undefined): string {
   return q.replace(/\s+/g, ' ').trim().slice(0, 300);
 }
 
+/**
+ * The kind of thing a tap is asking for. A highlights button and a stats query are different asks;
+ * keeping both makes the next card about the earlier one.
+ */
+const ASK_FACETS: { id: string; re: RegExp }[] = [
+  { id: 'watch', re: /\b(?:highlights?|videos?|clips?|replays?)\b/i },
+  { id: 'stats', re: /\b(?:stats?|statistics|box\s*scores?)\b/i },
+  { id: 'schedule', re: /\b(?:schedules?|fixtures|slate)\b/i },
+  { id: 'injuries', re: /\binjur(?:y|ies)\b/i },
+  { id: 'standings', re: /\bstandings\b/i },
+  { id: 'news', re: /\b(?:news|rumou?rs)\b/i },
+  { id: 'roster', re: /\b(?:rosters?|line-?ups?)\b/i },
+  { id: 'contract', re: /\b(?:contracts?|salar(?:y|ies)|trades?)\b/i },
+];
+
+/** Which ask a label or query is making, when it names one. */
+export function askFacet(text: string): string | undefined {
+  return ASK_FACETS.find((f) => f.re.test(text))?.id;
+}
+
+const LABEL_STOP = new Set(['the', 'and', 'for', 'with', 'from', 'this', 'that', 'full', 'show', 'see', 'view']);
+
+const sameWord = (a: string, b: string) => a === b || a === `${b}s` || b === `${a}s` || a === `${b}es` || b === `${a}es`;
+
+/**
+ * The next search says what the button says. "Preseason highlights" on a query about his stats
+ * becomes a highlights search that still names him, not another stats card.
+ */
+export function queryForLabel(label: string, query: string): string {
+  const wanted = askFacet(label);
+  const got = askFacet(query);
+  let q = query.trim();
+  if (wanted && got && wanted !== got) {
+    const drop = ASK_FACETS.find((f) => f.id === got);
+    if (drop) q = q.split(/\s+/).filter((w) => w && !drop.re.test(w)).join(' ');
+  }
+  const have = q.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  const missing = label.split(/\s+/).filter((w) => {
+    const core = w.toLowerCase().replace(/[^a-z0-9]/g, '');
+    return core.length >= 3 && !LABEL_STOP.has(core) && !have.some((h) => sameWord(h, core));
+  });
+  if (missing.length) q = `${q} ${missing.join(' ')}`.trim();
+  return q.replace(/\s+/g, ' ').trim() || query.trim();
+}
+
 const normFollow = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
 
 /**

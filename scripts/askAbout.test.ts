@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { askQuestion, cleanRef, entityOf, refContext, topicOf, usefulFollowups, withRef, REF_MAX, type Box } from '../shared/askAbout.ts';
+import { askQuestion, cleanRef, entityOf, queryForLabel, refContext, topicOf, usefulFollowups, withRef, REF_MAX, type Box } from '../shared/askAbout.ts';
 
 const cases: [Box, string][] = [
   // tile: label + value + entity (the t453 repro)
@@ -147,6 +147,15 @@ test('withRef keeps the tapped thing and entity in the search query', () => {
     withRef('What happened in Oct 7, 2026: Top 10 plays?', { label: 'Oct 7, 2026: Top 10 plays', value: 'Seven preseason games on the Oct 7 schedule.', entity: 'NBA' }),
     'What happened in Oct 7, 2026: Top 10 plays? NBA',
   );
+});
+
+test('a highlights button does not search the stats query written under it', () => {
+  assert.equal(
+    queryForLabel('Preseason highlights', 'AJ Dybantsa Wizards washington stats'),
+    'AJ Dybantsa Wizards washington Preseason highlights',
+  );
+  assert.equal(queryForLabel('Full stat line', 'AJ Dybantsa full stat line'), 'AJ Dybantsa full stat line');
+  assert.equal(queryForLabel('Shooting splits', 'AJ Dybantsa shooting splits'), 'AJ Dybantsa shooting splits');
 });
 
 test('topicOf keeps the subject of a topic title', () => {
