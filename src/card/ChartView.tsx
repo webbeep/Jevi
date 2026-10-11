@@ -84,8 +84,9 @@ export default function ChartView({ node }: { node: Extract<CardNode, { type: 'c
 
   const title = node.title ? undupeParen(node.title) : undefined;
   const unit = node.unit && !unitAlreadyInTitle(title, node.unit) ? node.unit : undefined;
+  // A chart has no text of its own to set its width. It asks for 16rem, and never more than the strip allows.
   return (
-    <div className="rounded-xl border bg-card p-3 sm:p-4">
+    <div className="w-full max-w-full min-w-[min(16rem,78cqw)] rounded-xl border bg-card p-3 sm:p-4">
       {title && <div className="mb-3 text-sm font-medium">{title}{unit && <span className="ml-1 text-muted-foreground">({unit})</span>}</div>}
       {node.kind === 'pie' ? chart : (
         <ChartContainer config={config} className={node.kind === 'hbar' ? 'aspect-auto w-full' : 'aspect-auto h-40 w-full sm:h-44'} style={node.kind === 'hbar' ? { height: Math.max(120, node.data.length * 34) } : undefined}>
