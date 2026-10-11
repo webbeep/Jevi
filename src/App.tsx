@@ -12,7 +12,7 @@ import { UsageLine } from './auth/UsageLine';
 import { bootAuthOnce, claimBoot } from './auth/resume';
 import { flushPendingSave } from './auth/saves';
 import { clearSyncedHistory, noteDeviceAsk } from './auth/sync';
-import { ArrowUp, ChevronDown, CornerDownRight, CornerLeftUp, History, Pencil, Plus, RotateCw, Search, Shuffle, SlidersHorizontal, WifiOff, X } from 'lucide-react';
+import { ArrowUp, CornerDownRight, CornerLeftUp, History, Plus, RotateCw, Search, SlidersHorizontal, WifiOff, X } from 'lucide-react';
 import type { AnswerCard, CardNode } from '../shared/card';
 import { packHistorySources, type HistorySource } from '../shared/historyCard';
 import { topicOf, usefulFollowups, type AskRef } from '../shared/askAbout';
@@ -35,25 +35,15 @@ import { turnDegraded, turnsDegraded } from '../shared/degraded';
 import { MANUAL_RETRY_AFTER, OFFLINE_MESSAGE, clearPending, loadPending, savePending } from '../shared/offline';
 import { clearHistory, readHistory, recordAsk, rememberFollowups, touchHistory } from '../shared/personal';
 import { placeholderExamples } from '../shared/starters';
-import { useSuggestions } from './useSuggestions';
+import { HomeShelf } from './HomeShelf';
+import type { OpenedSave } from './auth/SavedPanel';
 import { clearTypeaheadClientCache, useTypeahead } from './useTypeahead';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Skeleton } from '@/components/ui/skeleton';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 
 const LOADING: CardNode[] = [{ type: 'slot', hint: 'answer', shape: 'hero' }, { type: 'slot', hint: 'details', shape: 'block' }];
-/** Open history stays at three rows. The choice is remembered on this device. */
-const HISTORY_OPEN_KEY = 'zo:history-open';
-
-function readHistoryOpen(): boolean {
-  try {
-    return localStorage.getItem(HISTORY_OPEN_KEY) !== '0';
-  } catch {
-    return true;
-  }
-}
 
 /** What to do with highlighted text. */
 const QUOTE_MODES = [
@@ -182,9 +172,7 @@ export default function App() {
   // t447 + T455: item taps send right away; a tap while any answer in the thread is still streaming is queued and fires when it finishes.
   const threadBusy = turns.some((t) => t.filling);
   const [queued, setQueued] = useState<{ q: string; ref?: AskRef; from: number; item?: string } | null>(null);
-  const { items: suggestions, rows: suggestionRows, shuffle, shuffleEnabled, pending: ideasLoading, refresh } = useSuggestions();
   const [histRev, setHistRev] = useState(0);
-  const [historyOpen, setHistoryOpen] = useState(() => (typeof window !== 'undefined' ? readHistoryOpen() : true));
   const inputRef = useRef<HTMLInputElement>(null);
   const [phExamples] = useState(() => placeholderExamples());
   const [phIndex, setPhIndex] = useState(0);
@@ -268,7 +256,6 @@ export default function App() {
     recordAsk(localStorage, query);
     noteDeviceAsk();
     setHistRev((n) => n + 1);
-    refresh();
     typeahead.close();
     history.pushState(null, '', `?${new URLSearchParams({ q: query })}`);
     session.search(query, { reset: true });
@@ -319,8 +306,19 @@ export default function App() {
   };
   openHistoryRef.current = openHistory;
 
-  const editStarter = (text: string) => {
-    setInput(text);
+  const openSaved = (saved: OpenedSave) => {
+    openGen.current += 1;
+    if (saved.fromHistory) {
+      touchHistory(localStorage, saved.query);
+      noteDeviceAsk();
+      setHistRev((n) => n + 1);
+    }
+    const cached = saved.fromHistory ? readAnswerCache(saved.query) : undefined;
+    if (cached?.length) session.restore(cached);
+    else session.restore([turnFromHistory(saved.query, saved.card, saved.results)]);
+    shown.current = saved.query;
+    history.pushState(null, '', `?${new URLSearchParams({ q: saved.query })}`);
+    window.scrollTo({ top: 0 });
   };
 
   const newChat = () => {
@@ -374,13 +372,10 @@ export default function App() {
     return () => registerSnapshot(null);
   }, []);
   useEffect(() => {
-    const onHistory = () => {
-      setHistRev((n) => n + 1);
-      refresh();
-    };
+    const onHistory = () => setHistRev((n) => n + 1);
     window.addEventListener('zo-history', onHistory);
     return () => window.removeEventListener('zo-history', onHistory);
-  }, [refresh]);
+  }, []);
 
   useEffect(() => {
     try {
@@ -504,7 +499,6 @@ export default function App() {
     void clearSyncedHistory();
     void fetch('/api/history', { method: 'DELETE', credentials: 'same-origin' }).catch(() => undefined);
     setHistRev((n) => n + 1);
-    refresh();
     typeahead.close();
   };
 
@@ -518,7 +512,7 @@ export default function App() {
             <header inert={showOnboarding || undefined} className="flex h-14 items-center justify-end gap-1 px-3 sm:px-5">
               <AuthHeader theme={choice} onTheme={choose} />
             </header>
-            <main inert={showOnboarding || undefined} className="relative mx-auto flex w-full max-w-[640px] flex-col px-4 pb-16 pt-[10dvh] sm:pt-[16dvh]">
+            <main inert={showOnboarding || undefined} className="relative mx-auto flex w-full max-w-[640px] flex-col px-4 pb-8 pt-[6dvh] sm:pt-[12dvh]">
               <h1 className="flex justify-center">
                 <Wordmark className="text-[40px] sm:text-[48px]" />
                 <span className="sr-only">ZO</span>
@@ -575,101 +569,7 @@ export default function App() {
                 )}
               </form>
               </div>
-              {historyItems.length > 0 && (
-                <div className="mt-5 sm:mt-6">
-                  <div className="flex items-center justify-between gap-2 px-1">
-                    <h2 className="zo-label" id="home-history-label">History</h2>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setHistoryOpen((open) => {
-                          const next = !open;
-                          try {
-                            localStorage.setItem(HISTORY_OPEN_KEY, next ? '1' : '0');
-                          } catch {
-                            /* private mode */
-                          }
-                          return next;
-                        });
-                      }}
-                      aria-expanded={historyOpen}
-                      aria-controls="home-history"
-                      aria-label={historyOpen ? 'Collapse history' : 'Show history'}
-                      className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-foreground/[0.04] hover:text-foreground"
-                    >
-                      <ChevronDown className={cn('size-4 transition-transform duration-200', !historyOpen && '-rotate-90')} />
-                    </button>
-                  </div>
-                  <ul id="home-history" aria-labelledby="home-history-label" hidden={!historyOpen} className={cn('max-h-36 flex-col gap-1 overflow-y-auto', historyOpen ? 'flex' : 'hidden')} data-testid="home-history">
-                    {historyItems.map((item) => (
-                      <li key={item.q}>
-                        <button
-                          type="button"
-                          onClick={() => openHistory(item.q)}
-                          className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[14px] leading-snug text-foreground/70 transition-colors hover:bg-foreground/[0.04] hover:text-foreground"
-                        >
-                          <History className="size-4 shrink-0 text-muted-foreground" />
-                          <span className="min-w-0 flex-1 break-words">{item.q}</span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              <div className="mt-5 sm:mt-6">
-                <div className="mb-1.5 flex items-center justify-between gap-2 px-1">
-                  <div className="min-w-0">
-                    <h2 className="zo-label">Try one</h2>
-                  </div>
-                  <div className="flex shrink-0 items-center">
-                    {shuffleEnabled && (
-                      <button
-                        type="button"
-                        onClick={shuffle}
-                        aria-label="Shuffle suggestions"
-                        className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-xl px-2 text-[12px] text-muted-foreground transition-colors hover:bg-foreground/[0.04] hover:text-foreground"
-                      >
-                        <Shuffle className="size-3.5" />
-                        Shuffle
-                      </button>
-                    )}
-                  </div>
-                </div>
-                {ideasLoading && <p className="sr-only" aria-live="polite">Loading suggestions</p>}
-                <ul className="flex flex-col gap-1 sm:grid sm:grid-cols-2 sm:gap-x-3 sm:gap-y-1" aria-busy={ideasLoading || undefined} data-testid="try-one">
-                  {ideasLoading
-                    ? Array.from({ length: suggestionRows }, (_, i) => (
-                        <li key={`idea-wait-${i}`} className="zo-rise" style={{ animationDelay: `${i * 70}ms` }} data-testid="idea-placeholder">
-                          <div className="flex min-h-11 items-center gap-3 rounded-xl px-3 py-2.5" aria-hidden="true">
-                            <Skeleton className="size-4 shrink-0 rounded-md" />
-                            <Skeleton className="h-3 rounded-full" style={{ width: `${52 + (i % 3) * 14}%` }} />
-                          </div>
-                        </li>
-                      ))
-                    : suggestions.map((s, i) => (
-                    <li key={s.id} className="animate-in fade-in fill-mode-backwards duration-500" style={{ animationDelay: `${i * 40}ms` }}>
-                      <div className="flex min-h-11 items-stretch gap-0.5 rounded-xl hover:bg-foreground/[0.04]">
-                        <button
-                          type="button"
-                          onClick={() => startSearch(s.text)}
-                          className="flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[14px] leading-snug text-foreground/80 transition-colors hover:text-foreground"
-                        >
-                          <Icon name={s.icon} fallback="sparkles" className="size-4 shrink-0 text-muted-foreground" />
-                          <span className="min-w-0 flex-1 break-words">{s.text}</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => editStarter(s.text)}
-                          aria-label={`Edit: ${s.text}`}
-                          className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:text-foreground"
-                        >
-                          <Pencil className="size-3.5" />
-                        </button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+              <HomeShelf signedIn={auth.enabled && auth.signedIn} onSearch={startSearch} onOpenSaved={openSaved} />
             </main>
             {showOnboarding && <OnboardingCard onDone={finishOnboarding} />}
           </>
@@ -748,20 +648,7 @@ export default function App() {
           }}
           onClearHistory={wipeHistory}
           onReopenHistory={openHistory}
-          onOpenSaved={(saved) => {
-            openGen.current += 1;
-            if (saved.fromHistory) {
-              touchHistory(localStorage, saved.query);
-              noteDeviceAsk();
-              setHistRev((n) => n + 1);
-            }
-            const cached = saved.fromHistory ? readAnswerCache(saved.query) : undefined;
-            if (cached?.length) session.restore(cached);
-            else session.restore([turnFromHistory(saved.query, saved.card, saved.results)]);
-            shown.current = saved.query;
-            history.pushState(null, '', `?${new URLSearchParams({ q: saved.query })}`);
-            window.scrollTo({ top: 0 });
-          }}
+          onOpenSaved={openSaved}
         />
       </div>
     </>
