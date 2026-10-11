@@ -1,3 +1,4 @@
+import { NAME_PARTICLE } from '../shared/askAbout';
 import { nameLike, tokens, type EntityHint } from './imageGate';
 import { isBlockedHost, isFictionHost } from './spamHosts';
 
@@ -144,6 +145,9 @@ export function personSubject(query: string): string {
         commaEnd = true;
         break;
       }
+    } else if (run.length && NAME_PARTICLE.test(w) && i + 1 < words.length && /^[A-Z]/.test(words[i + 1]!)) {
+      // "Sergio de Larrea": the particle belongs to the name.
+      run.push(w);
     } else break;
   }
   // "who is Ed chu": a sloppy-case surname after a capitalised first name still belongs to the name.
@@ -167,14 +171,21 @@ export function personSubject(query: string): string {
       const lowW = w.toLowerCase();
       // A role or descriptor word ends the name: "John Smith Explorer", "David Kim Violinist".
       // A two-letter word after a full name is an abbreviation ("Ed Chu Bf ai" = BlueFlame AI), not a surname.
+      if (NAME_PARTICLE.test(w)) continue;
       if (looksLikeOrgToken(w) || ROLE1.has(lowW) || DESCRIPTOR_WORDS.has(lowW) || ROLE_TAIL.has(lowW) || /^co-founder$/i.test(w) || (ABBREV.test(w) && !NAME_SUFFIX.test(w))) {
         cut = i;
         break;
       }
     }
     // Choice-query shape "Name Name Org Role" (≥4 Cap tokens): never treat Org as a middle name.
-    if (run.length >= 4 && cut > 2) cut = 2;
-    return run.slice(0, Math.min(cut, 3)).join(' ');
+    // A particle keeps the surname after it: "Sergio de Larrea Mavericks" stays three words.
+    if (run.length >= 4 && cut > 2) {
+      let keep = 2;
+      if (NAME_PARTICLE.test(run[1] ?? '')) keep = NAME_PARTICLE.test(run[2] ?? '') ? 4 : 3;
+      cut = Math.min(cut, keep);
+    }
+    const cap = run.some((w) => NAME_PARTICLE.test(w)) ? 4 : 3;
+    return run.slice(0, Math.min(cut, cap)).join(' ');
   }
   // Lowercase person asks only after who/about: "who is barack obama" (not "open source database" or "zxqv").
   if (hadWho && words.length <= 4 && words.every((w) => /^[a-z0-9][a-z0-9.'-]*$/i.test(w) && !COMMON.has(w.toLowerCase()))) {

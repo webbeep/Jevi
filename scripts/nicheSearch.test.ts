@@ -52,6 +52,9 @@ test('a sloppy-case person ask keeps the whole name', () => {
   assert.equal(personSubject('who is Messi now'), 'Messi');
   assert.equal(personSubject('who is Ray lee founder'), 'Ray Lee');
   assert.equal(personSubject('who is Barack Obama'), 'Barack Obama');
+  assert.equal(personSubject('Sergio de Larrea, Mavericks rookie'), 'Sergio de Larrea');
+  assert.equal(personSubject('Who is Sergio de Larrea?'), 'Sergio de Larrea');
+  assert.equal(isPersonAsk('Sergio de Larrea, Mavericks rookie'), true);
 });
 
 test('"Ed Chu" matches pages that write Edward Chu, and also searches the formal name', () => {

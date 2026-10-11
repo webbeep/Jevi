@@ -19,14 +19,14 @@ const cases: [Box, string][] = [
   [{ kind: 'tile', label: 'Steph', value: '10 pts', entity: '2026 NBA preseason' }, "What is behind Steph's 10 pts?"],
   [{ kind: 'tile', label: 'Lendeborg', value: 'Warriors' }, 'What about Lendeborg (Warriors)?'],
   // people
-  [{ kind: 'tile', label: 'CEO', value: 'Raj Bhatt', entity: 'BlueFlame AI' }, "Who is Raj Bhatt, BlueFlame AI's CEO?"],
-  [{ kind: 'tile', label: 'Founded by', value: 'Raj Bhatt and Ann Lee', entity: 'BlueFlame AI' }, "Who are Raj Bhatt and Ann Lee, BlueFlame AI's founders?"],
-  [{ kind: 'tile', label: 'Head coach', value: 'Steve Kerr' }, 'Who is Steve Kerr, the head coach?'],
-  [{ kind: 'tile', label: 'CEO', value: 'Raj Bhatt', entity: 'Warriors' }, "Who is Raj Bhatt, Warriors' CEO?"],
+  [{ kind: 'tile', label: 'CEO', value: 'Raj Bhatt', entity: 'BlueFlame AI' }, "Raj Bhatt, BlueFlame AI's CEO"],
+  [{ kind: 'tile', label: 'Founded by', value: 'Raj Bhatt and Ann Lee', entity: 'BlueFlame AI' }, "Raj Bhatt and Ann Lee, BlueFlame AI's founders"],
+  [{ kind: 'tile', label: 'Head coach', value: 'Steve Kerr' }, 'Steve Kerr, head coach'],
+  [{ kind: 'tile', label: 'CEO', value: 'Raj Bhatt', entity: 'Warriors' }, "Raj Bhatt, Warriors' CEO"],
   // a company in a role a company can fill
   [{ kind: 'fact', label: 'Owner', value: 'Datasite', entity: 'BlueFlame AI' }, "What is Datasite, BlueFlame AI's owner?"],
   [{ kind: 'fact', label: 'Owned by', value: 'Datasite', entity: 'BlueFlame AI' }, "What is Datasite, BlueFlame AI's owner?"],
-  [{ kind: 'fact', label: 'Owner', value: 'Joe Lacob', entity: 'Warriors' }, "Who is Joe Lacob, Warriors' owner?"],
+  [{ kind: 'fact', label: 'Owner', value: 'Joe Lacob', entity: 'Warriors' }, "Joe Lacob, Warriors' owner"],
   [{ kind: 'tile', label: 'Founded by', value: 'Y Combinator Labs', entity: 'Acme' }, "What is Y Combinator Labs, Acme's founder?"],
   // profile facts and kinds
   [{ kind: 'fact', label: 'Role', value: 'Senior Software Engineer', entity: 'Ray Lee' }, "What does Ray Lee's role as Senior Software Engineer involve?"],
@@ -37,8 +37,8 @@ const cases: [Box, string][] = [
   [{ kind: 'tile', label: 'Founded', value: '2019', entity: 'BlueFlame AI' }, 'How was BlueFlame AI founded in 2019?'],
   [{ kind: 'tile', label: 'Series A', value: '2024', entity: 'BlueFlame AI' }, 'What happened with Series A in 2024?'],
   [{ kind: 'tile', label: 'Last funding', value: 'Mar 2024', entity: 'BlueFlame AI' }, 'What happened with BlueFlame AI in Mar 2024?'],
-  [{ kind: 'profile', label: 'Ray Lee', value: 'Software engineer at Stripe' }, 'Who is Ray Lee, software engineer at Stripe?'],
-  [{ kind: 'profile', label: 'Ray Lee' }, 'Who is Ray Lee?'],
+  [{ kind: 'profile', label: 'Ray Lee', value: 'Software engineer at Stripe' }, 'Ray Lee, Software engineer at Stripe'],
+  [{ kind: 'profile', label: 'Ray Lee' }, 'Ray Lee'],
   // verdicts
   [{ kind: 'verdict', label: 'Do bananas ripen avocados faster when stored in a paper bag', value: 'Yes' }, 'Why do bananas ripen avocados faster when stored in a paper bag?'],
   [{ kind: 'verdict', label: 'Is coffee bad for you?', value: 'No' }, "Why isn't coffee bad for you?"],
@@ -48,9 +48,10 @@ const cases: [Box, string][] = [
   [{ kind: 'tile', label: 'Avocados ripen bananas', value: 'Mixed' }, 'How true is it that avocados ripen bananas?'],
   [{ kind: 'tile', label: 'Stephen Curry retired', value: 'No' }, 'Why is it false that Stephen Curry retired?'],
   // rows, lists, links, timeline
-  [{ kind: 'row', label: '**Yaxel Lendeborg** — Warriors forward' }, 'Who is Yaxel Lendeborg?'],
-  [{ kind: 'row', label: 'Yaxel Lendeborg, Golden State Warriors', detail: 'Top rookie' }, 'Who is Yaxel Lendeborg?'],
-  [{ kind: 'row', label: 'Priya Natarajan' }, 'Who is Priya Natarajan?'],
+  [{ kind: 'row', label: '**Yaxel Lendeborg** — Warriors forward' }, 'Yaxel Lendeborg, Warriors forward'],
+  [{ kind: 'row', label: 'Yaxel Lendeborg, Golden State Warriors', detail: 'Top rookie' }, 'Yaxel Lendeborg, Golden State Warriors'],
+  [{ kind: 'row', label: 'Priya Natarajan' }, 'Priya Natarajan'],
+  [{ kind: 'tile', label: 'Sergio de Larrea', value: 'Mavericks rookie', entity: 'Rookie Standouts' }, 'Sergio de Larrea, Mavericks rookie'],
   [{ kind: 'row', label: 'BlueFlame AI' }, 'What is BlueFlame AI?'],
   [{ kind: 'row', label: 'New York' }, 'What is New York?'],
   [{ kind: 'row', label: 'Trail Blazers' }, 'What is Trail Blazers?'],
@@ -187,6 +188,6 @@ test('usefulFollowups drops a question that only repeats the card', () => {
   );
   assert.deepEqual(
     usefulFollowups(['What is Priya Natarajan?', 'What is BlueFlame AI?'], 'Preseason notes'),
-    ['Who is Priya Natarajan?', 'What is BlueFlame AI?'],
+    ['Priya Natarajan', 'What is BlueFlame AI?'],
   );
 });

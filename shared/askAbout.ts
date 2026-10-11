@@ -66,7 +66,6 @@ const EDU = /\b(education|school|college|university|alma mater|studied)\b/i;
 const ORG = /\b(company|employer|team|club|organi[sz]ation|works? at)\b/i;
 const ROLE = /\b(role|job|title|position|occupation|profession)\b/i;
 const START = /\b(founded|launched|established|started|released|introduced|created)\b/i;
-const PEOPLE_CONTEXT = /\b(players?|rookies?|people|athletes?|actors?|actress(es)?|singers?|artists?|authors?|candidates?|coach(es)?|picks?|draft|mvp|roster|forward|guard|center|quarterback|pitcher|striker|midfielder|goalkeeper)\b/i;
 
 const LABEL_WORDS = new Set(`agent product model platform type category status stage focus industry sector market customer user employee team size
 founded launch release version price pricing cost plan tier funding revenue valuation growth profit income sale share rate score point rebound
@@ -79,8 +78,9 @@ raised raise acquired acquisition valued backed employees users customers`.split
 
 /** A label that names a kind of fact ("Agent", "Revenue growth", "Team FG%") rather than a person or thing ("Steph"). */
 function isGenericLabel(label: string): boolean {
+  if (personName(label)) return false;
   const words = label.split(' ');
-  if (words.some(isLowerWord)) return true;
+  if (words.some((w) => isLowerWord(w) && !NAME_PARTICLE.test(w))) return true;
   if (/\d|%/.test(label) || words.some((w) => /^[A-Z]{2,}[A-Z0-9&%]*$/.test(w))) return true;
   if ([PERSON, ROLE, LOC, EDU, ORG, START].some((re) => re.test(label)) || BY.some(([re]) => re.test(label))) return true;
   return words.some((w) => {
@@ -127,10 +127,10 @@ function split(text: string): [string, string] {
   return c && nameLike(c[1].trim()) ? [c[1].trim(), c[2].trim()] : [text, ''];
 }
 
-const nameLike = (s: string) => {
-  const w = s.split(' ');
-  return w.length >= 2 && w.length <= 4 && w.every((x) => /^[A-Z][A-Za-z'’.-]*$/.test(x));
-};
+/** "de" in "Sergio de Larrea" is part of the name, not a separate word. */
+export const NAME_PARTICLE = /^(?:de|da|di|del|della|dei|dos|du|la|le|van|von|der|den|ten|ter|bin|bint|al|el|st|saint)$/i;
+
+const nameLike = (s: string) => personName(s);
 
 const ORG_NAME = /\b(inc|llc|ltd|corp|co|plc|gmbh|ai|group|capital|ventures|partners|holdings|labs?|technologies|systems|media|studios?|bank|fund|university|company)\b/i;
 
@@ -148,14 +148,17 @@ ducks lightning devils
 recipe pie tracker news scores highlights price stock play plays game games series app platform agent product`.split(/\s+/));
 
 /**
- * Two or three capitalised words that name a person ("Priya Natarajan", "AJ Dybantsa").
+ * Two or three capitalised words that name a person ("Priya Natarajan", "Sergio de Larrea").
  * A company, place, or team that happens to be capitalised ("BlueFlame AI", "New York", "Trail Blazers") does not.
  */
+const isNameWord = (w: string) => NAME_PARTICLE.test(w) || /^[A-Z][A-Za-z'’.-]*$/.test(w);
+
 export function personName(subject: string): boolean {
   const words = subject.replace(/[?.!]+$/, '').trim().split(/\s+/);
-  if (words.length < 2 || words.length > 3) return false;
-  if (!words.every((w) => /^[A-Z][A-Za-z'’.-]*$/.test(w))) return false;
-  if (words.some((w) => /^[A-Z]{3,}$/.test(w))) return false;
+  const proper = words.filter((w) => !NAME_PARTICLE.test(w));
+  if (proper.length < 2 || words.length > 4) return false;
+  if (!words.every(isNameWord)) return false;
+  if (proper.some((w) => /^[A-Z]{3,}$/.test(w))) return false;
   if (ORG_NAME.test(subject)) return false;
   return words.every((w) => !NOT_A_PERSON.has(w.toLowerCase().replace(/[^a-z]/g, '')));
 }
@@ -176,8 +179,7 @@ function labelOnly(box: Box, label: string, E?: string): string {
   const [subject0, rest] = split(label);
   const subject = cut(subject0, 80);
   const detail = [rest, clean(box.detail)].filter(Boolean).join(' ');
-  const ctx = `${detail} ${label} ${E ?? ''}`;
-  if (nameLike(subject0) && (PERSON.test(ctx) || PEOPLE_CONTEXT.test(ctx) || personName(subject0))) return `Who is ${subject}?`;
+  if (personName(subject0)) return aboutPerson(subject, detail);
   if (subject0.split(' ').length > 7) return `Explain "${cut(subject0, 80)}"`;
   if (E && (box.kind === 'tile' || box.kind === 'stat' || box.kind === 'fact') && subject0.split(' ').every((w) => isCap(w) || isLowerWord(w)) && !mentions(subject0, E)) {
     return `What is ${possessive(E)} ${lowerLabel(subject)}?`;
@@ -207,7 +209,7 @@ function labelValue(label: string, V: string, unit: string, E?: string): string 
   if ((PERSON.test(label) || by) && !isNumeric(V) && namesPeople(label, V)) {
     const many = /,|\band\b|&/.test(V);
     const role = many && !/s$/.test(L) ? `${L}s` : L;
-    return E ? `${many ? 'Who are' : 'Who is'} ${V}, ${possessive(E)} ${role}?` : `${many ? 'Who are' : 'Who is'} ${V}, the ${role}?`;
+    return `${V}, ${E ? `${possessive(E)} ${role}` : role}`;
   }
   if (START.test(label) && isYear(V)) return E ? `How was ${E} ${L} in ${V}?` : `What happened in ${V}?`;
   if (isYear(V)) return E ? `What happened with ${E} in ${V}?` : `What happened in ${V}?`;
@@ -217,6 +219,13 @@ function labelValue(label: string, V: string, unit: string, E?: string): string 
   if (EDU.test(label)) return E ? `What did ${E} study at ${V}?` : `What is ${V} known for?`;
   if (ORG.test(label)) return E ? `What does ${E} do at ${V}?` : `What is ${V}?`;
   return E ? `What is ${V}, ${possessive(E)} ${L}?` : `What is the ${L} ${V}?`;
+}
+
+/** A person is the name and the role. "Who is", "What is", and "Why is" are not part of it. */
+function aboutPerson(name: string, role?: string): string {
+  const extra = role?.replace(/[?.]+$/g, '').trim();
+  if (!extra || mentions(name, extra) || mentions(extra, name)) return name;
+  return `${name}, ${extra}`;
 }
 
 /** The natural follow-up a tapped box sends. Never "Ask about …". */
@@ -230,7 +239,7 @@ export function askQuestion(box: Box): string {
 
   if (box.kind === 'profile') {
     if (!label) return 'What is this?';
-    return out(value ? `Who is ${label}, ${lowerFirst(cut(value, 60))}?` : `Who is ${label}?`);
+    return out(aboutPerson(label, value));
   }
   if (box.kind === 'timeline' && label && box.when) {
     const when = cut(clean(box.when), 40);
@@ -255,6 +264,12 @@ export function askQuestion(box: Box): string {
     const who = E ? `${possessive(E)} game` : 'the game';
     if (!value || /^(upcoming|scheduled|tbd|preview|next)\b|\d{1,2}:\d{2}/i.test(value)) return out(`What should I know about ${who} ${side} ${opp}?`);
     return out(`What happened in ${who} ${side} ${opp} (${cut(value, 30)})?`);
+  }
+  // A person's name is the follow-up. The card title is not glued on as "'s name".
+  const named = label ? split(label) : undefined;
+  if (named && personName(named[0]) && !(value && isNumeric(value))) {
+    const role = [value, named[1], clean(box.detail)].find((s) => s && !mentions(s, named[0]));
+    return out(aboutPerson(named[0], role));
   }
   // A sentence-long label reads badly inside the question; ask about the value.
   if (label && value && label.split(' ').length <= 6) return out(labelValue(label, value, unit, E));
@@ -401,12 +416,12 @@ export function queryForLabel(label: string, query: string): string {
 
 const normFollow = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
 
-/** "What is Priya Natarajan?" asks about a person. Companies and places stay "what". */
+/** "What is Priya Natarajan?" is just the person. A company or a real question stays as written. */
 function whoAsk(text: string): string {
   const trimmed = text.trim();
-  const m = trimmed.match(/^what\s+is\s+(.+?)\s*\??$/i);
+  const m = trimmed.match(/^(?:what|who|why)\s+(?:is|are)\s+(.+?)\s*\??$/i);
   if (!m || !personName(m[1])) return trimmed;
-  return `Who is ${m[1].replace(/[?.!]+$/, '').trim()}?`;
+  return m[1].replace(/[?.!]+$/, '').trim();
 }
 
 /**
@@ -425,7 +440,7 @@ export function usefulFollowups(items: string[], title?: string, query?: string)
   for (const item of items) {
     const text = whoAsk(item);
     const n = normFollow(text).replace(/\?$/, '').trim();
-    if (n.split(' ').length < 4 || seen.has(n)) continue;
+    if ((!personName(text) && n.split(' ').length < 4) || seen.has(n)) continue;
     if (titleN && (n === titleN || n === `what happened in ${titleN}` || n === `what is ${titleN}` || n === `what happened with ${titleN}`)) continue;
     if (queryN && n === queryN) continue;
     if (titleN.length > 12 && n.includes(titleN) && n.length <= titleN.length + 24) continue;

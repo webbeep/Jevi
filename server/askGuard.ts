@@ -61,15 +61,15 @@ export function anchoredFollowup(original: string, question: string): string | u
 }
 
 /**
- * "What is Priya Natarajan?" is a person lookup. The search and the card should ask who.
+ * "What is Priya Natarajan?" is a person lookup. The name is the search.
  * A longer question ("What is Priya Natarajan's college?") keeps the person's own words.
  */
 export function personQuestion(question: string): string {
   const q = question.trim();
-  const m = q.match(/^what\s+is\s+(.+?)\s*\??$/i);
+  const m = q.match(/^(?:what|who|why)\s+(?:is|are)\s+(.+?)\s*\??$/i);
   if (!m) return q;
   const subject = m[1].trim().replace(/[?.!]+$/, '');
-  return personName(subject) ? `Who is ${subject}?` : q;
+  return personName(subject) ? subject : q;
 }
 
 /**
@@ -81,9 +81,9 @@ export function needsOwnSearch(question: string, covered: string): boolean {
   if (isWritingAsk(question)) return false;
   const q = question.trim();
   if (PRONOUN.test(q)) return false;
-  if (personQuestion(q) !== q) return true;
-  if (!isPersonAsk(q)) return false;
-  const name = personSubject(q);
+  const asked = personQuestion(q);
+  if (!isPersonAsk(asked)) return false;
+  const name = personSubject(asked);
   if (!name || !personName(name)) return false;
   return !covered.toLowerCase().includes(name.toLowerCase());
 }

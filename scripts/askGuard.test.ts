@@ -47,7 +47,8 @@ test('ban notices and addresses are scrubbed, and the chip that offers them neve
 });
 
 test('a person follow-up is its own search, and a pronoun or a writing request is not', () => {
-  assert.equal(personQuestion('What is Priya Natarajan?'), 'Who is Priya Natarajan?');
+  assert.equal(personQuestion('What is Priya Natarajan?'), 'Priya Natarajan');
+  assert.equal(personQuestion('Who is Sergio de Larrea?'), 'Sergio de Larrea');
   assert.equal(personQuestion('What is BlueFlame AI?'), 'What is BlueFlame AI?');
   assert.equal(personQuestion("What is Priya Natarajan's college?"), "What is Priya Natarajan's college?");
   assert.equal(needsOwnSearch('What is Priya Natarajan?', 'NBA scores tonight'), true);
