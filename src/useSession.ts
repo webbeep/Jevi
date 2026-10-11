@@ -272,18 +272,27 @@ export function useSession() {
           return update(route, (t) => ({ live: { ...takeLive(t), regions: e.data } }));
         case 'head':
           sawContent = true;
-          return update(route, (t) => ({ live: { ...takeLive(t), head: e.data } }));
+          return update(route, (t) => {
+            // A title correction can arrive after the card is already on screen. Fold it into that card.
+            if (t.result && !t.filling) {
+              const result: CardResponse = { ...t.result, card: { ...t.result.card, ...e.data } };
+              return { result, variants: { ...t.variants, [variantKey(t.pattern, t.simple)]: result } };
+            }
+            return { live: { ...takeLive(t), head: e.data } };
+          });
         case 'node':
           sawContent = true;
           return update(route, (t) => {
             const results = ref.current.find((x) => x.id === t.searchId)?.search?.results ?? [];
             const slots = t.result ? settledSlots.current.get(route) : undefined;
             if (t.result && slots) {
+              // The review corrects a node that is already showing. Keep the tree mounted: a version
+              // bump remounts every section, replays the entrance, and resets a video already playing.
               const placed = placeNode({ regions: [], nodes: slots, raw: slots, followups: t.result.followups, credits: t.result.card.credits ?? [] }, e.data.index, e.data.node, t.question, results);
               settledSlots.current.set(route, placed.raw);
               const body = placed.nodes.filter((n): n is CardNode => !!n);
               const result: CardResponse = { ...t.result, card: { ...t.result.card, body } };
-              return { result, variants: { ...t.variants, [variantKey(t.pattern, t.simple)]: result }, live: undefined, filling: false, thinking: false, version: t.version + 1 };
+              return { result, variants: { ...t.variants, [variantKey(t.pattern, t.simple)]: result }, live: undefined, filling: false, thinking: false };
             }
             const live = takeLive(t);
             return { live: placeNode(live, e.data.index, e.data.node, t.question, results), thinking: false, version: live.nodes.some(Boolean) ? t.version : t.version + 1 };
@@ -292,7 +301,7 @@ export function useSession() {
           return update(route, (t) => {
             if (!t.result) return { live: { ...(t.live ?? emptyLive()), followups: e.data } };
             const result = { ...t.result, followups: e.data };
-            return { result, variants: { ...t.variants, [variantKey(t.pattern, t.simple)]: result }, version: t.version + 1 };
+            return { result, variants: { ...t.variants, [variantKey(t.pattern, t.simple)]: result } };
           });
         case 'done':
           return update(route, (t) => {

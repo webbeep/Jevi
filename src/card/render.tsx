@@ -1,4 +1,4 @@
-import { Component, type ReactNode, Suspense, lazy } from 'react';
+import { Component, useRef, type ReactNode, Suspense, lazy } from 'react';
 import type { CardNode, Gap } from '../../shared/card';
 import { cn } from '@/lib/utils';
 import { Separator } from '@/components/ui/separator';
@@ -43,6 +43,22 @@ class NodeBoundary extends Component<{ children: ReactNode }, { failed: boolean 
   }
 }
 
+/**
+ * The entrance runs once, when the row mounts. Turning stagger on later (the stream finishing, a
+ * review landing) must not set animation-delay after the fact: that restarts zo-rise, flashes the
+ * card, and a transform on this row pauses or reloads a video that is already playing.
+ */
+function EnterRow({ play, delayMs, children }: { play: boolean; delayMs?: number; children: ReactNode }) {
+  const once = useRef({ play, delayMs });
+  const entered = once.current.play;
+  const delay = once.current.delayMs;
+  return (
+    <div className={cn('min-w-0', entered && 'zo-rise')} style={entered && delay != null ? { animationDelay: `${delay}ms` } : undefined}>
+      {children}
+    </div>
+  );
+}
+
 export function Nodes({ nodes, className, stagger = false }: { nodes: CardNode[]; className?: string; stagger?: boolean }) {
   // Real nodes are keyed by type and occurrence, not position: parallel regions arrive out of order and
   // leave gaps, and a positional key would remount (and reset) every node after a gap that fills in.
@@ -59,11 +75,11 @@ export function Nodes({ nodes, className, stagger = false }: { nodes: CardNode[]
         if (!placeholder) real += 1;
         const enter = !placeholder || stagger;
         return (
-          <div key={key} className={cn('min-w-0', enter && 'zo-rise')} style={enter && stagger ? { animationDelay: `${i * 55}ms` } : undefined}>
+          <EnterRow key={key} play={enter} delayMs={enter && stagger ? i * 55 : undefined}>
             <NodeBoundary>
               <NodeView node={n} />
             </NodeBoundary>
-          </div>
+          </EnterRow>
         );
       })}
     </div>
