@@ -3,6 +3,7 @@ import { json } from '../util.ts';
 import { createAuth } from './better.ts';
 import { authEnabled, d1, sessionSecret } from './env.ts';
 import { readFacingUsage } from './gate.ts';
+import { bridgeCallbackUrls, isPublicHost, OAUTH_HOST, oauthBridgeStart } from './oauthBridge.ts';
 import { currentUser, deleteSession } from './session.ts';
 
 function originOf(request: Request): string {
@@ -93,7 +94,9 @@ export async function start(request: Request, env: Env): Promise<Response> {
   if (!d1(env) || !sessionSecret(env)) return json({ error: 'Sign-in is unavailable' }, 503);
   if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) return json({ error: 'Sign-in is unavailable' }, 503);
   const url = new URL(request.url);
-  const callbacks = signInCallbackUrls(returnTarget(url));
+  if (isPublicHost(url.host)) return new Response(null, { status: 302, headers: { location: oauthBridgeStart(url) } });
+  const bridged = url.host === OAUTH_HOST && url.searchParams.get('bridge') === '1';
+  const callbacks = bridged ? bridgeCallbackUrls(returnTarget(url)) : signInCallbackUrls(returnTarget(url));
   const origin = originOf(request);
   const auth = await createAuth(env, request);
   const ba = await auth.handler(
