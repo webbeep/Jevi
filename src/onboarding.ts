@@ -5,7 +5,6 @@ export const ONBOARD_USERS_KEY = 'zo-onboarded-users';
 /** One standout feature per card. The picture plays it; the line under it only names it. */
 export const ONBOARD_STEPS = [
   { id: 'shape', title: 'Shaped to the question', line: 'The layout fits the ask: a comparison, a price, or the steps.' },
-  { id: 'sources', title: 'A second search', line: 'You see each search. If the pages miss, it tries another.' },
   { id: 'tap', title: 'Ask about one part', line: 'Tap a clip, a row, or a stat. The next ask keeps that subject.' },
   { id: 'live', title: 'Live prices', line: 'A ticker opens on the live quote and its chart.' },
 ] as const;

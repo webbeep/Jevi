@@ -13,8 +13,8 @@ function memory(): OnboardStore & { dump: Record<string, string> } {
 
 const fresh = { deviceDone: false, userIds: [] as string[], hasUsedApp: false, isNewUser: false, userId: null };
 
-test('the intro is four feature steps, one idea each', () => {
-  assert.deepEqual(ONBOARD_STEPS.map((step) => step.id), ['shape', 'sources', 'tap', 'live']);
+test('the intro is three feature steps, one idea each', () => {
+  assert.deepEqual(ONBOARD_STEPS.map((step) => step.id), ['shape', 'tap', 'live']);
   for (const step of ONBOARD_STEPS) {
     assert.ok(step.title.length > 0 && step.line.length > 0 && step.line.length < 80);
   }

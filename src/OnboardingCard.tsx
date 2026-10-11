@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent } from 'react';
-import { CornerDownRight, Search } from 'lucide-react';
+import { CornerDownRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { GAIN } from './card/returnColor';
@@ -8,7 +8,6 @@ import { ONBOARD_STEPS } from './onboarding';
 type StepId = (typeof ONBOARD_STEPS)[number]['id'];
 
 const SHAPE_HOLDS = [1500, 1500, 1700];
-const SOURCE_HOLDS = [900, 1500, 1000, 2800];
 const TAP_HOLDS = [700, 480, 1900];
 const LIVE_HOLDS = [1100, 1100, 1100, 1500];
 const LIVE_RANGES = ['1D', '1W', '1M', '1Y'] as const;
@@ -139,45 +138,6 @@ function ShapeDemo({ active }: { active: boolean }) {
   );
 }
 
-function QueryLine({ text }: { text: string }) {
-  return (
-    <div className="zo-row">
-      <div className="flex min-w-0 items-center gap-2 py-0.5 text-[13px] text-foreground/85">
-        <Search className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-        <span className="truncate">{text}</span>
-      </div>
-    </div>
-  );
-}
-
-function SourceLine({ name, domain, dim }: { name: string; domain: string; dim?: boolean }) {
-  return (
-    <div className={cn('zo-row', dim && 'opacity-40')}>
-      <div className="flex items-center gap-2 py-0.5">
-        <span className="flex size-4 shrink-0 items-center justify-center rounded bg-foreground/10 text-[9px] font-medium">{name.slice(0, 1)}</span>
-        <span className="min-w-0 flex-1 truncate text-[12.5px]">{name}</span>
-        <span className="zo-meta shrink-0">{domain}</span>
-      </div>
-    </div>
-  );
-}
-
-function SourcesDemo({ active }: { active: boolean }) {
-  const reduced = useReducedMotion();
-  const phase = useLoop(active, SOURCE_HOLDS, reduced);
-  const again = phase >= 2;
-  return (
-    <div className="flex h-full flex-col justify-start gap-2 px-5 pt-5 text-left">
-      <p className="zo-shimmer-text text-[12px] font-medium">{again ? 'Searching again' : 'Searching for'}</p>
-      <QueryLine text="top 10 plays oct 7" />
-      {again && <QueryLine text="NBA top 10 plays Oct 7" />}
-      {phase === 1 && <SourceLine name="NFL Top Plays" domain="nfl.com" />}
-      {phase === 2 && <SourceLine name="NFL Top Plays" domain="nfl.com" dim />}
-      {phase >= 3 && <SourceLine name="NBA's Top 10 Plays — Oct 7" domain="youtube.com" />}
-    </div>
-  );
-}
-
 function TapDemo({ active }: { active: boolean }) {
   const reduced = useReducedMotion();
   const phase = useLoop(active, TAP_HOLDS, reduced);
@@ -230,7 +190,6 @@ function LiveDemo({ active }: { active: boolean }) {
 function StepVisual({ id, active }: { id: StepId; active: boolean }) {
   switch (id) {
     case 'shape': return <ShapeDemo active={active} />;
-    case 'sources': return <SourcesDemo active={active} />;
     case 'tap': return <TapDemo active={active} />;
     case 'live': return <LiveDemo active={active} />;
     default: {
