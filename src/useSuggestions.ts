@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import { personalizedStarters, readHistory, readRelated, relatedSubjects, writeRelated } from '../shared/personal';
+import { ideaBrief, personalizedStarters, readHistory, readIdeaCache, readRelated, relatedSubjects, writeIdeaCache, writeRelated } from '../shared/personal';
 import {
   canShuffle,
   pickShown,
+  shownCount,
   type Suggestion,
 } from '../shared/starters';
 
@@ -11,6 +12,8 @@ export type { Suggestion };
 function load(width: number): { items: Suggestion[]; personalized: boolean } {
   try {
     if (typeof localStorage === 'undefined') return { items: pickShown(width), personalized: false };
+    const cached = readIdeaCache(localStorage);
+    if (cached?.length) return { items: cached.slice(0, shownCount(width)), personalized: true };
     return personalizedStarters(localStorage, width);
   } catch {
     return { items: pickShown(width), personalized: false };
@@ -27,9 +30,10 @@ function missingRelated(): { key: string; query: string }[] {
 }
 
 /**
- * Home starters. Cold start is the curated Strategy set. Once this device has ask history, each
- * shown row is the next ask for a different recent subject (not only the last two), enriched with
- * popular related searches (the free suggest endpoint, cached 6h). Shuffle stays off until the pool rule is met.
+ * Home starters. Cold start is the curated Strategy set. Once this device has ask history, a model
+ * writes the next set from those asks and the follow-ups already shown, and that set lasts a day.
+ * Until it answers, and whenever it fails, the rows are the template list (one next ask per subject).
+ * Shuffle stays off until the pool rule is met, and stays off once the list is personal.
  */
 export function useSuggestions(): {
   items: Suggestion[];
@@ -68,6 +72,43 @@ export function useSuggestions(): {
       if (!ac.signal.aborted) setState(load(width));
     });
     return () => ac.abort();
+  }, [width, rev]);
+
+  useEffect(() => {
+    let history: { q: string }[] = [];
+    try {
+      history = readHistory(localStorage);
+      if (!history.length || readIdeaCache(localStorage)) return;
+    } catch {
+      return;
+    }
+    const ac = new AbortController();
+    const timer = window.setTimeout(() => ac.abort(), 9000);
+    const brief = ideaBrief(localStorage);
+    void fetch('/api/home-ideas', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ asks: brief.asks, followups: brief.followups, want: 4 }),
+      signal: ac.signal,
+    })
+      .then((res) => res.json() as Promise<{ suggestions?: unknown; source?: unknown }>)
+      .then((data) => {
+        if (ac.signal.aborted) return;
+        const items = Array.isArray(data.suggestions) ? data.suggestions.filter((row): row is Suggestion => {
+          if (!row || typeof row !== 'object') return false;
+          const item = row as Suggestion;
+          return typeof item.text === 'string' && !!item.text.trim() && typeof item.icon === 'string' && typeof item.id === 'string';
+        }) : [];
+        if (!items.length) return;
+        writeIdeaCache(localStorage, items.slice(0, 4).map((item) => ({ ...item, group: item.group === 's1' ? 's1' : 'broad' })), data.source !== 'llm');
+        setState(load(width));
+      })
+      .catch(() => undefined)
+      .finally(() => window.clearTimeout(timer));
+    return () => {
+      ac.abort();
+      window.clearTimeout(timer);
+    };
   }, [width, rev]);
 
   const refresh = useCallback(() => setRev((n) => n + 1), []);

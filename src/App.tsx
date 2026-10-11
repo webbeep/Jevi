@@ -33,7 +33,7 @@ import { loadSnapshot, normalizeAnswerQuery, purgeDegradedSnapshots, saveSnapsho
 import { cacheTtlS } from '../shared/cacheTtl';
 import { turnDegraded, turnsDegraded } from '../shared/degraded';
 import { MANUAL_RETRY_AFTER, OFFLINE_MESSAGE, clearPending, loadPending, savePending } from '../shared/offline';
-import { clearHistory, readHistory, recordAsk, touchHistory } from '../shared/personal';
+import { clearHistory, readHistory, recordAsk, rememberFollowups, touchHistory } from '../shared/personal';
 import { placeholderExamples } from '../shared/starters';
 import { useSuggestions } from './useSuggestions';
 import { clearTypeaheadClientCache, useTypeahead } from './useTypeahead';
@@ -331,6 +331,13 @@ export default function App() {
     clearPending(localStorage);
     history.pushState(null, '', '/');
   };
+
+  useEffect(() => {
+    for (const t of turns) {
+      const ups = t.result?.followups;
+      if (ups?.length) rememberFollowups(localStorage, t.question, ups);
+    }
+  }, [turns]);
 
   // T446: report each finished card once so the account's ask history can reopen it.
   const streamed = useRef(new Set<number>());

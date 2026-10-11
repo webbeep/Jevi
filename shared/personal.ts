@@ -277,6 +277,12 @@ function ideasFor(item: HistoryItem): { text: string; icon: string }[] {
 export type Related = Record<string, string[]>;
 
 export const RELATED_KEY = 'zo:related:v1';
+/** Follow-ups the answers already offered, so the next day's ideas can go further. */
+export const FOLLOWUPS_KEY = 'zo:followups:v1';
+/** Home ideas from the model. A real set lasts a day; a template fallback lasts an hour. */
+export const IDEAS_KEY = 'zo:ideas:v1';
+export const IDEAS_TTL_MS = 24 * 60 * 60 * 1000;
+export const IDEAS_SOFT_TTL_MS = 60 * 60 * 1000;
 const RELATED_TTL_MS = 6 * 60 * 60 * 1000;
 const RELATED_MAX = 12;
 
@@ -405,9 +411,9 @@ export function computeItems(history: HistoryItem[], related: Related = {}, want
 }
 
 /**
- * Cold start (no history) returns the generic Strategy set. Otherwise the list is rebuilt from the
- * newest asks every time (it is cheap and must follow what was just asked), with any related
- * searches already fetched for those subjects.
+ * Cold start (no history) returns the generic Strategy set. Otherwise this is the template list:
+ * one next ask per recent subject. The home screen prefers the day cache in `zo:ideas:v1` when it
+ * is still fresh, and uses this list until the model answers or when that call fails.
  */
 export function personalizedStarters(storage: Storage, width: number, now = Date.now()): { items: Suggestion[]; personalized: boolean } {
   const history = readHistory(storage);
@@ -416,8 +422,97 @@ export function personalizedStarters(storage: Storage, width: number, now = Date
   return { items: computeItems(history, readRelated(storage, now), want), personalized: true };
 }
 
+const FOLLOW_MAX = 16;
+
+/** Remember the follow-ups shown for a question. Same list again does not rewrite storage. */
+export function rememberFollowups(storage: Storage, q: string, items: string[], now = Date.now()): void {
+  const query = q.trim();
+  if (!query) return;
+  const list = items.map((item) => item.trim().replace(/\s+/g, ' ').slice(0, 140)).filter(Boolean).slice(0, 4);
+  if (!list.length) return;
+  let rows: { q: string; items: string[]; at: number }[] = [];
+  try {
+    const parsed = JSON.parse(readRaw(storage, FOLLOWUPS_KEY) ?? '[]') as unknown;
+    if (Array.isArray(parsed)) {
+      rows = parsed.flatMap((row) => {
+        if (!row || typeof row !== 'object') return [];
+        const text = (row as { q?: unknown }).q;
+        const at = (row as { at?: unknown }).at;
+        const saved = (row as { items?: unknown }).items;
+        if (typeof text !== 'string' || typeof at !== 'number' || !Array.isArray(saved)) return [];
+        return [{ q: text, at, items: saved.filter((item): item is string => typeof item === 'string') }];
+      });
+    }
+  } catch {
+    rows = [];
+  }
+  const prev = rows.find((row) => row.q.toLowerCase() === query.toLowerCase());
+  if (prev && prev.items.join('\n') === list.join('\n')) return;
+  const next = [{ q: query, items: list, at: now }, ...rows.filter((row) => row.q.toLowerCase() !== query.toLowerCase())].slice(0, FOLLOW_MAX);
+  writeRaw(storage, FOLLOWUPS_KEY, JSON.stringify(next));
+}
+
+export function readFollowups(storage: Storage): { q: string; items: string[] }[] {
+  try {
+    const parsed = JSON.parse(readRaw(storage, FOLLOWUPS_KEY) ?? '[]') as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((row) => {
+      if (!row || typeof row !== 'object') return [];
+      const q = (row as { q?: unknown }).q;
+      const items = (row as { items?: unknown }).items;
+      if (typeof q !== 'string' || !Array.isArray(items)) return [];
+      return [{ q, items: items.filter((item): item is string => typeof item === 'string' && !!item.trim()) }];
+    });
+  } catch {
+    return [];
+  }
+}
+
+/** Newest asks, plus the follow-ups already shown for those asks. */
+export function ideaBrief(storage: Storage): { asks: string[]; followups: string[] } {
+  const asks = readHistory(storage).slice(0, 8).map((item) => item.q);
+  const asked = new Set(asks.map((q) => q.toLowerCase()));
+  const followups: string[] = [];
+  const seen = new Set<string>();
+  for (const row of readFollowups(storage)) {
+    if (!asked.has(row.q.toLowerCase())) continue;
+    for (const item of row.items) {
+      const key = item.toLowerCase();
+      if (seen.has(key) || asked.has(key)) continue;
+      seen.add(key);
+      followups.push(item);
+      if (followups.length >= 12) return { asks, followups };
+    }
+  }
+  return { asks, followups };
+}
+
+function isSuggestion(value: unknown): value is Suggestion {
+  if (!value || typeof value !== 'object') return false;
+  const row = value as { id?: unknown; text?: unknown; icon?: unknown; group?: unknown };
+  return typeof row.id === 'string' && typeof row.text === 'string' && !!row.text.trim() && typeof row.icon === 'string' && (row.group === 'broad' || row.group === 's1');
+}
+
+/** The day's ideas, or null when missing or past their time. */
+export function readIdeaCache(storage: Storage, now = Date.now()): Suggestion[] | null {
+  try {
+    const parsed = JSON.parse(readRaw(storage, IDEAS_KEY) ?? 'null') as { at?: unknown; soft?: unknown; items?: unknown } | null;
+    if (!parsed || typeof parsed.at !== 'number' || !Array.isArray(parsed.items)) return null;
+    const ttl = parsed.soft === true ? IDEAS_SOFT_TTL_MS : IDEAS_TTL_MS;
+    if (now - parsed.at >= ttl) return null;
+    const items = parsed.items.filter(isSuggestion).slice(0, 4);
+    return items.length ? items : null;
+  } catch {
+    return null;
+  }
+}
+
+export function writeIdeaCache(storage: Storage, items: Suggestion[], soft: boolean, now = Date.now()): void {
+  writeRaw(storage, IDEAS_KEY, JSON.stringify({ at: now, soft, items: items.slice(0, 4) }));
+}
+
 export function clearHistory(storage: Storage): void {
-  for (const key of [HISTORY_KEY, STARTERS_CACHE_KEY, ASKCOUNT_KEY, RECENT_KEY, TYPEAHEAD_CACHE_KEY, RELATED_KEY]) {
+  for (const key of [HISTORY_KEY, STARTERS_CACHE_KEY, ASKCOUNT_KEY, RECENT_KEY, TYPEAHEAD_CACHE_KEY, RELATED_KEY, FOLLOWUPS_KEY, IDEAS_KEY]) {
     try {
       storage.removeItem(key);
     } catch {

@@ -12,6 +12,14 @@ import {
   readRelated,
   relatedSubjects,
   RELATED_KEY,
+  FOLLOWUPS_KEY,
+  IDEAS_KEY,
+  IDEAS_TTL_MS,
+  IDEAS_SOFT_TTL_MS,
+  ideaBrief,
+  readIdeaCache,
+  rememberFollowups,
+  writeIdeaCache,
   subjectOf,
   writeRelated,
   personalizedStarters,
@@ -149,13 +157,34 @@ test('opening an older question moves it to the front and does not count a new a
   assert.equal(storage.getItem(ASKCOUNT_KEY), String(Number(count) + 1));
 });
 
-test('clearHistory wipes history, starters, related, ask count, recents, and the typeahead key', () => {
+test('follow-ups are kept for the asks they belong to, and the idea cache lasts a day', () => {
+  const storage = memory();
+  recordAsk(storage, 'jaylen brown injuries', 1);
+  rememberFollowups(storage, 'jaylen brown injuries', ['Jaylen Brown next game', 'Jaylen Brown next game'], 2);
+  rememberFollowups(storage, 'old topic', ['something else'], 3);
+  const brief = ideaBrief(storage);
+  assert.deepEqual(brief.asks, ['jaylen brown injuries']);
+  assert.deepEqual(brief.followups, ['Jaylen Brown next game']);
+  const idea = { id: 'i-1', text: 'Celtics trade options this season', icon: 'newspaper', group: 'broad' as const };
+  writeIdeaCache(storage, [idea], false, 10);
+  assert.equal(readIdeaCache(storage, 10 + IDEAS_TTL_MS - 1)?.[0]?.text, idea.text);
+  assert.equal(readIdeaCache(storage, 10 + IDEAS_TTL_MS), null);
+  writeIdeaCache(storage, [idea], true, 10);
+  assert.equal(readIdeaCache(storage, 10 + IDEAS_SOFT_TTL_MS - 1)?.[0]?.text, idea.text);
+  assert.equal(readIdeaCache(storage, 10 + IDEAS_SOFT_TTL_MS), null);
+  assert.ok(storage.getItem(FOLLOWUPS_KEY));
+  assert.ok(storage.getItem(IDEAS_KEY));
+});
+
+test('clearHistory wipes history, starters, related, ideas, ask count, recents, and the typeahead key', () => {
   const storage = memory();
   recordAsk(storage, 'best mug', 1);
   storage.setItem(RECENT_KEY, '["best mug"]');
   storage.setItem(TYPEAHEAD_CACHE_KEY, '{}');
   storage.setItem(STARTERS_CACHE_KEY, '{}');
   writeRelated(storage, 'mug', ['mug warmer'], 5);
+  rememberFollowups(storage, 'best mug', ['mug warmer'], 6);
+  writeIdeaCache(storage, [{ id: 'i', text: 'mug warmer worth it', icon: 'sparkles', group: 'broad' }], false, 7);
   assert.ok(storage.getItem(HISTORY_KEY));
   assert.ok(storage.getItem(RELATED_KEY));
   clearHistory(storage);
@@ -165,5 +194,7 @@ test('clearHistory wipes history, starters, related, ask count, recents, and the
   assert.equal(storage.getItem(RECENT_KEY), null);
   assert.equal(storage.getItem(TYPEAHEAD_CACHE_KEY), null);
   assert.equal(storage.getItem(RELATED_KEY), null);
+  assert.equal(storage.getItem(FOLLOWUPS_KEY), null);
+  assert.equal(storage.getItem(IDEAS_KEY), null);
   assert.equal(personalizedStarters(storage, 1280, 20).personalized, false);
 });
