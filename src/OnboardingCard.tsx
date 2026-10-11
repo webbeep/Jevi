@@ -8,7 +8,7 @@ import { ONBOARD_STEPS } from './onboarding';
 type StepId = (typeof ONBOARD_STEPS)[number]['id'];
 
 const SHAPE_HOLDS = [1500, 1500, 1700];
-const SOURCE_HOLDS = [480, 980, 760, 1800];
+const SOURCE_HOLDS = [900, 1500, 1000, 2800];
 const TAP_HOLDS = [700, 480, 1900];
 const LIVE_HOLDS = [1100, 1100, 1100, 1500];
 const LIVE_RANGES = ['1D', '1W', '1M', '1Y'] as const;
