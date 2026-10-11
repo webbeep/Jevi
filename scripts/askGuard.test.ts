@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { asksToCompare, cryptographyHint, faithfulQuery, isWritingAsk, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from '../server/askGuard.ts';
+import { asksToCompare, cryptographyHint, faithfulQuery, isWritingAsk, needsOwnSearch, personQuestion, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from '../server/askGuard.ts';
 import { isPersonAsk } from '../server/entity.ts';
+import { planLayout } from '../server/plan.ts';
 import type { CardNode } from '../shared/card.ts';
 
 test('a writing request is answered, not searched, and a complete question is not rewritten', () => {
@@ -37,6 +38,27 @@ test('ban notices and addresses are scrubbed, and the chip that offers them neve
     ],
   };
   assert.deepEqual(withoutLeakActions(actions)?.items.map((i) => i.label), ['Find the paper on arXiv']);
+});
+
+test('a person follow-up is its own search, and a pronoun or a writing request is not', () => {
+  assert.equal(personQuestion('What is Priya Natarajan?'), 'Who is Priya Natarajan?');
+  assert.equal(personQuestion('What is BlueFlame AI?'), 'What is BlueFlame AI?');
+  assert.equal(personQuestion("What is Priya Natarajan's college?"), "What is Priya Natarajan's college?");
+  assert.equal(needsOwnSearch('What is Priya Natarajan?', 'NBA scores tonight'), true);
+  assert.equal(needsOwnSearch("What is Priya Natarajan's college?", 'NBA scores tonight'), true);
+  assert.equal(needsOwnSearch('What is photosynthesis?', 'how do mRNA vaccines work'), false);
+  assert.equal(needsOwnSearch('Who is Priya Natarajan?', 'Priya Natarajan'), false);
+  assert.equal(needsOwnSearch('explain it like I am 10', 'how do mRNA vaccines work'), false);
+  assert.equal(needsOwnSearch('which one has better battery life?', 'iphone 17 vs pixel 10'), false);
+  assert.equal(needsOwnSearch('Draft the unblock email', 'It Takes Two'), false);
+});
+
+test('a person follow-up is a search when the planner is unavailable', async () => {
+  const person = await planLayout('What is Priya Natarajan?', {} as never, { original: 'NBA scores tonight' });
+  assert.equal(person.mode, 'search');
+  assert.equal(person.pattern, 'profile');
+  const chat = await planLayout('explain it like I am 10', {} as never, { original: 'how do mRNA vaccines work' });
+  assert.equal(chat.mode, 'chat');
 });
 
 test('a query carrying an address is never a person to disambiguate', () => {

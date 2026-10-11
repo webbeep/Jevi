@@ -132,6 +132,34 @@ const nameLike = (s: string) => {
   return w.length >= 2 && w.length <= 4 && w.every((x) => /^[A-Z][A-Za-z'’.-]*$/.test(x));
 };
 
+const ORG_NAME = /\b(inc|llc|ltd|corp|co|plc|gmbh|ai|group|capital|ventures|partners|holdings|labs?|technologies|systems|media|studios?|bank|fund|university|company)\b/i;
+
+/** Place, team, and common-noun words. A capitalised pair that includes one is not a person. */
+const NOT_A_PERSON = new Set(`new north south east west san los saint fort mount lake port cape rio las hong kong
+york angeles francisco diego jose antonio vegas paris london tokyo berlin rome madrid boston chicago seattle miami
+dallas houston atlanta denver phoenix austin portland detroit minneapolis orleans carolina dakota jersey mexico
+island beach springs heights valley park bay city golden state county
+blazers warriors lakers celtics knicks nets heat bulls bucks hawks magic hornets pistons pacers cavaliers raptors
+sixers nuggets timberwolves thunder jazz spurs mavericks rockets grizzlies pelicans kings suns clippers
+yankees dodgers mets cubs giants patriots chiefs eagles cowboys packers ravens steelers bears lions broncos
+texans colts jaguars titans bengals browns vikings saints falcons panthers seahawks rams chargers raiders
+bills dolphins jets bruins rangers penguins capitals flyers oilers canucks kraken predators blues sharks
+ducks lightning devils
+recipe pie tracker news scores highlights price stock play plays game games series app platform agent product`.split(/\s+/));
+
+/**
+ * Two or three capitalised words that name a person ("Priya Natarajan", "AJ Dybantsa").
+ * A company, place, or team that happens to be capitalised ("BlueFlame AI", "New York", "Trail Blazers") does not.
+ */
+export function personName(subject: string): boolean {
+  const words = subject.replace(/[?.!]+$/, '').trim().split(/\s+/);
+  if (words.length < 2 || words.length > 3) return false;
+  if (!words.every((w) => /^[A-Z][A-Za-z'’.-]*$/.test(w))) return false;
+  if (words.some((w) => /^[A-Z]{3,}$/.test(w))) return false;
+  if (ORG_NAME.test(subject)) return false;
+  return words.every((w) => !NOT_A_PERSON.has(w.toLowerCase().replace(/[^a-z]/g, '')));
+}
+
 const mentions = (hay: string | undefined, needle: string | undefined) => !!hay && !!needle && hay.toLowerCase().includes(needle.toLowerCase());
 
 const OCCASION = /^(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s+(?:19|20)\d{2})?|(?:19|20)\d{2}-\d{2}-\d{2}|\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?(?:,?\s+(?:19|20)\d{2})?)$/i;
@@ -149,7 +177,7 @@ function labelOnly(box: Box, label: string, E?: string): string {
   const subject = cut(subject0, 80);
   const detail = [rest, clean(box.detail)].filter(Boolean).join(' ');
   const ctx = `${detail} ${label} ${E ?? ''}`;
-  if (nameLike(subject0) && (PERSON.test(ctx) || PEOPLE_CONTEXT.test(ctx))) return `Who is ${subject}?`;
+  if (nameLike(subject0) && (PERSON.test(ctx) || PEOPLE_CONTEXT.test(ctx) || personName(subject0))) return `Who is ${subject}?`;
   if (subject0.split(' ').length > 7) return `Explain "${cut(subject0, 80)}"`;
   if (E && (box.kind === 'tile' || box.kind === 'stat' || box.kind === 'fact') && subject0.split(' ').every((w) => isCap(w) || isLowerWord(w)) && !mentions(subject0, E)) {
     return `What is ${possessive(E)} ${lowerLabel(subject)}?`;
@@ -373,6 +401,14 @@ export function queryForLabel(label: string, query: string): string {
 
 const normFollow = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
 
+/** "What is Priya Natarajan?" asks about a person. Companies and places stay "what". */
+function whoAsk(text: string): string {
+  const trimmed = text.trim();
+  const m = trimmed.match(/^what\s+is\s+(.+?)\s*\??$/i);
+  if (!m || !personName(m[1])) return trimmed;
+  return `Who is ${m[1].replace(/[?.!]+$/, '').trim()}?`;
+}
+
 /**
  * Suggested questions that are worth showing: they name the card's subject and they are not the title
  * asked again ("What happened in Oct 7, 2026: Top 10 plays?").
@@ -387,7 +423,7 @@ export function usefulFollowups(items: string[], title?: string, query?: string)
   const seen = new Set<string>();
   const kept: string[] = [];
   for (const item of items) {
-    const text = item.trim();
+    const text = whoAsk(item);
     const n = normFollow(text).replace(/\?$/, '').trim();
     if (n.split(' ').length < 4 || seen.has(n)) continue;
     if (titleN && (n === titleN || n === `what happened in ${titleN}` || n === `what is ${titleN}` || n === `what happened with ${titleN}`)) continue;

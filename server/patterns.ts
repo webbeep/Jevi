@@ -1,3 +1,4 @@
+import { personName } from '../shared/askAbout';
 import { withoutRepeatedLead, type AnswerCard, type CardNode, type CardPattern } from '../shared/card';
 import { isBriefingQuery } from '../shared/recency';
 
@@ -181,6 +182,8 @@ export function heuristicPattern(q: string): string {
   if (/\b(scores|box scores?|highlights|fixtures|slate|tip-?offs?|kick-?offs?)\b/.test(s)) return 'briefing';
   if (/\b(current|right now|price|score|rate|forecast)\b/.test(s)) return 'spotlight';
   if (/\b(statistics|stats|population|how many|growth|trend)\b/.test(s)) return 'dataset';
+  const named = q.match(/^(?:what|who)\s+(?:is|was)\s+(.+?)\s*\??$/i);
+  if (named && personName(named[1].trim())) return 'profile';
   if (/^(what is|what are|explain|define)/.test(s) || /^how (do|does)\b/.test(s) || /\bhow\b.*\bworks?\b/.test(s)) return 'explainer';
   if (/^(who is|who was)/.test(s)) return 'profile';
   if (/\b(photos|pictures|images|places to visit|things to do)\b/.test(s)) return 'visual';

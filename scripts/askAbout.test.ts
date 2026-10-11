@@ -50,6 +50,10 @@ const cases: [Box, string][] = [
   // rows, lists, links, timeline
   [{ kind: 'row', label: '**Yaxel Lendeborg** — Warriors forward' }, 'Who is Yaxel Lendeborg?'],
   [{ kind: 'row', label: 'Yaxel Lendeborg, Golden State Warriors', detail: 'Top rookie' }, 'Who is Yaxel Lendeborg?'],
+  [{ kind: 'row', label: 'Priya Natarajan' }, 'Who is Priya Natarajan?'],
+  [{ kind: 'row', label: 'BlueFlame AI' }, 'What is BlueFlame AI?'],
+  [{ kind: 'row', label: 'New York' }, 'What is New York?'],
+  [{ kind: 'row', label: 'Trail Blazers' }, 'What is Trail Blazers?'],
   [{ kind: 'row', label: 'Paris, France' }, 'What is Paris, France?'],
   [{ kind: 'row', label: 'AMP — research and diligence agent', entity: 'BlueFlame AI' }, 'What is AMP?'],
   [{ kind: 'list', label: 'Clifford scored 18 off the bench in every preseason game so far [3]' }, 'Explain "Clifford scored 18 off the bench in every preseason game so far"'],
@@ -180,5 +184,9 @@ test('usefulFollowups drops a question that only repeats the card', () => {
   assert.deepEqual(
     usefulFollowups(['How long does apple pie keep?', 'What is Apple Pie Recipe?'], 'Apple Pie Recipe'),
     ['How long does apple pie keep?'],
+  );
+  assert.deepEqual(
+    usefulFollowups(['What is Priya Natarajan?', 'What is BlueFlame AI?'], 'Preseason notes'),
+    ['Who is Priya Natarajan?', 'What is BlueFlame AI?'],
   );
 });

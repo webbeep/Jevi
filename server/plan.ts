@@ -1,10 +1,11 @@
 import type { FollowupMode, LayoutPlan } from '../shared/card';
+import { needsOwnSearch } from './askGuard';
 import { askJev, choice, jevKey, noul, score } from './jev';
 import { PATTERNS, heuristicPattern, patternById, skeletonCard } from './patterns';
 import type { Env } from './util';
 
 const DEPTHS = ['brief', 'standard', 'detailed'] as const;
-const PLAN_DEADLINE_MS = 4000;
+const PLAN_DEADLINE_MS = 2200;
 
 const MODES: Record<FollowupMode, string> = {
   refine: 'Asks to change a card already on screen: a different unit, time range, focus, audience, amount, layout or level of detail',
@@ -38,7 +39,7 @@ export async function planLayout(query: string, env: Env, ctx: PlanContext = {})
       confidence: 0.5,
       depth: 'standard',
       readPages: heuristicPattern(query) === 'spotlight' || heuristicPattern(query) === 'dataset',
-      mode: original ? 'chat' : undefined,
+      mode: original ? (needsOwnSearch(query, original) ? 'search' : 'chat') : undefined,
       think: false,
       ms: Date.now() - started,
     };

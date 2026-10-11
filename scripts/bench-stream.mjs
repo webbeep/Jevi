@@ -50,6 +50,8 @@ export const FOLLOWUPS = [
   { seed: 'best budget noise cancelling headphones 2026', q: 'which is lightest for travel?', kind: 'chat' },
   { seed: 'NBA scores tonight', q: 'who scored the most?', kind: 'chat' },
   { seed: 'write a short apology email for missing a meeting', q: 'make it shorter', kind: 'chat' },
+  { seed: 'NBA scores tonight', q: 'What is Cooper Flagg?', kind: 'person' },
+  { seed: 'how do mRNA vaccines work', q: 'What is photosynthesis?', kind: 'lookup' },
 ];
 
 async function run({ q, kind, body }) {

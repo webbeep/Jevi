@@ -53,7 +53,7 @@ import { type LateExtras, normalizeUrl, searchWithLate } from './search';
 import type { WebHit } from './cascade';
 import { domainOf } from './util';
 import { choicesIn, distinctActions, subjectWords } from './chips';
-import { asksToCompare, cryptographyHint, faithfulQuery, isWritingAsk, quickPlan, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
+import { asksToCompare, cryptographyHint, faithfulQuery, isWritingAsk, needsOwnSearch, personQuestion, quickPlan, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
 import { comparisonRepair, comparisonTitle } from './compareAnswer';
 import { withFinishedSentences } from './polish';
 import { isOwnSite, orcidSite, pickOwnSite, probeOwnSite, RESEARCH_ASK, withOwnSite } from './ownSite';
@@ -428,7 +428,8 @@ function applyReview(send: Send, req: DesignRequest, shown: Map<number, CardNode
  */
 async function searchAndDesign(send: Send, env: Env, query: string, freshness: Freshness, context: string | undefined, started: number, scope: AskScope, rewritten = false, seedRows?: SearchResult[], steer?: { avoid: Set<string>; rejected: string }) {
   const understood = rewritten ? Promise.resolve(undefined) : understand(query, env, context).finally(() => mark(scope.ledger, 'understood'));
-  const planned = understood.then((u) => planLayout(query, env, { intent: u?.intent })).then((plan) => {
+  // The layout is chosen from the question itself, so it runs with the search instead of after the intent read.
+  const planned = planLayout(query, env, {}).then((plan) => {
     send('plan', plan);
     return plan;
   });
@@ -912,6 +913,16 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
     const recent = 'The person said the last answer was not current: use only items from the past 24 hours, say when each happened, and if nothing that recent was found, say so plainly instead of repeating older items.';
     send('rewrite', { query });
     await searchAndDesign(send, env, query, 'day', [recent, context].filter(Boolean).join('\n'), started, scope, true);
+    return;
+  }
+
+  // A person the card never names is a new search. Waiting on the planner, and its chat
+  // fallback, was answering that question from the card already on screen.
+  const covered = [req.original, from?.title, from?.card?.title, from?.card?.subtitle].filter(Boolean).join('\n');
+  if (req.intent !== 'adjust' && needsOwnSearch(req.question, covered)) {
+    const query = personQuestion(req.question);
+    send('rewrite', { query });
+    await searchAndDesign(send, env, query, 'any', context, started, scope, false);
     return;
   }
 

@@ -1,7 +1,8 @@
-import { askFacet } from '../shared/askAbout';
+import { askFacet, personName } from '../shared/askAbout';
 import type { CardNode, FollowupMode, LayoutPlan } from '../shared/card';
 import { isBlockPage } from './blockPage';
 import { repeatsCallout } from './chips';
+import { isPersonAsk, personSubject } from './entity';
 import { compareSides, heuristicPattern, patternById, skeletonCard } from './patterns';
 
 const IP = /\b(?:\d{1,3}\.){3}\d{1,3}\b|\b(?:[0-9a-f]{1,4}:){2,}[0-9a-f:]*/i;
@@ -39,6 +40,34 @@ export function standsAlone(question: string): boolean {
  */
 export function asksToCompare(question: string): boolean {
   return compareSides(question).length >= 2 && !PRONOUN.test(question);
+}
+
+/**
+ * "What is Priya Natarajan?" is a person lookup. The search and the card should ask who.
+ * A longer question ("What is Priya Natarajan's college?") keeps the person's own words.
+ */
+export function personQuestion(question: string): string {
+  const q = question.trim();
+  const m = q.match(/^what\s+is\s+(.+?)\s*\??$/i);
+  if (!m) return q;
+  const subject = m[1].trim().replace(/[?.!]+$/, '');
+  return personName(subject) ? `Who is ${subject}?` : q;
+}
+
+/**
+ * A follow-up that looks a person up needs its own search. Answering "What is Priya Natarajan?"
+ * from the card already on screen was the miss. A definition ("What is photosynthesis?") stays
+ * with the planner: general knowledge is often the right, faster answer. Pronouns and writing stay a conversation turn.
+ */
+export function needsOwnSearch(question: string, covered: string): boolean {
+  if (isWritingAsk(question)) return false;
+  const q = question.trim();
+  if (PRONOUN.test(q)) return false;
+  if (personQuestion(q) !== q) return true;
+  if (!isPersonAsk(q)) return false;
+  const name = personSubject(q);
+  if (!name || !personName(name)) return false;
+  return !covered.toLowerCase().includes(name.toLowerCase());
 }
 
 /**
