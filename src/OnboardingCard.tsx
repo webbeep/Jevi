@@ -181,9 +181,10 @@ function SourcesDemo({ active }: { active: boolean }) {
 function TapDemo({ active }: { active: boolean }) {
   const reduced = useReducedMotion();
   const phase = useLoop(active, TAP_HOLDS, reduced);
+  const pressed = phase >= 1;
   return (
-    <div className="flex h-full flex-col justify-center px-4">
-      <div className={cn('rounded-xl border bg-card px-2.5 py-2 shadow-card transition-colors', phase >= 1 && 'bg-foreground/[0.04]')}>
+    <div className="flex h-full flex-col justify-start px-4 pt-8">
+      <div className={cn('rounded-xl border bg-card px-2.5 py-2 shadow-card transition-shadow', pressed && 'ring-2 ring-foreground/25')}>
         <div className="flex items-center gap-2">
           <span className="flex size-4 shrink-0 items-center justify-center rounded bg-foreground/10 text-[9px] font-medium">N</span>
           <span className="min-w-0 flex-1 truncate text-[12.5px]">NBA&apos;s Top 10 Plays — Oct 7</span>
@@ -210,7 +211,7 @@ function LiveDemo({ active }: { active: boolean }) {
         <p className="text-[12px] text-muted-foreground">Tesla · TSLA</p>
         <p className="mt-0.5 text-[22px] font-semibold tracking-tight tabular-nums">$412.80</p>
         <p className="text-[11px] font-medium tabular-nums" style={{ color: GAIN }}>{frame.change}</p>
-        <svg viewBox="0 0 280 56" className="zo-rise mt-1 h-12 w-full" aria-hidden>
+        <svg key={phase} viewBox="0 0 280 56" className="zo-rise mt-1 h-12 w-full" aria-hidden>
           <path d={sparkPath(frame.points)} fill="none" stroke={GAIN} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
         </svg>
         <div className="mt-1 flex items-center justify-between border-b" role="tablist" aria-label="Chart range">
