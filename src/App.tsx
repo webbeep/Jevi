@@ -1002,8 +1002,8 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
   onQueue: (queued: { q: string; ref?: AskRef; from: number; item?: string }) => void;
 }) {
   const streaming = !!turn.live?.nodes.some(Boolean);
-  // A later region can arrive before the first one. Until the top of the answer is real, keep showing the
-  // research: an empty card, or a placeholder in that gap, looks like the wait is fake.
+  // Parallel region calls finish out of order. The first real section replaces the full-card wait;
+  // sections still running keep their own skeletons inside the streamed body.
   const answerStarted = !!turn.live && liveBody(turn.live, true).some((n) => n.type !== 'citations' && n.type !== 'slot');
   const offlinePartial = Boolean(turn.offline && (turn.live?.head || streaming));
   // Jev's plan already names the layout. Once the sources have landed, that skeleton is the placeholder —

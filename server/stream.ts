@@ -177,6 +177,13 @@ function imageBoost(pattern: string, search: SearchResponse, env: Env, scope: As
 /** How many pages to read and how long to wait for them before designing. At most five pages per ask. */
 const pageBudget = (readPages: boolean) => (readPages ? { count: 5, need: 3, budgetMs: 1600 } : { count: 3, need: 2, budgetMs: 800 });
 
+/**
+ * How long to keep waiting for the picture search after pages are in. That search started when the
+ * results were sent, so it has already overlapped the source check and the page reads. A short grace
+ * lets a straggler into the prompt; pictures that land later still fill blank rows from the same promise.
+ */
+const BOOST_GRACE_MS = 200;
+
 /** The model is scored against the person's question, including hits a looser retry brought back. */
 function applyRelevance(query: string, response: SearchResponse, ledger: CallLedger): SearchResponse {
   const gated = gateResults(query, response.results);
@@ -269,7 +276,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
 
   // Page preview images and images from engines that answered late are often the most relevant ones.
   const lateImages = !rescued && late ? await Promise.race([late.then((l) => l.images), new Promise<ImageResult[]>((r) => setTimeout(() => r([]), 150))]) : [];
-  const boosted = !rescued && req.boost ? await Promise.race([req.boost, new Promise<ImageResult[]>((r) => setTimeout(() => r([]), 1500))]) : [];
+  const boosted = !rescued && req.boost ? await Promise.race([req.boost, new Promise<ImageResult[]>((r) => setTimeout(() => r([]), BOOST_GRACE_MS))]) : [];
   const pageImgs = pages.filter((p) => p.image).map((p) => {
     const source = req.search.results[p.n - 1]?.domain ?? '';
     return { url: p.url, thumb: p.image!, title: req.search.results[p.n - 1]?.title ?? '', source, license: 'source' as const, credit: source };
