@@ -1,14 +1,32 @@
 import { useEffect, useRef, useState, type PointerEvent } from 'react';
-import { ArrowUp, Search } from 'lucide-react';
+import { CornerDownRight, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { GAIN } from './card/returnColor';
 import { ONBOARD_STEPS } from './onboarding';
 
 type StepId = (typeof ONBOARD_STEPS)[number]['id'];
 
-const ASK = 'renting vs buying';
-const LOOK_HOLDS = [420, 620, 620, 1700];
-const CARD_HOLDS = [380, 700, 760, 1600];
+const SHAPE_HOLDS = [1500, 1500, 1700];
+const SOURCE_HOLDS = [480, 980, 760, 1800];
+const TAP_HOLDS = [700, 480, 1900];
+const LIVE_HOLDS = [1100, 1100, 1100, 1500];
+const LIVE_RANGES = ['1D', '1W', '1M', '1Y'] as const;
+
+const SHAPE_FRAMES = [
+  { kind: 'compare', ask: 'Is renting or buying cheaper?' },
+  { kind: 'price', ask: 'Tesla stock price' },
+  { kind: 'steps', ask: 'How to make a sourdough starter' },
+] as const;
+
+type ShapeKind = (typeof SHAPE_FRAMES)[number]['kind'];
+
+const LIVE_FRAMES = [
+  { change: '+7.40 (+1.82%)', points: [30, 28, 34, 32, 40, 38, 46, 44, 52, 58, 55, 62] },
+  { change: '+18.10 (+4.59%)', points: [20, 24, 22, 30, 36, 33, 42, 48, 45, 55, 60, 62] },
+  { change: '+41.20 (+11.09%)', points: [12, 18, 16, 22, 28, 26, 34, 40, 38, 48, 54, 62] },
+  { change: '+164.40 (+66.2%)', points: [8, 10, 14, 12, 18, 24, 22, 30, 36, 44, 52, 62] },
+] as const;
 
 function useReducedMotion() {
   const [reduced, setReduced] = useState(() => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches);
@@ -46,85 +64,26 @@ function useLoop(active: boolean, holds: readonly number[], reduced: boolean) {
   return phase;
 }
 
-function AskDemo({ active }: { active: boolean }) {
-  const reduced = useReducedMotion();
-  const [n, setN] = useState(0);
-  useEffect(() => {
-    if (!active) return;
-    if (reduced) {
-      setN(ASK.length);
-      return;
-    }
-    setN(0);
-    let count = 0;
-    let timer = 0;
-    const tick = () => {
-      const wait = count >= ASK.length ? 1400 : 68;
-      timer = window.setTimeout(() => {
-        count = count >= ASK.length ? 0 : count + 1;
-        setN(count);
-        tick();
-      }, wait);
-    };
-    tick();
-    return () => window.clearTimeout(timer);
-  }, [active, reduced]);
-  const typed = ASK.slice(0, n);
-  const sent = n >= ASK.length;
-  return (
-    <div className="flex h-full flex-col justify-center px-5">
-      <div className={cn('flex h-12 items-center gap-2 rounded-2xl border bg-card pl-3.5 pr-1.5 shadow-card', sent && 'ring-1 ring-foreground/15')}>
-        <Search className="size-4 shrink-0 text-muted-foreground" />
-        <span className="min-w-0 flex-1 truncate text-left text-[14px] text-foreground">
-          {typed}
-          {!sent && <span className="ml-px inline-block h-4 w-px translate-y-0.5 bg-foreground align-middle" />}
-        </span>
-        <span className={cn('flex size-9 items-center justify-center rounded-xl bg-foreground text-background transition-transform', sent && 'scale-90')}>
-          <ArrowUp className="size-4" />
-        </span>
-      </div>
-    </div>
-  );
+function sparkPath(points: readonly number[]): string {
+  const w = 280;
+  const h = 56;
+  const min = Math.min(...points);
+  const max = Math.max(...points);
+  const span = max - min || 1;
+  return points.map((p, i) => {
+    const x = (i / (points.length - 1)) * w;
+    const y = h - ((p - min) / span) * (h - 6) - 3;
+    return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
 }
 
-function LookDemo({ active }: { active: boolean }) {
-  const reduced = useReducedMotion();
-  const phase = useLoop(active, LOOK_HOLDS, reduced);
-  const queries = ['renting vs buying a home', 'rent vs buy monthly cost'];
-  const sources = [
-    { name: 'Cost comparison', domain: 'example.com' },
-    { name: 'Rent or buy calculator', domain: 'housing.example' },
-  ];
-  return (
-    <div className="flex h-full flex-col justify-start gap-2.5 px-5 pt-5 text-left">
-      <p className="zo-shimmer-text text-[12px] font-medium">Searching for</p>
-      {queries.map((q, i) => phase > i && (
-        <div key={q} className="zo-row">
-          <p className="truncate text-[13px] text-foreground/80">{q}</p>
-        </div>
-      ))}
-      {phase >= 3 && sources.map((s, i) => (
-        <div key={s.domain} className="zo-row" style={{ animationDelay: `${i * 90}ms` }}>
-          <div className="flex items-center gap-2 py-0.5">
-            <span className="flex size-4 shrink-0 items-center justify-center rounded bg-foreground/10 text-[9px] font-medium">{s.name.slice(0, 1)}</span>
-            <span className="min-w-0 flex-1 truncate text-[12.5px]">{s.name}</span>
-            <span className="shrink-0 text-[10px] text-muted-foreground">{s.domain}</span>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function CardDemo({ active }: { active: boolean }) {
-  const reduced = useReducedMotion();
-  const phase = useLoop(active, CARD_HOLDS, reduced);
-  return (
-    <div className="flex h-full flex-col justify-start px-4 pt-4">
-      <div className="rounded-xl border bg-card px-3 py-2.5 shadow-card">
-        <p className="text-[12px] font-medium">Renting vs buying</p>
-        {phase >= 1 && (
-          <div className="zo-rise mt-2 grid grid-cols-2 gap-1.5">
+function ShapeBody({ kind }: { kind: ShapeKind }) {
+  switch (kind) {
+    case 'compare':
+      return (
+        <>
+          <p className="text-[12px] font-medium">Renting vs buying</p>
+          <div className="mt-2 grid grid-cols-2 gap-1.5">
             {[
               { label: 'Rent', bar: 'w-4/5' },
               { label: 'Buy', bar: 'w-3/5' },
@@ -135,23 +94,133 @@ function CardDemo({ active }: { active: boolean }) {
               </div>
             ))}
           </div>
-        )}
-        {phase >= 2 && (
-          <div className="zo-cover mt-2 space-y-1 border-t pt-2">
-            {['Monthly', 'Upfront'].map((row) => (
-              <div key={row} className="grid grid-cols-[64px_1fr_1fr] items-center gap-2">
-                <span className="text-[10px] text-muted-foreground">{row}</span>
-                <span className="h-1.5 rounded-full bg-foreground/25" />
-                <span className="h-1.5 w-2/3 rounded-full bg-foreground/70" />
-              </div>
+        </>
+      );
+    case 'price':
+      return (
+        <>
+          <p className="text-[12px] text-muted-foreground">TSLA · Tesla</p>
+          <p className="mt-0.5 text-[22px] font-semibold tracking-tight tabular-nums">$412.80</p>
+          <p className="text-[11px] font-medium tabular-nums" style={{ color: GAIN }}>+$7.40 today</p>
+        </>
+      );
+    case 'steps':
+      return (
+        <>
+          <p className="text-[12px] font-medium">Sourdough starter</p>
+          <ol className="mt-2 space-y-1.5">
+            {['Mix flour and water', 'Feed it each day', 'Wait until it rises'].map((step, i) => (
+              <li key={step} className="flex items-center gap-2 text-[12px]">
+                <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-foreground text-[9px] font-medium text-background">{i + 1}</span>
+                {step}
+              </li>
             ))}
-          </div>
-        )}
-        {phase >= 3 && (
-          <div className="zo-rise mt-2 flex justify-end">
-            <span className="rounded-md border px-2 py-0.5 text-[10px] text-muted-foreground">Save</span>
-          </div>
-        )}
+          </ol>
+        </>
+      );
+    default: {
+      const unknown: never = kind;
+      return unknown;
+    }
+  }
+}
+
+function ShapeDemo({ active }: { active: boolean }) {
+  const reduced = useReducedMotion();
+  const phase = useLoop(active, SHAPE_HOLDS, reduced);
+  const frame = SHAPE_FRAMES[reduced ? 0 : phase]!;
+  return (
+    <div className="flex h-full flex-col justify-center px-4">
+      <p className="mb-2 truncate text-center text-[11px] text-muted-foreground">{frame.ask}</p>
+      <div key={frame.kind} className="zo-rise rounded-xl border bg-card px-3 py-2.5 shadow-card">
+        <ShapeBody kind={frame.kind} />
+      </div>
+    </div>
+  );
+}
+
+function QueryLine({ text }: { text: string }) {
+  return (
+    <div className="zo-row">
+      <div className="flex min-w-0 items-center gap-2 py-0.5 text-[13px] text-foreground/85">
+        <Search className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+        <span className="truncate">{text}</span>
+      </div>
+    </div>
+  );
+}
+
+function SourceLine({ name, domain, dim }: { name: string; domain: string; dim?: boolean }) {
+  return (
+    <div className={cn('zo-row', dim && 'opacity-40')}>
+      <div className="flex items-center gap-2 py-0.5">
+        <span className="flex size-4 shrink-0 items-center justify-center rounded bg-foreground/10 text-[9px] font-medium">{name.slice(0, 1)}</span>
+        <span className="min-w-0 flex-1 truncate text-[12.5px]">{name}</span>
+        <span className="zo-meta shrink-0">{domain}</span>
+      </div>
+    </div>
+  );
+}
+
+function SourcesDemo({ active }: { active: boolean }) {
+  const reduced = useReducedMotion();
+  const phase = useLoop(active, SOURCE_HOLDS, reduced);
+  const again = phase >= 2;
+  return (
+    <div className="flex h-full flex-col justify-start gap-2 px-5 pt-5 text-left">
+      <p className="zo-shimmer-text text-[12px] font-medium">{again ? 'Searching again' : 'Searching for'}</p>
+      <QueryLine text="top 10 plays oct 7" />
+      {again && <QueryLine text="NBA top 10 plays Oct 7" />}
+      {phase === 1 && <SourceLine name="NFL Top Plays" domain="nfl.com" />}
+      {phase === 2 && <SourceLine name="NFL Top Plays" domain="nfl.com" dim />}
+      {phase >= 3 && <SourceLine name="NBA's Top 10 Plays — Oct 7" domain="youtube.com" />}
+    </div>
+  );
+}
+
+function TapDemo({ active }: { active: boolean }) {
+  const reduced = useReducedMotion();
+  const phase = useLoop(active, TAP_HOLDS, reduced);
+  return (
+    <div className="flex h-full flex-col justify-center px-4">
+      <div className={cn('rounded-xl border bg-card px-2.5 py-2 shadow-card transition-colors', phase >= 1 && 'bg-foreground/[0.04]')}>
+        <div className="flex items-center gap-2">
+          <span className="flex size-4 shrink-0 items-center justify-center rounded bg-foreground/10 text-[9px] font-medium">N</span>
+          <span className="min-w-0 flex-1 truncate text-[12.5px]">NBA&apos;s Top 10 Plays — Oct 7</span>
+          <span className="zo-meta shrink-0">youtube.com</span>
+        </div>
+      </div>
+      {phase >= 2 && (
+        <div className="zo-rise mt-2.5 flex items-start gap-2 px-1 text-[12.5px] leading-snug text-foreground/85">
+          <CornerDownRight className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+          <span>What happened in that video from Oct 7?</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LiveDemo({ active }: { active: boolean }) {
+  const reduced = useReducedMotion();
+  const phase = useLoop(active, LIVE_HOLDS, reduced);
+  const frame = LIVE_FRAMES[phase]!;
+  return (
+    <div className="flex h-full flex-col justify-center px-4">
+      <div className="rounded-xl border bg-card px-3 py-2.5 shadow-card">
+        <p className="text-[12px] text-muted-foreground">Tesla · TSLA</p>
+        <p className="mt-0.5 text-[22px] font-semibold tracking-tight tabular-nums">$412.80</p>
+        <p className="text-[11px] font-medium tabular-nums" style={{ color: GAIN }}>{frame.change}</p>
+        <svg viewBox="0 0 280 56" className="zo-rise mt-1 h-12 w-full" aria-hidden>
+          <path d={sparkPath(frame.points)} fill="none" stroke={GAIN} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+        </svg>
+        <div className="mt-1 flex items-center justify-between border-b" role="tablist" aria-label="Chart range">
+          {LIVE_RANGES.map((range, i) => (
+            <span key={range} className="relative px-1.5 py-1 text-[11px] font-semibold" style={{ color: i === phase ? GAIN : 'var(--muted-foreground)' }}>
+              {range}
+              {i === phase && <span className="absolute inset-x-1 -bottom-px h-0.5 rounded-full" style={{ background: GAIN }} />}
+            </span>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -159,9 +228,10 @@ function CardDemo({ active }: { active: boolean }) {
 
 function StepVisual({ id, active }: { id: StepId; active: boolean }) {
   switch (id) {
-    case 'ask': return <AskDemo active={active} />;
-    case 'look': return <LookDemo active={active} />;
-    case 'card': return <CardDemo active={active} />;
+    case 'shape': return <ShapeDemo active={active} />;
+    case 'sources': return <SourcesDemo active={active} />;
+    case 'tap': return <TapDemo active={active} />;
+    case 'live': return <LiveDemo active={active} />;
     default: {
       const unknown: never = id;
       return unknown;
