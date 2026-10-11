@@ -4,9 +4,11 @@ import type { CardNode } from '../shared/card';
  * A local-conditions card (weather, forecast, temperature) has only a handful of
  * numbers. Parallel region designers cannot see each other, so the same reading
  * lands in the hero, a key-value list, a "now" scroller and a stat grid.
- * Collapse keeps the first copy of each reading. A price that also appears in a
- * chart or a table stays: those nodes are a different presentation and are never
- * rewritten here.
+ * Collapse keeps the first copy of each reading. The same tile twice (two
+ * "tonight" temperatures, two rain chances, two winds) is one fact, whatever
+ * the wording. A later period with its own number stays. A price that also
+ * appears in a chart or a table stays: those nodes are a different presentation
+ * and are never rewritten here.
  */
 
 const READING_LABELS = new Set([
@@ -23,6 +25,7 @@ const READING_LABELS = new Set([
   'uv',
   'uv index',
   'cloud cover',
+  'rain chance',
 ]);
 
 const LABEL_ALIAS: Record<string, string> = {
@@ -39,6 +42,13 @@ const LABEL_ALIAS: Record<string, string> = {
   rainfall: 'rainfall',
   rain: 'rainfall',
   precipitation: 'rainfall',
+  'rain chance': 'rain chance',
+  'chance of rain': 'rain chance',
+  'probability of rain': 'rain chance',
+  'probability of precipitation': 'rain chance',
+  'precip chance': 'rain chance',
+  'precipitation chance': 'rain chance',
+  'chance of precipitation': 'rain chance',
   'snow depth': 'snow depth',
   snow: 'snow depth',
   snowfall: 'snow depth',
@@ -57,13 +67,43 @@ const UNIT_WORD = /^(?:f|c|mi|in|mph|km|mm|cm|mb|hpa|kph|miles|mile|inches|inch|
 const CONDITION = /\b(?:cloudy|sunny|clear|rainy?|snowy?|foggy?|windy|stormy|overcast|humid|fair)\b/i;
 const GENERIC_TITLE = /^(?:the\s+|current\s+|local\s+|today'?s\s+)*(?:weather|forecast|temperature)(?:\s+(?:now|today|report|update))?$/i;
 
+const STOP_WORD = new Set(['of', 'the', 'a', 'an', 'and']);
+/** Words that narrow a fact without naming a different one: "tonight's low" is still tonight. */
+const QUALIFIER_WORD = new Set(['low', 'high', 'min', 'max', 'minimum', 'maximum', 'speed']);
+const WORD_ALIAS: Record<string, string> = {
+  precip: 'rain',
+  precipitation: 'rain',
+  rainfall: 'rain',
+  probability: 'chance',
+  probabilities: 'chance',
+  winds: 'wind',
+  mon: 'monday',
+  tue: 'tuesday',
+  tues: 'tuesday',
+  wed: 'wednesday',
+  thu: 'thursday',
+  thur: 'thursday',
+  thurs: 'thursday',
+  fri: 'friday',
+  sat: 'saturday',
+  sun: 'sunday',
+};
+
+interface Fact {
+  /** Sorted words of the label, so "rain chance" and "chance of rain" meet. */
+  key: string;
+  nums: string[];
+  text: string;
+}
+
 interface Seen {
   readings: Set<string>;
   phrases: Set<string>;
+  facts: Fact[];
 }
 
 function fresh(): Seen {
-  return { readings: new Set(), phrases: new Set() };
+  return { readings: new Set(), phrases: new Set(), facts: [] };
 }
 
 function numKey(raw: string): string {
@@ -72,6 +112,65 @@ function numKey(raw: string): string {
 
 function numbersIn(text: string): string[] {
   return [...text.matchAll(/-?\d+(?:\.\d+)?/g)].map((m) => numKey(m[0]));
+}
+
+function absNums(text: string): string[] {
+  return numbersIn(text).map((n) => numKey(String(Math.abs(Number(n)))));
+}
+
+function factWords(label: string): string[] {
+  const words = label
+    .toLowerCase()
+    .replace(/[^a-z\s]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length > 1 && !STOP_WORD.has(w) && !QUALIFIER_WORD.has(w) && !UNIT_WORD.test(w))
+    .map((w) => WORD_ALIAS[w] ?? w);
+  const nums = absNums(label);
+  return nums.length ? [...nums, ...words] : words;
+}
+
+function factKey(label: string): string {
+  const words = factWords(label);
+  if (!words.length) return '';
+  return [...words].sort().join(' ');
+}
+
+function plainFact(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/** The same label and an overlapping number is the same fact. A different number (a high beside a low) stays. */
+function repeatsFact(label: string, value: string, seen: Seen): boolean {
+  const key = factKey(label);
+  if (!key) return false;
+  const nums = absNums(value);
+  const text = plainFact(value);
+  return seen.facts.some((fact) => {
+    if (fact.key !== key) return false;
+    if (nums.length && fact.nums.length) return nums.some((n) => fact.nums.includes(n));
+    if (!nums.length && !fact.nums.length) return !!text && text === fact.text;
+    return false;
+  });
+}
+
+function rememberFact(label: string, value: string, seen: Seen): void {
+  const key = factKey(label);
+  if (!key) return;
+  seen.facts.push({ key, nums: absNums(value), text: plainFact(value) });
+}
+
+function hasGlyph(text: string): boolean {
+  return /[\p{L}\p{N}]/u.test(text);
+}
+
+/** A bordered tile with no letters, digits, or picture would draw an empty box. */
+function blankShell(node: CardNode): boolean {
+  if (node.type === 'tile') {
+    if (hasGlyph(`${node.label ?? ''} ${node.value ?? ''} ${node.sub ?? ''}`)) return false;
+    return !(node.imageSrc || node.imageRef !== undefined || node.imageQuery);
+  }
+  if (node.type === 'stat') return !hasGlyph(`${node.label} ${node.value} ${node.unit ?? ''} ${node.delta ?? ''}`);
+  return false;
 }
 
 function labelKey(label: string): string {
@@ -147,14 +246,16 @@ function rememberHero(node: Extract<CardNode, { type: 'hero' }>, seen: Seen): vo
 const CURRENT_LABEL = /^(?:now|current|right now|today)$/i;
 
 function takeLeaf(node: CardNode, seen: Seen): CardNode | undefined {
-  if (!substance(node)) return undefined;
+  if (blankShell(node) || !substance(node)) return undefined;
   if (node.type === 'tile' || node.type === 'stat') {
-    const primary = [node.label, node.value, node.type === 'stat' ? node.unit : undefined].filter(Boolean).join(' ');
+    const value = [node.value, node.type === 'stat' ? node.unit : undefined].filter(Boolean).join(' ');
+    const primary = [node.label, value].filter(Boolean).join(' ');
     const extra = node.type === 'tile' ? node.sub : undefined;
     const blob = [primary, extra].filter(Boolean).join(' ');
     // "Now / Partly cloudy" restates the hero. "Mon / 72°" is a later period and stays, even when the number matches.
+    // A second "Tonight 58°" or "Rain chance 100%" is the same fact and goes, even when the subtitle differs.
     const current = CURRENT_LABEL.test(node.label.trim());
-    if (knownAndSeen(primary, seen, node.label) || (current && (restates(blob, seen) || knownAndSeen(blob, seen)))) return undefined;
+    if (knownAndSeen(primary, seen, node.label) || repeatsFact(node.label, value, seen) || (current && (restates(blob, seen) || knownAndSeen(blob, seen)))) return undefined;
     let next: CardNode = node;
     if (node.type === 'tile' && node.sub && (knownAndSeen(node.sub, seen) || restates(node.sub, seen))) {
       const clauses = node.sub.split(/\s*[·•|]\s*/).filter((clause) => !knownAndSeen(clause, seen) && !restates(clause, seen));
@@ -162,16 +263,20 @@ function takeLeaf(node: CardNode, seen: Seen): CardNode | undefined {
       next = sub ? { ...node, sub } : { ...node, sub: undefined };
     }
     rememberText(primary, seen, node.label);
+    rememberFact(node.label, value, seen);
     if (next.type === 'tile' && next.sub) rememberText(next.sub, seen);
     return next;
   }
   if (node.type === 'keyvalue') {
     const items = node.items.filter((item) => {
       const text = `${item.label} ${item.value}`;
-      return !knownAndSeen(text, seen, item.label) && !restates(text, seen);
+      return !knownAndSeen(text, seen, item.label) && !repeatsFact(item.label, item.value, seen) && !restates(text, seen);
     });
     if (!items.length) return undefined;
-    for (const item of items) rememberText(`${item.label} ${item.value}`, seen, item.label);
+    for (const item of items) {
+      rememberText(`${item.label} ${item.value}`, seen, item.label);
+      rememberFact(item.label, item.value, seen);
+    }
     return items.length === node.items.length ? node : { ...node, items };
   }
   if (node.type === 'text' || node.type === 'heading' || node.type === 'callout') {

@@ -15,8 +15,9 @@ const ChartView = lazy(() => import('./ChartView'));
 const TickerView = lazy(() => import('./TickerView'));
 
 const GAP: Record<Gap, string> = { sm: 'gap-1.5 sm:gap-2', md: 'gap-2 sm:gap-3', lg: 'gap-3 sm:gap-5' };
-const COLS = { 2: 'grid-cols-2', 3: 'grid-cols-2 sm:grid-cols-3 max-sm:[&>*:last-child:nth-child(odd)]:col-span-2', 4: 'grid-cols-2 sm:grid-cols-4' } as const;
-const WIDE_COLS = { 2: 'sm:grid-cols-2', 3: 'sm:grid-cols-3', 4: 'sm:grid-cols-2 lg:grid-cols-4' } as const;
+/** A 2-column grid with an odd last child spans that child, so the row does not end in an empty cell. The class is written out in full so the stylesheet picks it up. */
+const COLS = { 2: 'grid-cols-2 [&>*:last-child:nth-child(odd)]:col-span-2', 3: 'grid-cols-2 sm:grid-cols-3 max-sm:[&>*:last-child:nth-child(odd)]:col-span-2', 4: 'grid-cols-2 sm:grid-cols-4' } as const;
+const WIDE_COLS = { 2: 'sm:grid-cols-2 sm:[&>*:last-child:nth-child(odd)]:col-span-2', 3: 'sm:grid-cols-3', 4: 'sm:grid-cols-2 lg:grid-cols-4' } as const;
 const ALIGN = { start: 'sm:items-start', center: 'sm:items-center', end: 'sm:items-end', between: 'sm:items-center sm:justify-between' } as const;
 
 /** Whether a node is (or contains) a placeholder, so swapping it for real content remounts and animates it. */
@@ -41,7 +42,11 @@ const FILL_CELL = 'flex min-w-0 flex-col [&>*]:max-w-full [&>*]:flex-1';
  * tap target, and never wider than the card allows (18rem, or 78% of the strip on
  * a phone so the next cell peeks). A new component follows this without being named.
  */
-const STRIP_CELL = 'w-max min-w-[7.5rem] max-w-[min(18rem,78cqw)] shrink-0 snap-start [&>*]:w-full';
+/**
+ * The border hugs the text. w-full here stretched a short tile out to the cap, so the
+ * next cell's centered text sat past the peek and the peek looked like an empty box.
+ */
+const STRIP_CELL = 'w-max min-w-[7.5rem] max-w-[min(18rem,78cqw)] shrink-0 snap-start [&>*]:w-max [&>*]:max-w-full';
 
 /** A sideways strip scrolls by touch. The bar itself is hidden: it was drawing in the hole under a short cell and adding height the content does not need. */
 const TRACK = 'no-scrollbar min-w-0 max-w-full touch-pan-x overflow-x-auto overscroll-x-contain';
@@ -161,8 +166,16 @@ export function NodeView({ node }: { node: CardNode }): ReactNode {
           {node.tabs.map((t, i) => <TabsContent key={i} value={String(i)}><Nodes nodes={t.children} className="gap-3" /></TabsContent>)}
         </Tabs>
       );
-    case 'scroller':
+    case 'scroller': {
       if (!node.children.length) return null;
+      // One cell has nothing to scroll to. A strip would leave it short, with empty card beside it.
+      if (node.children.length === 1) {
+        return (
+          <TilePictures.Provider value={node.children.some(wantsPicture)}>
+            <div className={cn(FILL_CELL, '[&>*]:min-w-0')}><NodeView node={node.children[0]!} /></div>
+          </TilePictures.Provider>
+        );
+      }
       return (
         <TilePictures.Provider value={node.children.some(wantsPicture)}>
           <div className={cn('@container snap-x snap-mandatory', TRACK)}>
@@ -176,6 +189,7 @@ export function NodeView({ node }: { node: CardNode }): ReactNode {
           </div>
         </TilePictures.Provider>
       );
+    }
     case 'divider':
       return <Separator />;
     case 'hero': return <Hero node={node} />;

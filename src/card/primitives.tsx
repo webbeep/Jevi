@@ -418,6 +418,9 @@ export function Tile({ node }: { node: Of<'tile'> }) {
   const link = useSource(node.source);
   const label = plain(node.label);
   const value = node.value && plain(node.value);
+  const sub = node.sub ? plain(node.sub) : '';
+  // No letters, digits, or picture: the border alone would be an empty box.
+  if (!/[\p{L}\p{N}]/u.test(`${label} ${value ?? ''} ${sub}`) && !slot && !img && !pending) return null;
   const box: Box = { kind: isVerdict(value) ? 'verdict' : 'tile', label, value, entity };
   const ask = askQuestion(box);
   const ref: AskRef = { label, value, entity, sourceUrl: link?.url, snippet: link?.snippet };
@@ -426,7 +429,7 @@ export function Tile({ node }: { node: Of<'tile'> }) {
       data-item=""
       data-tile-kind={kind}
       className={cn(
-        'relative flex min-w-0 max-w-full flex-col items-center gap-0.5 overflow-hidden rounded-xl border px-2 py-2.5 text-center transition-colors has-[>button:hover]:border-foreground/20 sm:gap-1 sm:px-3 sm:py-3',
+        'relative flex min-w-[7.5rem] max-w-full flex-col items-center gap-0.5 overflow-hidden rounded-xl border px-2 py-2.5 text-center transition-colors has-[>button:hover]:border-foreground/20 sm:gap-1 sm:px-3 sm:py-3',
         node.active ? 'border-foreground/25 bg-muted ring-1 ring-foreground/10' : 'bg-card',
       )}
     >

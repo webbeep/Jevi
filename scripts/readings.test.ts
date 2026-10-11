@@ -81,6 +81,46 @@ test('a weather card keeps one copy of each reading and titles the place', () =>
   assert.equal(flat.match(/Visibility|visibility/g)?.length, 1);
 });
 
+test('a repeated period, rain chance, and wind are each kept once', () => {
+  const nodes: CardNode[] = [
+    { type: 'hero', value: '64', unit: '°F', caption: 'Periods of rain' },
+    {
+      type: 'scroller',
+      children: [
+        { type: 'tile', label: 'Tonight', value: '58°F', sub: 'Steady rain, heavy at times' },
+        { type: 'tile', label: 'Rain Chance', value: '100%', sub: 'About half an inch' },
+        { type: 'tile', label: 'Wind', value: 'E 10–15', sub: 'Gusts to 30 mph' },
+        { type: 'tile', label: '—', value: '·' },
+      ],
+    },
+    {
+      type: 'grid',
+      cols: 2,
+      children: [
+        { type: 'tile', label: 'Chance of rain', value: '100%' },
+        { type: 'tile', label: 'Winds', value: 'E 10-15 mph', sub: 'Gusts to 30 mph' },
+        { type: 'tile', label: "Tonight's low", value: '58°', sub: 'Showers, heavy rain possible' },
+        { type: 'tile', label: 'Tomorrow', value: '70°F', sub: 'Morning showers' },
+        { type: 'tile', label: 'Tomorrow', value: '70°', sub: 'Clearing' },
+        { type: 'tile', label: 'Monday', value: '58°', sub: 'Same number, later day' },
+        { type: 'tile', label: 'Tonight', value: '49°', sub: 'A different temperature stays' },
+      ],
+    },
+  ];
+  const settled = settleReadings(nodes, { title: 'New York City, NY' }, 'weather in New York City');
+  const series = settled.nodes[1];
+  assert.equal(series?.type, 'scroller');
+  if (series?.type !== 'scroller') return;
+  assert.deepEqual(series.children.map((node) => (node.type === 'tile' ? node.label : node.type)), ['Tonight', 'Rain Chance', 'Wind']);
+  const grid = settled.nodes[2];
+  assert.equal(grid?.type, 'grid');
+  if (grid?.type !== 'grid') return;
+  assert.deepEqual(
+    grid.children.map((node) => (node.type === 'tile' ? `${node.label} ${node.value}` : node.type)),
+    ['Tomorrow 70°F', 'Monday 58°', 'Tonight 49°'],
+  );
+});
+
 test('a price hero and its chart both stay', () => {
   const nodes: CardNode[] = [
     { type: 'hero', value: '412.80', unit: '$', label: 'Tesla', caption: 'Up 1.2% today' },
