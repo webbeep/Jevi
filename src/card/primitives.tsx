@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useId, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { MouseEvent } from 'react';
 import { Check, ChevronLeft, ChevronRight, Copy, Globe, Minus, Play, Star, ThumbsDown, ThumbsUp, TrendingDown, TrendingUp } from 'lucide-react';
 import { askQuestion, queryForLabel, type AskRef, type Box } from '../../shared/askAbout';
@@ -18,6 +18,7 @@ import { Icon } from './Icon';
 import { ICON_NAMES } from './iconNames';
 import { RichText } from './RichText';
 import { GAIN, LOSS, returnColor } from './returnColor';
+import { autoplaySrc, playerSignal, videoEmbed, withOrigin, type VideoEmbed } from './videoEmbed';
 
 type Of<T extends CardNode['type']> = Extract<CardNode, { type: T }>;
 
@@ -286,49 +287,130 @@ function PhotoCredit({ src, className }: { src: string | undefined; className?: 
   );
 }
 
-/** Video id and embeddable player for YouTube and Vimeo watch pages; undefined for channels and other pages. */
-export function videoEmbed(url: string): { id: string; player: string; thumb?: string } | undefined {
-  try {
-    const u = new URL(url);
-    const host = u.hostname.replace(/^(www|m)\./, '');
-    const yt = host === 'youtu.be' ? u.pathname.slice(1) : host.endsWith('youtube.com') ? (u.searchParams.get('v') ?? u.pathname.match(/^\/(?:shorts|embed|live)\/([\w-]{11})/)?.[1]) : undefined;
-    if (yt && /^[\w-]{11}$/.test(yt)) return { id: yt, player: `https://www.youtube-nocookie.com/embed/${yt}?autoplay=1&rel=0`, thumb: `https://i.ytimg.com/vi/${yt}/hqdefault.jpg` };
-    const vimeo = host === 'vimeo.com' ? u.pathname.match(/^\/(\d+)/)?.[1] : undefined;
-    if (vimeo) return { id: vimeo, player: `https://player.vimeo.com/video/${vimeo}?autoplay=1` };
-  } catch {
-    // not a URL
-  }
-  return undefined;
+const PLAY_BADGE = 'relative flex size-14 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-sm transition-transform group-hover:scale-105';
+
+/**
+ * The poster covers a player that is already on the page, with autoplay off.
+ * Once that player can take a tap, the poster stops catching clicks, so the
+ * first tap lands on the player's own play control. A tap that arrives before
+ * then starts this same frame during the tap. Mounting a new frame in a later
+ * render drops the tap, and the player then asks for a second one.
+ */
+function VideoPlayer({ embed, title, thumb }: { embed: VideoEmbed; title: string; thumb?: string }) {
+  const frame = useRef<HTMLIFrameElement>(null);
+  const playerId = useId().replace(/:/g, '');
+  const started = useRef(false);
+  const fallback = useRef<number | undefined>(undefined);
+  const [ready, setReady] = useState(false);
+  const [poster, setPoster] = useState(true);
+  const base = withOrigin(embed, typeof location === 'undefined' ? undefined : location.origin);
+  // Held in state only so a tap that starts the clip keeps the same frame.
+  // The assignment below happens during the tap; the state update matches it.
+  const [src, setSrc] = useState(base);
+
+  useLayoutEffect(() => {
+    const hideIfFocused = () => {
+      if (document.activeElement === frame.current) setPoster(false);
+    };
+    const onMessage = (e: MessageEvent) => {
+      if (e.source !== frame.current?.contentWindow) return;
+      const signal = playerSignal(e.data);
+      if (signal.ready) setReady(true);
+      if (signal.playing) setPoster(false);
+    };
+    const onBlur = (e: FocusEvent) => {
+      if (!e.isTrusted) return;
+      hideIfFocused();
+      requestAnimationFrame(hideIfFocused);
+    };
+    window.addEventListener('message', onMessage);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('message', onMessage);
+      window.removeEventListener('blur', onBlur);
+      window.clearTimeout(fallback.current);
+    };
+  }, []);
+
+  const arm = () => {
+    const el = frame.current;
+    if (!el || started.current) return;
+    started.current = true;
+    window.clearTimeout(fallback.current);
+    const next = autoplaySrc(base);
+    el.src = next;
+    setSrc(next);
+    setPoster(false);
+  };
+
+  const listen = () => {
+    if (started.current) return;
+    const win = frame.current?.contentWindow;
+    if (win) {
+      switch (embed.kind) {
+        case 'youtube':
+          win.postMessage(JSON.stringify({ event: 'listening', id: playerId, channel: 'widget' }), '*');
+          break;
+        case 'vimeo':
+          win.postMessage(JSON.stringify({ method: 'addEventListener', value: 'play' }), '*');
+          break;
+        default: {
+          const _exhaustive: never = embed.kind;
+          return _exhaustive;
+        }
+      }
+    }
+    // The player document can finish loading before its play control exists.
+    // Until it says it is ready, a tap still starts this frame directly.
+    window.clearTimeout(fallback.current);
+    fallback.current = window.setTimeout(() => setReady(true), 1200);
+  };
+
+  return (
+    <>
+      <iframe
+        ref={frame}
+        id={playerId}
+        src={src}
+        title={title}
+        allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+        allowFullScreen
+        referrerPolicy="strict-origin-when-cross-origin"
+        onLoad={listen}
+        className="absolute inset-0 size-full"
+      />
+      {poster && (
+        <div className={cn('group absolute inset-0', ready && 'pointer-events-none [&_*]:pointer-events-none')} aria-hidden={ready || undefined}>
+          {thumb && <img src={thumb} alt="" loading="lazy" className="absolute inset-0 size-full object-cover" />}
+          {ready ? (
+            <span className="absolute inset-0 flex items-center justify-center" aria-hidden="true">
+              <span className={PLAY_BADGE}><Play className="ml-0.5 size-6 fill-current" /></span>
+            </span>
+          ) : (
+            <button type="button" onClick={arm} className="absolute inset-0 flex items-center justify-center" aria-label={`Play ${title}`}>
+              <span className={PLAY_BADGE}><Play className="ml-0.5 size-6 fill-current" /></span>
+            </button>
+          )}
+        </div>
+      )}
+    </>
+  );
 }
 
 export function VideoView({ node }: { node: Of<'video'> }) {
   const r = useSource(node.source);
-  const [playing, setPlaying] = useState(false);
   if (!r) return null;
   const embed = videoEmbed(r.url);
   const thumb = embed?.thumb ?? r.image;
   return (
     <figure className="space-y-2">
       <div className="relative aspect-video overflow-hidden rounded-xl border bg-muted">
-        {playing && embed ? (
-          <iframe src={embed.player} title={r.title} allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowFullScreen className="absolute inset-0 size-full" />
+        {embed ? (
+          <VideoPlayer key={embed.player} embed={embed} title={r.title} thumb={thumb} />
         ) : (
-          <a
-            href={r.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(e) => {
-              if (!embed) return;
-              e.preventDefault();
-              setPlaying(true);
-            }}
-            className="group absolute inset-0 flex items-center justify-center"
-            aria-label={`Play ${r.title}`}
-          >
+          <a href={r.url} target="_blank" rel="noopener noreferrer" className="group absolute inset-0 flex items-center justify-center" aria-label={`Play ${r.title}`}>
             {thumb && <img src={thumb} alt="" loading="lazy" className="absolute inset-0 size-full object-cover" />}
-            <span className="relative flex size-14 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-sm transition-transform group-hover:scale-105">
-              <Play className="ml-0.5 size-6 fill-current" />
-            </span>
+            <span className={PLAY_BADGE}><Play className="ml-0.5 size-6 fill-current" /></span>
           </a>
         )}
       </div>
