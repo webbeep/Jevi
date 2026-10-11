@@ -1,0 +1,274 @@
+/**
+ * Puts trustworthy, same-language sources first and keeps the card in the language of the question.
+ * Deterministic: no network and no model call. A list is never emptied.
+ */
+import type { CardNode } from '../shared/card';
+
+const AUTHORITY = [
+  'wikipedia.org', 'britannica.com', 'nobelprize.org', 'medlineplus.gov', 'nih.gov', 'cdc.gov', 'who.int',
+  'nasa.gov', 'nature.com', 'science.org', 'scientificamerican.com', 'mayoclinic.org', 'nba.com', 'espn.com',
+  'reuters.com', 'apnews.com', 'bbc.com', 'bbc.co.uk', 'nytimes.com', 'theguardian.com', 'washingtonpost.com',
+];
+
+const PRESS = [
+  'cnet.com', 'techradar.com', 'theverge.com', 'tomsguide.com', 'gsmarena.com', 'phonearena.com',
+  'androidauthority.com', 'androidcentral.com', 'pcmag.com', 'mashable.com', 'wired.com', 'arstechnica.com',
+  'cbssports.com', 'sports.yahoo.com', 'yahoo.com', 'basketball-reference.com', 'foxchase.org', 'sciencefocus.com',
+  'pearson.com', 'nobelprize.org',
+];
+
+/** Classroom blogs, slideshows, and free-host pages that outranked the encyclopedia. */
+const WEAK = [
+  'blogspot.com', 'wordpress.com', 'sites.google.com', 'wixsite.com', 'weebly.com', 'tumblr.com',
+  'genially.com', 'livejournal.com', 'blogger.com',
+];
+
+const EN = new Set(['the', 'a', 'an', 'of', 'to', 'and', 'in', 'was', 'were', 'for', 'with', 'her', 'his', 'she', 'he', 'from', 'that', 'who', 'on', 'as', 'by', 'is', 'are', 'its', 'their', 'this', 'be', 'or', 'at', 'it', 'not']);
+const ROMANCE = new Set(['el', 'la', 'los', 'las', 'una', 'un', 'del', 'que', 'por', 'sus', 'para', 'donde', 'fue', 'era', 'en', 'se', 'de', 'al', 'su', 'como', 'también', 'tambien', 'con', 'esta', 'este', 'pero', 'porque', 'cuando', 'sobre', 'entre', 'desde', 'hasta']);
+
+const KEEP = 4;
+
+export function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./i, '').toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+function endsWithHost(domain: string, host: string): boolean {
+  return domain === host || domain.endsWith(`.${host}`);
+}
+
+/** 0 is an encyclopedia or official page, 3 is a free-host blog. */
+export function hostTier(domain: string): 0 | 1 | 2 | 3 {
+  const d = domain.toLowerCase().replace(/^www\./, '');
+  if (!d) return 2;
+  if (AUTHORITY.some((host) => endsWithHost(d, host)) || /\.(?:gov|edu|mil)(?:\.[a-z]{2})?$/.test(d)) return 0;
+  if (PRESS.some((host) => endsWithHost(d, host))) return 1;
+  if (WEAK.some((host) => endsWithHost(d, host))) return 3;
+  return 2;
+}
+
+/** True when the question is written in Latin letters, so an English answer is the right one. */
+export function latinQuery(query: string): boolean {
+  const letters = [...query].filter((ch) => /\p{L}/u.test(ch));
+  if (letters.length < 3) return true;
+  const latin = letters.filter((ch) => /\p{Script=Latin}/u.test(ch)).length;
+  return latin / letters.length >= 0.8;
+}
+
+function cjkShare(text: string): number {
+  const letters = [...text].filter((ch) => /\p{L}/u.test(ch));
+  if (letters.length < 6) return 0;
+  const cjk = letters.filter((ch) => /\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}|\p{Script=Hangul}/u.test(ch)).length;
+  return cjk / letters.length;
+}
+
+function romanceHeavy(text: string): boolean {
+  const words = text.toLowerCase().split(/[^a-záéíóúñü]+/).filter((word) => word.length > 1);
+  if (words.length < 8) return false;
+  let en = 0;
+  let other = 0;
+  for (const word of words) {
+    if (EN.has(word)) en += 1;
+    if (ROMANCE.has(word)) other += 1;
+  }
+  return other >= 4 && other > en;
+}
+
+function foreignText(text: string): boolean {
+  return cjkShare(text) >= 0.25 || romanceHeavy(text);
+}
+
+export interface RankedHit {
+  url: string;
+  title: string;
+  snippet?: string;
+  domain: string;
+}
+
+/**
+ * Drops foreign-script hits and free-host blogs once enough better hits remain, then
+ * orders encyclopedias and official sites ahead of everything else. Same objects, new order.
+ */
+export function preferSources<T extends RankedHit>(query: string, rows: readonly T[]): T[] {
+  if (rows.length <= 1) return [...rows];
+  const latin = latinQuery(query);
+  const marked = rows.map((row, index) => ({
+    row,
+    index,
+    tier: hostTier(row.domain || hostOf(row.url)),
+    foreign: latin && cjkShare(`${row.title} ${row.snippet ?? ''}`) >= 0.3,
+  }));
+  let pool = marked;
+  const native = pool.filter((item) => !item.foreign);
+  if (native.length >= KEEP) pool = native;
+  const solid = pool.filter((item) => item.tier < 3);
+  if (solid.length >= KEEP) pool = solid;
+  // A person or a scoreboard should lead with the encyclopedia or the league. Other asks keep
+  // the engine's order, with free-host pages that had to stay sunk to the back.
+  const promote = /\b(who|whom|whose|biography|nobel|scores?|scoreboard|standings)\b/i.test(query);
+  pool.sort((a, b) => (promote ? a.tier - b.tier : Number(a.tier === 3) - Number(b.tier === 3)) || a.index - b.index);
+  return pool.map((item) => item.row);
+}
+
+function keepSentences(query: string, text: string): string {
+  if (!latinQuery(query)) return text;
+  const parts = text.split(/(?<=[.!?])\s+/);
+  const kept = parts.filter((part) => part.trim() && !foreignText(part));
+  return kept.join(' ').replace(/\s+/g, ' ').trim();
+}
+
+function cleanText(query: string, text: string | undefined): string | undefined {
+  if (!text) return text;
+  const next = keepSentences(query, text);
+  return next || undefined;
+}
+
+/** Drops sentences the question did not ask for, and repeated table or list rows. */
+export function cleanNode(query: string, node: CardNode): CardNode | undefined {
+  switch (node.type) {
+    case 'text':
+    case 'callout':
+    case 'quote':
+    case 'draft': {
+      const text = cleanText(query, node.text);
+      if (!text) return undefined;
+      return text === node.text ? node : { ...node, text };
+    }
+    case 'hero': {
+      const caption = cleanText(query, node.caption);
+      return caption === node.caption ? node : { ...node, caption };
+    }
+    case 'heading': {
+      const text = cleanText(query, node.text);
+      if (!text) return undefined;
+      return text === node.text ? node : { ...node, text };
+    }
+    case 'list': {
+      const seen = new Set<string>();
+      const items = node.items.flatMap((item) => {
+        const text = cleanText(query, item.text);
+        if (!text) return [];
+        const key = text.toLowerCase().replace(/\s+/g, ' ');
+        if (seen.has(key)) return [];
+        seen.add(key);
+        return [text === item.text ? item : { ...item, text }];
+      });
+      if (!items.length) return undefined;
+      return items.length === node.items.length && items.every((item, i) => item === node.items[i]) ? node : { ...node, items };
+    }
+    case 'table': {
+      const seen = new Set<string>();
+      const rows = node.rows.flatMap((row) => {
+        const cells = row.map((cell) => cleanText(query, cell) ?? (foreignText(cell) ? '' : cell));
+        if (cells.every((cell) => !cell.trim())) return [];
+        const key = cells.join(' | ').toLowerCase().replace(/\s+/g, ' ');
+        if (seen.has(key)) return [];
+        seen.add(key);
+        return [cells];
+      });
+      if (!rows.length) return undefined;
+      return rows.length === node.rows.length && rows.every((row, i) => row.every((cell, j) => cell === node.rows[i]?.[j])) ? node : { ...node, rows };
+    }
+    case 'tile': {
+      const sub = cleanText(query, node.sub);
+      return sub === node.sub ? node : { ...node, sub };
+    }
+    case 'steps': {
+      const items = node.items.map((step, index) => {
+        const detail = cleanText(query, step.detail);
+        const title = /^\d+\.\s/.test(step.title) ? step.title.replace(/^\d+\.\s*/, `${index + 1}. `) : step.title;
+        return detail === step.detail && title === step.title ? step : { ...step, title, detail };
+      });
+      return items.every((step, i) => step === node.items[i]) ? node : { ...node, items };
+    }
+    case 'accordion': {
+      const items = node.items.flatMap((item) => {
+        const text = cleanText(query, item.text);
+        return text ? [text === item.text ? item : { ...item, text }] : [];
+      });
+      if (!items.length) return undefined;
+      return { ...node, items };
+    }
+    case 'stack':
+    case 'grid':
+    case 'scroller':
+    case 'section': {
+      const children = node.children.flatMap((child) => {
+        const next = cleanNode(query, child);
+        return next ? [next] : [];
+      });
+      if (!children.length) return undefined;
+      return children.length === node.children.length && children.every((child, i) => child === node.children[i]) ? node : { ...node, children };
+    }
+    case 'tabs': {
+      const tabs = node.tabs
+        .map((tab) => ({
+          ...tab,
+          children: tab.children.flatMap((child) => {
+            const next = cleanNode(query, child);
+            return next ? [next] : [];
+          }),
+        }))
+        .filter((tab) => tab.children.length);
+      if (!tabs.length) return undefined;
+      return { ...node, tabs };
+    }
+    case 'keyvalue':
+    case 'timeline':
+    case 'stat':
+    case 'links':
+    case 'video':
+    case 'chart':
+    case 'ticker':
+    case 'progress':
+    case 'rating':
+    case 'proscons':
+    case 'badges':
+    case 'code':
+    case 'image':
+    case 'gallery':
+    case 'profile':
+    case 'actions':
+    case 'choices':
+    case 'slider':
+    case 'scaler':
+    case 'pricing':
+    case 'reveal':
+    case 'citations':
+    case 'divider':
+    case 'slot':
+      return node;
+    default: {
+      const unreachable: never = node;
+      return unreachable;
+    }
+  }
+}
+
+function yearsIn(text: string): string[] {
+  return [...text.matchAll(/\b(?:1[5-9]\d{2}|20\d{2})\b/g)].map((match) => match[0]);
+}
+
+/**
+ * A "sources disagree" note that names two years, when the rest of the card already
+ * states one of them and not the other, is the weak page arguing with the encyclopedia.
+ */
+export function withoutSettledDisputes(nodes: readonly (CardNode | undefined)[]): (CardNode | undefined)[] {
+  const committed = nodes.filter((node) => node && node.type !== 'callout').map((node) => JSON.stringify(node)).join('\n');
+  return nodes.map((node) => {
+    if (!node || node.type !== 'callout' || !/disagree/i.test(node.text)) return node;
+    const years = [...new Set(yearsIn(node.text))];
+    if (years.length < 2) return node;
+    const shown = years.filter((year) => new RegExp(`\\b${year}\\b`).test(committed));
+    return shown.length && shown.length < years.length ? undefined : node;
+  });
+}
+
+/** Language, repeated rows, and a disagreement the card has already settled. Holes stay holes. */
+export function finishQuality(query: string, nodes: readonly (CardNode | undefined)[]): (CardNode | undefined)[] {
+  const cleaned = nodes.map((node) => (node ? cleanNode(query, node) : node));
+  return withoutSettledDisputes(cleaned);
+}

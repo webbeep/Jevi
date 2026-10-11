@@ -58,7 +58,7 @@ Reply as JSON: {"goal": string, "use": number[], "stale": number[], "offTopic": 
 - use: result numbers that directly answer the goal and are current enough for it, best first.
 - stale: results whose information is outdated for this goal: an old price, last season's stats, a superseded version, news older than the ask allows. Judge by the result's date and content against today's date. An evergreen fact (a definition, a birth date) is not stale. For a "today" or "latest" ask, the past 36 hours count as today.
 - offTopic: results about something else: another person or company with the same name, a different product, place or time period, or results that only share words with the ask.
-- conflicts: at most 3 short notes where results disagree on a fact that matters, naming the results and their dates, e.g. "[3] says 71,360 on Jun 2; live quote [1] says 82,290".
+- conflicts: at most 3 short notes where results disagree on a fact that matters, naming the results and their dates, e.g. "[3] says 71,360 on Jun 2; live quote [1] says 82,290". A conflict counts only when two results worth citing (an encyclopedia, an official site, a major publication) state different values. A blog, slideshow, classroom page, or page in another language that differs from those is offTopic, not a conflict.
 - missing: what the person asked that no result answers, or "" when the results cover it.
 - A result marked LIVE is real-time data fetched seconds ago: it beats any other result on the current value.
 Be strict: a result that is only loosely related is not in "use".`;

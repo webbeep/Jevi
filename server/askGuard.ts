@@ -43,6 +43,24 @@ export function asksToCompare(question: string): boolean {
 }
 
 /**
+ * "Which one has better battery life?" after "iPhone 17 vs Pixel 10" is that comparison's
+ * battery, not a fresh search that can wander off to other phones. Skips the rewriter.
+ */
+export function anchoredFollowup(original: string, question: string): string | undefined {
+  if (!/\b(which|what|how)\b/i.test(question)) return undefined;
+  if (!/\b(one|it|they|them|either|better|worse|more|less)\b/i.test(question)) return undefined;
+  const sides = compareSides(original);
+  if (sides.length < 2) return undefined;
+  const attr = question
+    .replace(/\b(which|one|of them|has|have|is|are|a|the|better|worse|more|less|it|they|them)\b/gi, ' ')
+    .replace(/[?]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const vs = sides.join(' vs ');
+  return attr ? `${vs} ${attr}` : vs;
+}
+
+/**
  * "What is Priya Natarajan?" is a person lookup. The search and the card should ask who.
  * A longer question ("What is Priya Natarajan's college?") keeps the person's own words.
  */

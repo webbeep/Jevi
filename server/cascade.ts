@@ -7,6 +7,7 @@ import { loadSkips, tripSkip } from './engineSkip';
 import { SERPER_IMAGES_SHARE, takeSlot, type CapBucket } from './providerCap';
 import { HttpStatusError, type Env, clip, domainOf, fetchJson } from './util';
 import { gateResults, strongCount } from './relevanceGate';
+import { latinQuery } from './sourceQuality';
 import { fetchWikiSearch } from './wikiSearch';
 import { youKeyedSearch, youKeylessSearch, youKeyPresent } from './youSearch';
 
@@ -316,6 +317,8 @@ async function serperSearch(q: Query, env: Env): Promise<{ hits: WebHit[]; image
       body: JSON.stringify({
         q: q.q,
         num: Math.min(q.count, 10),
+        // An English question was being answered from another country's results (Chinese score pages).
+        ...(latinQuery(q.q) ? { gl: 'us', hl: 'en' } : {}),
         ...(q.freshness === 'any' ? {} : { tbs: TBS[q.freshness] }),
       }),
     },

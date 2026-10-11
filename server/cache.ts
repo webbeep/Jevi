@@ -25,7 +25,7 @@ export function normalizeQuery(q: string): string {
 }
 
 export function searchCacheKey(q: string, freshness: string, count: number): string {
-  return `${normalizeQuery(q)}|f=${freshness}|n=${count}`;
+  return `${normalizeQuery(q)}|f=${freshness}|n=${count}|src=2`;
 }
 
 export function packSearch(res: SearchResponse): string {

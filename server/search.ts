@@ -16,6 +16,7 @@ import { searchDegraded } from './degraded';
 import { diversify } from './diversify';
 import { withinOneEdit } from './entity';
 import { gateResults } from './relevanceGate';
+import { preferSources } from './sourceQuality';
 import { commons, openverse, permitted } from './images';
 import { maybeBluesky, socialSources } from './social';
 import { UA, domainOf, fetchJson, hedge, type Env } from './util';
@@ -273,7 +274,10 @@ export async function searchWithLate(q: Query, env: Env, scope?: AskScope): Prom
       ask.ledger.cache = 'hit';
       const hit = gateResults(q.q, cached.response.results);
       ask.ledger.relevanceDropped = (ask.ledger.relevanceDropped ?? 0) + hit.dropped;
-      const response = hit.dropped ? { ...cached.response, results: hit.kept } : cached.response;
+      const ranked = preferSources(q.q, hit.kept);
+      const response = ranked.length !== cached.response.results.length || ranked.some((row, i) => row !== cached.response.results[i])
+        ? { ...cached.response, results: ranked }
+        : cached.response;
       return { response: { ...response, query: q.q, freshness: q.freshness }, late: Promise.resolve(emptyLate()) };
     }
     ask.ledger.cache = cached.kind === 'off' ? 'off' : 'miss';
@@ -313,7 +317,7 @@ export async function searchWithLate(q: Query, env: Env, scope?: AskScope): Prom
   // Relevance runs after diversify and before the cap, so a junk hit cannot take a slot the model will read.
   const pooled = q.ungated ? { kept: [...extra, ...web12], dropped: 0 } : gateResults(q.q, [...extra, ...web12]);
   ask.ledger.relevanceDropped = (ask.ledger.relevanceDropped ?? 0) + pooled.dropped;
-  const results = pooled.kept.slice(0, q.count);
+  const results = preferSources(q.q, pooled.kept).slice(0, q.count);
   const knowledge = (instant && knowledgeMatches(q.q, instant.title, instant.description) ? instant : undefined)
     ?? (wiki && knowledgeMatches(q.q, wiki.title, wiki.description) ? wiki : undefined);
   const content = new Map<string, string>();

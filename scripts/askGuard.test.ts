@@ -1,9 +1,15 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { asksToCompare, cryptographyHint, faithfulQuery, isWritingAsk, needsOwnSearch, personQuestion, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from '../server/askGuard.ts';
+import { anchoredFollowup, asksToCompare, cryptographyHint, faithfulQuery, isWritingAsk, needsOwnSearch, personQuestion, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from '../server/askGuard.ts';
 import { isPersonAsk } from '../server/entity.ts';
 import { planLayout } from '../server/plan.ts';
 import type { CardNode } from '../shared/card.ts';
+
+test('a which-one follow-up stays on the comparison already on screen', () => {
+  assert.equal(anchoredFollowup('iphone 17 vs pixel 10', 'which one has better battery life?'), 'iphone 17 vs pixel 10 battery life');
+  assert.equal(anchoredFollowup('how do mRNA vaccines work', 'explain it like I am 10'), undefined);
+  assert.equal(anchoredFollowup('iphone 17 vs pixel 10', 'Does the iPhone 17 come with 256GB storage as standard?'), undefined);
+});
 
 test('a writing request is answered, not searched, and a complete question is not rewritten', () => {
   assert.equal(isWritingAsk('Draft the unblock email'), true);

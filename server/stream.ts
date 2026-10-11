@@ -43,7 +43,7 @@ import { keepPictures, reviewCard, type Review } from './review';
 import { permitted } from './images';
 import { hasLlm } from './llm';
 import { collectPages, ogImageOf } from './pages';
-import { MADE_PATTERNS, compareSideQueries, skeletonCard } from './patterns';
+import { MADE_PATTERNS, compareSideQueries, heuristicPattern, skeletonCard } from './patterns';
 import { planLayout } from './plan';
 import type { AskScope, CallLedger } from './budget';
 import { SEARCH_CALL_CAP, logAsk, mark, moreQueries, newLedger, queriesForAsk, searchCalls } from './budget';
@@ -53,10 +53,11 @@ import { type LateExtras, normalizeUrl, searchWithLate } from './search';
 import type { WebHit } from './cascade';
 import { domainOf } from './util';
 import { choicesIn, distinctActions, subjectWords } from './chips';
-import { asksToCompare, cryptographyHint, faithfulQuery, isWritingAsk, needsOwnSearch, personQuestion, quickPlan, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
+import { anchoredFollowup, asksToCompare, cryptographyHint, faithfulQuery, isWritingAsk, needsOwnSearch, personQuestion, quickPlan, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
 import { comparisonRepair, comparisonTitle } from './compareAnswer';
 import { withFinishedSentences } from './polish';
 import { queryWithPlace, readerPlace, settleReadings } from './readings';
+import { finishQuality, hostTier, preferSources } from './sourceQuality';
 import { isOwnSite, orcidSite, pickOwnSite, probeOwnSite, RESEARCH_ASK, withOwnSite } from './ownSite';
 import { quoteAsk } from '../shared/quoteAsk';
 import { scholarlyResults, withScholarly } from './scholarly';
@@ -191,7 +192,9 @@ const BOOST_GRACE_MS = 200;
 function applyRelevance(query: string, response: SearchResponse, ledger: CallLedger): SearchResponse {
   const gated = gateResults(query, response.results);
   ledger.relevanceDropped = (ledger.relevanceDropped ?? 0) + gated.dropped;
-  return gated.dropped ? { ...response, results: gated.kept } : response;
+  const ranked = preferSources(query, gated.kept);
+  const changed = ranked.length !== response.results.length || ranked.some((row, i) => row !== response.results[i]);
+  return changed ? { ...response, results: ranked } : response;
 }
 
 /**
@@ -244,6 +247,16 @@ async function rescueSources(send: Send, env: Env, req: DesignArgs, brief: Sourc
   return { search: gated, brief: next ?? { goal: brief.goal, use: [], stale: [], offTopic: [], conflicts: [] } };
 }
 
+/**
+ * The encyclopedia extract already answers a person, and an official scoreboard snippet already
+ * has the number. Waiting on more page reads is what held the card back.
+ */
+function pagesCanWait(req: DesignArgs): boolean {
+  if (isPersonAsk(req.query) && (req.search.knowledge?.extract?.length ?? 0) > 180) return true;
+  if (heuristicPattern(req.query) !== 'briefing' || guessFreshness(req.query) !== 'day') return false;
+  return req.search.results.slice(0, 5).some((row) => hostTier(row.domain) === 0 && /\d/.test(`${row.title} ${row.snippet}`));
+}
+
 async function design(send: Send, env: Env, req: DesignArgs, started: number, scope: AskScope, late?: Promise<LateExtras>) {
   // Follow-ups keep the sources already gated for the original question.
   if (!req.followup) req = { ...req, search: applyRelevance(req.query, req.search, scope.ledger) };
@@ -253,14 +266,24 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   if (!req.followup && MADE_PATTERNS.has(req.pattern)) req = { ...req, followup: { mode: 'chat', question: req.query } };
   // Conversation turns reason from what is already known; everything else reads pages first.
   const chat = req.followup?.mode === 'chat';
-  const budget = chat ? { count: 3, need: 0, budgetMs: 0 } : req.deep ? DEEP_PAGES : pageBudget(req.readPages);
+  const skipReads = !chat && !req.followup && !req.deep && pagesCanWait(req);
+  const budget = chat
+    ? { count: 3, need: 0, budgetMs: 0 }
+    : skipReads
+      ? { count: 0, need: 0, budgetMs: 0 }
+      : req.deep
+        ? DEEP_PAGES
+        : pageBudget(req.readPages);
   // Usually it already ran on the literal search's rows while the rewrites were searching.
   const briefing = !newSearch || chat ? undefined
     : req.earlyBrief ? req.earlyBrief.then((early) => early ? remapBrief(early.brief, early.judged, req.search.results) : undefined)
     : briefSources({ query: req.query, intent: req.intent, context: req.context, results: req.search.results, isLive: isQuoteRow, shown: req.ticker ? TICKER_SHOWN : undefined }, env);
   // Page reads overlap the source check. A rescue throws those pages away and reads the new rows.
   const reading = collectPages(req.search.results, env, budget, late, scope);
-  let brief = await briefing?.finally(() => mark(scope.ledger, 'brief'));
+  const briefWait = skipReads && briefing
+    ? Promise.race([briefing, new Promise<SourceBrief | undefined>((resolve) => setTimeout(() => resolve(undefined), 400))])
+    : briefing;
+  let brief = await briefWait?.finally(() => mark(scope.ledger, 'brief'));
   if (brief) console.log(JSON.stringify({ zo: 'brief', use: brief.use.length, stale: brief.stale, offTopic: brief.offTopic, conflicts: brief.conflicts.length, missing: !!brief.missing }));
   let rescued = false;
   if (req.allowRescue && brief && !chat && sourcesMiss(brief)) {
@@ -312,6 +335,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   const publishReadings = () => {
     const indexes = [...shown.keys()].sort((a, b) => a - b);
     const settled = settleReadings(indexes.map((index) => shown.get(index)), head, questionOf());
+    const quality = finishQuality(questionOf(), settled.nodes);
     if (head) {
       if (settled.head) head = { ...head, title: settled.head.title, subtitle: settled.head.subtitle };
       const key = JSON.stringify(head);
@@ -321,7 +345,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       }
     }
     indexes.forEach((index, i) => {
-      const node = settled.nodes[i] ?? { type: 'stack' as const, children: [] };
+      const node = quality[i] ?? { type: 'stack' as const, children: [] };
       shown.set(index, node);
       const key = JSON.stringify(node);
       if (sentNode.get(index) === key) return;
@@ -479,9 +503,10 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   const onLiteral = (hits: WebHit[]) => {
     if (earlyBrief) return;
     // A first look at what the search found, shown while the rest of the search and the layout finish.
-    send('peek', gateResults(query, hits.map(webRow)).kept.slice(0, PEEK_ROWS).map(({ title, url, domain, date }) => ({ title, url, domain, date })));
+    const kept = preferSources(query, gateResults(query, hits.map(webRow)).kept);
+    send('peek', kept.slice(0, PEEK_ROWS).map(({ title, url, domain, date }) => ({ title, url, domain, date })));
     earlyBrief = quoting.then(async (quote) => {
-      const rows = [...(quote ? [quoteRow(quote)] : []), ...gateResults(query, hits.map(webRow)).kept].slice(0, BRIEF_ROWS);
+      const rows = [...(quote ? [quoteRow(quote)] : []), ...kept].slice(0, BRIEF_ROWS);
       const brief = await briefSources({ query, intent: intentNow, context, results: rows, isLive: isQuoteRow, shown: quote ? TICKER_SHOWN : undefined }, env);
       mark(scope.ledger, 'brief');
       return brief && { brief, judged: rows };
@@ -960,8 +985,9 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
   }
 
   // Classify and speculatively rewrite at the same time; the rewrite is only used if Jev says a new search is needed.
-  const rewritten = req.intent === 'adjust' || standsAlone(req.question)
-    ? Promise.resolve(req.question)
+  const anchored = req.intent === 'adjust' ? undefined : anchoredFollowup(req.original, req.question);
+  const rewritten = anchored || req.intent === 'adjust' || standsAlone(req.question)
+    ? Promise.resolve(anchored ?? req.question)
     : rewriteQuery(req.original, req.question, env, context, from?.title).catch(() => req.question);
   const plan = await planLayout(req.question, env, { original: req.original, cards: req.cards.map(({ id, title }) => ({ id, title })), context });
   const mode = req.intent === 'adjust' ? 'refine' : req.intent === 'ask' && plan.mode === 'refine' ? 'answer' : plan.mode ?? 'chat';
