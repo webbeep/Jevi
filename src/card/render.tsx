@@ -29,6 +29,38 @@ function isCompact(n: CardNode): boolean {
   return n.type === 'tile' || n.type === 'stat' || (n.type === 'slot' && n.shape === 'tile');
 }
 
+/**
+ * A tile, a stat, or a nest of those. A paragraph, chart, or table is not one:
+ * those still need a reading width, while a label and a value do not.
+ */
+function isTrackCell(n: CardNode): boolean {
+  if (isCompact(n)) return true;
+  if (n.type === 'stack' || n.type === 'grid') return n.children.length > 0 && n.children.every(isTrackCell);
+  return false;
+}
+
+/**
+ * The cell fills the row. The row is only as tall as its tallest text, so a short
+ * sibling lines its border up instead of leaving a hole under itself.
+ * flex-1 reports that text as the cell's minimum size, then grows into the row.
+ */
+const FILL_CELL = 'flex min-w-0 flex-col [&>*]:min-w-0 [&>*]:flex-1';
+
+/**
+ * A compact cell is as wide as its text. The cap stops a short label from reserving
+ * most of the card, which is what made a strip of tiles a long horizontal scroll.
+ */
+const COMPACT_TRACK = 'w-max min-w-[7.5rem] max-w-[11.5rem] shrink-0';
+
+/**
+ * A wider cell stays inside the card. On a phone the next one peeks in; it never
+ * exceeds 18rem. Wide screens fit about three.
+ */
+const WIDE_TRACK = 'w-[78cqw] max-w-72 shrink-0 sm:w-[calc((100cqw-1rem)/3)] sm:max-w-none';
+
+/** A sideways strip scrolls by touch. The bar itself is hidden: it was drawing in the hole under a short cell and adding height the text does not need. */
+const TRACK = 'no-scrollbar min-w-0 max-w-full touch-pan-x overflow-x-auto overscroll-x-contain';
+
 /** One malformed node from the model hides itself instead of taking down the card (or the app). */
 class NodeBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
@@ -97,16 +129,16 @@ export function NodeView({ node }: { node: CardNode }): ReactNode {
         const n = node.children.length;
         return (
           <TilePictures.Provider value={node.children.some(wantsPicture)}>
-            <div className={cn('grid min-w-0 grid-cols-2', n % 2 === 1 && '[&>*:last-child]:col-span-2 sm:[&>*:last-child]:col-span-1', n <= 4 ? (n === 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-4') : 'sm:grid-cols-3', GAP[node.gap ?? 'md'])}>
-              {node.children.map((c, i) => <div key={i} className="flex min-w-0 flex-col [&>*]:flex-1"><NodeView node={c} /></div>)}
+            <div className={cn('grid min-w-0 items-stretch grid-cols-2', n % 2 === 1 && '[&>*:last-child]:col-span-2 sm:[&>*:last-child]:col-span-1', n <= 4 ? (n === 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-4') : 'sm:grid-cols-3', GAP[node.gap ?? 'md'])}>
+              {node.children.map((c, i) => <div key={i} className={FILL_CELL}><NodeView node={c} /></div>)}
             </div>
           </TilePictures.Provider>
         );
       }
       return (
         <TilePictures.Provider value={node.children.some(wantsPicture)}>
-          <div className={cn('flex min-w-0 max-w-full', GAP[node.gap ?? 'md'], compact ? 'touch-pan-x overflow-x-auto overscroll-x-contain' : row ? cn('flex-col sm:flex-row', ALIGN[node.align ?? 'start'], node.wrap && 'sm:flex-wrap') : 'flex-col')}>
-            {node.children.map((c, i) => <div key={i} className={cn('flex min-w-0 flex-col [&>*]:flex-1', compact ? 'flex-1' : row && 'sm:flex-1')}><NodeView node={c} /></div>)}
+          <div className={cn('flex min-w-0 max-w-full items-stretch', GAP[node.gap ?? 'md'], compact ? TRACK : row ? cn('flex-col sm:flex-row', ALIGN[node.align ?? 'start'], node.wrap && 'sm:flex-wrap') : 'flex-col')}>
+            {node.children.map((c, i) => <div key={i} className={cn(FILL_CELL, compact ? 'flex-1' : row && 'sm:flex-1')}><NodeView node={c} /></div>)}
           </div>
         </TilePictures.Provider>
       );
@@ -114,9 +146,12 @@ export function NodeView({ node }: { node: CardNode }): ReactNode {
     case 'grid':
       if (!node.children.length) return null;
       // Only small cells (tiles, stats) stay two-up on phones; larger blocks get the full width.
+      // Each cell fills the row so a one-line tile lines up with a neighbor that wraps.
       return (
         <TilePictures.Provider value={node.children.some(wantsPicture)}>
-          <div className={cn('grid min-w-0', node.children.every(isCompact) ? COLS[node.cols] : WIDE_COLS[node.cols], GAP[node.gap ?? 'md'], '[&>*]:h-full [&>*]:min-w-0')}>{node.children.map((c, i) => <NodeView key={i} node={c} />)}</div>
+          <div className={cn('grid min-w-0 items-stretch', node.children.every(isCompact) ? COLS[node.cols] : WIDE_COLS[node.cols], GAP[node.gap ?? 'md'])}>
+            {node.children.map((c, i) => <div key={i} className={FILL_CELL}><NodeView node={c} /></div>)}
+          </div>
         </TilePictures.Provider>
       );
     case 'section':
@@ -143,12 +178,13 @@ export function NodeView({ node }: { node: CardNode }): ReactNode {
       );
     case 'scroller':
       if (!node.children.length) return null;
+      // Every child shares the row height. A tile sizes to its text; a chart or paragraph keeps a reading width that still peeks the next cell.
       return (
         <TilePictures.Provider value={node.children.some(wantsPicture)}>
-          <div className="@container min-w-0 max-w-full touch-pan-x snap-x snap-mandatory overflow-x-auto overscroll-x-contain">
-            <div className="flex w-max gap-2">
+          <div className={cn('@container snap-x snap-mandatory', TRACK)}>
+            <div className="flex w-max items-stretch gap-2">
               {node.children.map((c, i) => (
-                <div key={i} className="w-[78cqw] max-w-72 shrink-0 snap-start sm:w-[calc((100cqw-1rem)/3)] sm:max-w-none">
+                <div key={i} className={cn(FILL_CELL, 'snap-start', isTrackCell(c) ? COMPACT_TRACK : WIDE_TRACK)}>
                   <NodeView node={c} />
                 </div>
               ))}
