@@ -7,9 +7,7 @@ import { ONBOARD_STEPS } from './onboarding';
 
 type StepId = (typeof ONBOARD_STEPS)[number]['id'];
 
-const SHAPE_HOLDS = [3600, 1600, 1700];
-const CHART_HOLDS = [1100, 1100, 1100, 1500];
-const CHART_RANGES = ['1D', '1W', '1M', '1Y'] as const;
+const SHAPE_HOLDS = [1800, 1800, 1800];
 const TAP_HOLDS = [720, 420, 680, 420, 680, 420, 1700];
 const HIGHLIGHT_HOLDS = [720, 680, 1900];
 
@@ -22,12 +20,7 @@ const SHAPE_FRAMES = [
 type ShapeKind = (typeof SHAPE_FRAMES)[number]['kind'];
 type TapTarget = 'section' | 'stat' | 'button';
 
-const CHART_FRAMES = [
-  { change: '+7.40 (+1.82%)', points: [30, 28, 34, 32, 40, 38, 46, 44, 52, 58, 55, 62] },
-  { change: '+18.10 (+4.59%)', points: [20, 24, 22, 30, 36, 33, 42, 48, 45, 55, 60, 62] },
-  { change: '+41.20 (+11.09%)', points: [12, 18, 16, 22, 28, 26, 34, 40, 38, 48, 54, 62] },
-  { change: '+164.40 (+66.2%)', points: [8, 10, 14, 12, 18, 24, 22, 30, 36, 44, 52, 62] },
-] as const;
+const CHART_POINTS = [30, 28, 34, 32, 40, 38, 46, 44, 52, 58, 55, 62] as const;
 
 const TAP_BEATS: { target: TapTarget; press: boolean; ask: string }[] = [
   { target: 'section', press: false, ask: '' },
@@ -115,34 +108,23 @@ function Pointer({ x, y, pressing }: { x: number; y: number; pressing: boolean }
   );
 }
 
-function ChartFrame({ active }: { active: boolean }) {
-  const reduced = useReducedMotion();
-  const phase = useLoop(active, CHART_HOLDS, reduced);
-  const frame = CHART_FRAMES[phase]!;
+function ChartFrame() {
   return (
     <>
       <p className="text-[12px] text-muted-foreground">Tesla · TSLA</p>
       <p className="mt-0.5 text-[20px] font-semibold tracking-tight tabular-nums">$412.80</p>
-      <p className="text-[11px] font-medium tabular-nums" style={{ color: GAIN }}>{frame.change}</p>
-      <svg key={phase} viewBox="0 0 280 56" className="zo-rise mt-1 h-9 w-full" aria-hidden>
-        <path d={sparkPath(frame.points)} fill="none" stroke={GAIN} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+      <p className="text-[11px] font-medium tabular-nums" style={{ color: GAIN }}>+7.40 (+1.82%)</p>
+      <svg viewBox="0 0 280 56" className="zo-rise mt-1 h-9 w-full" aria-hidden>
+        <path d={sparkPath(CHART_POINTS)} fill="none" stroke={GAIN} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
       </svg>
-      <div className="mt-0.5 flex items-center justify-between border-b" role="tablist" aria-label="Chart range">
-        {CHART_RANGES.map((range, i) => (
-          <span key={range} className="relative px-1.5 py-1 text-[11px] font-semibold" style={{ color: i === phase ? GAIN : 'var(--muted-foreground)' }}>
-            {range}
-            {i === phase && <span className="absolute inset-x-1 -bottom-px h-0.5 rounded-full" style={{ background: GAIN }} />}
-          </span>
-        ))}
-      </div>
     </>
   );
 }
 
-function ShapeBody({ kind, active }: { kind: ShapeKind; active: boolean }) {
+function ShapeBody({ kind }: { kind: ShapeKind }) {
   switch (kind) {
     case 'chart':
-      return <ChartFrame active={active} />;
+      return <ChartFrame />;
     case 'compare':
       return (
         <>
@@ -189,7 +171,7 @@ function ShapeDemo({ active }: { active: boolean }) {
     <div className="flex h-full flex-col justify-center px-4" data-testid="onboard-visual" data-step="shape">
       <p className="mb-2 truncate text-center text-[11px] text-muted-foreground">{frame.ask}</p>
       <div key={frame.kind} className="zo-rise rounded-xl border bg-card px-3 py-2.5 shadow-card">
-        <ShapeBody kind={frame.kind} active={active && frame.kind === 'chart'} />
+        <ShapeBody kind={frame.kind} />
       </div>
     </div>
   );
