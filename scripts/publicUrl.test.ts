@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { PUBLIC_ORIGIN, publicShareUrl } from '../shared/publicUrl.ts';
 
-test('a share of the app is the pages.dev origin, including the trailing slash', () => {
+test('a share of the app is the public origin, including the trailing slash', () => {
   assert.equal(publicShareUrl('https://zo.page'), `${PUBLIC_ORIGIN}/`);
   assert.equal(publicShareUrl('https://zo.page/'), `${PUBLIC_ORIGIN}/`);
   assert.equal(publicShareUrl('https://zo2.pages.dev'), `${PUBLIC_ORIGIN}/`);

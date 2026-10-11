@@ -2,7 +2,7 @@
 //   dev     -> writes .dev.vars for `wrangler pages dev`
 //   secrets -> uploads app keys as Cloudflare Pages secrets
 //   deploy  -> creates the Pages project if needed, uploads secrets, deploys dist/
-// The git branch picks the site: main -> jevi.pages.dev (project jev), experiment -> zo2.pages.dev (project zo2).
+// The git branch picks the site: main -> project jev (zo.fyi), experiment -> zo2.pages.dev (project zo2).
 // CLOUDFLARE_* entries configure wrangler itself and are never uploaded as secrets.
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';

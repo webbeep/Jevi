@@ -1,5 +1,5 @@
-/** Live app for now. Facebook replaces a shared link with og:url, so this is the only public host. */
-export const PUBLIC_ORIGIN = 'https://zo2.pages.dev';
+/** The public host. Facebook replaces a shared link with og:url, so this is the only one. */
+export const PUBLIC_ORIGIN = 'https://zo.fyi';
 
 /**
  * A link someone can send. Path, query and hash stay; the host is always the public app,
