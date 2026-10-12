@@ -1,4 +1,5 @@
 import type { CardNode, ImageCredit } from '../shared/card';
+import { claimsFigure, showsFigure } from '../shared/figure';
 import { fileWords, fitsEntity, isComposite, namesSibling, rankForEntity, splitEntities } from '../shared/imagematch';
 import type { ImageResult } from '../shared/types';
 import { findImages } from './images';
@@ -187,9 +188,14 @@ export class PictureResolver {
         return { ...node, refs };
       }
       case 'image': {
-        if (node.ref === undefined) return node;
+        const claim = `${node.caption ?? ''} ${node.query ?? ''}`;
+        const figure = claimsFigure(claim);
+        if (node.ref === undefined) return figure && !node.query ? { ...node, src: undefined } : node;
         const img = this.pool[node.ref];
-        return img && mentionsAny(node.caption ? `${this.subject} ${node.caption}` : this.subject, img) ? node : { ...node, ref: undefined, query: node.query ?? node.caption };
+        const named = !!img && mentionsAny(node.caption ? `${this.subject} ${node.caption}` : this.subject, img);
+        if (named && (!figure || showsFigure(img))) return node;
+        if (figure) return { ...node, ref: undefined, query: undefined, src: undefined };
+        return { ...node, ref: undefined, query: node.query ?? node.caption };
       }
       case 'stack':
       case 'grid':
@@ -268,8 +274,16 @@ export class PictureResolver {
         return { ...node, items };
       }
       case 'image': {
-        if (!node.query) return node;
-        const pic = await this.one(node.query, true);
+        const query = node.query;
+        if (!query) return node;
+        const claim = `${query} ${node.caption ?? ''}`;
+        if (claimsFigure(claim)) {
+          const pooled = this.pool.find((img) => img.thumb && !this.used.has(img.thumb) && showsFigure(img) && mentions(query, img));
+          if (!pooled) return { ...node, query: undefined, src: undefined, ref: undefined };
+          const pic = this.take(pooled);
+          return { ...node, query: undefined, src: pic.src, link: pic.link, caption: node.caption ?? pic.title };
+        }
+        const pic = await this.one(query, true);
         return { ...node, query: undefined, src: pic?.src, link: pic?.link, caption: node.caption ?? pic?.title };
       }
       case 'gallery': {
