@@ -1,5 +1,6 @@
 import { DEEP_PAGES, routeExtras, routeOf } from './router';
 import { serperImages } from './cascade';
+import { playerStatRow } from './playerLine';
 import { publicEvent } from './publicPayload';
 import {
   askTopic,
@@ -521,6 +522,8 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   const scholarly = scholarlyResults(query);
   // Watch asks also read YouTube (keyless), in parallel: web results rarely carry a playable video.
   const videos = videoResults(query);
+  // A preseason line lives on the player page, which the web results often miss once the main engine is capped.
+  const statLine = playerStatRow(query);
   // Searches that need no model ("$rdw" → "RDW stock news today") lead the rewrites.
   const instant = [...tickerQueries(query), ...formalNameQueries(query)];
   const sides = compareSideQueries(query);
@@ -559,6 +562,11 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     console.log(JSON.stringify({ zo: 'quote', symbol: quote!.symbol, source: quote!.source, ms: Date.now() - started }));
   }
   let late: Promise<LateExtras> | undefined = found.late;
+  const line = await statLine;
+  if (line) {
+    const key = normalizeUrl(line.url);
+    results = { ...results, results: [line, ...results.results.filter((row) => normalizeUrl(row.url) !== key)] };
+  }
   // EN4 part 8: set when the answer is rebuilt from the rows behind a Which-one? pick, so the
   // seed pages get re-read instead of designed from the snippets alone.
   let fromSeeds = false;
