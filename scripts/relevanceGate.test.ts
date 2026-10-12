@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { distinguishingTerms, hasFullPersonName } from '../server/entity.ts';
 import { gateResults } from '../server/relevanceGate.ts';
 
 const hit = (title: string, snippet: string, url: string) => ({ title, url, snippet });
@@ -78,4 +79,21 @@ test('a one-word ask about an odd name keeps the single hit that carries it', ()
   const q = 'zxqv';
   const tiktok = hit('ZXQV (@gstopcat)', 'ZXQV (@gstopcat) on TikTok | 403K Likes. 2235 Followers.', 'https://www.tiktok.com/@gstopcat');
   assert.deepEqual(gateResults(q, [tiktok]), { kept: [tiktok], dropped: 0 });
+});
+
+test('Jayson Tatum preseason stats keeps the stat line instead of an empty result', () => {
+  const q = 'Jayson Tatum Preseason Stats';
+  assert.deepEqual(distinguishingTerms(q), []);
+  const career = hit('Jayson Tatum', '2026-27 Projection Per 36 Minutes PTS 25.4', 'https://www.basketball-reference.com/players/t/tatumja01.html');
+  const lineups = hit('Jayson Tatum 2025-26 Lineups', 'Regular Season 5-Man Combinations', 'https://www.basketball-reference.com/players/t/tatumja01/lineups/2026');
+  const finals = hit('2022 NBA Finals', 'Jayson Tatum had a poor shooting performance, going 3-for-17', 'https://en.wikipedia.org/wiki/2022_NBA_Finals');
+  const fox = hit('Jayson Tatum STATS | FOX Sports', '21.8 PPG 10.0 RPG 5.3 APG', 'https://www.foxsports.com/nba/jayson-tatum-player-stats?seasonType=pre');
+  const real = hit('NBA Preseason Stats - RealGM', 'Jayson Tatum BOS 1 26.9 23.0 5.0 4.0', 'https://basketball.realgm.com/nba/preseason/stats');
+  const nba = hit('Jayson Tatum | Forward-Guard | Boston Celtics', 'Tatum posted 23 points, five rebounds and four assists in the preseason win.', 'https://www.nba.com/player/1628369/jayson-tatum');
+  assert.equal(hasFullPersonName('Jayson Tatum', fox), true);
+  assert.equal(hasFullPersonName('Jayson Tatum', real), true);
+  const onlyCareer = gateResults(q, [career, lineups, finals]);
+  assert.deepEqual(onlyCareer.kept.map((r) => r.title), [career.title, lineups.title, finals.title]);
+  const gated = gateResults(q, [career, lineups, finals, nba, real, fox]);
+  assert.deepEqual(gated.kept.map((r) => r.title), [nba.title, real.title, fox.title, career.title, lineups.title, finals.title]);
 });

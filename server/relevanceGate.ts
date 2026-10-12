@@ -1,3 +1,8 @@
+import { TOPIC_WORD } from '../shared/askAbout';
+import { cashtags } from './queryClean';
+import { isBlockedHost } from './spamHosts';
+import { contextTerms, distinguishingTerms, hasFullPersonName, isPersonAsk, nameIsTopic, personSubject, personSourceOk } from './entity';
+
 /**
  * Drops off-topic hits after they are merged and before the answer model sees them.
  * No network and no model call: names, other capitalised tokens, uncommon words, and numbers
@@ -34,10 +39,6 @@ const TASK = new Set([
 const FILLER3 = new Set(['new', 'top', 'all', 'any', 'out', 'off', 'way', 'see', 'put', 'set', 'say', 'try', 'own', 'via', 'etc', 'yet', 'ago', 'one', 'two', 'got', 'far', 'big', 'lot', 'few', 'day', 'non']);
 
 const TOKEN = /[A-Za-z0-9]+(?:['’.-][A-Za-z0-9]+)*/g;
-
-import { cashtags } from './queryClean';
-import { isBlockedHost } from './spamHosts';
-import { contextTerms, distinguishingTerms, hasFullPersonName, isPersonAsk, nameIsTopic, personSubject, personSourceOk } from './entity';
 
 export interface GateHit {
   title: string;
@@ -206,7 +207,7 @@ export function gateResults<T extends GateHit>(query: string, rows: readonly T[]
         // one-letter company misspelling, or a name that is only in the page text.
         const profile = termsOf(query);
         const kept = ok.filter((row) => !judge(profile, row).hard);
-        return { kept, dropped: rows.length - kept.length };
+        return { kept: seasonFirst(query, kept), dropped: rows.length - kept.length };
       } else {
         const ctx = contextTerms(query, name);
         const withCtx = clean.filter((row) => hasFullPersonName(name, row) && (
@@ -238,7 +239,24 @@ export function gateResults<T extends GateHit>(query: string, rows: readonly T[]
   } else {
     kept = pool.filter((_, i) => !judged[i].hard && judged[i].score >= FLOOR && sharesTerms(profile, judged[i].hits));
   }
-  return { kept, dropped: rows.length - kept.length };
+  return { kept: seasonFirst(query, kept), dropped: rows.length - kept.length };
+}
+
+/**
+ * A player stat ask ("Jayson Tatum Preseason Stats") should lead with the page that has the line.
+ * Career and projection pages stay, behind the pages that name the season or the stat.
+ */
+function seasonFirst<T extends GateHit>(query: string, rows: T[]): T[] {
+  if (!isPersonAsk(query) || rows.length < 2) return rows;
+  const topics = (query.match(TOKEN) ?? []).map((word) => word.toLowerCase()).filter((word) => TOPIC_WORD.test(word));
+  if (!topics.length) return rows;
+  const about = (row: T) => {
+    const hay = norm(`${row.title} ${row.snippet ?? ''} ${row.url}`);
+    return topics.some((topic) => hasTerm(hay, topic));
+  };
+  const front = rows.filter(about);
+  if (!front.length || front.length === rows.length) return rows;
+  return [...front, ...rows.filter((row) => !about(row))];
 }
 
 /** Rows that clearly match the question (not ones kept only because most of the list scored low). */

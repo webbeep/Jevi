@@ -296,7 +296,7 @@ export function entityOf(title: string | undefined): string | undefined {
   return t;
 }
 
-const TOPIC_WORD = /^(results?|scores?|schedule|standings|preseason|season|playoffs?|highlights|recap|news|stats|statistics|rankings?|odds|picks|predictions?|vs\.?|tonight|today|week|weekend|guide|comparison|review|reviews|deals?|prices?)$/i;
+export const TOPIC_WORD = /^(results?|scores?|schedule|standings|preseason|season|playoffs?|highlights|recap|news|stats|statistics|rankings?|odds|picks|predictions?|vs\.?|tonight|today|week|weekend|guide|comparison|review|reviews|deals?|prices?)$/i;
 const TOPIC_START = /^(best|top|cheapest|latest|new|how|why|when|where|which|what|who|should|is|are|can|do|does|ways|tips|guide|list|ranking)$/i;
 const SMALL = new Set(['of', 'the', 'and', 'for', 'de', 'la', 'del', 'von', 'van', 'to', 'in', 'on', 'at', '&', 'this', 'these', 'that']);
 const MONTH = /^(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)\.?$/i;

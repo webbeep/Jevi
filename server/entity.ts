@@ -1,4 +1,4 @@
-import { NAME_PARTICLE } from '../shared/askAbout';
+import { NAME_PARTICLE, TOPIC_WORD } from '../shared/askAbout';
 import { nameLike, tokens, type EntityHint } from './imageGate';
 import { isBlockedHost, isFictionHost } from './spamHosts';
 
@@ -211,9 +211,9 @@ export function contextTerms(query: string, name = personSubject(query)): string
       continue;
     }
     // CamelCase orgs (BlueFlame) or short org tails (AI, Inc) — not NBA/NFL alone.
-    // Sports leagues (NBA) are season context, not identity — requiring them dropped the
-    // Nique Clifford Wikipedia bio from a preseason ask.
-    if (SPORTS_LEAGUE.test(w)) continue;
+    // Sports leagues (NBA) and season words (Preseason, Stats) are what was asked, not which
+    // person. Requiring them dropped every page and the ask came back as "no results".
+    if (SPORTS_LEAGUE.test(w) || TOPIC_WORD.test(w)) continue;
     // Cap tokens after the person name count as context (Raycon, USATF, Stripe) — not only CamelCase/ALLCAPS.
     // Alphanumeric org tokens carry a digit and a letter ("C2") — too short for capCtx, still identity.
     const capCtx = /^[A-Z]/.test(w) && (w.length >= 3 || (ABBREV.test(w) && !NAME_SUFFIX.test(w))) && !/^(Who|What|When|Where|Why|How)$/i.test(w);
@@ -319,7 +319,9 @@ export function hasFullPersonName(name: string, row: EntityRow): boolean {
     for (const m of seg.matchAll(longer)) {
       if (!/^[A-Z]/.test(m[1] ?? '')) continue;
       const nxt = (m[1] ?? '').toLowerCase().replace(/[’']/g, '');
-      if (!nxt || AFTER_OK.has(nxt)) continue;
+      if (!nxt || AFTER_OK.has(nxt) || TOPIC_WORD.test(nxt)) continue;
+      // "Jayson Tatum STATS" / "Jayson Tatum BOS": a short all-caps label is a column or a team, not a longer name.
+      if (/^[A-Z]{2,5}$/.test(m[1] ?? '')) continue;
       if (!ORG_TAIL.test(m[1]!) && !/^(Inc|LLC|Ltd|Corp|Co|AI|ML)$/i.test(m[1]!)) return false;
     }
     // Only a repeated first name ("Ray Ray Lee") is a longer-name prefix — not "Description Ray Lee".
