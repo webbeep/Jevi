@@ -1,4 +1,5 @@
 import { actionQuery } from '../shared/askAbout';
+import { readDiagram } from '../shared/diagram';
 import { withoutRepeatedLead, type AnswerCard, type CardNode, type Tone } from '../shared/card';
 import { inferSeats, priceAsOf, sameSource, type BillingBasis, type Price, type PricePeriod, type PriceUnit } from '../shared/pricing';
 
@@ -151,6 +152,8 @@ function sanitizeNode(raw: unknown, imageCount: number, depth: number, ctx?: { s
       const items = arr(n.items).map((i) => (typeof i === 'string' ? { title: i } : { title: str((i as Raw)?.title, 120) ?? '', detail: str((i as Raw)?.detail, 300) })).filter((i) => i.title);
       return items.length ? { type, items } : undefined;
     }
+    case 'diagram':
+      return readDiagram(n);
     case 'proscons': {
       const pros = strings(n.pros);
       const cons = strings(n.cons);

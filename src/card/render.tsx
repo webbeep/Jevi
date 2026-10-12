@@ -3,6 +3,7 @@ import type { CardNode, Gap } from '../../shared/card';
 import { cn } from '@/lib/utils';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { DiagramView } from './DiagramView';
 import { Icon } from './Icon';
 import { AccordionNode, Choices, Pricing, Reveal, Scaler, SliderNode } from './interactive';
 import {
@@ -206,6 +207,7 @@ export function NodeView({ node }: { node: CardNode }): ReactNode {
     case 'table': return <TableView node={node} />;
     case 'timeline': return <Timeline node={node} />;
     case 'steps': return <Steps node={node} />;
+    case 'diagram': return <DiagramView node={node} />;
     case 'proscons': return <ProsCons node={node} />;
     case 'badges': return <Badges node={node} />;
     case 'quote': return <Quote node={node} />;
