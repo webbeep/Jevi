@@ -40,7 +40,7 @@ import { rewriteQuery } from './ai';
 import { type DesignRequest, designParallel, designStream, gateNode } from './design';
 import { BRIEF_ROWS, briefSources, remapBrief, type SourceBrief } from './brief';
 import { onTopicCount, rescueQuery, sourcesMiss } from './rescue';
-import { keepPictures, reviewCard, type Review } from './review';
+import { citesSources, keepPictures, reviewCard, type Review } from './review';
 import { permitted } from './images';
 import { hasLlm } from './llm';
 import { collectPages, ogImageOf } from './pages';
@@ -397,8 +397,11 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       if (followups.length) send('followups', followups);
     },
     credit: (credit) => send('credit', credit),
-    beginReview: !chat && req.followup?.mode !== 'refine' ? () => {
+    beginReview: req.followup?.mode !== 'refine' ? () => {
+      // A conversation turn is reviewed only when it leans on the sources: a draft, code or pure reasoning has nothing to check.
+      if (chat && !citesSources([...shown.values()])) return;
       pendingReview = reviewCard({
+        conversation: chat,
         query: designReq.followup?.question ?? designReq.query,
         context: designReq.context,
         brief: designReq.brief,

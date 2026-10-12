@@ -141,15 +141,17 @@ export interface DesignSummary {
   via?: string;
 }
 
+const NAME_THE_ANSWER = ' A "who" or "which" question is answered by name in the lead (the player, product, place or plan), never only by a description such as "the No. 7 pick" or "the cheaper one"; when the sources do not name it, say so.';
+
 function followupRules(f: FollowupContext | undefined, originalQuery: string): string {
   if (!f) return '';
   switch (f.mode) {
     case 'refine':
       return `\n\nTHIS IS AN ADJUSTED VERSION of CURRENT CARD (below), which answered "${originalQuery}". The person asked: "${f.question}". Output a complete new card that applies the change: keep the same subject and everything that still applies, restructure freely if the change calls for a different layout, and make the change obvious in the subtitle. Mark the matching choices option as selected and move any slider or scaler to the requested value. The original card stays on screen above, so do not describe what changed in prose.`;
     case 'answer':
-      return `\n\nTHIS IS A FOLLOW-UP. The original search was "${originalQuery}". Design a focused card that answers only the follow-up question "${f.question}". Do not repeat the original answer; pick the components that fit this question best.`;
+      return `\n\nTHIS IS A FOLLOW-UP. The original search was "${originalQuery}". Design a focused card that answers only the follow-up question "${f.question}". Do not repeat the original answer; pick the components that fit this question best.${NAME_THE_ANSWER}`;
     case 'chat':
-      return `\n\nTHIS IS A CONVERSATION TURN, NOT A SEARCH. Reply to "${f.question}" like a thoughtful expert assistant: understand what they really need given the conversation, think it through, and give a direct, confident answer first, then the reasoning or steps that support it. Use the conversation, your general knowledge and the SOURCES where relevant. You may reason, calculate, compare, plan and advise here. Do not invent current specifics (today's prices, recent events, live figures, exact specs you are unsure of); when those matter, say what to check and add a "search" action for it. Only cite [n] when a statement really comes from that source.`;
+      return `\n\nTHIS IS A CONVERSATION TURN, NOT A SEARCH. Reply to "${f.question}" like a thoughtful expert assistant: understand what they really need given the conversation, think it through, and give a direct, confident answer first, then the reasoning or steps that support it. Use the conversation, your general knowledge and the SOURCES where relevant. You may reason, calculate, compare, plan and advise here. Do not invent current specifics (today's prices, recent events, live figures, exact specs you are unsure of); when those matter, say what to check and add a "search" action for it. Only cite [n] when a statement really comes from that source.${NAME_THE_ANSWER}`;
     default: {
       const unreachable: never = f.mode;
       return unreachable;
@@ -489,7 +491,7 @@ export async function designStream(req: DesignRequest, env: Env, on: DesignEvent
     console.warn('design fallback', JSON.stringify({ via: via ?? null, lines, unparsed, removed, head: headSent, failure: failure?.slice(0, 200) ?? null }));
     return extractive(req, on);
   }
-  if (!chat) on.beginReview?.();
+  on.beginReview?.();
   await pictures.flush();
   return { engine: chat ? 'reasoning' : 'composed', removed, via };
 }

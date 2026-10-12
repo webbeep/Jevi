@@ -91,6 +91,18 @@ export function keepPictures(before: unknown, after: unknown): unknown {
   return now;
 }
 
+/**
+ * A card that cites a source makes claims the sources can check. Drafts and code are the person's
+ * own output, so a card holding one is never reviewed as a conversation turn.
+ */
+export function citesSources(nodes: readonly CardNode[]): boolean {
+  const json = JSON.stringify(nodes);
+  if (/"type":"(draft|code)"/.test(json)) return false;
+  return nodes.some((n) => n.type === 'citations' && n.refs.length > 0) || /\[\d+\]/.test(json);
+}
+
+const CONVERSATION = 'This card answers a conversation turn: reasoning, advice and general knowledge are allowed and are not errors. Flag only: it does not answer what was asked (a "who" answered without the name, a "which" without picking one), a fact cited [n] that result does not support or contradicts, or a current value (price, score, date of an event) nothing supports.';
+
 /** Top-level nodes as the reviewer reads them; actions, citations and pictures carry no claims. */
 function cardText(head: Omit<AnswerCard, 'body'> | undefined, nodes: Map<number, CardNode>): string {
   const lines = [`Title: ${head?.title ?? ''}${head?.subtitle ? ` — ${head.subtitle}` : ''}`];
@@ -121,6 +133,8 @@ export async function reviewCard(
     head?: Omit<AnswerCard, 'body'>;
     nodes: Map<number, CardNode>;
     followups?: string[];
+    /** A follow-up answered by reasoning over the conversation and the sources, not a search card. */
+    conversation?: boolean;
   },
   env: Env,
   timeoutMs = 2200,
@@ -128,6 +142,7 @@ export async function reviewCard(
   if (!hasLlm(env) || !args.nodes.size) return undefined;
   const user = [
     `Today is ${new Date().toISOString().slice(0, 10)} (UTC).`,
+    args.conversation ? CONVERSATION : '',
     args.context ? `Conversation so far:\n${args.context.slice(0, 1200)}` : '',
     `Asked: ${args.query}`,
     args.brief ? `Goal: ${args.brief.goal}` : '',

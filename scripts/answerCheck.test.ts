@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { readBrief, rejectedSources, remapBrief } from '../server/brief.ts';
-import { keepPictures, readReview } from '../server/review.ts';
+import { citesSources, keepPictures, readReview } from '../server/review.ts';
 import { corpusOf, gateNode, type DesignRequest } from '../server/design.ts';
 import { Grounding } from '../server/ground.ts';
 import { tickerBody } from '../shared/tickerNotes.ts';
@@ -165,5 +165,16 @@ describe('early source check', () => {
     const judged = [row('a.com'), row('b.com')];
     const brief = { goal: 'g', use: [2], stale: [], offTopic: [1], conflicts: [], missing: 'x' };
     assert.deepEqual(remapBrief(brief, judged, [judged[1]!, judged[0]!]), { goal: 'g', use: [1], stale: [], offTopic: [2], conflicts: [], missing: 'x' });
+  });
+});
+
+describe('conversation turns are reviewed when they cite sources', () => {
+  test('a cited answer is checked; reasoning, drafts and code are not', () => {
+    assert.equal(citesSources([{ type: 'hero', value: '25', label: 'Game-high', caption: 'Oct. 10 [5]' }]), true);
+    assert.equal(citesSources([{ type: 'text', text: 'Rye works.' }, { type: 'citations', refs: [2] }]), true);
+    assert.equal(citesSources([{ type: 'text', text: 'Photosynthesis turns light into sugar.' }]), false);
+    assert.equal(citesSources([{ type: 'citations', refs: [] }]), false);
+    assert.equal(citesSources([{ type: 'draft', text: 'Hi, sorry I missed it.' }, { type: 'list', items: [{ text: 'Send it soon [2]' }] }]), false);
+    assert.equal(citesSources([{ type: 'stack', children: [{ type: 'code', language: 'js', code: 'a[1]' }] }]), false);
   });
 });
