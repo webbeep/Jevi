@@ -62,7 +62,7 @@ import { finishQuality, hostTier, preferSources } from './sourceQuality';
 import { isOwnSite, orcidSite, pickOwnSite, probeOwnSite, RESEARCH_ASK, withOwnSite } from './ownSite';
 import { quoteAsk } from '../shared/quoteAsk';
 import { scholarlyResults, withScholarly } from './scholarly';
-import { videoResults, wantsVideo, withVideos } from './videoSearch';
+import { recallClips, wantsVideo, withProductClips, withVideos } from './videoSearch';
 import { guessFreshness, preferFresh, staleComplaint, stricter } from './freshness';
 import { isQuoteRow, liveQuote, quoteRow, tickerNode } from './liveQuote';
 import { splitPeople } from './peopleSplit';
@@ -521,7 +521,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   // SPD-C4 (t457): paper/DOI asks also read OpenAlex, in parallel with the web search.
   const scholarly = scholarlyResults(query);
   // Watch asks also read YouTube (keyless), in parallel: web results rarely carry a playable video.
-  const videos = videoResults(query);
+  const videos = recallClips(query);
   // A preseason line lives on the player page, which the web results often miss once the main engine is capped.
   const statLine = playerStatRow(query);
   // Searches that need no model ("$rdw" → "RDW stock news today") lead the rewrites.
@@ -554,7 +554,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   const scholar = await scholarly;
   if (scholar.length) results = { ...results, results: withScholarly(scholar, results.results) };
   const clips = await videos;
-  if (clips.length) results = { ...results, results: withVideos(clips, results.results) };
+  if (clips.length) results = { ...results, results: wantsVideo(query) ? withVideos(clips, results.results) : withProductClips(clips, results.results) };
   const quote = await quoting;
   const live = quote ? quoteRow(quote) : undefined;
   if (live) {

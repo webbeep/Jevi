@@ -81,6 +81,27 @@ test('a one-word ask about an odd name keeps the single hit that carries it', ()
   assert.deepEqual(gateResults(q, [tiktok]), { kept: [tiktok], dropped: 0 });
 });
 
+test('a numbered product drops the previous model and keeps the one that was asked', () => {
+  const q = 'Google Fitbit Edge vs Xiaomi Miband 11';
+  const edge = hit('Google Fitbit Edge specs', 'Launched 12 Oct 2026. 1.34-inch AMOLED, GPS, ECG and SpO2.', 'https://www.fitbit.com/edge');
+  const band11 = hit('Xiaomi Mi Band 11 review', 'The Mi Band 11 adds a larger screen. It follows the Mi Band 10.', 'https://www.youtube.com/watch?v=abcdefghijk');
+  const band4 = hit('Xiaomi Mi Band 4 vs Fitbit Inspire HR', 'Mi Band 4 specs and pricing compared with the Inspire HR.', 'https://www.wareable.com/xiaomi/mi-band-4-review');
+  const gated = gateResults(q, [band4, edge, band11]);
+  assert.deepEqual(gated.kept.map((r) => r.title), [edge.title, band11.title]);
+  assert.equal(gateResults('Xiaomi Miband 11', [band4, band11]).kept.map((r) => r.title).join('|'), band11.title);
+  const asked = 'iphone 17 vs pixel 10';
+  const iphone = hit('iPhone 17 battery life', 'The iPhone 17 battery is rated for 30 hours of video playback.', 'https://www.apple.com/iphone-17');
+  const old = hit('iPhone 16 review', 'iPhone 16 specs and pricing.', 'https://www.theverge.com/iphone-16');
+  assert.deepEqual(gateResults(asked, [old, iphone]).kept.map((r) => r.title), [iphone.title]);
+});
+
+test('a price and a stat line are not model numbers', () => {
+  const phones = hit('Best wireless headphones under $80', 'These wireless headphones stay under $80.', 'https://www.rtings.com/headphones/under-80');
+  assert.deepEqual(gateResults('best wireless headphones under $100', [phones]).kept.map((r) => r.title), [phones.title]);
+  const line = hit('Jaylen Brown dropped 30 on the Knicks', 'Brown scored 30 points.', 'https://www.espn.com/nba/story/brown-30');
+  assert.equal(gateResults('jaylen brown injuries dropping', [line]).kept.length, 1);
+});
+
 test('Jayson Tatum preseason stats keeps the stat line instead of an empty result', () => {
   const q = 'Jayson Tatum Preseason Stats';
   assert.deepEqual(distinguishingTerms(q), []);
