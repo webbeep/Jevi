@@ -4,7 +4,7 @@ import { knowledgeMatches } from '../shared/relevance';
 import type { SearchResponse } from '../shared/types';
 import { hasLlm, llmLines } from './llm';
 import { candidates, extractStats, extractTimeline } from './extract';
-import { Grounding, groundNodes } from './ground';
+import { Grounding, groundNodes, SourceNumbers } from './ground';
 import { PictureResolver, type RowImagePlan } from './pictures';
 import { Polisher } from './polish';
 import type { PageText } from './pages';
@@ -303,6 +303,20 @@ export function corpusOf(req: DesignRequest): string {
   ].join(' ');
 }
 
+/** What each citable source states, so a cited number points at the page that has it. */
+export function sourceNumbersOf(req: DesignRequest): SourceNumbers {
+  const rejected = rejectedSources(req.brief, Math.min(req.search.results.length, BRIEF_ROWS));
+  return new SourceNumbers([
+    ...req.search.results.map((r, i) => ({ n: i + 1, text: `${r.title} ${r.snippet} ${r.date ?? ''} ${r.content ?? ''}` })),
+    ...req.pages.map((p) => ({ n: p.n, text: p.text })),
+  ].filter((s) => !rejected.has(s.n)));
+}
+
+/** Number grounding for this request; follow-up conversation turns may reason past the sources. */
+function groundingFor(req: DesignRequest, lenient: boolean): Grounding {
+  return new Grounding(corpusOf(req), lenient, sourceNumbersOf(req));
+}
+
 type Parsed = { kind: 'head'; head: Omit<AnswerCard, 'body'> } | { kind: 'node'; node: CardNode } | { kind: 'followups'; items: string[] } | { kind: 'dropped' };
 
 /** Parses one streamed output line into a sanitized, grounded piece of the card. */
@@ -363,7 +377,7 @@ function parseLine(line: string, g: Grounding, imageCount: number, query: string
     return { kind: 'head', head: { title: head.title, subtitle: head.subtitle && g.ok(head.subtitle) ? head.subtitle : undefined, icon: head.icon, accent: head.accent } };
   }
   const [clean] = sanitizeNodes([obj], imageCount, 0, { sources, query: seatQuery ?? query });
-  const [grounded] = clean ? groundNodes([clean], g) : [];
+  const [grounded] = clean ? groundNodes([clean], g).map((n) => g.recite(n)) : [];
   const fitted = grounded ? fitNode(grounded, seatQuery ?? query) : undefined;
   const shown = fitted ? dropModelDiagram(fitted) : undefined;
   return shown ? { kind: 'node', node: shown } : { kind: 'dropped' };
@@ -371,7 +385,7 @@ function parseLine(line: string, g: Grounding, imageCount: number, query: string
 
 /** A node written outside the design stream (the answer review) passes the same sanitize and grounding gates. */
 export function gateNode(raw: unknown, req: DesignRequest): CardNode | undefined {
-  const g = new Grounding(corpusOf(req), req.followup?.mode === 'chat');
+  const g = groundingFor(req, req.followup?.mode === 'chat');
   const parsed = parseLine(JSON.stringify(raw), g, Math.min(req.search.images.length, 12), req.query, priceSources(req), req.followup?.question ?? req.query);
   const node = parsed?.kind === 'node' ? emitReady(parsed.node, req.search.results.length === 0) : undefined;
   return req.ticker ? withoutCharts(node) : node;
@@ -404,7 +418,7 @@ export async function designStream(req: DesignRequest, env: Env, on: DesignEvent
   if (!hasLlm(env)) return extractive(req, on);
 
   const chat = req.followup?.mode === 'chat';
-  const g = new Grounding(corpusOf(req), chat);
+  const g = groundingFor(req, chat);
   const polish = new Polisher(textCap(req));
   const pictures = new PictureResolver(env, req.search.images, on.credit, req.query, undefined, req.rowImages && { ...req.rowImages, results: req.search.results });
   const emitNode = bindVerdict(req, on.node);
@@ -526,7 +540,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
   const regions = diagramOn ? layoutWithDiagram(baseLayout, !!lead) : baseLayout;
   on.layout(regions);
   const sources = priceSources(req);
-  const g = new Grounding(corpusOf(req));
+  const g = groundingFor(req, false);
   const pictures = new PictureResolver(env, req.search.images, on.credit, req.query, undefined, req.rowImages && { ...req.rowImages, results: req.search.results });
   const emitNode = bindVerdict(req, on.node);
   const polish = new Polisher(textCap(req));
