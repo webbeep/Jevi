@@ -2,7 +2,7 @@ import { acceptDiagram, diagramIntent, diagramNeedsRetry, diagramsEnabled, type 
 import { llmJson } from './llm';
 import type { Env } from './util';
 
-const SYSTEM = `You name the parts of one mechanism as JSON. Each label is a part or a step the sources describe, such as token, attention, or decoder. Never an article section: Introduction, Overview, Training, Architecture, Limitations, Applications, Key Innovation, History, or Summary. The detail sentence must mention that same part. If the sources do not explain how it works, return {"type":"diagram","nodes":[]}. No markdown, no HTML, no Mermaid, no SVG.`;
+const SYSTEM = `You name the parts of one mechanism as JSON, and you connect them with edges. A split has two outgoing edges. A join has two incoming edges. Use one straight line only when nothing splits or joins. Each label is a part or a step the sources describe, such as token, attention, or decoder. Never an article section: Introduction, Overview, Training, Architecture, Limitations, Applications, Key Innovation, History, or Summary. The detail sentence must mention that same part. If the sources do not explain how it works, return {"type":"diagram","nodes":[]}. No markdown, no HTML, no Mermaid, no SVG.`;
 
 /**
  * One small diagram for a visualize / explain-how / diagram question.
@@ -17,11 +17,11 @@ export async function requestDiagram(env: Env, question: string, corpus: string)
     `QUESTION: ${question}`,
     `KIND: ${kind}`,
     kind === 'flow'
-      ? 'This is a flow. Order the stages from first to last.'
-      : 'This is a concept. Name the parts in the order a newcomer should meet them.',
+      ? 'This is a flow. Connect each step to the step that follows. If one step divides, give it two outgoing edges. If two steps meet, point both at the next step.'
+      : 'This is a concept. Link each part to the parts it feeds or depends on. Draw a split or a join when the sources describe one. Do not force every part into one line.',
     'Return one JSON object and nothing else:',
-    `{"type":"diagram","kind":"${kind}","title":"2-6 words","nodes":[{"id":"a","label":"1-4 words that appear in the sources or the question","detail":"one sentence from the sources"}],"edges":[{"from":"a","to":"b"}]}`,
-    'Use 3 to 6 nodes. Every label is a part or a step copied from the sources or the question, not a section heading. If you cannot name three real parts, return "nodes":[].',
+    `{"type":"diagram","kind":"${kind}","title":"2-6 words","nodes":[{"id":"a","label":"1-4 words that appear in the sources or the question","detail":"one sentence from the sources"}],"edges":[{"from":"a","to":"b"},{"from":"a","to":"c"},{"from":"b","to":"d"},{"from":"c","to":"d"}]}`,
+    'Use 3 to 6 nodes. Every node id appears in at least one edge. Every label is a part or a step copied from the sources or the question, not a section heading. If you cannot name three real parts, return "nodes":[].',
     '',
     'SOURCES',
     corpus.slice(0, 6000),

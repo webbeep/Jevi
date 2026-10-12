@@ -6,7 +6,9 @@ import {
   acceptDiagram,
   diagramNeedsRetry,
   diagramDocument,
+  diagramFrameHeight,
   diagramIntent,
+  layoutDiagram,
   diagramRegionIndex,
   diagramSlotAt,
   diagramsEnabled,
@@ -165,6 +167,135 @@ test('a diagram keeps source-backed stages and drops an invented one', () => {
     { from: 'n1', to: 'n2' },
     { from: 'n2', to: 'n3' },
   ]);
+});
+
+const BILL = 'A bill is introduced, then the House and the Senate each vote, and the President signs it.';
+
+test('a split stays a branch instead of one line', () => {
+  const card = acceptDiagram({
+    nodes: [
+      { id: 'a', label: 'Introduced' },
+      { id: 'b', label: 'House' },
+      { id: 'c', label: 'Senate' },
+      { id: 'd', label: 'President' },
+    ],
+    edges: [
+      { from: 'a', to: 'b' },
+      { from: 'a', to: 'c' },
+      { from: 'b', to: 'd' },
+      { from: 'c', to: 'd' },
+    ],
+  }, BILL, 'flow');
+  assert.ok(card);
+  assert.deepEqual(card.edges.map((edge) => [edge.from, edge.to]), [
+    ['n0', 'n1'],
+    ['n0', 'n2'],
+    ['n1', 'n3'],
+    ['n2', 'n3'],
+  ]);
+  assert.match(card.mermaid ?? '', /n0 --> n1/);
+  assert.match(card.mermaid ?? '', /n0 --> n2/);
+  const layout = layoutDiagram(card, 340);
+  const house = layout.boxes[1]!;
+  const senate = layout.boxes[2]!;
+  const president = layout.boxes[3]!;
+  assert.equal(house.y, senate.y);
+  assert.notEqual(house.x, senate.x);
+  assert.ok(president.y > house.y);
+  assert.equal(layout.wires.length, 4);
+  const graphic = diagramDocument(card, true, 340);
+  assert.match(graphic, /class="arrow"/);
+  assert.equal((graphic.match(/marker-end=/g) ?? []).length, 4);
+});
+
+test('a loop is dropped and an unknown stage is not an edge', () => {
+  const card = acceptDiagram({
+    nodes: [
+      { id: 'a', label: 'Introduced' },
+      { id: 'b', label: 'House' },
+      { id: 'c', label: 'President' },
+    ],
+    edges: [
+      { from: 'a', to: 'b' },
+      { from: 'b', to: 'c' },
+      { from: 'c', to: 'a' },
+      { from: 'a', to: 'missing' },
+    ],
+  }, BILL, 'flow');
+  assert.ok(card);
+  assert.equal(card.edges.length, 2);
+  assert.equal(card.edges.some((edge) => edge.from === 'n2' && edge.to === 'n0'), false);
+});
+
+test('diagram layout benchmark keeps branches, padding, and no overlap', () => {
+  const cases: { name: string; card: NonNullable<ReturnType<typeof acceptDiagram>>; branch: boolean }[] = [];
+  const bill = acceptDiagram({
+    nodes: [
+      { id: 'a', label: 'Introduced' },
+      { id: 'b', label: 'House' },
+      { id: 'c', label: 'Senate' },
+      { id: 'd', label: 'President' },
+    ],
+    edges: [
+      { from: 'a', to: 'b' }, { from: 'a', to: 'c' }, { from: 'b', to: 'd' }, { from: 'c', to: 'd' },
+    ],
+  }, BILL, 'flow');
+  const photo = acceptDiagram({
+    nodes: [
+      { id: 'a', label: 'Light' },
+      { id: 'b', label: 'Chlorophyll' },
+      { id: 'c', label: 'Water' },
+      { id: 'd', label: 'Sugar' },
+    ],
+    edges: [
+      { from: 'a', to: 'b' }, { from: 'a', to: 'c' }, { from: 'b', to: 'd' }, { from: 'c', to: 'd' },
+    ],
+  }, CORPUS, 'concept');
+  const line = acceptDiagram({
+    nodes: [
+      { id: 'a', label: 'Light' },
+      { id: 'b', label: 'Chlorophyll' },
+      { id: 'c', label: 'Water' },
+      { id: 'd', label: 'Sugar' },
+    ],
+  }, CORPUS, 'concept');
+  assert.ok(bill && photo && line);
+  cases.push({ name: 'bill', card: bill, branch: true }, { name: 'photo', card: photo, branch: true }, { name: 'line', card: line, branch: false });
+  let branched = 0;
+  for (const item of cases) {
+    const layout = layoutDiagram(item.card, 340);
+    const branchedEdges = item.card.edges.filter((edge) => item.card.edges.filter((other) => other.from === edge.from).length > 1);
+    if (item.branch) {
+      assert.ok(branchedEdges.length >= 1, item.name);
+      branched++;
+      const siblings = layout.boxes.filter((box) => box.y === layout.boxes[1]!.y);
+      assert.ok(siblings.length >= 2, item.name);
+    } else {
+      assert.equal(new Set(layout.boxes.map((box) => box.y)).size, item.card.nodes.length, item.name);
+    }
+    for (const box of layout.boxes) {
+      assert.ok(box.x >= 16, item.name);
+      assert.ok(box.x + box.w <= layout.width - 16, item.name);
+      assert.ok(box.y >= 16, item.name);
+      assert.ok(box.y + box.h <= layout.height - 8, item.name);
+    }
+    for (let i = 0; i < layout.boxes.length; i++) {
+      for (let j = i + 1; j < layout.boxes.length; j++) {
+        const a = layout.boxes[i]!;
+        const b = layout.boxes[j]!;
+        const overlap = a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+        assert.equal(overlap, false, item.name);
+      }
+    }
+    for (const edge of item.card.edges) {
+      const from = layout.boxes[item.card.nodes.findIndex((step) => step.id === edge.from)]!;
+      const to = layout.boxes[item.card.nodes.findIndex((step) => step.id === edge.to)]!;
+      assert.ok(to.y > from.y, item.name);
+    }
+  }
+  assert.ok(diagramFrameHeight(bill, 340) < diagramFrameHeight(line, 340));
+  console.log(JSON.stringify({ cases: cases.length, branched, line: line.nodes.length }));
+  assert.equal(branched, 2);
 });
 
 test('a flow compiles Mermaid that quotes every remaining label', () => {
