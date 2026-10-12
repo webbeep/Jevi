@@ -1,4 +1,4 @@
-import { parseTrendsRss, type TrendQuery } from '../shared/trending.ts';
+import { parseTrendsRss, TRENDING_POOL, type TrendQuery } from '../shared/trending.ts';
 import { UA } from './util.ts';
 
 const TTL_MS = 10 * 60 * 1000;
@@ -77,7 +77,7 @@ async function fetchFeed(geo: string, doFetch: Fetch): Promise<TrendQuery[]> {
     signal: AbortSignal.timeout(FETCH_MS),
   });
   if (!res.ok) throw new Error(`trends ${res.status}`);
-  const items = parseTrendsRss(await res.text());
+  const items = parseTrendsRss(await res.text(), TRENDING_POOL);
   if (items.length) {
     mem.set(geo, { at: Date.now(), items });
     await writeEdge(geo, items);

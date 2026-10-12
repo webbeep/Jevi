@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { loadTrending, resetTrendingCache, trendCountry } from '../server/trending.ts';
-import { parseTrendsRss, titleQuery, TRENDING_LIMIT } from '../shared/trending.ts';
+import { parseTrendsRss, tailorTrends, titleQuery, TRENDING_LIMIT, TRENDING_POOL } from '../shared/trending.ts';
 
 const FEED = `<?xml version="1.0" encoding="UTF-8"?>
 <rss><channel>
@@ -61,8 +61,26 @@ test('loadTrending reads the country feed and falls back to the US list', async 
   assert.deepEqual(calls.map((url) => new URL(url).searchParams.get('geo')), ['FR', 'US']);
   calls.length = 0;
   const again = await loadTrending('US', fake);
-  assert.equal(again.length, TRENDING_LIMIT);
+  assert.equal(again.length, 9);
+  assert.equal(again.length <= TRENDING_POOL, true);
   assert.equal(calls.length, 0);
+});
+
+test('tailorTrends lifts at most two matching rows and leaves the rest in feed order', () => {
+  const pool = parseTrendsRss(FEED, TRENDING_POOL);
+  assert.deepEqual(
+    tailorTrends(pool, []).map((item) => item.query),
+    pool.slice(0, TRENDING_LIMIT).map((item) => item.query),
+  );
+  assert.deepEqual(
+    tailorTrends(pool, ['how do I clean a sink']).map((item) => item.query),
+    pool.slice(0, TRENDING_LIMIT).map((item) => item.query),
+  );
+  const lifted = tailorTrends(pool, ['four extra innings', 'tulsa king cast']);
+  assert.deepEqual(lifted.slice(0, 2).map((item) => item.query), ['Four Extra', 'Tulsa King Season 4']);
+  assert.equal(lifted.length, TRENDING_LIMIT);
+  assert.equal(lifted[2]?.query, 'Amon Ra St Brown');
+  assert.equal(lifted.some((item) => item.query === 'One'), false);
 });
 
 test('loadTrending returns nothing when the feed fails and nothing is cached', async () => {

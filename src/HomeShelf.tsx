@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Bookmark, Trash2, TrendingUp } from 'lucide-react';
 import type { AnswerCard } from '../shared/card';
-import { TRENDING_LIMIT, type TrendQuery } from '../shared/trending';
+import { readHistory } from '../shared/personal';
+import { tailorTrends, TRENDING_LIMIT, TRENDING_POOL, type TrendQuery } from '../shared/trending';
 import { COPY } from './auth/copy';
 import { requestSaves } from './auth/gatebus';
 import type { OpenedSave } from './auth/SavedPanel';
@@ -20,6 +21,11 @@ interface SaveRow {
 }
 
 const CLIENT_TTL_MS = 10 * 60 * 1000;
+
+function recentQueries(): string[] {
+  if (typeof localStorage === 'undefined') return [];
+  return readHistory(localStorage).slice(0, 8).map((item) => item.q);
+}
 let trendCache: { at: number; items: TrendQuery[] } | null = null;
 
 function asTrends(value: unknown): TrendQuery[] {
@@ -32,7 +38,7 @@ function asTrends(value: unknown): TrendQuery[] {
     const query = (row as { query?: unknown }).query;
     if (typeof query !== 'string' || !query.trim()) continue;
     out.push({ query: query.trim() });
-    if (out.length >= TRENDING_LIMIT) break;
+    if (out.length >= TRENDING_POOL) break;
   }
   return out;
 }
@@ -139,6 +145,7 @@ function RowSkeleton({ width }: { width: string }) {
 /**
  * Under the search bar: trending searches, and saved answers once someone is signed in.
  * The trending list is a fixed handful of rows, so it has no scroller of its own.
+ * Up to two of those rows move up when they share a topic with a recent search on this device.
  */
 export function HomeShelf({
   signedIn,
@@ -150,6 +157,7 @@ export function HomeShelf({
   onOpenSaved: (saved: OpenedSave) => void;
 }) {
   const { items, pending } = useTrending();
+  const shown = tailorTrends(items, recentQueries());
   const [tab, setTab] = useState<HomeTab>('trending');
   const [saves, setSaves] = useState<SaveRow[]>([]);
   const [more, setMore] = useState(false);
@@ -255,7 +263,7 @@ export function HomeShelf({
             onRemove={(row) => void removeSave(row)}
           />
         ) : (
-          <TrendingList items={items} pending={pending} onSearch={onSearch} />
+          <TrendingList items={shown} pending={pending} onSearch={onSearch} />
         )}
       </div>
     </div>

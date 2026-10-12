@@ -5,8 +5,18 @@ export interface TrendQuery {
 
 /** Six rows fit under the search bar on a phone without a list of their own to scroll. */
 export const TRENDING_LIMIT = 6;
+/** Extra rows kept so a recent search can pull a match into those six. */
+export const TRENDING_POOL = 15;
+/** At most this many of the six rows move up because they match a recent search. */
+export const TRENDING_TAILOR = 2;
 
 const SMALL = new Set(['a', 'an', 'and', 'as', 'at', 'but', 'by', 'for', 'in', 'of', 'on', 'or', 'the', 'to', 'vs', 'via']);
+/** Words that show up in almost every search and should not count as a shared topic. */
+const TREND_STOP = new Set([
+  ...SMALL,
+  'about', 'are', 'best', 'from', 'get', 'got', 'how', 'into', 'live', 'new', 'news', 'one', 'out',
+  'that', 'this', 'today', 'top', 'two', 'was', 'were', 'what', 'when', 'where', 'who', 'why', 'with', 'you', 'your',
+]);
 
 function decode(text: string): string {
   return text
@@ -36,6 +46,10 @@ export function titleQuery(raw: string): string {
 
 function wordsOf(text: string): string[] {
   return text.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length > 1);
+}
+
+function contentWords(text: string): string[] {
+  return wordsOf(text).filter((word) => word.length >= 3 && !TREND_STOP.has(word));
 }
 
 /** True when every word of `short` already appears in the longer query. */
@@ -73,4 +87,46 @@ export function parseTrendsRss(xml: string, limit = TRENDING_LIMIT): TrendQuery[
     kept.push({ query });
   }
   return kept;
+}
+
+/**
+ * Country trends, nudged by recent searches on this device.
+ * Up to `slots` rows that share a topic word move to the front. The rest stay in feed order.
+ * No history, or no shared topic, leaves the first `limit` rows as they arrived.
+ */
+export function tailorTrends(
+  pool: readonly TrendQuery[],
+  recent: readonly string[],
+  limit = TRENDING_LIMIT,
+  slots = TRENDING_TAILOR,
+): TrendQuery[] {
+  const source = pool.filter((item) => item.query.trim());
+  const recentWords = recent.map(contentWords).filter((words) => words.length > 0).slice(0, 8);
+  const matches: { item: TrendQuery; index: number; recency: number }[] = [];
+  if (recentWords.length) {
+    source.forEach((item, index) => {
+      const words = new Set(contentWords(item.query));
+      if (words.size === 0) return;
+      const recency = recentWords.findIndex((row) => row.some((word) => words.has(word)));
+      if (recency >= 0) matches.push({ item, index, recency });
+    });
+  }
+  matches.sort((a, b) => a.recency - b.recency || a.index - b.index);
+  const chosen = new Set<string>();
+  const out: TrendQuery[] = [];
+  for (const match of matches) {
+    if (out.length >= slots || out.length >= limit) break;
+    const key = match.item.query.toLowerCase();
+    if (chosen.has(key)) continue;
+    chosen.add(key);
+    out.push(match.item);
+  }
+  for (const item of source) {
+    if (out.length >= limit) break;
+    const key = item.query.toLowerCase();
+    if (chosen.has(key)) continue;
+    chosen.add(key);
+    out.push(item);
+  }
+  return out;
 }
