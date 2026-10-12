@@ -594,6 +594,19 @@ test('IPCAP: signed-in asks never count against or hit the network cap; anonymou
   assert.equal(after.ok, true);
 });
 
+test('defaults are 5 anonymous questions and 30 signed-in', async () => {
+  const { env } = mem();
+  env.AUTH_ENABLED = 'true';
+  const day = new Date('2026-10-12T00:00:00Z');
+  const headers = { cookie: await cookie() };
+  const anon = await applyGate(new Request('http://127.0.0.1/api/stream', { headers }), env, day, nobody, 'anon');
+  assert.equal(anon.ok, true);
+  if (anon.ok) assert.equal(anon.headers?.['X-ZO-Limit'], '5');
+  const user = await applyGate(new Request('http://127.0.0.1/api/stream', { headers }), env, day, signed, 'signed');
+  assert.equal(user.ok, true);
+  if (user.ok) assert.equal(user.headers?.['X-ZO-Limit'], '30');
+});
+
 test('IPCAP: default anonymous network cap is 50', async () => {
   const { env } = mem();
   env.AUTH_ENABLED = 'true';
@@ -634,17 +647,17 @@ test('IPCAP: owner allowlist (ZO_OWNER_EMAILS, case-insensitive) gets the 1000/d
   if (!over.ok) assert.equal(over.body.reason, 'signed');
 });
 
-test('t449: default signed-in cap is 50/day per account and never counts against the network cap', async () => {
+test('t449: default signed-in cap is 30/day per account and never counts against the network cap', async () => {
   const { env } = mem();
   env.AUTH_ENABLED = 'true';
   env.GATE_IP_PER_DAY = '1';
   const day = new Date('2026-10-08T12:00:00Z');
   const headers = { cookie: await cookie(), 'CF-Connecting-IP': IP };
-  for (let i = 0; i < 50; i++) assert.equal((await applyGate(new Request('http://127.0.0.1/api/stream', { headers }), env, day, signed, `s${i}`)).ok, true);
-  const over = await applyGate(new Request('http://127.0.0.1/api/stream', { headers }), env, day, signed, 's50');
+  for (let i = 0; i < 30; i++) assert.equal((await applyGate(new Request('http://127.0.0.1/api/stream', { headers }), env, day, signed, `s${i}`)).ok, true);
+  const over = await applyGate(new Request('http://127.0.0.1/api/stream', { headers }), env, day, signed, 's30');
   assert.equal(over.ok, false);
   if (!over.ok) {
     assert.equal(over.body.reason, 'signed');
-    assert.equal(over.body.limit, 50);
+    assert.equal(over.body.limit, 30);
   }
 });
