@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { MouseEvent } from 'react';
 import { Check, ChevronLeft, ChevronRight, Copy, Globe, Minus, Play, Star, ThumbsDown, ThumbsUp, TrendingDown, TrendingUp } from 'lucide-react';
-import { askQuestion, queryForLabel, type AskRef, type Box } from '../../shared/askAbout';
+import { actionQuery, askQuestion, isLookupLabel, type AskRef, type Box } from '../../shared/askAbout';
 import type { CardNode, Tone } from '../../shared/card';
 import { factTileLabel } from '../../shared/factTile';
 import { initials } from '../../shared/initials';
@@ -978,10 +978,11 @@ const sameName = (a: string, b: string) => {
 export function Actions({ node }: { node: Of<'actions'> }) {
   const { onSearch, onAsk, onRefine } = useCard();
   const run = (a: Of<'actions'>['items'][number]) => {
-    const q = a.kind === 'refine' ? a.query : queryForLabel(a.label, a.query);
+    const q = a.kind === 'refine' ? a.query : actionQuery(a.label, a.query);
+    const lookup = isLookupLabel(a.label);
     switch (a.kind ?? 'search') {
       case 'refine': return onRefine(q);
-      case 'ask': return onAsk(q);
+      case 'ask': return lookup ? onSearch(q) : onAsk(q);
       case 'search': return onSearch(q);
       default: {
         const unreachable: never = a.kind as never;

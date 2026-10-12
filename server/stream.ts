@@ -33,7 +33,7 @@ import { fetchWikiDisambiguation, fetchWikiLeadImage } from './wikiSearch';
 import { type EntityHint, mentionsAny } from './imageGate';
 import type { RowImagePlan } from './pictures';
 import type { AnswerCard, CardNode, FollowupContext, FollowupIntent, LayoutPlan } from '../shared/card';
-import { type AskRef, cardSearchQuery, refContext, topicOf, usefulFollowups, withRef } from '../shared/askAbout';
+import { type AskRef, cardSearchQuery, plainFollowup, refContext, topicOf, usefulFollowups, withRef } from '../shared/askAbout';
 import type { EngineStatus, Freshness, ImageResult, SearchResponse, SearchResult } from '../shared/types';
 import { rewriteQuery } from './ai';
 import { type DesignRequest, designParallel, designStream, gateNode } from './design';
@@ -61,7 +61,7 @@ import { finishQuality, hostTier, preferSources } from './sourceQuality';
 import { isOwnSite, orcidSite, pickOwnSite, probeOwnSite, RESEARCH_ASK, withOwnSite } from './ownSite';
 import { quoteAsk } from '../shared/quoteAsk';
 import { scholarlyResults, withScholarly } from './scholarly';
-import { videoResults, withVideos } from './videoSearch';
+import { videoResults, wantsVideo, withVideos } from './videoSearch';
 import { guessFreshness, preferFresh, staleComplaint, stricter } from './freshness';
 import { isQuoteRow, liveQuote, quoteRow, tickerNode } from './liveQuote';
 import { splitPeople } from './peopleSplit';
@@ -885,6 +885,10 @@ function engineErrors(engines: EngineStatus[]): string[] {
 }
 
 async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind: 'followup' }>, started: number, scope: AskScope) {
+  const cleaned = plainFollowup(req.question);
+  if (cleaned !== req.question) req = { ...req, question: cleaned };
+  // "Watch on YouTube" is a search for the video, even when the button was marked ask.
+  if (req.intent === 'ask' && wantsVideo(req.question)) req = { ...req, intent: 'search' };
   const refLine = req.ref ? refContext(req.ref) : '';
   const context = scrubLeak([req.context?.slice(0, 4000), refLine].filter(Boolean).join('\n')) || undefined;
   const from = req.cards.find((c) => c.id === req.from);

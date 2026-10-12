@@ -393,14 +393,97 @@ const LABEL_STOP = new Set(['the', 'and', 'for', 'with', 'from', 'this', 'that',
 
 const sameWord = (a: string, b: string) => a === b || a === `${b}s` || b === `${a}s` || a === `${b}es` || b === `${a}es`;
 
+/** Explain "subject" — note. The note is a typed instruction or a bag of button words. */
+const QUOTE_ASK = /^(?:explain|go deeper on)\s+"([^"]+)"(?:\s*[—–-]\s*([\s\S]+))?$/i;
+
+/** The subject of a quote follow-up. A note after the dash is not part of it. */
+export function bareTopic(text: string): string {
+  const m = text.trim().match(QUOTE_ASK);
+  return (m ? m[1] : text).trim();
+}
+
+const ADDON_VERB = /^(find|watch|show|see|open|play|listen)$/i;
+const INSTRUCTION = /\b(focus|only|without|include|except|compare|versus|vs\.?|simpler|deeper|please|because|about the|not the)\b/i;
+
+/** "On youtube Waveform Discussion video Find Watch" is glued button words, not a note the person typed. */
+function isAddonNote(note: string): boolean {
+  const words = note.trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  if (INSTRUCTION.test(note)) return false;
+  const verbs = words.filter((w) => ADDON_VERB.test(w.replace(/[^A-Za-z]/g, '')));
+  const capped = words.filter((w) => /^[A-Z][a-z]/.test(w));
+  return verbs.length >= 1 && (capped.length >= 1 || words.length >= 5);
+}
+
+/**
+ * A quote follow-up keeps a real note. A glued bag of button words is dropped.
+ * A watch bag becomes a watch search, so "Watch on YouTube" does not explain the title.
+ */
+export function plainFollowup(question: string): string {
+  const trimmed = question.trim();
+  const m = trimmed.match(QUOTE_ASK);
+  if (!m) return trimmed;
+  const subject = m[1].trim();
+  const note = (m[2] ?? '').trim();
+  if (note && !isAddonNote(note)) return trimmed;
+  const bag = `${note} ${trimmed}`;
+  if (/\byoutube\b/i.test(bag) || /\bwatch\b/i.test(bag)) return `Watch ${subject} on YouTube`;
+  if (/\brecap\b/i.test(bag)) return `${subject} recap`;
+  if (/^go deeper on/i.test(trimmed)) return `Go deeper on ${subject}`;
+  return `Explain ${subject}`;
+}
+
+/** A short button ("Watch on YouTube", "Episode recap"), not a finished search sentence. */
+const ACTION_BUTTON = /^(?:watch|find|show|see|view|open|play|listen|search|read)\b|\bon youtube\b|\b(?:recap|summary|overview)\b/i;
+
+function isActionButton(label: string): boolean {
+  const words = label.trim().split(/\s+/);
+  return words.length > 0 && words.length <= 4 && ACTION_BUTTON.test(label.trim());
+}
+
+function phraseForButton(label: string, topic: string): string {
+  const t = bareTopic(topic).replace(/\s+/g, ' ').trim();
+  if (/\byoutube\b/i.test(label) || /^watch\b/i.test(label.trim())) {
+    const name = t.replace(/\bon youtube\b/ig, ' ').replace(/^(?:watch|find|show|see)\s+/i, '').replace(/\s+/g, ' ').trim();
+    const subject = name || t;
+    if (subject && /\bon youtube\b/i.test(subject) && /^watch\b/i.test(subject)) return subject;
+    return `Watch ${subject || label} on YouTube`.replace(/\s+/g, ' ').trim();
+  }
+  if (/\brecap\b/i.test(label)) {
+    const name = t.replace(/\brecaps?\b/ig, ' ').replace(/\s+/g, ' ').trim();
+    return `${name || t} recap`.replace(/\s+/g, ' ').trim();
+  }
+  if (/\boverview\b/i.test(label)) {
+    const name = t.replace(/\boverview\b/ig, ' ').replace(/\s+/g, ' ').trim();
+    return `${name || t} overview`.replace(/\s+/g, ' ').trim();
+  }
+  if (/\bsummary\b/i.test(label)) {
+    const name = t.replace(/\bsummary\b/ig, ' ').replace(/\s+/g, ' ').trim();
+    return `${name || t} summary`.replace(/\s+/g, ' ').trim();
+  }
+  return queryForLabel(label, t);
+}
+
+/** What an action button searches. The label is the ask. A quote note is not added on. */
+export function actionQuery(label: string, query: string): string {
+  const topic = bareTopic(query);
+  if (isActionButton(label)) return phraseForButton(label, topic || label);
+  return queryForLabel(label, topic);
+}
+
+/** A button that looks something up (watch, recap, highlights) is a search, even if the card called it an ask. */
+export function isLookupLabel(label: string): boolean {
+  return isActionButton(label) || !!askFacet(label);
+}
+
 /**
  * The next search says what the button says. "Preseason highlights" on a query about his stats
  * becomes a highlights search that still names him, not another stats card.
  */
 export function queryForLabel(label: string, query: string): string {
   const wanted = askFacet(label);
-  const got = askFacet(query);
-  let q = query.trim();
+  let q = bareTopic(query);
+  const got = askFacet(q);
   if (wanted && got && wanted !== got) {
     const drop = ASK_FACETS.find((f) => f.id === got);
     if (drop) q = q.split(/\s+/).filter((w) => w && !drop.re.test(w)).join(' ');
@@ -420,10 +503,13 @@ export function queryForLabel(label: string, query: string): string {
  * A label that already is that question is left as written.
  */
 export function cardSearchQuery(label: string, subject: string): string {
-  const picked = label.trim();
-  const base = subject.trim();
+  const picked = plainFollowup(label.trim());
+  const base = bareTopic(subject.trim());
   if (!picked) return base;
+  if (isActionButton(picked)) return phraseForButton(picked, base || picked);
   if (!base || base.toLowerCase() === picked.toLowerCase()) return picked;
+  // A finished ask is already the search. Don't glue it onto the earlier question or its quote note.
+  if (picked.split(/\s+/).length >= 5 && !/\b(it|its|this|that|these|those)\b/i.test(picked)) return picked;
   return queryForLabel(picked, base);
 }
 
@@ -451,7 +537,7 @@ export function usefulFollowups(items: string[], title?: string, query?: string)
   const seen = new Set<string>();
   const kept: string[] = [];
   for (const item of items) {
-    const text = whoAsk(item);
+    const text = whoAsk(plainFollowup(item));
     const n = normFollow(text).replace(/\?$/, '').trim();
     if ((!personName(text) && n.split(' ').length < 4) || seen.has(n)) continue;
     if (titleN && (n === titleN || n === `what happened in ${titleN}` || n === `what is ${titleN}` || n === `what happened with ${titleN}`)) continue;

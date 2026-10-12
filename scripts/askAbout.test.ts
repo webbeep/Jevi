@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { askQuestion, cardSearchQuery, cleanRef, entityOf, queryForLabel, refContext, topicOf, usefulFollowups, withRef, REF_MAX, type Box } from '../shared/askAbout.ts';
+import { actionQuery, askQuestion, cardSearchQuery, cleanRef, entityOf, isLookupLabel, plainFollowup, queryForLabel, refContext, topicOf, usefulFollowups, withRef, REF_MAX, type Box } from '../shared/askAbout.ts';
 
 const cases: [Box, string][] = [
   // tile: label + value + entity (the t453 repro)
@@ -162,6 +162,23 @@ test('a search button keeps the card subject', () => {
     'AJ Dybantsa Wizards washington Preseason highlights',
   );
   assert.equal(cardSearchQuery('best running shoes for beginners', 'best running shoes for beginners'), 'best running shoes for beginners');
+});
+
+const YOUTUBE_MASH = 'Explain "2026 Smartphone Awards Episode" — On youtube Waveform Discussion video Find Watch';
+
+test('a watch button does not explain the title or keep glued button words', () => {
+  const watch = 'Watch 2026 Smartphone Awards Episode on YouTube';
+  assert.equal(actionQuery('Watch on YouTube', YOUTUBE_MASH), watch);
+  assert.equal(actionQuery('Watch on YouTube', watch), watch);
+  assert.equal(plainFollowup(YOUTUBE_MASH), watch);
+  assert.equal(cardSearchQuery(YOUTUBE_MASH, 'Waveform: The MKBHD Podcast'), watch);
+  assert.equal(cardSearchQuery(watch, YOUTUBE_MASH), watch);
+  assert.equal(actionQuery('Episode recap', YOUTUBE_MASH), '2026 Smartphone Awards Episode recap');
+  assert.equal(actionQuery('Awards winners', YOUTUBE_MASH), '2026 Smartphone Awards Episode winners');
+  assert.equal(plainFollowup('Explain "2026 Smartphone Awards Episode" — focus on the camera category'), 'Explain "2026 Smartphone Awards Episode" — focus on the camera category');
+  assert.equal(isLookupLabel('Watch on YouTube'), true);
+  assert.equal(isLookupLabel('Preseason highlights'), true);
+  assert.equal(isLookupLabel('What does the host mean'), false);
 });
 
 test('a highlights button does not search the stats query written under it', () => {
