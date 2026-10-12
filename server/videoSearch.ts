@@ -1,4 +1,6 @@
 import type { SearchResult } from '../shared/types';
+import { compareSides } from './patterns';
+import { hasProductModel } from './productModel';
 import { gateResults } from './relevanceGate';
 
 /** Asks where watching beats reading: highlights, trailers, tutorials, replays. */
@@ -72,6 +74,44 @@ export function parseYouTube(html: string): SearchResult[] {
 /** Up to three on-topic YouTube videos for a watch ask; [] on any failure (the web results still stand). Keyless. */
 export async function videoResults(query: string, doFetch: typeof fetch = fetch): Promise<SearchResult[]> {
   if (!wantsVideo(query)) return [];
+  return fetchClips(query, doFetch);
+}
+
+/**
+ * Sides of a comparison (or the ask itself) that name a numbered product.
+ * "Google Fitbit Edge vs Xiaomi Miband 11" searches YouTube for the Mi Band, which is on video
+ * before a spec page is indexed. A price ("under $100") or a watch ask is not one of these.
+ */
+export function productClipQueries(query: string): string[] {
+  if (wantsVideo(query)) return [];
+  const sides = compareSides(query);
+  const pool = sides.length >= 2 ? sides : [query];
+  return pool.filter((side) => hasProductModel(side)).slice(0, 2);
+}
+
+/**
+ * Watch asks search YouTube for the whole question. A numbered product also searches YouTube
+ * for that product, so a launch-day review can enter the sources when the web index only has
+ * the previous model. [] on any failure.
+ */
+export async function recallClips(query: string, doFetch: typeof fetch = fetch): Promise<SearchResult[]> {
+  if (wantsVideo(query)) return videoResults(query, doFetch);
+  const sides = productClipQueries(query);
+  if (!sides.length) return [];
+  const lists = await Promise.all(sides.map((side) => fetchClips(side, doFetch)));
+  const seen = new Set<string>();
+  const out: SearchResult[] = [];
+  for (const row of lists.flat()) {
+    if (seen.has(row.url)) continue;
+    seen.add(row.url);
+    out.push(row);
+    if (out.length >= 4) break;
+  }
+  return out;
+}
+
+/** YouTube rows for one query. Keyless. Never throws. */
+async function fetchClips(query: string, doFetch: typeof fetch): Promise<SearchResult[]> {
   const key = query.trim().toLowerCase();
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_MS) return hit.rows;
@@ -98,15 +138,27 @@ export async function videoResults(query: string, doFetch: typeof fetch = fetch)
   }
 }
 
+const clipId = (u: string) => u.match(/[?&]v=([\w-]{11})|youtu\.be\/([\w-]{11})|shorts\/([\w-]{11})/)?.slice(1).find(Boolean) ?? u;
+
 /**
  * The best video leads the sources and the rest follow the first few web results, so a watch card has
  * a playable source inside the numbered list the designer reads.
  */
 export function withVideos(videos: readonly SearchResult[], web: readonly SearchResult[]): SearchResult[] {
   if (!videos.length) return [...web];
-  const id = (u: string) => u.match(/[?&]v=([\w-]{11})|youtu\.be\/([\w-]{11})|shorts\/([\w-]{11})/)?.slice(1).find(Boolean) ?? u;
-  const ids = new Set(videos.map((v) => id(v.url)));
-  const rest = web.filter((r) => !ids.has(id(r.url)));
+  const ids = new Set(videos.map((v) => clipId(v.url)));
+  const rest = web.filter((r) => !ids.has(clipId(r.url)));
   const [lead, ...more] = videos;
   return [lead!, ...rest.slice(0, 3), ...more, ...rest.slice(3)];
+}
+
+/**
+ * A product review stays behind the written sources. The designer reads the first 12, so the
+ * clips sit inside that window without taking the place of a spec page.
+ */
+export function withProductClips(videos: readonly SearchResult[], web: readonly SearchResult[]): SearchResult[] {
+  if (!videos.length) return [...web];
+  const ids = new Set(videos.map((v) => clipId(v.url)));
+  const rest = web.filter((r) => !ids.has(clipId(r.url)));
+  return [...rest.slice(0, 8), ...videos.slice(0, 4), ...rest.slice(8)];
 }

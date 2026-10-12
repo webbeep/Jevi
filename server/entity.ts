@@ -1,5 +1,6 @@
 import { NAME_PARTICLE, TOPIC_WORD } from '../shared/askAbout';
 import { nameLike, tokens, type EntityHint } from './imageGate';
+import { hasProductModel } from './productModel';
 import { isBlockedHost, isFictionHost } from './spamHosts';
 
 /**
@@ -529,6 +530,9 @@ export function isPersonAsk(query: string, pattern?: string): boolean {
     if (wordCount(subject) < 2 && wordCount(rest) > wordCount(subject)) return false;
     return subject !== '';
   }
+  // "Xiaomi Miband 11" is a product, not a person named Xiaomi Miband. The person gate would
+  // require that glued name and drop every "Mi Band 11" page.
+  if (hasProductModel(query)) return false;
   // SPD-C1 (t457): a capitalised phrase inside a longer sentence is the topic, not a person lookup
   // ("Fact-check: Gmail lets you attach files up to 50 MB", "Does AirPods Pro 3 have a heart rate sensor?").
   // Treating it as a person dropped every source without that exact name (live H2H P11/P12/P13: 0–1 sources).
