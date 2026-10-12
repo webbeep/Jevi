@@ -6,9 +6,8 @@
  * not in the sources is left out. If fewer than three stages remain, the card stays
  * a normal explanation and no diagram is shown.
  *
- * Off unless ZO_DIAGRAMS is 1, true, or yes. Set that on the experiment preview only.
- * Rollback: set ZO_DIAGRAMS to 0 on that preview, or redeploy the previous experiment
- * build. Production keeps the old behavior until the flag is turned on there.
+ * Off unless ZO_DIAGRAMS is 1, true, or yes.
+ * Rollback: set ZO_DIAGRAMS to 0, or redeploy the previous build.
  */
 import type { CardNode } from './card';
 
@@ -225,9 +224,14 @@ export function toMermaid(node: DiagramCard): string {
   return lines.join('\n');
 }
 
+const BOX_W = 232;
+const BOX_H = 44;
+const BOX_GAP = 32;
+const DIAGRAM_W = 300;
+
 export function diagramHeight(count: number): number {
   const n = Math.max(1, count);
-  return 36 + n * 52 + Math.max(0, n - 1) * 18 + 72;
+  return 28 + n * BOX_H + Math.max(0, n - 1) * BOX_GAP + 72;
 }
 
 const ESC: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
@@ -238,7 +242,8 @@ function esc(s: string): string {
 
 /**
  * The graphic's document. It is shown in a sandboxed frame.
- * The only script is ours; stage text is escaped and also passed as JSON with < neutralized.
+ * Boxes and arrowheads are drawn here. The only script is ours.
+ * Stage text is escaped and also passed as JSON with < neutralized.
  */
 export function diagramDocument(node: DiagramCard, dark: boolean): string {
   const text = dark ? '#f4f4f5' : '#18181b';
@@ -246,36 +251,56 @@ export function diagramDocument(node: DiagramCard, dark: boolean): string {
   const line = dark ? '#3f3f46' : '#d4d4d8';
   const fill = dark ? '#18181b' : '#ffffff';
   const soft = dark ? '#27272a' : '#f4f4f5';
-  const steps = node.nodes.map((step, i) => {
-    const arrow = i < node.nodes.length - 1 ? '<span class="arrow" aria-hidden="true"></span>' : '';
-    return `<button type="button" data-i="${i}" aria-pressed="${i === 0 ? 'true' : 'false'}"><span class="n">${i + 1}</span><span class="label">${esc(step.label)}</span></button>${arrow}`;
-  }).join('');
+  const x = (DIAGRAM_W - BOX_W) / 2;
+  const svgH = node.nodes.length * BOX_H + Math.max(0, node.nodes.length - 1) * BOX_GAP;
+  const parts: string[] = [];
+  node.nodes.forEach((step, i) => {
+    const y = i * (BOX_H + BOX_GAP);
+    const size = step.label.length > 26 ? 12 : 14;
+    parts.push(`<g data-i="${i}" role="button" tabindex="0" aria-pressed="${i === 0 ? 'true' : 'false'}"><rect class="box" x="${x}" y="${y}" width="${BOX_W}" height="${BOX_H}" rx="12"/><text class="label" x="${DIAGRAM_W / 2}" y="${y + BOX_H / 2 + 1}" text-anchor="middle" dominant-baseline="middle" font-size="${size}">${esc(step.label)}</text></g>`);
+    if (i < node.nodes.length - 1) {
+      const y1 = y + BOX_H;
+      const y2 = y1 + BOX_GAP - 6;
+      parts.push(`<line class="arrow" x1="${DIAGRAM_W / 2}" y1="${y1}" x2="${DIAGRAM_W / 2}" y2="${y2}" marker-end="url(#arrowhead)"/>`);
+    }
+  });
   const details = JSON.stringify(node.nodes.map((step) => step.detail ?? '')).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026');
   const mermaid = node.kind === 'flow' && node.mermaid ? `<pre hidden>${esc(node.mermaid)}</pre>` : '';
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'"><style>
     body{margin:0;font:14px/1.35 ui-sans-serif,system-ui,sans-serif;color:${text};background:transparent}
-    h2{margin:0 0 8px;font-size:13px;font-weight:600}
-    button{display:flex;align-items:center;gap:8px;width:100%;text-align:left;border:1px solid ${line};background:${fill};color:${text};border-radius:10px;padding:8px 10px;cursor:pointer}
-    button[aria-pressed="true"]{background:${soft};border-color:${text}}
-    .n{flex:0 0 auto;width:22px;height:22px;border-radius:999px;border:1px solid ${line};display:flex;align-items:center;justify-content:center;font-size:12px}
-    .label{min-width:0}
-    .arrow{display:block;width:2px;height:14px;margin:2px auto;background:${muted}}
-    #detail{min-height:44px;margin:10px 0 0;color:${muted};font-size:13px}
+    h2{margin:0 0 10px;font-size:13px;font-weight:600;text-align:center}
+    svg{display:block;width:100%;max-width:${DIAGRAM_W}px;height:auto;margin:0 auto}
+    .box{fill:${fill};stroke:${line};stroke-width:1.5}
+    [aria-pressed="true"] .box{fill:${soft};stroke:${text};stroke-width:2}
+    text{fill:${text};font-family:ui-sans-serif,system-ui,sans-serif;pointer-events:none}
+    .arrow{stroke:${muted};stroke-width:1.5}
+    #detail{min-height:40px;margin:12px 0 0;color:${muted};font-size:13px;text-align:center}
   </style></head><body>
   ${node.title ? `<h2>${esc(node.title)}</h2>` : ''}
-  <div id="steps">${steps}</div>
+  <svg viewBox="0 0 ${DIAGRAM_W} ${svgH}" role="img" aria-label="${esc(node.title || 'Diagram')}">
+    <defs><marker id="arrowhead" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="${muted}"/></marker></defs>
+    ${parts.join('')}
+  </svg>
   <p id="detail"></p>
   ${mermaid}
   <script type="application/json" id="d">${details}</script>
   <script data-zo="diagram">
     const details = JSON.parse(document.getElementById('d').textContent || '[]');
-    const buttons = Array.from(document.querySelectorAll('button'));
+    const nodes = Array.from(document.querySelectorAll('[data-i]'));
     const panel = document.getElementById('detail');
     function show(i) {
-      buttons.forEach((b, j) => b.setAttribute('aria-pressed', j === i ? 'true' : 'false'));
-      panel.textContent = details[i] || buttons[i].querySelector('.label').textContent || '';
+      nodes.forEach((n, j) => n.setAttribute('aria-pressed', j === i ? 'true' : 'false'));
+      const label = nodes[i] && nodes[i].querySelector('.label');
+      panel.textContent = details[i] || (label ? label.textContent : '');
     }
-    buttons.forEach((b) => b.addEventListener('click', () => show(Number(b.dataset.i))));
+    nodes.forEach((n) => {
+      n.addEventListener('click', () => show(Number(n.dataset.i)));
+      n.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        show(Number(n.dataset.i));
+      });
+    });
     show(0);
   </script>
   </body></html>`;

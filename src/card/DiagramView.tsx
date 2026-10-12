@@ -4,7 +4,7 @@ import { DIAGRAM_SANDBOX, diagramDocument, diagramHeight } from '../../shared/di
 
 type DiagramNode = Extract<CardNode, { type: 'diagram' }>;
 
-/** The graphic for a diagram node. The frame can run the step buttons and cannot read the page. */
+/** The graphic for a diagram node. The frame draws the boxes and cannot read the page. */
 export function DiagramView({ node }: { node: DiagramNode }) {
   const [dark, setDark] = useState(() => document.documentElement.classList.contains('dark'));
   useEffect(() => {

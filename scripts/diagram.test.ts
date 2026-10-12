@@ -126,7 +126,11 @@ test('article sections are not a diagram of how something works', () => {
   assert.ok(card);
   assert.deepEqual(card.nodes.map((n) => n.label), ['Token', 'Attention', 'Decoder']);
   assert.match(card.nodes[0]?.detail ?? '', /token/);
-  assert.match(diagramDocument(card, true), /class="arrow"/);
+  const graphic = diagramDocument(card, true);
+  assert.match(graphic, /<svg/);
+  assert.match(graphic, /class="arrow"/);
+  assert.match(graphic, /marker-end="url\(#arrowhead\)"/);
+  assert.equal(graphic.includes('<button'), false);
   assert.equal(diagramNeedsRetry({
     nodes: [
       { label: 'Introduction' },
