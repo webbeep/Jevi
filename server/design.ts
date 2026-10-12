@@ -247,6 +247,12 @@ function briefRules(req: DesignRequest): string {
   ].filter(Boolean).join('\n');
 }
 
+function seasonStatRule(req: DesignRequest): string {
+  const asked = `${req.query} ${req.followup?.question ?? ''}`;
+  if (!/\bpre-?season\b/i.test(asked)) return '';
+  return '- PRESEASON: the person asked for preseason stats. A regular-season average, a career line, or a projection is not the preseason line. When PAGE TEXT or SOURCES state a preseason game, lead with that line (points, rebounds, assists, the opponent and the date). Never label a season average as preseason.';
+}
+
 function timeRules(req: DesignRequest): string {
   const today = `- Today is ${new Date().toISOString().slice(0, 10)} (UTC).`;
   const asked = stricter(guessFreshness(req.query), guessFreshness(req.followup?.question ?? ''));
@@ -272,6 +278,7 @@ function taskBlock(req: DesignRequest): string {
     req.simple ? '- Write for a 10-year-old: plain words and a friendly analogy.' : '',
     timeRules(req),
     liveQuoteRule(req),
+    seasonStatRule(req),
     briefRules(req),
     followupRules(req.followup, req.search.query).trim().replace(/^/, '- '),
     req.search.results.length ? '' : '- No web sources were found for this; answer from general knowledge, say it may be out of date, and do not cite sources.',

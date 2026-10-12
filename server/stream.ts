@@ -279,7 +279,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     : req.earlyBrief ? req.earlyBrief.then((early) => early ? remapBrief(early.brief, early.judged, req.search.results) : undefined)
     : briefSources({ query: req.query, intent: req.intent, context: req.context, results: req.search.results, isLive: isQuoteRow, shown: req.ticker ? TICKER_SHOWN : undefined }, env);
   // Page reads overlap the source check. A rescue throws those pages away and reads the new rows.
-  const reading = collectPages(req.search.results, env, budget, late, scope);
+  const reading = collectPages(req.search.results, env, budget, late, scope, req.query);
   const briefWait = skipReads && briefing
     ? Promise.race([briefing, new Promise<SourceBrief | undefined>((resolve) => setTimeout(() => resolve(undefined), 400))])
     : briefing;
@@ -295,7 +295,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       void reading.catch(() => undefined);
     }
   }
-  const pages = rescued ? await collectPages(req.search.results, env, budget, undefined, scope) : await reading;
+  const pages = rescued ? await collectPages(req.search.results, env, budget, undefined, scope, req.query) : await reading;
   mark(scope.ledger, 'pages');
   const fresh = pages.filter((p) => !req.search.results[p.n - 1]?.content);
   if (fresh.length) send('pages', fresh.map(({ n, url, text }) => ({ n, url, text })));
