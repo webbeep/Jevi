@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { anchoredFollowup, asksToCompare, cryptographyHint, faithfulQuery, isWritingAsk, needsOwnSearch, personQuestion, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from '../server/askGuard.ts';
+import { anchoredFollowup, asksToCompare, cryptographyHint, faithfulQuery, isWritingAsk, missingSpec, needsOwnSearch, personQuestion, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from '../server/askGuard.ts';
 import { isPersonAsk } from '../server/entity.ts';
 import { planLayout } from '../server/plan.ts';
 import type { CardNode } from '../shared/card.ts';
@@ -9,6 +9,22 @@ test('a which-one follow-up stays on the comparison already on screen', () => {
   assert.equal(anchoredFollowup('iphone 17 vs pixel 10', 'which one has better battery life?'), 'iphone 17 vs pixel 10 battery life');
   assert.equal(anchoredFollowup('how do mRNA vaccines work', 'explain it like I am 10'), undefined);
   assert.equal(anchoredFollowup('iphone 17 vs pixel 10', 'Does the iPhone 17 come with 256GB storage as standard?'), undefined);
+});
+
+test('a follow-up about an attribute no gathered source states searches for it', () => {
+  const headphones = [
+    { title: 'Best budget ANC headphones 2026', snippet: 'Sony WH-CH720N at $179.99, Anker Q45 under $100, 50 hours of playback.' },
+    { title: 'JBL Tune 770NC review', snippet: 'Great noise cancelling for the money.' },
+  ];
+  assert.equal(missingSpec('which is lightest for travel?', headphones), true);
+  assert.equal(missingSpec('which has the best battery?', headphones), false);
+  assert.equal(missingSpec('which is cheapest?', headphones), false);
+  assert.equal(missingSpec('which is lightest for travel?', [...headphones, { title: 'Specs', snippet: '', content: 'The Q45 weighs 295 g.' }]), false);
+  assert.equal(missingSpec('which is lightest?', [{ title: 'Specs', snippet: 'Only 192g on the scale' }]), false);
+  assert.equal(missingSpec('explain it like I am 10', headphones), false);
+  assert.equal(missingSpec('rewrite the review to mention the weight', headphones), false);
+  assert.equal(missingSpec('how much does it cost?', [{ title: 'mRNA vaccines', snippet: 'Cells read the instructions.' }]), true);
+  assert.equal(missingSpec('which is lightest?', []), false);
 });
 
 test('a writing request is answered, not searched, and a complete question is not rewritten', () => {

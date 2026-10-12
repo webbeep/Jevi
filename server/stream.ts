@@ -54,7 +54,7 @@ import { type LateExtras, normalizeUrl, searchWithLate } from './search';
 import type { WebHit } from './cascade';
 import { domainOf } from './util';
 import { choicesIn, distinctActions, subjectWords } from './chips';
-import { anchoredFollowup, asksToCompare, cryptographyHint, faithfulQuery, isWritingAsk, needsOwnSearch, personQuestion, quickPlan, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
+import { anchoredFollowup, asksToCompare, cryptographyHint, faithfulQuery, isWritingAsk, missingSpec, needsOwnSearch, personQuestion, quickPlan, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
 import { comparisonRepair, comparisonTitle } from './compareAnswer';
 import { withFinishedSentences } from './polish';
 import { queryWithPlace, readerPlace, settleReadings } from './readings';
@@ -1004,15 +1004,21 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
     ? Promise.resolve(anchored ?? req.question)
     : rewriteQuery(req.original, req.question, env, context, from?.title).catch(() => req.question);
   const plan = await planLayout(req.question, env, { original: req.original, cards: req.cards.map(({ id, title }) => ({ id, title })), context });
-  const mode = req.intent === 'adjust' ? 'refine' : req.intent === 'ask' && plan.mode === 'refine' ? 'answer' : plan.mode ?? 'chat';
+  const planned = req.intent === 'adjust' ? 'refine' : req.intent === 'ask' && plan.mode === 'refine' ? 'answer' : plan.mode ?? 'chat';
+  const mode = (planned === 'answer' || planned === 'chat') && missingSpec(req.question, req.search?.results ?? []) ? 'search' : planned;
 
   switch (mode) {
     case 'search': {
-      send('plan', plan);
+      send('plan', { ...plan, mode });
       const host = req.cards.find((c) => c.id === req.from);
       const entity = req.ref?.entity ?? topicOf(host?.card?.title) ?? topicOf(host?.title);
       const ref = req.ref ? { ...req.ref, ...(entity ? { entity } : {}) } : undefined;
-      const query = faithfulQuery(req.question, withRef(await rewritten, ref));
+      // A follow-up the planner meant to answer from the card ("which is lightest for travel?") names no subject of its own.
+      const own = await rewritten;
+      const resolved = mode !== planned && own === req.question
+        ? await rewriteQuery(req.original, req.question, env, context, from?.title).catch(() => req.question)
+        : own;
+      const query = faithfulQuery(req.question, withRef(resolved, ref));
       send('rewrite', { query });
       await searchAndDesign(send, env, query, 'any', context, started, scope, true, req.ref ? req.search?.results : undefined);
       return;
