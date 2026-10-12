@@ -15,6 +15,37 @@ const UNCITED = new Set(['code', 'draft', 'ticker', 'diagram']);
 /** Numbers that must be on the cited page: counts like "step 1" are not claims. */
 const claimNumbers = (s: string) => [...new Set(numberTokens(s.replace(MARKER, '')).filter((n) => Number(n) > FREE_NUMBER_MAX))];
 
+/** Next steps, controls and the citation list make no claims about the world. */
+const NO_CLAIMS = new Set([...UNCITED, 'actions', 'choices', 'citations', 'links', 'video', 'image', 'gallery']);
+
+/** The text of every node that states facts, at any depth. */
+function collectClaims(value: unknown, out: string[]): void {
+  if (typeof value === 'string') out.push(value);
+  else if (Array.isArray(value)) value.forEach((v) => collectClaims(v, out));
+  else if (value && typeof value === 'object') {
+    if (NO_CLAIMS.has(String((value as { type?: unknown }).type))) return;
+    for (const [k, v] of Object.entries(value)) if (!/^(type|icon|tone|accent|image\w*|imageRef|source)$/.test(k)) collectClaims(v, out);
+  }
+}
+
+/** Every source the card points at: the citation list, inline markers, and source links. */
+export function citedSources(nodes: readonly CardNode[]): Set<number> {
+  const refs = new Set<number>();
+  const walk = (value: unknown) => {
+    if (typeof value === 'string') for (const m of value.matchAll(MARKER)) refs.add(Number(m[1]));
+    else if (Array.isArray(value)) value.forEach(walk);
+    else if (value && typeof value === 'object') {
+      const node = value as { type?: unknown; refs?: unknown; source?: unknown };
+      if (UNCITED.has(String(node.type))) return;
+      if (node.type === 'citations' && Array.isArray(node.refs)) node.refs.forEach((n) => typeof n === 'number' && refs.add(n));
+      if (typeof node.source === 'number') refs.add(node.source);
+      Object.values(value).forEach(walk);
+    }
+  };
+  walk(nodes);
+  return refs;
+}
+
 /**
  * The numbers each source states, by source number. A number is often in the sources but not
  * on the page its citation points at; the citation is moved to the page that states it.
@@ -84,6 +115,30 @@ export class SourceNumbers {
     if (nums.every((x) => this.states(n, x))) return n;
     const [only, ...rest] = this.cover(nums, new Set([n])) ?? [];
     return only !== undefined && !rest.length ? only : n;
+  }
+
+  /**
+   * Sources to add to the card's citation list so the numbers it shows without a citation of their own
+   * (a hero, a tile, a table cell) are on a page the card cites. At most 3, the pages that state the most first.
+   */
+  missingRefs(nodes: readonly CardNode[]): number[] {
+    const cited = citedSources(nodes);
+    const texts: string[] = [];
+    collectClaims(nodes, texts);
+    let left = claimNumbers(texts.join(' ')).filter((x) => ![...cited].some((n) => this.states(n, x)));
+    const added: number[] = [];
+    while (left.length && added.length < 3) {
+      let best: { n: number; hits: number } | undefined;
+      for (const [n, own] of this.bySource) {
+        if (cited.has(n) || added.includes(n)) continue;
+        const hits = left.filter((x) => own.has(x)).length;
+        if (hits && (!best || hits > best.hits || (hits === best.hits && n < best.n))) best = { n, hits };
+      }
+      if (!best) break;
+      added.push(best.n);
+      left = left.filter((x) => !this.states(best!.n, x));
+    }
+    return added;
   }
 
   /** Every cited string in a node, at any depth, plus the source links of tiles and list rows. */

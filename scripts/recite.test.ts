@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { CardNode } from '../shared/card.ts';
-import { Grounding, SourceNumbers } from '../server/ground.ts';
+import { citedSources, Grounding, SourceNumbers } from '../server/ground.ts';
 
 const sources = new SourceNumbers([
   { n: 1, text: 'Pixel 10 has a 4,970 mAh battery and 30W charging.' },
@@ -66,4 +66,25 @@ test('grounding without source numbers leaves citations as written', () => {
   const node: CardNode = { type: 'text', text: '3,692 mAh [1].' };
   assert.deepEqual(new Grounding('3692').recite(node), node);
   assert.deepEqual(new Grounding('3692', false, sources).recite(node), { type: 'text', text: '3,692 mAh [3].' });
+});
+
+test('the citation list gains the page behind a number that has no citation of its own', () => {
+  const body: CardNode[] = [
+    { type: 'hero', value: '3,692', unit: 'mAh', label: 'iPhone 17 battery' },
+    { type: 'tile', label: 'Pixel 10', value: '4,970 mAh', source: 1 },
+    { type: 'actions', items: [{ label: 'Compare 2025 phones', query: 'best phones 2025' }] },
+    { type: 'citations', refs: [1] },
+  ];
+  assert.deepEqual([...citedSources(body)], [1]);
+  assert.deepEqual(sources.missingRefs(body), [3]);
+  assert.deepEqual(sources.missingRefs([...body.slice(0, 3), { type: 'citations', refs: [1, 3] }]), []);
+});
+
+test('pictures, next steps and numbers no source states add nothing to the citation list', () => {
+  const body: CardNode[] = [
+    { type: 'tile', label: 'Phone', value: 'Fast', imageSrc: 'https://img.example/3692.jpg' },
+    { type: 'text', text: 'About 799 dollars.' },
+    { type: 'choices', options: [{ label: '2025 models', prompt: 'phones released 2025' }] },
+  ];
+  assert.deepEqual(sources.missingRefs(body), []);
 });

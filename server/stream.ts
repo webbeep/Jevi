@@ -37,7 +37,7 @@ import type { AnswerCard, CardNode, FollowupContext, FollowupIntent, LayoutPlan 
 import { type AskRef, cardSearchQuery, plainFollowup, refContext, topicOf, usefulFollowups, withRef } from '../shared/askAbout';
 import type { EngineStatus, Freshness, ImageResult, SearchResponse, SearchResult } from '../shared/types';
 import { rewriteQuery } from './ai';
-import { type DesignRequest, designParallel, designStream, gateNode } from './design';
+import { type DesignRequest, designParallel, designStream, gateNode, sourceNumbersOf } from './design';
 import { BRIEF_ROWS, briefSources, remapBrief, type SourceBrief } from './brief';
 import { onTopicCount, rescueQuery, sourcesMiss } from './rescue';
 import { citesSources, keepPictures, reviewCard, type Review } from './review';
@@ -438,14 +438,27 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       send('node', { index: patch.index, node: patch.node });
     }
   };
+  const sourceNumbers = sourceNumbersOf(designReq);
+  // A number in a hero, tile or table has no citation of its own: the card's citation list names a page that states it.
+  const citeShown = () => {
+    const nodes = [...shown.values()];
+    const listed = [...shown].find(([, n]) => n.type === 'citations');
+    if (!listed && (chat || !designReq.search.results.length)) return;
+    const add = sourceNumbers.missingRefs(nodes);
+    if (!add.length) return;
+    if (listed?.[1].type === 'citations') shown.set(listed[0], { ...listed[1], refs: [...listed[1].refs, ...add] });
+    else shown.set(Math.max(-1, ...shown.keys()) + 1, { type: 'citations', refs: add });
+  };
   if (arrived.ready && arrived.review) applyReview(send, designReq, shown, arrived.review, started);
   settleComparison();
+  citeShown();
   publishReadings();
   send('done', { ...summary, pagesRead: pages.length, ms: Date.now() - started });
   if (pendingReview && !arrived.ready) {
     const review = await pendingReview;
     if (review) applyReview(send, designReq, shown, review, started);
     settleComparison();
+    citeShown();
     publishReadings();
     mark(scope.ledger, 'reviewed');
   } else if (pendingReview) {
