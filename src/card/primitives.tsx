@@ -506,16 +506,14 @@ export function Tile({ node }: { node: Of<'tile'> }) {
   const box: Box = { kind: isVerdict(value) ? 'verdict' : 'tile', label, value, entity };
   const ask = askQuestion(box);
   const ref: AskRef = { label, value, entity, sourceUrl: link?.url, snippet: link?.snippet };
-  // A picture slot with only a generic icon is a blank poster. Once this tile's own lookup is over, the name leads.
+  // The square is only for a real photo, or a short wait while one is loading. A generic icon in that box is empty space.
   const showPicture = !!img || pending;
-  const missedPicture = !noPhoto && wantsPicture(node) && !showPicture;
   return (
     <div
       data-item=""
       data-tile-kind={kind}
       className={cn(
-        'relative flex min-w-[7.5rem] max-w-full overflow-hidden rounded-xl border transition-colors has-[>button:hover]:border-foreground/20',
-        missedPicture ? 'flex-col items-start gap-0.5 px-3 py-2.5 text-left' : 'flex-col items-center gap-0.5 px-2 py-2.5 text-center sm:gap-1 sm:px-3 sm:py-3',
+        'relative flex min-w-[7.5rem] max-w-full flex-col items-center gap-0.5 overflow-hidden rounded-xl border px-2 py-2.5 text-center transition-colors has-[>button:hover]:border-foreground/20 sm:gap-1 sm:px-3 sm:py-3',
         node.active ? 'border-foreground/25 bg-muted ring-1 ring-foreground/10' : 'bg-card',
       )}
     >
@@ -529,30 +527,17 @@ export function Tile({ node }: { node: Of<'tile'> }) {
       )}
       <span
         className={cn(
-          'pointer-events-none relative flex max-w-full min-w-0 gap-1',
-          missedPicture ? 'text-[15px] font-semibold tracking-tight text-foreground' : 'justify-center text-[11px] font-medium text-muted-foreground',
-          !missedPicture && (isVerdict(node.value) ? 'min-h-[2lh] items-start' : 'items-center'),
+          'pointer-events-none relative flex max-w-full min-w-0 justify-center gap-1 text-[11px] font-medium text-muted-foreground',
+          isVerdict(node.value) ? 'min-h-[2lh] items-start' : 'items-center',
         )}
       >
-        {!showPicture && !missedPicture && !isVerdict(node.value) && <Icon name={icon} className="size-3.5 shrink-0 text-foreground/60" />}
-        <span className={cn('min-w-0 text-pretty [overflow-wrap:anywhere]', !missedPicture && 'line-clamp-2')}>{plain(node.label)}</span>
+        {!showPicture && !wantsPicture(node) && !isVerdict(node.value) && <Icon name={icon} className="size-3.5 shrink-0 text-foreground/60" />}
+        <span className="line-clamp-2 min-w-0 text-pretty [overflow-wrap:anywhere]">{plain(node.label)}</span>
         {link && <span className="-my-[3px] shrink-0"><SourceChip result={link} n={node.source!} /></span>}
       </span>
-      {!showPicture && !missedPicture && isVerdict(node.value) && <Icon name={icon} className="pointer-events-none relative size-[18px] text-foreground/70 sm:size-5" />}
-      {missedPicture ? (
-        (value || sub) && (
-          <span className="pointer-events-none relative max-w-full text-pretty text-[13px] leading-snug text-muted-foreground [overflow-wrap:anywhere]">
-            {value && <span className="font-medium text-foreground/80" style={{ color: returnColor(value, label) }}>{value}</span>}
-            {value && sub ? ' — ' : ''}
-            {sub && <RichText text={node.sub!} inline noLinks />}
-          </span>
-        )
-      ) : (
-        <>
-          {node.value && <span className="pointer-events-none relative max-w-full text-[15px] font-semibold tracking-tight [overflow-wrap:anywhere] sm:text-base" style={{ color: returnColor(plain(node.value), label) }}>{plain(node.value)}</span>}
-          {node.sub && <span className="pointer-events-none relative max-w-full text-pretty text-[11px] leading-tight text-muted-foreground [overflow-wrap:anywhere]"><RichText text={node.sub} inline noLinks /></span>}
-        </>
-      )}
+      {!showPicture && !wantsPicture(node) && isVerdict(node.value) && <Icon name={icon} className="pointer-events-none relative size-[18px] text-foreground/70 sm:size-5" />}
+      {node.value && <span className="pointer-events-none relative max-w-full text-[15px] font-semibold tracking-tight [overflow-wrap:anywhere] sm:text-base" style={{ color: returnColor(plain(node.value), label) }}>{plain(node.value)}</span>}
+      {node.sub && <span className="pointer-events-none relative max-w-full text-pretty text-[11px] leading-tight text-muted-foreground [overflow-wrap:anywhere]"><RichText text={node.sub} inline noLinks /></span>}
     </div>
   );
 }
