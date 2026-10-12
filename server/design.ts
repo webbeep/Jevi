@@ -4,7 +4,7 @@ import { knowledgeMatches } from '../shared/relevance';
 import type { SearchResponse } from '../shared/types';
 import { hasLlm, llmLines } from './llm';
 import { candidates, extractStats, extractTimeline } from './extract';
-import { Grounding, groundNodes } from './ground';
+import { Grounding, groundNodes, SourceNumbers } from './ground';
 import { PictureResolver, type RowImagePlan } from './pictures';
 import { Polisher } from './polish';
 import type { PageText } from './pages';
@@ -141,15 +141,17 @@ export interface DesignSummary {
   via?: string;
 }
 
+const NAME_THE_ANSWER = ' A "who" or "which" question is answered by name in the lead (the player, product, place or plan), never only by a description such as "the No. 7 pick" or "the cheaper one"; when the sources do not name it, say so.';
+
 function followupRules(f: FollowupContext | undefined, originalQuery: string): string {
   if (!f) return '';
   switch (f.mode) {
     case 'refine':
       return `\n\nTHIS IS AN ADJUSTED VERSION of CURRENT CARD (below), which answered "${originalQuery}". The person asked: "${f.question}". Output a complete new card that applies the change: keep the same subject and everything that still applies, restructure freely if the change calls for a different layout, and make the change obvious in the subtitle. Mark the matching choices option as selected and move any slider or scaler to the requested value. The original card stays on screen above, so do not describe what changed in prose.`;
     case 'answer':
-      return `\n\nTHIS IS A FOLLOW-UP. The original search was "${originalQuery}". Design a focused card that answers only the follow-up question "${f.question}". Do not repeat the original answer; pick the components that fit this question best.`;
+      return `\n\nTHIS IS A FOLLOW-UP. The original search was "${originalQuery}". Design a focused card that answers only the follow-up question "${f.question}". Do not repeat the original answer; pick the components that fit this question best.${NAME_THE_ANSWER}`;
     case 'chat':
-      return `\n\nTHIS IS A CONVERSATION TURN, NOT A SEARCH. Reply to "${f.question}" like a thoughtful expert assistant: understand what they really need given the conversation, think it through, and give a direct, confident answer first, then the reasoning or steps that support it. Use the conversation, your general knowledge and the SOURCES where relevant. You may reason, calculate, compare, plan and advise here. Do not invent current specifics (today's prices, recent events, live figures, exact specs you are unsure of); when those matter, say what to check and add a "search" action for it. Only cite [n] when a statement really comes from that source.`;
+      return `\n\nTHIS IS A CONVERSATION TURN, NOT A SEARCH. Reply to "${f.question}" like a thoughtful expert assistant: understand what they really need given the conversation, think it through, and give a direct, confident answer first, then the reasoning or steps that support it. Use the conversation, your general knowledge and the SOURCES where relevant. You may reason, calculate, compare, plan and advise here. Do not invent current specifics (today's prices, recent events, live figures, exact specs you are unsure of); when those matter, say what to check and add a "search" action for it. Only cite [n] when a statement really comes from that source.${NAME_THE_ANSWER}`;
     default: {
       const unreachable: never = f.mode;
       return unreachable;
@@ -303,6 +305,20 @@ export function corpusOf(req: DesignRequest): string {
   ].join(' ');
 }
 
+/** What each citable source states, so a cited number points at the page that has it. */
+export function sourceNumbersOf(req: DesignRequest): SourceNumbers {
+  const rejected = rejectedSources(req.brief, Math.min(req.search.results.length, BRIEF_ROWS));
+  return new SourceNumbers([
+    ...req.search.results.map((r, i) => ({ n: i + 1, text: `${r.title} ${r.snippet} ${r.date ?? ''} ${r.content ?? ''}` })),
+    ...req.pages.map((p) => ({ n: p.n, text: p.text })),
+  ].filter((s) => !rejected.has(s.n)));
+}
+
+/** Number grounding for this request; follow-up conversation turns may reason past the sources. */
+function groundingFor(req: DesignRequest, lenient: boolean): Grounding {
+  return new Grounding(corpusOf(req), lenient, sourceNumbersOf(req));
+}
+
 type Parsed = { kind: 'head'; head: Omit<AnswerCard, 'body'> } | { kind: 'node'; node: CardNode } | { kind: 'followups'; items: string[] } | { kind: 'dropped' };
 
 /** Parses one streamed output line into a sanitized, grounded piece of the card. */
@@ -363,7 +379,7 @@ function parseLine(line: string, g: Grounding, imageCount: number, query: string
     return { kind: 'head', head: { title: head.title, subtitle: head.subtitle && g.ok(head.subtitle) ? head.subtitle : undefined, icon: head.icon, accent: head.accent } };
   }
   const [clean] = sanitizeNodes([obj], imageCount, 0, { sources, query: seatQuery ?? query });
-  const [grounded] = clean ? groundNodes([clean], g) : [];
+  const [grounded] = clean ? groundNodes([clean], g).map((n) => g.recite(n)) : [];
   const fitted = grounded ? fitNode(grounded, seatQuery ?? query) : undefined;
   const shown = fitted ? dropModelDiagram(fitted) : undefined;
   return shown ? { kind: 'node', node: shown } : { kind: 'dropped' };
@@ -371,7 +387,7 @@ function parseLine(line: string, g: Grounding, imageCount: number, query: string
 
 /** A node written outside the design stream (the answer review) passes the same sanitize and grounding gates. */
 export function gateNode(raw: unknown, req: DesignRequest): CardNode | undefined {
-  const g = new Grounding(corpusOf(req), req.followup?.mode === 'chat');
+  const g = groundingFor(req, req.followup?.mode === 'chat');
   const parsed = parseLine(JSON.stringify(raw), g, Math.min(req.search.images.length, 12), req.query, priceSources(req), req.followup?.question ?? req.query);
   const node = parsed?.kind === 'node' ? emitReady(parsed.node, req.search.results.length === 0) : undefined;
   return req.ticker ? withoutCharts(node) : node;
@@ -404,7 +420,7 @@ export async function designStream(req: DesignRequest, env: Env, on: DesignEvent
   if (!hasLlm(env)) return extractive(req, on);
 
   const chat = req.followup?.mode === 'chat';
-  const g = new Grounding(corpusOf(req), chat);
+  const g = groundingFor(req, chat);
   const polish = new Polisher(textCap(req));
   const pictures = new PictureResolver(env, req.search.images, on.credit, req.query, undefined, req.rowImages && { ...req.rowImages, results: req.search.results });
   const emitNode = bindVerdict(req, on.node);
@@ -475,7 +491,7 @@ export async function designStream(req: DesignRequest, env: Env, on: DesignEvent
     console.warn('design fallback', JSON.stringify({ via: via ?? null, lines, unparsed, removed, head: headSent, failure: failure?.slice(0, 200) ?? null }));
     return extractive(req, on);
   }
-  if (!chat) on.beginReview?.();
+  on.beginReview?.();
   await pictures.flush();
   return { engine: chat ? 'reasoning' : 'composed', removed, via };
 }
@@ -526,7 +542,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
   const regions = diagramOn ? layoutWithDiagram(baseLayout, !!lead) : baseLayout;
   on.layout(regions);
   const sources = priceSources(req);
-  const g = new Grounding(corpusOf(req));
+  const g = groundingFor(req, false);
   const pictures = new PictureResolver(env, req.search.images, on.credit, req.query, undefined, req.rowImages && { ...req.rowImages, results: req.search.results });
   const emitNode = bindVerdict(req, on.node);
   const polish = new Polisher(textCap(req));

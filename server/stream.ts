@@ -37,10 +37,10 @@ import type { AnswerCard, CardNode, FollowupContext, FollowupIntent, LayoutPlan 
 import { type AskRef, cardSearchQuery, plainFollowup, refContext, topicOf, usefulFollowups, withRef } from '../shared/askAbout';
 import type { EngineStatus, Freshness, ImageResult, SearchResponse, SearchResult } from '../shared/types';
 import { rewriteQuery } from './ai';
-import { type DesignRequest, designParallel, designStream, gateNode } from './design';
+import { type DesignRequest, designParallel, designStream, gateNode, sourceNumbersOf } from './design';
 import { BRIEF_ROWS, briefSources, remapBrief, type SourceBrief } from './brief';
 import { onTopicCount, rescueQuery, sourcesMiss } from './rescue';
-import { keepPictures, reviewCard, type Review } from './review';
+import { citesSources, keepPictures, reviewCard, type Review } from './review';
 import { permitted } from './images';
 import { hasLlm } from './llm';
 import { collectPages, ogImageOf } from './pages';
@@ -54,7 +54,7 @@ import { type LateExtras, normalizeUrl, searchWithLate } from './search';
 import type { WebHit } from './cascade';
 import { domainOf } from './util';
 import { choicesIn, distinctActions, subjectWords } from './chips';
-import { anchoredFollowup, asksToCompare, cryptographyHint, faithfulQuery, isWritingAsk, needsOwnSearch, personQuestion, quickPlan, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
+import { anchoredFollowup, asksToCompare, cryptographyHint, faithfulQuery, isWritingAsk, missingSpec, needsOwnSearch, personQuestion, quickPlan, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
 import { comparisonRepair, comparisonTitle } from './compareAnswer';
 import { withFinishedSentences } from './polish';
 import { queryWithPlace, readerPlace, settleReadings } from './readings';
@@ -397,8 +397,11 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       if (followups.length) send('followups', followups);
     },
     credit: (credit) => send('credit', credit),
-    beginReview: !chat && req.followup?.mode !== 'refine' ? () => {
+    beginReview: req.followup?.mode !== 'refine' ? () => {
+      // A conversation turn is reviewed only when it leans on the sources: a draft, code or pure reasoning has nothing to check.
+      if (chat && !citesSources([...shown.values()])) return;
       pendingReview = reviewCard({
+        conversation: chat,
         query: designReq.followup?.question ?? designReq.query,
         context: designReq.context,
         brief: designReq.brief,
@@ -435,14 +438,27 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       send('node', { index: patch.index, node: patch.node });
     }
   };
+  const sourceNumbers = sourceNumbersOf(designReq);
+  // A number in a hero, tile or table has no citation of its own: the card's citation list names a page that states it.
+  const citeShown = () => {
+    const nodes = [...shown.values()];
+    const listed = [...shown].find(([, n]) => n.type === 'citations');
+    if (!listed && (chat || !designReq.search.results.length)) return;
+    const add = sourceNumbers.missingRefs(nodes);
+    if (!add.length) return;
+    if (listed?.[1].type === 'citations') shown.set(listed[0], { ...listed[1], refs: [...listed[1].refs, ...add] });
+    else shown.set(Math.max(-1, ...shown.keys()) + 1, { type: 'citations', refs: add });
+  };
   if (arrived.ready && arrived.review) applyReview(send, designReq, shown, arrived.review, started);
   settleComparison();
+  citeShown();
   publishReadings();
   send('done', { ...summary, pagesRead: pages.length, ms: Date.now() - started });
   if (pendingReview && !arrived.ready) {
     const review = await pendingReview;
     if (review) applyReview(send, designReq, shown, review, started);
     settleComparison();
+    citeShown();
     publishReadings();
     mark(scope.ledger, 'reviewed');
   } else if (pendingReview) {
@@ -1004,15 +1020,21 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
     ? Promise.resolve(anchored ?? req.question)
     : rewriteQuery(req.original, req.question, env, context, from?.title).catch(() => req.question);
   const plan = await planLayout(req.question, env, { original: req.original, cards: req.cards.map(({ id, title }) => ({ id, title })), context });
-  const mode = req.intent === 'adjust' ? 'refine' : req.intent === 'ask' && plan.mode === 'refine' ? 'answer' : plan.mode ?? 'chat';
+  const planned = req.intent === 'adjust' ? 'refine' : req.intent === 'ask' && plan.mode === 'refine' ? 'answer' : plan.mode ?? 'chat';
+  const mode = (planned === 'answer' || planned === 'chat') && missingSpec(req.question, req.search?.results ?? []) ? 'search' : planned;
 
   switch (mode) {
     case 'search': {
-      send('plan', plan);
+      send('plan', { ...plan, mode });
       const host = req.cards.find((c) => c.id === req.from);
       const entity = req.ref?.entity ?? topicOf(host?.card?.title) ?? topicOf(host?.title);
       const ref = req.ref ? { ...req.ref, ...(entity ? { entity } : {}) } : undefined;
-      const query = faithfulQuery(req.question, withRef(await rewritten, ref));
+      // A follow-up the planner meant to answer from the card ("which is lightest for travel?") names no subject of its own.
+      const own = await rewritten;
+      const resolved = mode !== planned && own === req.question
+        ? await rewriteQuery(req.original, req.question, env, context, from?.title).catch(() => req.question)
+        : own;
+      const query = faithfulQuery(req.question, withRef(resolved, ref));
       send('rewrite', { query });
       await searchAndDesign(send, env, query, 'any', context, started, scope, true, req.ref ? req.search?.results : undefined);
       return;

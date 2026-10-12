@@ -88,6 +88,32 @@ export function needsOwnSearch(question: string, covered: string): boolean {
   return !covered.toLowerCase().includes(name.toLowerCase());
 }
 
+/** A measurable attribute a follow-up asks about, and what a source that states it looks like. */
+const SPECS: { asks: RegExp; states: RegExp }[] = [
+  {
+    asks: /\b(lightest|lighter|lightweight|heaviest|heavier|weighs?|weight)\b/i,
+    states: /\bweigh(s|t|ing)?\b|\b\d+(?:\.\d+)?\s?(?:g|grams?|kg|oz|ounces?|lbs?|pounds?)\b/i,
+  },
+  { asks: /\bbattery\b|\blasts? longer\b/i, states: /\bbattery\b|\bmah\b|\b\d+\s?(?:hours?|hrs?|h)\b/i },
+  {
+    asks: /\b(price|prices|priced|cost|costs|cheap|cheaper|cheapest|expensive|pricier|affordable)\b/i,
+    states: /[$€£¥₹]\s?\d|\b\d+(?:\.\d+)?\s?(?:usd|eur|gbp|dollars?|euros?|pounds?)\b|\bpric(e|es|ed|ing)\b|\bmsrp\b/i,
+  },
+  { asks: /\b(calories|calorie|kcal)\b/i, states: /\b(calories|calorie|kcal)\b/i },
+];
+
+/**
+ * "Which is lightest for travel?" when none of the gathered sources states a weight: answering from
+ * them can only say "not listed", so the follow-up searches for that attribute instead.
+ */
+export function missingSpec(question: string, rows: { title: string; snippet?: string; content?: string }[]): boolean {
+  if (!rows.length || isWritingAsk(question)) return false;
+  const asked = SPECS.filter((s) => s.asks.test(question));
+  if (!asked.length) return false;
+  const text = rows.map((r) => `${r.title} ${r.snippet ?? ''} ${r.content ?? ''}`).join('\n');
+  return asked.some((s) => !s.states.test(text));
+}
+
 /**
  * The rewritten query, or the person's own words when the rewrite dropped them or picked up a ban notice.
  * "Draft the unblock email" shares nothing with "Takes Two, 2a06:…", so the email is what gets answered.
