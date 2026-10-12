@@ -102,3 +102,66 @@ test('a product row still gets its pictures when the rest of the card finishes f
   assert.equal(done?.type, 'list');
   if (done?.type === 'list') assert.equal(done.items.every((item) => !!item.imageSrc), true);
 });
+
+test('a softmax caption drops a page preview and keeps a real heatmap', () => {
+  const preview: ImageResult = {
+    url: 'https://www.ibm.com/blog/attention',
+    thumb: 'https://assets.ibm.com/is/image/ibm/attention-leadspace.jpg',
+    title: 'Attention mechanism',
+    source: 'ibm.com',
+    license: 'source',
+  };
+  const heatmap: ImageResult = {
+    url: 'https://en.wikipedia.org/wiki/Attention',
+    thumb: 'https://upload.wikimedia.org/wikipedia/commons/attention-heatmap.png',
+    title: 'Attention heatmap',
+    source: 'wikipedia',
+    license: 'open',
+  };
+  const caption = 'Each row is a token; brighter cells are the tokens it listens to most';
+  const dropped: CardNode[] = [];
+  new PictureResolver({} as Env, [preview], () => undefined, 'Explain how an LLM attention layer works')
+    .emit({ type: 'image', ref: 0, caption, aspect: 'wide' }, 0, (node) => dropped.push(node));
+  const gone = dropped[0];
+  assert.equal(gone?.type, 'image');
+  if (gone?.type !== 'image') return;
+  assert.equal(gone.ref, undefined);
+  assert.equal(gone.src, undefined);
+  assert.equal(gone.query, undefined);
+  assert.match(gone.caption ?? '', /brighter cells/);
+
+  const kept: CardNode[] = [];
+  new PictureResolver({} as Env, [heatmap], () => undefined, 'Explain how an LLM attention layer works')
+    .emit({ type: 'image', ref: 0, caption, aspect: 'wide' }, 0, (node) => kept.push(node));
+  const stay = kept[0];
+  assert.equal(stay?.type, 'image');
+  if (stay?.type !== 'image') return;
+  assert.equal(stay.ref, 0);
+});
+
+test('a softmax picture query does not search for a stand-in photo', async () => {
+  let lookups = 0;
+  const shown: CardNode[] = [];
+  const resolver = new PictureResolver({} as Env, [{
+    url: 'https://www.ibm.com/blog/attention',
+    thumb: 'https://assets.ibm.com/is/image/ibm/attention-leadspace.jpg',
+    title: 'Attention mechanism',
+    source: 'ibm.com',
+    license: 'source',
+  }], () => undefined, 'Explain how an LLM attention layer works', async () => {
+    lookups += 1;
+    return [];
+  });
+  resolver.emit({
+    type: 'image',
+    query: 'softmax attention heatmap',
+    caption: 'Each row is a token; brighter cells are the tokens it listens to most',
+  }, 0, (node) => shown.push(node));
+  await resolver.flush();
+  assert.equal(lookups, 0);
+  const last = shown.at(-1);
+  assert.equal(last?.type, 'image');
+  if (last?.type !== 'image') return;
+  assert.equal(last.src, undefined);
+  assert.equal(last.query, undefined);
+});
