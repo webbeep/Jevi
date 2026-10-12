@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import { handleSaveCollection, handleSaveItem } from '../server/auth/saves.ts';
 import { signSessionToken } from '../server/auth/session.ts';
 import type { Env } from '../server/util.ts';
+import { d1Prepare } from './d1mem.ts';
 
 const SECRET = 'test-session-secret-32chars!!';
 
@@ -33,22 +34,7 @@ function mem() {
   `);
   const d1 = {
     prepare(sql: string) {
-      return {
-        bind(...args: unknown[]) {
-          return {
-            async first() {
-              return db.prepare(sql).get(...(args as [])) ?? null;
-            },
-            async all() {
-              return { results: db.prepare(sql).all(...(args as [])) };
-            },
-            async run() {
-              const result = db.prepare(sql).run(...(args as []));
-              return { success: true, meta: { changes: result.changes } };
-            },
-          };
-        },
-      };
+      return d1Prepare(db, sql);
     },
   };
   return { db, env: { DB: d1, SESSION_SECRET: SECRET, AUTH_ENABLED: 'true', GATE_ANON_PER_DAY: '5' } as unknown as Env };

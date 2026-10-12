@@ -3,6 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { EVENT_MAX_BYTES, EVENT_NAMES, recordEvent } from '../server/auth/events.ts';
 import type { Env } from '../server/util.ts';
+import { d1Prepare } from './d1mem.ts';
 
 function mem() {
   const db = new DatabaseSync(':memory:');
@@ -17,22 +18,7 @@ function mem() {
   `);
   const d1 = {
     prepare(sql: string) {
-      return {
-        bind(...args: unknown[]) {
-          return {
-            async first() {
-              return db.prepare(sql).get(...(args as [])) ?? null;
-            },
-            async all() {
-              return { results: db.prepare(sql).all(...(args as [])) };
-            },
-            async run() {
-              const result = db.prepare(sql).run(...(args as []));
-              return { success: true, meta: { changes: result.changes } };
-            },
-          };
-        },
-      };
+      return d1Prepare(db, sql);
     },
   };
   return { db, env: { DB: d1 } as unknown as Env };

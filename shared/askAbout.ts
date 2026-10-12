@@ -414,6 +414,19 @@ export function queryForLabel(label: string, query: string): string {
   return q.replace(/\s+/g, ' ').trim() || query.trim();
 }
 
+/**
+ * A search button whose label is not already the card's question.
+ * "apple varieties" on "apple pie recipe" stays about the pie.
+ * A label that already is that question is left as written.
+ */
+export function cardSearchQuery(label: string, subject: string): string {
+  const picked = label.trim();
+  const base = subject.trim();
+  if (!picked) return base;
+  if (!base || base.toLowerCase() === picked.toLowerCase()) return picked;
+  return queryForLabel(picked, base);
+}
+
 const normFollow = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
 
 /** "What is Priya Natarajan?" is just the person. A company or a real question stays as written. */

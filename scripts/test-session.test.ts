@@ -6,6 +6,7 @@ import { handleSaveCollection } from '../server/auth/saves.ts';
 import { currentUser } from '../server/auth/session.ts';
 import { handleTestSession } from '../server/auth/testSession.ts';
 import type { Env } from '../server/util.ts';
+import { d1Prepare } from './d1mem.ts';
 
 const SECRET = 'test-session-secret-32chars!!';
 
@@ -54,22 +55,7 @@ function mem(track = true) {
   const d1 = {
     prepare(sql: string) {
       prepares += 1;
-      return {
-        bind(...args: unknown[]) {
-          return {
-            async first() {
-              return db.prepare(sql).get(...(args as [])) ?? null;
-            },
-            async all() {
-              return { results: db.prepare(sql).all(...(args as [])) };
-            },
-            async run() {
-              const result = db.prepare(sql).run(...(args as []));
-              return { success: true, meta: { changes: result.changes } };
-            },
-          };
-        },
-      };
+      return d1Prepare(db, sql);
     },
   };
   const env = {

@@ -41,6 +41,9 @@ function itemEntity(text: string): string {
  */
 export const PICTURE_WAIT_MS = 1500;
 
+/** Product-row lookups start while the card is still being written, and may finish shortly after the text. */
+const ROW_FILL_WAIT_MS = 2500;
+
 export class PictureResolver {
   private readonly pending: Promise<void>[] = [];
 
@@ -202,6 +205,12 @@ export class PictureResolver {
 
   /** Remote lookups left for this card; each costs one or more of the request's 50 subrequests. */
   private lookupsLeft = 10;
+  /** Blank product rows fill one after another so two rows cannot claim the same picture. */
+  private fillQueue: Promise<void> = Promise.resolve();
+  /** Product rows looked up as soon as they were shown get a longer finish wait than other pictures. */
+  private rowFillStarted = false;
+  /** Picture work started when the row was shown, reported once when the card finishes. */
+  private rowStats = { imageCalls: 0, og: 0, filled: 0 };
 
   private accepts(query: string, img: ImageResult, allowGeneric: boolean): boolean {
     if (this.used.has(img.thumb) || isComposite(img)) return false;
@@ -291,20 +300,50 @@ export class PictureResolver {
     track(vetted);
     // Start the card's one picture search early so it is ready when the card completes.
     if (this.rows?.cardImages && hasBlankPictures(vetted, this.ctx)) void this.rows.cardImages();
-    if (!PictureResolver.needs(vetted)) return;
-    this.pending.push(
-      this.resolve(vetted)
-        .then((patched) => track(patched))
-        .catch((err) => console.error('picture lookup failed', err)),
-    );
+    if (PictureResolver.needs(vetted)) {
+      this.pending.push(
+        this.resolve(vetted)
+          .then((patched) => track(patched))
+          .catch((err) => console.error('picture lookup failed', err)),
+      );
+      return;
+    }
+    // A ranked list names each product and leaves the picture blank. Looking them up only after the
+    // card is written misses the short wait before done, so the row is still empty (running shoes).
+    if (this.rows && hasBlankPictures(vetted, this.ctx)) this.startRowFill(vetted, track);
   }
 
-  /** Waits (at most `capMs`) for outstanding lookups and row pictures, so the card is complete before it is marked done. */
+  /** Fills one node's blank rows. Queued so later nodes see pictures the earlier ones already took. */
+  private startRowFill(node: CardNode, track: (n: CardNode) => void): void {
+    this.rowFillStarted = true;
+    const job = this.fillQueue.then(async () => {
+      const patched = await this.fillNode(node);
+      if (patched) track(patched);
+    }).catch((err) => console.error('row pictures failed', err));
+    this.fillQueue = job;
+    this.pending.push(job);
+  }
+
+  private async fillNode(node: CardNode): Promise<CardNode | undefined> {
+    if (!this.rows) return undefined;
+    const filled = await fillRowImages([node], { lookup: (entity) => this.find(entity, this.env, 3, false), ...this.rows, pool: this.pool, onCredit: this.onCredit }, this.used);
+    this.rowStats.imageCalls = Math.max(this.rowStats.imageCalls, filled.imageCalls);
+    this.rowStats.og += filled.og;
+    if (filled.changed[0]) this.rowStats.filled += 1;
+    return filled.changed[0] ? filled.nodes[0] : undefined;
+  }
+
+  /**
+   * Waits for outstanding lookups and row pictures, so the card is complete before it is marked done.
+   * Product rows already started while the rest of the card was written; they keep going until they
+   * finish or ROW_FILL_WAIT_MS, whichever is first. Other picture lookups stay on the short cap.
+   */
   async flush(capMs = PICTURE_WAIT_MS): Promise<void> {
     const started = Date.now();
+    const wait = this.rowFillStarted ? Math.max(capMs, ROW_FILL_WAIT_MS) : capMs;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const cap = new Promise<'cap'>((resolve) => {
-      timer = setTimeout(() => resolve('cap'), capMs);
+      timer = setTimeout(() => resolve('cap'), wait);
     });
     const done = await Promise.race([this.flushAll().then(() => 'ok' as const), cap]);
     if (timer !== undefined) clearTimeout(timer);
@@ -321,13 +360,15 @@ export class PictureResolver {
     try {
       const entries = [...this.latest.entries()];
       const filled = await fillRowImages(entries.map(([, e]) => e.node), { lookup: (entity) => this.find(entity, this.env, 3, false), ...this.rows, pool: this.pool, onCredit: this.onCredit }, this.used);
-      let count = 0;
+      this.rowStats.imageCalls = Math.max(this.rowStats.imageCalls, filled.imageCalls);
+      this.rowStats.og += filled.og;
+      let count = this.rowStats.filled;
       entries.forEach(([index, e], i) => {
         if (!filled.changed[i] || this.closed) return;
         count += 1;
         e.emit(filled.nodes[i], index);
       });
-      this.rows.onFilled?.({ imageCalls: filled.imageCalls, og: filled.og, filled: count });
+      this.rows.onFilled?.({ imageCalls: this.rowStats.imageCalls, og: this.rowStats.og, filled: count });
     } catch (err) {
       console.error('row pictures failed', err);
     }

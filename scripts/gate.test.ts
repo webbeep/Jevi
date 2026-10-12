@@ -11,6 +11,7 @@ import { logout, me, returnTarget, safeReturnPath, signInCallbackUrls } from '..
 import { recordEvent } from '../server/auth/events.ts';
 import { signSessionToken, type ZoUser } from '../server/auth/session.ts';
 import type { Env } from '../server/util.ts';
+import { d1Prepare } from './d1mem.ts';
 
 const SECRET = 'test-session-secret-32chars!!';
 const IP = '203.0.113.44';
@@ -26,22 +27,7 @@ function mem(opts?: { window?: boolean }) {
   }
   const d1 = {
     prepare(sql: string) {
-      return {
-        bind(...args: unknown[]) {
-          return {
-            async first() {
-              return db.prepare(sql).get(...(args as [])) ?? null;
-            },
-            async all() {
-              return { results: db.prepare(sql).all(...(args as [])) };
-            },
-            async run() {
-              const result = db.prepare(sql).run(...(args as []));
-              return { success: true, meta: { changes: result.changes } };
-            },
-          };
-        },
-      };
+      return d1Prepare(db, sql);
     },
     async batch(statements: Array<{ all: () => Promise<{ results: unknown[] }> }>) {
       db.exec('BEGIN');

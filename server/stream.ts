@@ -33,7 +33,7 @@ import { fetchWikiDisambiguation, fetchWikiLeadImage } from './wikiSearch';
 import { type EntityHint, mentionsAny } from './imageGate';
 import type { RowImagePlan } from './pictures';
 import type { AnswerCard, CardNode, FollowupContext, FollowupIntent, LayoutPlan } from '../shared/card';
-import { type AskRef, refContext, topicOf, usefulFollowups, withRef } from '../shared/askAbout';
+import { type AskRef, cardSearchQuery, refContext, topicOf, usefulFollowups, withRef } from '../shared/askAbout';
 import type { EngineStatus, Freshness, ImageResult, SearchResponse, SearchResult } from '../shared/types';
 import { rewriteQuery } from './ai';
 import { type DesignRequest, designParallel, designStream, gateNode } from './design';
@@ -935,7 +935,9 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
       await searchAndDesign(send, env, query, 'any', [chosen, pickContext].filter(Boolean).join('\n'), started, scope, true, req.search?.results);
       return;
     }
-    const query = picked;
+    // A Which-one? pick is already the person to search. Any other search button is a short label
+    // for this card ("apple varieties" on an apple pie card), so the search keeps that subject.
+    const query = person ? picked : cardSearchQuery(picked, askedQuestions(req.context)[0] ?? req.original);
     send('rewrite', { query });
     // EN4 part 8: the rows that produced these choices come along, so the pick never comes back empty.
     await searchAndDesign(send, env, query, 'any', pickContext, started, scope, true, req.search?.results);
