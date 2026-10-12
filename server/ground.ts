@@ -117,6 +117,8 @@ function groundNode(node: CardNode, g: Grounding): CardNode | undefined {
     case 'pricing':
     // Built from a quote feed by the server, not written by the model.
     case 'ticker':
+    // Stages were checked against the sources before this node was kept.
+    case 'diagram':
       return node;
     case 'scaler': {
       const items = node.items.filter((i) => g.ok(i.amount));

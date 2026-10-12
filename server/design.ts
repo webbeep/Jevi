@@ -21,6 +21,8 @@ import { guessFreshness, stricter } from './freshness';
 import { isQuoteRow } from './liveQuote';
 import { BRIEF_ROWS, rejectedSources, type SourceBrief } from './brief';
 import { CHART_TALK, withoutCharts } from '../shared/tickerNotes';
+import { diagramIntent, diagramRegionIndex, diagramSlotAt, diagramsEnabled, dropModelDiagram, layoutWithDiagram } from '../shared/diagram';
+import { requestDiagram } from './diagramAsk';
 
 const GRAMMAR = `Each node is a JSON object with a "type" field.
 LAYOUT
@@ -356,7 +358,8 @@ function parseLine(line: string, g: Grounding, imageCount: number, query: string
   const [clean] = sanitizeNodes([obj], imageCount, 0, { sources, query: seatQuery ?? query });
   const [grounded] = clean ? groundNodes([clean], g) : [];
   const fitted = grounded ? fitNode(grounded, seatQuery ?? query) : undefined;
-  return fitted ? { kind: 'node', node: fitted } : { kind: 'dropped' };
+  const shown = fitted ? dropModelDiagram(fitted) : undefined;
+  return shown ? { kind: 'node', node: shown } : { kind: 'dropped' };
 }
 
 /** A node written outside the design stream (the answer review) passes the same sanitize and grounding gates. */
@@ -367,7 +370,7 @@ export function gateNode(raw: unknown, req: DesignRequest): CardNode | undefined
   return req.ticker ? withoutCharts(node) : node;
 }
 
-const NODE_TYPES = new Set<string>(['stack', 'grid', 'section', 'tabs', 'scroller', 'divider', 'hero', 'heading', 'text', 'stat', 'tile', 'keyvalue', 'list', 'chart', 'progress', 'rating', 'table', 'timeline', 'steps', 'proscons', 'badges', 'quote', 'callout', 'draft', 'code', 'links', 'video', 'image', 'gallery', 'profile', 'actions', 'choices', 'slider', 'scaler', 'pricing', 'accordion', 'reveal', 'citations'] satisfies CardNode['type'][]);
+const NODE_TYPES = new Set<string>(['stack', 'grid', 'section', 'tabs', 'scroller', 'divider', 'hero', 'heading', 'text', 'stat', 'tile', 'keyvalue', 'list', 'chart', 'progress', 'rating', 'table', 'timeline', 'steps', 'diagram', 'proscons', 'badges', 'quote', 'callout', 'draft', 'code', 'links', 'video', 'image', 'gallery', 'profile', 'actions', 'choices', 'slider', 'scaler', 'pricing', 'accordion', 'reveal', 'citations'] satisfies CardNode['type'][]);
 
 /** Explanations and conversation turns may run longer; everything else stays glanceable. */
 function textCap(req: DesignRequest): number {
@@ -399,7 +402,9 @@ export async function designStream(req: DesignRequest, env: Env, on: DesignEvent
   const pictures = new PictureResolver(env, req.search.images, on.credit, req.query, undefined, req.rowImages && { ...req.rowImages, results: req.search.results });
   const emitNode = bindVerdict(req, on.node);
   const base = req.followup?.mode === 'refine' && req.followup.baseCard ? `CURRENT CARD\n${JSON.stringify(req.followup.baseCard).slice(0, 12000)}\n\n` : '';
-  const user = `${sourcesBlock(req.search, req.pages)}\n\n${base}SKELETON\n${JSON.stringify(patternSkeleton(req.pattern, req.followup?.question ?? req.query))}\n\nTASK\n${taskBlock(req)}\n\nQUERY: ${req.followup?.question ?? req.query}`;
+  const asked = req.followup?.question ?? req.query;
+  const diagramTask = diagramsEnabled(env.ZO_DIAGRAMS) && diagramIntent(asked) ? requestDiagram(env, asked, corpusOf(req)) : Promise.resolve(undefined);
+  const user = `${sourcesBlock(req.search, req.pages)}\n\n${base}SKELETON\n${JSON.stringify(patternSkeleton(req.pattern, asked))}\n\nTASK\n${taskBlock(req)}\n\nQUERY: ${asked}`;
 
   let headSent = false;
   let index = 0;
@@ -452,6 +457,11 @@ export async function designStream(req: DesignRequest, env: Env, on: DesignEvent
     console.error('Design stream failed', err);
     failure = err instanceof Error ? err.message : String(err);
   }
+  const diagram = await diagramTask;
+  if (diagram && contentNodes < MAX_CONTENT_NODES) {
+    contentNodes++;
+    pictures.emit(diagram, index++, emitNode);
+  }
   if (!contentNodes) {
     await pictures.flush();
     // One line per fallback so `wrangler pages deployment tail` shows why the model gave no card.
@@ -502,8 +512,11 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
   if (!hasLlm(env)) return extractive(req, on);
 
   const lead = videoLead(req);
-  const skeleton = patternSkeleton(req.pattern, req.followup?.question ?? req.query);
-  const regions = lead ? [lead, ...skeleton] : skeleton;
+  const query = req.followup?.question ?? req.query;
+  const skeleton = patternSkeleton(req.pattern, query);
+  const diagramOn = diagramsEnabled(env.ZO_DIAGRAMS) && diagramIntent(query) !== null;
+  const baseLayout = lead ? [lead, ...skeleton] : skeleton;
+  const regions = diagramOn ? layoutWithDiagram(baseLayout, !!lead) : baseLayout;
   on.layout(regions);
   const sources = priceSources(req);
   const g = new Grounding(corpusOf(req));
@@ -511,13 +524,11 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
   const emitNode = bindVerdict(req, on.node);
   const polish = new Polisher(textCap(req));
   const shared = `${sourcesBlock(req.search, req.pages, 2800)}\n\nTASK\n${taskBlock(req)}\n- Card regions, top to bottom:\n${skeleton.map((r, i) => `  R${i + 1}: ${regionPurpose(r)}`).join('\n')}${lead?.type === 'video' ? `\n  (Above R1 the card already plays VIDEO source [${lead.source}]; don't add another video node for it.)` : ''}\n  FINISH: header, interactive control, actions, citations, follow-ups`;
-  const query = req.followup?.question ?? req.query;
-
   let contentNodes = 0;
   let removed = 0;
 
   let headSentAny = false;
-  const regionCall = (region: CardNode, i: number, offset: number) => {
+  const regionCall = (region: CardNode, i: number) => {
     const user = `${shared}\n- YOU DESIGN R${i + 1}: ${JSON.stringify(region)}. The person is already looking at this arrangement, so keep it: a grid stays that grid, a stack stays that stack, a section keeps its title. Replace each slot with the component its shape names: a tile stays a tile, a table becomes a table with the same number of columns, steps stay steps, proscons stays proscons, a timeline stays a timeline, a hero becomes a hero or stat, a block becomes text, keyvalue or list. A chart slot stays a chart only for a ranking or a trend; a schedule, a tip-off, or a slate of scores becomes a table.${i === 0 ? ' R1 is the lead: it must answer the question at a glance.' : ''}\n- Output exactly one line: one JSON node.\n\nQUERY: ${query}`;
     let done = false;
     return llmLines(env, SYSTEM_REGION, user, 1200, (line) => {
@@ -528,7 +539,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
         const node = emitReady(polish.apply(parsed.node), req.search.results.length === 0);
         if (!node || (node.type === 'video' && lead?.type === 'video' && node.source === lead.source)) return;
         contentNodes++;
-        pictures.emit(node, i + offset, emitNode);
+        pictures.emit(node, diagramRegionIndex(i, !!lead, diagramOn), emitNode);
       } else if (parsed?.kind === 'dropped') removed++;
     });
   };
@@ -573,8 +584,14 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
     contentNodes++;
     emitNode(lead, 0);
   }
-  const offset = lead ? 1 : 0;
-  const results = await Promise.allSettled([...skeleton.map((region, i) => regionCall(region, i, offset)), finishCall()]);
+  const diagramTask = diagramOn
+    ? requestDiagram(env, query, corpusOf(req)).then((node) => {
+        if (!node) return;
+        contentNodes++;
+        return pictures.emit(node, diagramSlotAt(!!lead, skeleton.length), emitNode);
+      })
+    : Promise.resolve();
+  const results = await Promise.allSettled([...skeleton.map((region, i) => regionCall(region, i)), finishCall(), diagramTask]);
   if (!headSentAny) on.head({ title: titleCase(req.query) });
   results.filter((r) => r.status === 'rejected').forEach((r) => console.error('region failed', (r as PromiseRejectedResult).reason));
   if (!contentNodes) {

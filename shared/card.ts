@@ -49,6 +49,12 @@ export type CardNode =
   | { type: 'table'; columns: string[]; rows: string[][]; highlight?: number }
   | { type: 'timeline'; items: { when: string; title: string; text?: string; source?: number }[] }
   | { type: 'steps'; items: { title: string; detail?: string }[] }
+  /**
+   * A labeled diagram for a "visualize / explain how / diagram" question.
+   * The model names the stages. ZO compiles Mermaid for a flow and draws the graphic.
+   * Present only when ZO_DIAGRAMS is on.
+   */
+  | { type: 'diagram'; kind: 'flow' | 'concept'; title?: string; nodes: { id: string; label: string; detail?: string }[]; edges: { from: string; to: string; label?: string }[]; mermaid?: string }
   | { type: 'proscons'; pros: string[]; cons: string[] }
   | { type: 'badges'; items: string[] }
   | { type: 'quote'; text: string; source?: string }

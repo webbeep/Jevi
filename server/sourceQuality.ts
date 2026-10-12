@@ -237,6 +237,7 @@ export function cleanNode(query: string, node: CardNode): CardNode | undefined {
     case 'scaler':
     case 'pricing':
     case 'reveal':
+    case 'diagram':
     case 'citations':
     case 'divider':
     case 'slot':

@@ -49,6 +49,9 @@ export function cardPlainText(card: AnswerCard, results: { title: string }[] = [
       case 'steps':
         blocks.push({ text: n.items.map((i, at) => `${at + 1}. ${i.title}${i.detail ? ` — ${i.detail}` : ''}`).join('\n') });
         break;
+      case 'diagram':
+        blocks.push({ text: [n.title, ...n.nodes.map((step, at) => `${at + 1}. ${step.label}${step.detail ? ` — ${step.detail}` : ''}`)].filter(Boolean).join('\n') });
+        break;
       case 'proscons':
         blocks.push({ text: [n.pros.length ? `Pros:\n${n.pros.map((p) => `- ${p}`).join('\n')}` : '', n.cons.length ? `Cons:\n${n.cons.map((c) => `- ${c}`).join('\n')}` : ''].filter(Boolean).join('\n') });
         break;
