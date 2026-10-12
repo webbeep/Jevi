@@ -7,6 +7,41 @@ import type { Env } from '../server/util.ts';
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+test('fact tiles drop attached pictures', () => {
+  const pool: ImageResult[] = [
+    { url: 'https://www.flickr.com/photos/100mile', thumb: 'https://live.staticflickr.com/100mile.jpg', title: '100 mile challenge', source: 'flickr', license: 'source' },
+    { url: 'https://en.wikipedia.org/wiki/Network_theory', thumb: 'https://upload.wikimedia.org/network.png', title: 'Vox Media network', source: 'wikipedia', license: 'source' },
+  ];
+  const grid: CardNode = {
+    type: 'grid',
+    cols: 2,
+    children: [
+      { type: 'tile', label: 'Host', value: 'Marques Brownlee', sub: 'MKBHD', icon: 'user', imageRef: 0, imageQuery: 'Marques Brownlee' },
+      { type: 'tile', label: 'Co-hosts', value: 'Andrew Manganelli', sub: 'David Imel', icon: 'users', imageQuery: 'Andrew Manganelli' },
+      { type: 'tile', label: 'New episodes', value: 'Weekly', sub: 'Fridays 4AM ET', imageRef: 0, imageSrc: 'https://live.staticflickr.com/100mile.jpg' },
+      { type: 'tile', label: 'Network', value: 'Vox Media', sub: 'Podcast Network', imageRef: 1, imageQuery: 'Vox Media' },
+    ],
+  };
+  let lookups = 0;
+  const shown: CardNode[] = [];
+  const resolver = new PictureResolver({} as Env, pool, () => undefined, 'Waveform MKBHD', async () => {
+    lookups += 1;
+    return [];
+  });
+  resolver.emit(grid, 0, (node) => shown.push(node));
+  assert.equal(lookups, 0);
+  const first = shown[0];
+  assert.equal(first?.type, 'grid');
+  if (first?.type !== 'grid') return;
+  for (const child of first.children) {
+    assert.equal(child.type, 'tile');
+    if (child.type !== 'tile') continue;
+    assert.equal(child.imageSrc, undefined);
+    assert.equal(child.imageRef, undefined);
+    assert.equal(child.imageQuery, undefined);
+  }
+});
+
 test('product rows start looking up pictures when the row is shown', async () => {
   const credits: { src: string }[] = [];
   let lookups = 0;

@@ -100,6 +100,10 @@ describe('T443 image relevance gate', () => {
   test('attribute tiles never get a photo', () => {
     assert.equal(targetFor('Role', 'Senior Software Engineer').kind, 'none');
     assert.equal(targetFor('Location', 'New York, NY').kind, 'none');
+    assert.equal(targetFor('Host', 'Marques Brownlee').kind, 'none');
+    assert.equal(targetFor('Co-hosts', 'Andrew Manganelli').kind, 'none');
+    assert.equal(targetFor('New episodes', 'Weekly').kind, 'none');
+    assert.equal(targetFor('Network', 'Vox Media').kind, 'none');
     assert.equal(accepts(targetFor('Role', 'Senior Software Engineer'), img('Senior software engineer playing guitar')), false);
   });
   test('org tiles need the org\'s own site', () => {

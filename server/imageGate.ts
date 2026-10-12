@@ -1,3 +1,4 @@
+import { factTileLabel } from '../shared/factTile';
 import type { ImageResult } from '../shared/types';
 
 /**
@@ -185,7 +186,7 @@ export function isEventOrCategory(label: string): boolean {
 /** What a tile, stat or row may show, from its label/value/imageQuery. */
 export function targetFor(label: string, value?: string, imageQuery?: string, ctx?: GateContext): PicTarget {
   const l = label.trim().replace(/[:：]$/, '');
-  if (ATTR.test(l) || isEventOrCategory(l)) return NONE;
+  if (ATTR.test(l) || factTileLabel(l) || isEventOrCategory(l)) return NONE;
   if (ORG.test(l)) return value && value.trim() ? withHint({ kind: 'org', entity: value.trim() }, ctx) : NONE;
   if (properName(l, ctx?.corpus)) return withHint({ kind: 'named', entity: l }, ctx);
   if (imageQuery && properName(imageQuery, ctx?.corpus)) return withHint({ kind: 'named', entity: imageQuery }, ctx);

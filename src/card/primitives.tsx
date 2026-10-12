@@ -3,6 +3,7 @@ import type { MouseEvent } from 'react';
 import { Check, ChevronLeft, ChevronRight, Copy, Globe, Minus, Play, Star, ThumbsDown, ThumbsUp, TrendingDown, TrendingUp } from 'lucide-react';
 import { askQuestion, queryForLabel, type AskRef, type Box } from '../../shared/askAbout';
 import type { CardNode, Tone } from '../../shared/card';
+import { factTileLabel } from '../../shared/factTile';
 import { initials } from '../../shared/initials';
 import type { SearchResult } from '../../shared/types';
 import { cn } from '@/lib/utils';
@@ -35,7 +36,7 @@ const tidyClip = (s: string) => s.replace(/[\s—–,;:-]+…$/, '…');
 export const TilePictures = createContext(false);
 
 /** Whether a tile brings its own picture. The slot is kept only while that picture is loading or has arrived. */
-export const wantsPicture = (n: CardNode) => n.type === 'tile' && (!!n.imageSrc || n.imageRef !== undefined || !!n.imageQuery);
+export const wantsPicture = (n: CardNode) => n.type === 'tile' && !factTileLabel(n.label) && (!!n.imageSrc || n.imageRef !== undefined || !!n.imageQuery);
 
 export const TONE_TEXT: Record<Tone, string> = {
   default: 'text-foreground',
@@ -494,7 +495,7 @@ export function Tile({ node }: { node: Of<'tile'> }) {
   const slot = slotRef.current;
   const icon = tileIcon(node);
   const kind = tileKind(node);
-  const noPhoto = !!kind && NO_PHOTO.has(kind);
+  const noPhoto = (!!kind && NO_PHOTO.has(kind)) || factTileLabel(node.label);
   const [img, onImgError] = useLoadable(usePicture(noPhoto ? undefined : node.imageSrc, noPhoto ? undefined : node.imageRef));
   const pending = !noPhoto && !img && !!node.imageQuery && busy;
   const link = useSource(node.source);
@@ -508,6 +509,7 @@ export function Tile({ node }: { node: Of<'tile'> }) {
   const ref: AskRef = { label, value, entity, sourceUrl: link?.url, snippet: link?.snippet };
   // The square is only for a real photo, or a short wait while one is loading. A generic icon in that box is empty space.
   const showPicture = !!img || pending;
+  const showIcon = !showPicture && (noPhoto || !wantsPicture(node));
   return (
     <div
       data-item=""
@@ -531,11 +533,11 @@ export function Tile({ node }: { node: Of<'tile'> }) {
           isVerdict(node.value) ? 'min-h-[2lh] items-start' : 'items-center',
         )}
       >
-        {!showPicture && !wantsPicture(node) && !isVerdict(node.value) && <Icon name={icon} className="size-3.5 shrink-0 text-foreground/60" />}
+        {showIcon && !isVerdict(node.value) && <Icon name={icon} className="size-3.5 shrink-0 text-foreground/60" />}
         <span className="line-clamp-2 min-w-0 text-pretty [overflow-wrap:anywhere]">{plain(node.label)}</span>
         {link && <span className="-my-[3px] shrink-0"><SourceChip result={link} n={node.source!} /></span>}
       </span>
-      {!showPicture && !wantsPicture(node) && isVerdict(node.value) && <Icon name={icon} className="pointer-events-none relative size-[18px] text-foreground/70 sm:size-5" />}
+      {showIcon && isVerdict(node.value) && <Icon name={icon} className="pointer-events-none relative size-[18px] text-foreground/70 sm:size-5" />}
       {node.value && <span className="pointer-events-none relative max-w-full text-[15px] font-semibold tracking-tight [overflow-wrap:anywhere] sm:text-base" style={{ color: returnColor(plain(node.value), label) }}>{plain(node.value)}</span>}
       {node.sub && <span className="pointer-events-none relative max-w-full text-pretty text-[11px] leading-tight text-muted-foreground [overflow-wrap:anywhere]"><RichText text={node.sub} inline noLinks /></span>}
     </div>
