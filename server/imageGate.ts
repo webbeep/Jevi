@@ -1,3 +1,4 @@
+import { fileWords } from '../shared/imagematch';
 import type { ImageResult } from '../shared/types';
 
 /**
@@ -237,4 +238,34 @@ export function mentionsAny(subject: string, img: Pick<ImageResult, 'title' | 'u
   if (!/^https:\/\//i.test(img.thumb)) return false;
   const words = hay(img);
   return nameTokens(subject).concat(tokens(subject).filter((t) => t.length >= 4 && !STOP.has(t))).some((t) => t.length >= 3 && hit(t, words));
+}
+
+/** A filename that is only an id or a generic asset name does not say what the photo shows. */
+const FILE_GENERIC = new Set([
+  'jpg', 'jpeg', 'png', 'webp', 'gif', 'image', 'img', 'photo', 'thumb', 'thumbnail', 'hero', 'og',
+  'share', 'social', 'default', 'banner', 'cover', 'preview', 'large', 'small', 'medium', 'original',
+  'upload', 'uploads', 'asset', 'assets', 'getty', 'gettyimages', 'shutterstock', 'istock', 'reuters', 'imago',
+]);
+
+function fileSubject(thumb: string): string[] {
+  return tokens(fileWords(thumb)).filter((word) => word.length >= 4 && !FILE_GENERIC.has(word) && !/^\d+$/.test(word));
+}
+
+/**
+ * Whether a card-level picture belongs with this ask.
+ * A person needs every name token. A file that names something else is dropped, so a page titled
+ * "Leonard Miller" cannot contribute its photo of a bus. Any other subject still needs one significant word.
+ */
+export function showsSubject(
+  subject: string,
+  img: Pick<ImageResult, 'title' | 'url' | 'thumb'> & { source?: string },
+  person = '',
+): boolean {
+  const name = person.trim();
+  if (name.split(/\s+/).filter(Boolean).length < 2) return mentionsAny(subject, img);
+  if (!accepts({ kind: 'named', entity: name }, img)) return false;
+  const named = new Set(nameTokens(name));
+  const file = fileSubject(img.thumb);
+  if (!file.length) return true;
+  return file.some((word) => named.has(word) || [...named].some((token) => token.length >= 5 && word.includes(token)));
 }

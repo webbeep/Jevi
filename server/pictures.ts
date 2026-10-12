@@ -2,7 +2,8 @@ import type { CardNode, ImageCredit } from '../shared/card';
 import { fileWords, fitsEntity, isComposite, namesSibling, rankForEntity, splitEntities } from '../shared/imagematch';
 import type { ImageResult } from '../shared/types';
 import { findImages } from './images';
-import { type GateContext, type PicTarget, accepts, mentions, mentionsAny, nameLike, namedTarget, targetFor, withHint } from './imageGate';
+import { personSubject } from './entity';
+import { type GateContext, type PicTarget, accepts, mentions, nameLike, namedTarget, showsSubject, targetFor, withHint } from './imageGate';
 import { corpusOf, fillRowImages, hasBlankPictures, rowEntity, type RowImageDeps } from './rowImages';
 import type { Env } from './util';
 
@@ -182,14 +183,16 @@ export class PictureResolver {
           items: node.items.map((item) => ({ ...item, ...this.place(itemEntity(item.text), item.imageRef, item.imageQuery, this.itemTarget(item)) })),
         };
       case 'gallery': {
-        // T443: card-level pictures must mention the card subject.
-        const refs = node.refs.filter((r) => { const img = this.pool[r]; return !!img && mentionsAny(this.subject, img); });
+        // A person gallery needs the full name. One shared word ("Miller") is how a bus or a house gets in.
+        const person = personSubject(this.subject);
+        const refs = node.refs.filter((r) => { const img = this.pool[r]; return !!img && showsSubject(this.subject, img, person); });
         return { ...node, refs };
       }
       case 'image': {
         if (node.ref === undefined) return node;
         const img = this.pool[node.ref];
-        return img && mentionsAny(node.caption ? `${this.subject} ${node.caption}` : this.subject, img) ? node : { ...node, ref: undefined, query: node.query ?? node.caption };
+        const label = node.caption ? `${this.subject} ${node.caption}` : this.subject;
+        return img && showsSubject(label, img, personSubject(this.subject)) ? node : { ...node, ref: undefined, query: node.query ?? node.caption };
       }
       case 'stack':
       case 'grid':
@@ -234,7 +237,8 @@ export class PictureResolver {
   private async many(query: string, n: number): Promise<Pic[]> {
     if (this.lookupsLeft-- <= 0) return [];
     const found = await this.find(query, this.env, n, true);
-    return found.filter((img) => !this.used.has(img.thumb) && !isComposite(img) && mentions(query, img)).map((img) => this.take(img));
+    const person = personSubject(query);
+    return found.filter((img) => !this.used.has(img.thumb) && !isComposite(img) && showsSubject(query, img, person)).map((img) => this.take(img));
   }
 
   private static needs(node: CardNode): boolean {

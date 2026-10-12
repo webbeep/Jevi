@@ -7,6 +7,30 @@ import type { Env } from '../server/util.ts';
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const pic = (title: string, thumb: string, url = 'https://example.com/page'): ImageResult => ({
+  url,
+  thumb,
+  title,
+  source: 'example.com',
+  license: 'source',
+});
+
+test('a person gallery keeps a full-name photo and drops surname-only pictures', () => {
+  const pool = [
+    pic('Leonard Miller', 'https://cdn.nba.com/headshots/nba/latest/1040x760/1642363.png', 'https://www.nba.com/player/leonard-miller'),
+    pic('The Miller House', 'https://example.com/tudor-house.jpg'),
+    pic('Miller bus company', 'https://example.com/double-decker-bus.jpg'),
+    pic('Leonard Tennis Club', 'https://example.com/varsity-tennis.jpg'),
+    pic('Leonard Miller', 'https://example.com/soldiers-group.jpg', 'https://news.example.com/leonard-miller'),
+  ];
+  const shown: CardNode[] = [];
+  const resolver = new PictureResolver({} as Env, pool, () => undefined, 'Leonard Miller');
+  resolver.emit({ type: 'gallery', refs: [0, 1, 2, 3, 4] }, 0, (node) => shown.push(node));
+  const node = shown[0];
+  assert.equal(node?.type, 'gallery');
+  if (node?.type === 'gallery') assert.deepEqual(node.refs, [0]);
+});
+
 test('product rows start looking up pictures when the row is shown', async () => {
   const credits: { src: string }[] = [];
   let lookups = 0;
