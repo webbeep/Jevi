@@ -576,11 +576,11 @@ export default function App() {
         ) : (
           <>
             <header className="sticky top-0 z-30 border-b bg-background/75 backdrop-blur-xl backdrop-saturate-150">
-              <div className={cn(SHELL, 'flex h-14 items-center gap-3')}>
+              <div className={cn(SHELL, 'flex min-h-14 items-center gap-2 py-2 sm:gap-3')}>
                 <button onClick={newChat} className="shrink-0 rounded-full" aria-label="Home">
                   <LogoMark className="size-7" />
                 </button>
-                <h1 className="min-w-0 flex-1 truncate text-[15px] font-medium tracking-[-0.01em]">{title}</h1>
+                <h1 className="line-clamp-2 min-w-0 flex-1 text-pretty text-[15px] font-medium leading-snug tracking-[-0.01em] [overflow-wrap:anywhere]">{title}</h1>
                 {library.length > 0 && (
                   <Button variant="ghost" size="sm" className="h-8 shrink-0 gap-2 rounded-lg px-2 text-muted-foreground hover:text-foreground lg:hidden" onClick={() => openSources()} aria-label="Sources">
                     <FaviconStack domains={library.slice(0, 3).map((e) => e.result.domain)} />

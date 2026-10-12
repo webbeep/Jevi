@@ -8,6 +8,8 @@ import {
   diagramDocument,
   diagramFrameHeight,
   diagramIntent,
+  diagramIsLine,
+  diagramSelectionText,
   layoutDiagram,
   diagramRegionIndex,
   diagramSlotAt,
@@ -271,13 +273,16 @@ test('diagram layout benchmark keeps branches, padding, and no overlap', () => {
       const siblings = layout.boxes.filter((box) => box.y === layout.boxes[1]!.y);
       assert.ok(siblings.length >= 2, item.name);
     } else {
+      assert.equal(diagramIsLine(item.card), true, item.name);
       assert.equal(new Set(layout.boxes.map((box) => box.y)).size, item.card.nodes.length, item.name);
+      for (const box of layout.boxes) assert.ok(box.w <= layout.width - 64, item.name);
     }
     for (const box of layout.boxes) {
-      assert.ok(box.x >= 16, item.name);
-      assert.ok(box.x + box.w <= layout.width - 16, item.name);
-      assert.ok(box.y >= 16, item.name);
-      assert.ok(box.y + box.h <= layout.height - 8, item.name);
+      assert.ok(box.x >= 22, item.name);
+      assert.ok(box.x + box.w <= layout.width - 22, item.name);
+      assert.ok(box.y >= 40, item.name);
+      assert.ok(box.y + box.h <= layout.height - 16, item.name);
+      assert.ok(box.note.length === 0, item.name);
     }
     for (let i = 0; i < layout.boxes.length; i++) {
       for (let j = i + 1; j < layout.boxes.length; j++) {
@@ -293,9 +298,98 @@ test('diagram layout benchmark keeps branches, padding, and no overlap', () => {
       assert.ok(to.y > from.y, item.name);
     }
   }
+  assert.equal(diagramIsLine(bill), false);
+  assert.equal(diagramFrameHeight(bill, 340), layoutDiagram(bill, 340).height);
   assert.ok(diagramFrameHeight(bill, 340) < diagramFrameHeight(line, 340));
   console.log(JSON.stringify({ cases: cases.length, branched, line: line.nodes.length }));
   assert.equal(branched, 2);
+});
+
+const ATTENTION = 'For each token x in an input sequence, self-attention compares that token with every other token before it writes a context-aware representation.';
+
+test('a straight attention diagram stays off the frame and keeps the whole sentence', () => {
+  const card = {
+    type: 'diagram' as const,
+    kind: 'concept' as const,
+    title: 'How LLM attention works',
+    nodes: [
+      { id: 'n0', label: 'Token', detail: ATTENTION },
+      { id: 'n1', label: 'Self-attention', detail: 'Self-attention compares every token with the others.' },
+      { id: 'n2', label: 'Attention heads', detail: 'Attention heads run the comparison together.' },
+      { id: 'n3', label: 'Context', detail: 'The result is a context-aware representation.' },
+    ],
+    edges: [
+      { from: 'n0', to: 'n1' },
+      { from: 'n1', to: 'n2' },
+      { from: 'n2', to: 'n3' },
+    ],
+  };
+  assert.equal(diagramIsLine(card), true);
+  assert.equal(diagramSelectionText(card, 0), ATTENTION);
+  assert.equal(diagramSelectionText(card, 0).includes('…'), false);
+  for (const width of [280, 320, 390, 640]) {
+    const layout = layoutDiagram(card, width);
+    const first = layout.boxes[0]!;
+    assert.ok(first.y >= 40, String(width));
+    assert.ok(first.x >= 30, String(width));
+    assert.ok(first.x + first.w <= layout.width - 30, String(width));
+    assert.ok(first.note.length >= 1, String(width));
+    assert.match(first.note[0] ?? '', /For each token/);
+    assert.ok(first.h >= 60, String(width));
+    for (const box of layout.boxes) {
+      assert.ok(box.y >= 40, String(width));
+      assert.ok(box.x >= 22, String(width));
+      assert.ok(box.x + box.w <= layout.width - 22, String(width));
+      const labelMax = Math.max(4, Math.floor((Math.max(7.1, box.w - 18)) / 7.1));
+      const noteMax = Math.max(4, Math.floor((Math.max(6.3, box.w - 18)) / 6.3));
+      for (const line of box.lines) assert.ok(line.length <= labelMax, `${width} ${line}`);
+      for (const line of box.note) assert.ok(line.length <= noteMax, `${width} ${line}`);
+    }
+    const graphic = diagramDocument(card, true, width);
+    assert.match(graphic, /class="note"/);
+    assert.match(graphic, /For each token/);
+    assert.equal(graphic.includes('id="detail"'), false);
+    assert.equal(graphic.includes('2.8em'), false);
+    assert.match(graphic, /zo-diagram/);
+    assert.equal(diagramFrameHeight(card, width), layout.height);
+  }
+});
+
+test('attention parts that split sit on one row and join again', () => {
+  const card = {
+    type: 'diagram' as const,
+    kind: 'concept' as const,
+    nodes: [
+      { id: 'n0', label: 'Token', detail: ATTENTION },
+      { id: 'n1', label: 'Query', detail: 'The query is what this token asks of the others.' },
+      { id: 'n2', label: 'Key', detail: 'The key is what another token can match.' },
+      { id: 'n3', label: 'Value', detail: 'The value is the information that gets mixed.' },
+      { id: 'n4', label: 'Attention', detail: 'Attention mixes a value into the token.' },
+    ],
+    edges: [
+      { from: 'n0', to: 'n1' },
+      { from: 'n0', to: 'n2' },
+      { from: 'n0', to: 'n3' },
+      { from: 'n1', to: 'n4' },
+      { from: 'n2', to: 'n4' },
+      { from: 'n3', to: 'n4' },
+    ],
+  };
+  assert.equal(diagramIsLine(card), false);
+  for (const width of [320, 390]) {
+    const layout = layoutDiagram(card, width);
+    const query = layout.boxes[1]!;
+    const key = layout.boxes[2]!;
+    const value = layout.boxes[3]!;
+    const attention = layout.boxes[4]!;
+    assert.equal(query.y, key.y);
+    assert.equal(key.y, value.y);
+    assert.ok(query.x < key.x && key.x < value.x);
+    assert.ok(attention.y > query.y);
+    assert.ok(layout.boxes[0]!.y >= 40);
+    assert.ok(layout.boxes[0]!.w > query.w);
+    assert.equal(layout.wires.length, 6);
+  }
 });
 
 test('a flow compiles Mermaid that quotes every remaining label', () => {

@@ -2,9 +2,12 @@
  * Diagram cards for "visualize", "explain how", and "diagram" questions.
  *
  * The model names a few stages and how they connect. A split or a join stays a
- * branch instead of being pulled into one line. ZO checks those words against the
- * sources and draws the graphic in a sandbox. A stage that is not in the sources
- * is left out. If fewer than three stages remain, the card stays a normal explanation.
+ * branch instead of being pulled into one line. The first stage sits clear of the
+ * frame. A wide stage shows the start of its detail inside the box, and the full
+ * sentence is drawn outside the picture so a short frame cannot cut it off.
+ * ZO checks those words against the sources and draws the graphic in a sandbox.
+ * A stage that is not in the sources is left out. If fewer than three stages
+ * remain, the card stays a normal explanation.
  *
  * Off unless ZO_DIAGRAMS is 1, true, or yes.
  * Rollback: set ZO_DIAGRAMS to 0, or redeploy the previous build.
@@ -343,33 +346,80 @@ export function toMermaid(node: DiagramCard): string {
   return lines.join('\n');
 }
 
-const PAD = 16;
-const GAP_X = 12;
-const GAP_Y = 28;
-const BOX_H = 40;
-const BOX_H2 = 54;
+/** True when every stage has one way through. A split or a join is not a line. */
+export function diagramIsLine(node: DiagramCard): boolean {
+  if (node.nodes.length < 2 || node.edges.length !== node.nodes.length - 1) return false;
+  const out = new Map<string, number>();
+  const inn = new Map<string, number>();
+  for (const edge of node.edges) {
+    out.set(edge.from, (out.get(edge.from) ?? 0) + 1);
+    inn.set(edge.to, (inn.get(edge.to) ?? 0) + 1);
+  }
+  return node.nodes.every((step) => (out.get(step.id) ?? 0) <= 1 && (inn.get(step.id) ?? 0) <= 1);
+}
 
-export type DiagramBox = { i: number; x: number; y: number; w: number; h: number; lines: string[] };
+/** The sentence under the drawing. The picture never clips this. */
+export function diagramSelectionText(node: DiagramCard, index: number): string {
+  const step = node.nodes[index] ?? node.nodes[0];
+  if (!step) return '';
+  const detail = step.detail?.trim();
+  return detail || step.label;
+}
+
+const PAD_X = 22;
+const PAD_TOP = 40;
+const PAD_BOTTOM = 22;
+const GAP_X = 12;
+const GAP_Y = 30;
+const NOTE_MIN_W = 168;
+
+export type DiagramBox = { i: number; x: number; y: number; w: number; h: number; lines: string[]; note: string[] };
 export type DiagramWire = { d: string; label?: string; lx: number; ly: number };
 export type DiagramLayout = { width: number; height: number; boxes: DiagramBox[]; wires: DiagramWire[] };
 
-function wrapLabel(label: string, boxW: number): string[] {
-  const max = Math.max(8, Math.floor((boxW - 20) / 7.1));
-  if (label.length <= max) return [label];
-  const words = label.split(' ');
-  if (words.length < 2) return [label];
+/** Wraps to `maxLines` lines that fit the box. Leftover words end the last line with an ellipsis. */
+function wrapLabel(label: string, boxW: number, maxLines = 2, px = 7.1): string[] {
+  const max = Math.max(4, Math.floor((Math.max(px, boxW - 18)) / px));
+  const words = label.split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
   const lines: string[] = [];
   let cur = '';
-  for (const word of words) {
-    const next = cur ? `${cur} ${word}` : word;
+  let used = 0;
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i]!;
+    const piece = word.length > max ? `${word.slice(0, Math.max(1, max - 1))}…` : word;
+    const next = cur ? `${cur} ${piece}` : piece;
     if (cur && next.length > max) {
       lines.push(cur);
-      cur = word;
-    } else cur = next;
+      used = i;
+      cur = '';
+      if (lines.length === maxLines) break;
+      cur = piece;
+      used = i + 1;
+    } else {
+      cur = next;
+      used = i + 1;
+    }
   }
-  if (cur) lines.push(cur);
-  if (lines.length <= 2) return lines;
-  return [lines[0]!, lines.slice(1).join(' ')];
+  if (cur && lines.length < maxLines) {
+    lines.push(cur);
+    used = words.length;
+  }
+  if (used < words.length && lines.length) {
+    const trimmed = lines[lines.length - 1]!.replace(/…$/, '');
+    const room = Math.max(1, max - 1);
+    const base = trimmed.length > room ? trimmed.slice(0, room).trimEnd() : trimmed;
+    lines[lines.length - 1] = `${base}…`;
+  }
+  return lines;
+}
+
+function boxMetrics(labelLines: number, noteLines: number): { h: number; labelY: number; noteY: number } {
+  if (!noteLines) return { h: labelLines > 1 ? 56 : 48, labelY: 0, noteY: 0 };
+  const labelY = 22;
+  const noteY = labelY + Math.max(0, labelLines - 1) * 16 + 16;
+  const last = noteY + Math.max(0, noteLines - 1) * 14;
+  return { h: last + 16, labelY, noteY };
 }
 
 function layerOf(node: DiagramCard): number[] {
@@ -437,28 +487,30 @@ function avgPos(pred: number[], pos: Map<number, number>, self: number): number 
 export function layoutDiagram(node: DiagramCard, width: number): DiagramLayout {
   const viewW = Math.max(260, Math.round(width));
   const rows = orderRows(node, layerOf(node));
-  const maxCols = Math.max(1, ...rows.map((row) => row.length));
-  const available = viewW - PAD * 2;
-  const boxW = Math.max(76, Math.floor((available - GAP_X * (maxCols - 1)) / maxCols));
-  const boxes: DiagramBox[] = node.nodes.map((step, i) => ({ i, x: 0, y: 0, w: boxW, h: BOX_H, lines: [step.label] }));
-  let y = PAD;
+  const available = viewW - PAD_X * 2;
+  const boxes: DiagramBox[] = node.nodes.map((step, i) => ({ i, x: 0, y: 0, w: 48, h: 48, lines: [step.label], note: [] }));
+  let y = PAD_TOP;
   for (const row of rows) {
+    const spread = Math.floor((available - GAP_X * (row.length - 1)) / row.length);
+    const boxW = row.length === 1 ? Math.min(spread, Math.floor(available * 0.88)) : spread;
     const rowW = row.length * boxW + Math.max(0, row.length - 1) * GAP_X;
-    let x = PAD + (available - rowW) / 2;
-    let rowH = BOX_H;
+    let x = PAD_X + (available - rowW) / 2;
+    let rowH = 48;
     const prepared = row.map((i) => {
-      const lines = wrapLabel(node.nodes[i]!.label, boxW);
-      const h = lines.length > 1 ? BOX_H2 : BOX_H;
-      rowH = Math.max(rowH, h);
-      return { i, lines, h };
+      const step = node.nodes[i]!;
+      const lines = wrapLabel(step.label, boxW, 2, 7.1);
+      const note = boxW >= NOTE_MIN_W && step.detail ? wrapLabel(step.detail, boxW, 2, 6.3) : [];
+      const metrics = boxMetrics(Math.max(1, lines.length), note.length);
+      rowH = Math.max(rowH, metrics.h);
+      return { i, lines: lines.length ? lines : [step.label], note, h: metrics.h };
     });
     for (const item of prepared) {
-      boxes[item.i] = { i: item.i, x, y: y + (rowH - item.h) / 2, w: boxW, h: item.h, lines: item.lines };
+      boxes[item.i] = { i: item.i, x, y: y + (rowH - item.h) / 2, w: boxW, h: item.h, lines: item.lines, note: item.note };
       x += boxW + GAP_X;
     }
     y += rowH + GAP_Y;
   }
-  const height = Math.max(PAD * 2 + BOX_H, y - GAP_Y + PAD);
+  const height = Math.max(PAD_TOP + 48 + PAD_BOTTOM, y - GAP_Y + PAD_BOTTOM);
   const wires: DiagramWire[] = [];
   for (const edge of node.edges) {
     const from = boxes[node.nodes.findIndex((step) => step.id === edge.from)];
@@ -481,9 +533,12 @@ function num(value: number): number {
   return Math.round(value * 10) / 10;
 }
 
-/** Iframe height for this width, including the caption under the drawing. */
+/**
+ * Iframe height for the drawing only.
+ * The title and the detail sentence live outside the frame, so a short frame cannot cut them off.
+ */
 export function diagramFrameHeight(node: DiagramCard, width: number): number {
-  return layoutDiagram(node, width).height + (node.title ? 28 : 0) + 62;
+  return layoutDiagram(node, width).height;
 }
 
 const ESC: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
@@ -495,17 +550,28 @@ function esc(s: string): string {
 /**
  * The graphic's document. It is shown in a sandboxed frame.
  * Boxes and arrowheads are drawn here. The only script is ours.
- * Stage text is escaped and also passed as JSON with < neutralized.
+ * The full detail sentence is not in this frame. The page renders it, and the
+ * script tells the page which stage was chosen.
  */
+function tspans(x: number, lines: string[], dy: number): string {
+  return lines.map((line, i) => `<tspan x="${num(x)}" dy="${i === 0 ? 0 : dy}">${esc(line)}</tspan>`).join('');
+}
+
 function boxText(box: DiagramBox): string {
-  const cx = box.x + box.w / 2;
   const size = box.w < 120 ? 12 : 14;
-  if (box.lines.length < 2) {
-    return `<text class="label" x="${num(cx)}" y="${num(box.y + box.h / 2 + 1)}" text-anchor="middle" dominant-baseline="middle" font-size="${size}">${esc(box.lines[0] ?? '')}</text>`;
+  if (!box.note.length) {
+    const cx = box.x + box.w / 2;
+    if (box.lines.length < 2) {
+      return `<text class="label" x="${num(cx)}" y="${num(box.y + box.h / 2 + 1)}" text-anchor="middle" dominant-baseline="middle" font-size="${size}">${esc(box.lines[0] ?? '')}</text>`;
+    }
+    const start = box.y + box.h / 2 - 8;
+    return `<text class="label" x="${num(cx)}" y="${num(start)}" text-anchor="middle" font-size="12">${tspans(cx, box.lines, 16)}</text>`;
   }
-  const start = box.y + box.h / 2 - 6;
-  const tspans = box.lines.map((line, i) => `<tspan x="${num(cx)}" dy="${i === 0 ? 0 : 15}">${esc(line)}</tspan>`).join('');
-  return `<text class="label" x="${num(cx)}" y="${num(start)}" text-anchor="middle" font-size="12">${tspans}</text>`;
+  const metrics = boxMetrics(box.lines.length, box.note.length);
+  const x = box.x + 14;
+  const labelY = box.y + metrics.labelY;
+  const noteY = box.y + metrics.noteY;
+  return `<text class="label" x="${num(x)}" y="${num(labelY)}" font-size="${size}">${tspans(x, box.lines, 16)}</text><text class="note" x="${num(x)}" y="${num(noteY)}" font-size="11">${tspans(x, box.note, 14)}</text>`;
 }
 
 export function diagramDocument(node: DiagramCard, dark: boolean, width = 340): string {
@@ -520,35 +586,29 @@ export function diagramDocument(node: DiagramCard, dark: boolean, width = 340): 
     ...layout.wires.map((wire) => `<path class="arrow" d="${wire.d}" marker-end="url(#arrowhead)"/>${wire.label ? `<text class="edge" x="${num(wire.lx)}" y="${num(wire.ly)}" text-anchor="middle">${esc(wire.label)}</text>` : ''}`),
     ...layout.boxes.map((box) => `<g data-i="${box.i}" role="button" tabindex="0" aria-pressed="${box.i === 0 ? 'true' : 'false'}"><rect class="box" x="${num(box.x)}" y="${num(box.y)}" width="${num(box.w)}" height="${num(box.h)}" rx="${radius}"/>${boxText(box)}</g>`),
   ];
-  const details = JSON.stringify(node.nodes.map((step) => step.detail ?? '')).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026');
   const mermaid = node.kind === 'flow' && node.mermaid ? `<pre hidden>${esc(node.mermaid)}</pre>` : '';
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'"><style>
-    body{margin:0;overflow:hidden;font:14px/1.45 ui-sans-serif,system-ui,sans-serif;color:${text};background:transparent}
-    h2{margin:0 16px 8px;font-size:13px;font-weight:600;text-align:center}
-    svg{display:block;width:100%;height:${layout.height}px}
+    body{margin:0;overflow:hidden;background:transparent}
+    svg{display:block;width:100%;height:${layout.height}px;overflow:visible}
+    [data-i]{cursor:pointer}
     .box{fill:${fill};stroke:${line};stroke-width:1.5}
     [aria-pressed="true"] .box{fill:${soft};stroke:${text};stroke-width:2}
     text{fill:${text};font-family:ui-sans-serif,system-ui,sans-serif;pointer-events:none}
+    .label{font-weight:600}
+    .note{font-size:11px;fill:${muted}}
     .edge{font-size:10px;fill:${muted}}
     .arrow{stroke:${muted};stroke-width:1.5;fill:none}
-    #detail{min-height:2.8em;margin:8px 16px 0;color:${muted};font-size:13px;line-height:1.45;text-align:center;text-wrap:balance}
   </style></head><body>
-  ${node.title ? `<h2>${esc(node.title)}</h2>` : ''}
-  <svg viewBox="0 0 ${layout.width} ${layout.height}" height="${layout.height}" role="img" aria-label="${esc(node.title || 'Diagram')}">
+  <svg viewBox="0 0 ${layout.width} ${layout.height}" preserveAspectRatio="xMidYMin meet" role="img" aria-label="${esc(node.title || 'Diagram')}">
     <defs><marker id="arrowhead" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="${muted}"/></marker></defs>
     ${parts.join('')}
   </svg>
-  <p id="detail"></p>
   ${mermaid}
-  <script type="application/json" id="d">${details}</script>
   <script data-zo="diagram">
-    const details = JSON.parse(document.getElementById('d').textContent || '[]');
     const nodes = Array.from(document.querySelectorAll('[data-i]'));
-    const panel = document.getElementById('detail');
     function show(i) {
       nodes.forEach((n, j) => n.setAttribute('aria-pressed', j === i ? 'true' : 'false'));
-      const label = nodes[i] && nodes[i].querySelector('.label');
-      panel.textContent = details[i] || (label ? label.textContent : '');
+      parent.postMessage({ type: 'zo-diagram', i: i }, '*');
     }
     nodes.forEach((n) => {
       n.addEventListener('click', () => show(Number(n.dataset.i)));
