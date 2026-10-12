@@ -14,9 +14,15 @@ function readCap(raw: string | undefined): number | undefined {
   return Math.floor(n);
 }
 
-/** Built-in daily caps for the free/one-time pools. Serper's 2.5k credits are one-time (~2.3k left 8 Oct; prod 200/day for Ricky's live experience, eval 50/day — past it eval falls through to LangSearch; Ricky t449). */
+/**
+ * Built-in daily caps. Serper Starter is a prepaid 50,000-credit pack (about six months),
+ * not the old 2,500-credit grant the 200/day prod ration was protecting. 1,500/day lets
+ * live search stay on Serper; a day that actually hits the ceiling still lasts about a
+ * month of the pack. Eval is the bench bucket and spends the same credits. These are not
+ * the per-person ask gates.
+ */
 const DEFAULT_CAPS: Record<string, Record<CapBucket, number>> = {
-  serper: { prod: 200, eval: 50 },
+  serper: { prod: 1500, eval: 200 },
   langsearch: { prod: 300, eval: 300 },
   // You.com keyless MCP free profile (~100/day total). Stored under bucket 'shared'
   // so prod+eval share one counter (the free MCP is ~100/day per IP, not 200).
@@ -45,7 +51,7 @@ function logRefusal(provider: string, bucket: CapBucket): void {
 
 /**
  * Take one daily slot. No cap → true, and D1 is not touched.
- * With no D1 binding or a D1 error, Serper (one-time credit pool) is refused (fail closed);
+ * With no D1 binding or a D1 error, Serper (prepaid credit pack) is refused (fail closed);
  * daily-renewing pools such as LangSearch are allowed (fail open).
  */
 /** Providers whose free quota is one pool for the day (prod+eval share a counter). */
@@ -57,8 +63,8 @@ export function usageBucket(provider: string, bucket: CapBucket): string {
 }
 
 /**
- * SPD-P (t457): Serper prod is a one-time credit pool. Signed-out asks may use at most this share of the prod
- * day, so signed-in/owner asks still get Serper at the evening peak; the Serper /images extra stops at half the day.
+ * Serper prod is a prepaid credit pack. Signed-out asks may use at most this share of the prod
+ * day, so signed-in asks still get Serper at the evening peak; the Serper /images extra stops at half the day.
  */
 export const SERPER_ANON_SHARE = 0.7;
 export const SERPER_IMAGES_SHARE = 0.5;
