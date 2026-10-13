@@ -103,7 +103,7 @@ function bestPage(nums: readonly string[], sources: readonly ClaimSource[], pref
 
 /** "2300" matches 2300 and 2,300. A decimal is matched as written. */
 function shownNumber(num: string): RegExp {
-  if (num.includes('.')) return new RegExp(`\\$?\\s*${num.replace('.', '\\.')}`, 'g');
+  if (num.includes('.')) return new RegExp(`\\$?\\s*${num.replace('.', '\\.')}\\s?%?`, 'g');
   const groups: string[] = [];
   let rest = num;
   while (rest.length > 3) {
@@ -111,7 +111,7 @@ function shownNumber(num: string): RegExp {
     rest = rest.slice(0, -3);
   }
   groups.unshift(rest);
-  return new RegExp(`\\$?\\s*${groups.join(',?')}(?:\\.0+)?`, 'g');
+  return new RegExp(`\\$?\\s*${groups.join(',?')}(?:\\.0+)?\\s?%?`, 'g');
 }
 
 const AGENCY_SKIP = new Set(['AM', 'PM', 'US', 'UK', 'EU', 'UN', 'TV', 'ID', 'OK', 'NBA', 'NFL', 'MLB', 'NHL', 'GDP', 'USD', 'EUR', 'CEO', 'CFO', 'PDF', 'FAQ', 'DIY', 'GPS', 'HDMI', 'USB']);
@@ -133,11 +133,13 @@ function withoutForeignAgency(label: string, source: ClaimSource | undefined): s
   let out = label;
   for (const token of agencyTokens(label)) {
     if (hostHasAgency(source, token)) continue;
-    const attributed = new RegExp(`\\b${token}\\b\\s*(?:\\d{4}|survey|report|estimate|data|figures?)|\\b(?:according to|per|from)\\s+${token}\\b|^${token}$`, 'i');
-    if (!attributed.test(label)) continue;
-    out = out.replace(new RegExp(`\\b${token}\\b`), ' ');
+    const named = new RegExp(`\\b${token}\\b(?:'s)?\\s*[,:—–-]?\\s*(?:\\d{4}|survey|report|estimate|data|figures?)`, 'i');
+    const clause = new RegExp(`\\b(?:according to|per|from)\\s+(?:the\\s+)?(?:[A-Za-z]+\\s+){0,3}${token}(?:'s)?(?:\\s+(?:latest|recent|annual|new|current))?(?:\\s+(?:estimate|survey|report|data|figures?))?`, 'i');
+    const exact = new RegExp(`^${token}$`, 'i').test(label.trim());
+    if (!named.test(out) && !clause.test(out) && !exact) continue;
+    out = out.replace(clause, ' ').replace(new RegExp(`\\b${token}\\b(?:'s)?`, 'i'), ' ');
   }
-  return out.replace(/\s{2,}/g, ' ').replace(/\s+([,.;:)])/g, '$1').trim();
+  return out.replace(/\s{2,}/g, ' ').replace(/\s+([,.;:)])/g, '$1').replace(/,\s*(?=\[)/g, ' ').replace(/^[,:—–-]+\s*/, '').replace(/\s{2,}/g, ' ').trim();
 }
 
 function stripNums(text: string, nums: readonly string[]): string {

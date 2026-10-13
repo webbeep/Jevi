@@ -1115,6 +1115,9 @@ test('a one-letter brand misspelling is corrected from the pages, and stops bein
     { title: 'NVIDIA Corporation', url: 'https://en.wikipedia.org/wiki/Nvidia', snippet: 'NVIDIA designs GPUs. Jensen Huang has been CEO since it was founded.' },
   ];
   assert.equal(spellingQuery('Jensen Huang Nvdia', pages), 'Jensen Huang, NVIDIA');
+  assert.equal(spellingQuery('Jensen Huang Nvdia', [
+    { title: 'Jensen Huang NVIDIA', url: 'https://example.com/jensen-huang-nvidia', snippet: 'Results for Nvdia and Jensen Huang.' },
+  ]), 'Jensen Huang, NVIDIA');
   assert.equal(spellingQuery('Jensen Huang Nvidia', pages), '');
   assert.equal(personSourceOk('Jensen Huang, Nvidia', pages[0]!), true);
 });

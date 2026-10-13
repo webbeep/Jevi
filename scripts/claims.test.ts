@@ -90,14 +90,21 @@ test('a fetched page, not its snippet, is what a cited number has to match', () 
   );
   const text = retargetCites('Minnesota has about 2,900 wolves [1].', page);
   assert.doesNotMatch(text, /2,900/);
+  const percent = retargetCites('A review found 15% of users lost weight [1].', page);
+  assert.doesNotMatch(percent, /%|15/);
 });
 
 test('an agency label stays only when the cited host is that agency', () => {
   const news: ClaimSource[] = [{ n: 1, text: 'The 2023 count was 2,294 wolves.', domain: 'www.mprnews.org' }];
-  const tile: CardNode = { type: 'tile', label: 'Latest estimate', value: '2,294', sub: 'DNR 2023', source: 1 };
+  const tile: CardNode = { type: 'tile', label: 'Latest estimate', value: '2,294', sub: 'DNR, 2023', source: 1 };
   const next = bindClaims(tile, news, 'How many wolves are in Minnesota?');
   assert.doesNotMatch(next.type === 'tile' ? next.sub ?? '' : '', /DNR/);
   assert.match(next.type === 'tile' ? next.sub ?? '' : '', /2023/);
+  const prose: CardNode = { type: 'text', text: "The count was 2,294, per the Minnesota DNR's latest estimate [1]." };
+  const said = bindClaims(prose, news, 'How many wolves are in Minnesota?');
+  const body = said.type === 'text' ? said.text : '';
+  assert.doesNotMatch(body, /DNR/);
+  assert.match(body, /2,294/);
   const dnr: ClaimSource[] = [{ n: 1, text: 'The 2023 count was 2,294 wolves.', domain: 'files.dnr.state.mn.us' }];
   const kept = bindClaims(tile, dnr, 'How many wolves are in Minnesota?');
   assert.match(kept.type === 'tile' ? kept.sub ?? '' : '', /DNR/);

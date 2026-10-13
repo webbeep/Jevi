@@ -7,7 +7,7 @@ import type { SearchResult } from '../shared/types';
  * OpenAlex relevance ranks follow-up work above the original there. OpenAlex is keyless and free (CC0 metadata); each work becomes a source whose
  * text states title, authors, year, venue and DOI, plus the abstract when OpenAlex has one.
  */
-export const PAPER_ASK = /\b(?:peer[- ]reviewed|dois?|journal articles?|meta[- ]analys[ie]s|systematic reviews?|scholarly|preprints?|(?:research|academic|scientific) papers?|papers (?:on|about|regarding|by|that)|what (?:does|do) (?:the )?research|research (?:says|shows|on|about|into|suggests)|scientific (?:evidence|literature|consensus)|clinical trials?|according to (?:a |the )?(?:study|studies|paper|trial)|(?:the )?study (?:on|of|found|shows|showed)|studies (?:on|of|found|show))\b/i;
+export const PAPER_ASK = /\b(?:peer[- ]reviewed|dois?|journal articles?|meta[- ]analys[ie]s|systematic reviews?|scholarly|preprints?|(?:research|academic|scientific) papers?|papers (?:on|about|regarding|by|that)|what (?:does|do) (?:the )?research|what (?:did|do|does) (?:the |a )?(?:studies|study|research|papers?)|research (?:says|shows|on|about|into|suggests)|scientific (?:evidence|literature|consensus)|clinical trials?|according to (?:a |the )?(?:study|studies|paper|trial)|(?:the )?study (?:on|of|found|shows|showed)|studies (?:on|of|found|find|show))\b/i;
 
 const TIMEOUT_MS = 2500;
 const MAX = 5;

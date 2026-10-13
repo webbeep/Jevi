@@ -423,7 +423,8 @@ export function spellingQuery(query: string, rows: readonly { title?: string; sn
     const low = core.toLowerCase();
     const spell = nearOrgSpelling(low, rows);
     if (!spell || spell === low) return word;
-    const typed = rows.some((row) => tokens(`${row.title ?? ''} ${row.snippet ?? ''} ${row.url ?? ''}`).includes(low));
+    // A snippet often repeats the typed query. The title and the address are the page's own spelling.
+    const typed = rows.some((row) => tokens(`${row.title ?? ''} ${row.url ?? ''}`).includes(low));
     if (typed) return word;
     changed = true;
     const capped = /^[A-Z]/.test(core) ? `${spell[0]!.toUpperCase()}${spell.slice(1)}` : spell;
