@@ -1300,6 +1300,51 @@ export function middleInitialPerson(text: string, name: string): boolean {
   return new RegExp(`${esc(parts[0]!)}\\s+[A-Z]\\.\\s+${esc(parts[parts.length - 1]!)}`, 'i').test(text);
 }
 
+/**
+ * People the disambiguation list names with a middle initial ("Michael B. Jordan (actor)",
+ * "Michael B. Jordan (born 1987), American actor"). The famous person is the first choice.
+ */
+function middleNameChoices(name: string, list: EntityRow, rows: readonly EntityRow[]): EntityChoice[] {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length < 2) return [];
+  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`${esc(parts[0]!)}\\s+([A-Z])\\.\\s+${esc(parts[parts.length - 1]!)}\\s*\\(([^)]{0,60})\\)`, 'gi');
+  const text = list.snippet ?? '';
+  const others: EntityChoice[] = [];
+  const seen = new Set<string>();
+  for (const match of text.matchAll(re)) {
+    const initial = match[1] ?? '';
+    const inside = (match[2] ?? '').trim();
+    const after = text.slice((match.index ?? 0) + match[0].length);
+    const gloss = (after.match(/^\s*,\s*((?:(?!\s[A-Z][a-z]+\s).){3,70})/)?.[1] ?? '').trim();
+    const full = `${parts[0]} ${initial}. ${parts[parts.length - 1]}`;
+    const key = full.toLowerCase();
+    if (!initial || seen.has(key)) continue;
+    const year = /^(?:born\b|c\.?\s*)?\d{3,4}/i.test(inside);
+    const descriptor = (year ? gloss : gloss || inside).replace(/\s+/g, ' ').trim().slice(0, 48);
+    if (!descriptor || /disambiguation|may refer/i.test(descriptor)) continue;
+    seen.add(key);
+    others.push({
+      name: full,
+      descriptor,
+      query: full,
+      id: slugOf(full, descriptor) || slugOf(full),
+      seeds: rows.map((row, i) => (`${row.title ?? ''} ${row.snippet ?? ''}`.toLowerCase().includes(key) ? i : -1)).filter((i) => i >= 0),
+    });
+  }
+  const exact = rows.findIndex((row) => exactWikiArticle(row, name));
+  const famous = exact >= 0 ? toChoice(name, [exact], rows as EntityRow[]) : undefined;
+  const lead = famous && famous.descriptor ? famous : exact >= 0 ? { ...toChoice(name, [exact], rows as EntityRow[]), descriptor: famous?.descriptor || 'Best known' } : undefined;
+  const choices = [lead, ...others].filter((choice): choice is EntityChoice => !!choice && offerChoice(choice));
+  const uniq = new Set<string>();
+  return choices.filter((choice) => {
+    const key = choice.query.toLowerCase();
+    if (uniq.has(key)) return false;
+    uniq.add(key);
+    return true;
+  }).slice(0, 3);
+}
+
 /** "Michael B. Jordan" is a different person from "Michael Jordan": a token sits inside the name. */
 function insertedName(row: EntityRow, name: string): boolean {
   const parts = name.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -1510,7 +1555,15 @@ export function resolveEntity(
 
   // A disambiguation page that names someone with a middle initial ("Michael B. Jordan")
   // is a second person. A bare parenthetical of the exact name is not.
-  const anotherPerson = disambig.length > 0 && middleInitialPerson(`${rows[disambig[0]!]?.title ?? ''} ${rows[disambig[0]!]?.snippet ?? ''}`, name);
+  // The list page itself often fails the biography name check, because the list also
+  // contains a longer name ("Michael Jordan Bonema"), so it is read from every row.
+  const listed = rows.find((row) => isDisambiguationPage(row));
+  const listedText = `${listed?.title ?? ''} ${listed?.snippet ?? ''}`;
+  const anotherPerson = !!listed && middleInitialPerson(listedText, name);
+  if (!pickAsk && !opts?.prior && listed && anotherPerson) {
+    const named = middleNameChoices(name, listed, rows);
+    if (named.length >= 2) return { kind: 'choices', choices: named };
+  }
 
   // Famous name: the exact Wikipedia article plus other en.wikipedia.org pages about the same
   // name is ONE dominant identity — never split it into choices (live: Obama, Taylor Swift).
