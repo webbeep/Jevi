@@ -3,6 +3,7 @@
  * Deterministic: no network and no model call. A list is never emptied.
  */
 import type { CardNode } from '../shared/card';
+import { shoppingAsk } from './claims';
 import { PAPER_ASK } from './scholarly';
 
 const AUTHORITY = [
@@ -140,8 +141,12 @@ export function preferSources<T extends RankedHit>(query: string, rows: readonly
   if (native.length >= KEEP) pool = native;
   const solid = pool.filter((item) => item.tier < 3);
   if (solid.length >= KEEP) pool = solid;
-  const nonsocial = pool.filter((item) => !isSocialHost(item.row.domain || hostOf(item.row.url)));
-  if (nonsocial.length >= KEEP) pool = nonsocial;
+  // A shopping ask keeps forum posts: the product photo and the price are often there.
+  // Other asks drop those posts once enough pages remain, so a thread does not lead.
+  if (!shoppingAsk(query)) {
+    const nonsocial = pool.filter((item) => !isSocialHost(item.row.domain || hostOf(item.row.url)));
+    if (nonsocial.length >= KEEP) pool = nonsocial;
+  }
   // A person or a scoreboard should lead with the encyclopedia or the league. A research
   // question leads with papers and official pages. Other asks keep the engine's order, with
   // free-host pages that had to stay sunk to the back.

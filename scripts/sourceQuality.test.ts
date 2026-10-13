@@ -45,6 +45,18 @@ test('a Chinese score page drops once an official English scoreboard is in the l
   assert.ok(out.some((row) => row.domain === 'www.nba.com'));
 });
 
+test('a shopping ask keeps a forum post that can carry the product photo', () => {
+  const rows = [
+    hit('www.runnersworld.com', 'Best running shoes for beginners'),
+    hit('www.reddit.com', 'Brooks Ghost 18', 'Daily trainer, about $140'),
+    hit('www.nytimes.com', 'Best running shoes'),
+    hit('runrepeat.com', 'Best beginner running shoes'),
+    hit('www.rtings.com', 'Best running shoes'),
+  ];
+  const out = preferSources('best running shoes for beginners', rows);
+  assert.ok(out.some((row) => row.domain.includes('reddit')));
+});
+
 test('a research question leads with papers and a social post does not outrank an official page', () => {
   const rows = [
     hit('www.reddit.com', 'Fasting thread', 'I tried intermittent fasting'),
