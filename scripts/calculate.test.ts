@@ -135,6 +135,64 @@ test('two different measures are not added into one number', () => {
   assert.match(body, /88 kg/);
 });
 
+test('a second line of the same measure is not added again', () => {
+  const card: AnswerCard = {
+    title: 'Player Stats',
+    body: [
+      { type: 'stat', label: 'PTS', value: '21.8' },
+      { type: 'stat', label: 'REB', value: '10' },
+      { type: 'stat', label: 'AST', value: '5.3' },
+      { type: 'stat', label: 'Career PTS', value: '23.5' },
+      { type: 'stat', label: 'Career AST', value: '3.9' },
+    ],
+  };
+  const answer = calculationAnswer({
+    question: 'Add the points, rebounds, and assists',
+    original: 'player stats',
+    priorTitle: 'Player Stats',
+    card,
+  });
+  const body = JSON.stringify(answer);
+  assert.match(body, /37\.1/);
+  assert.equal(body.includes('23.5'), false);
+  assert.equal(body.includes('3.9'), false);
+});
+
+test('a nutrition table adds the calorie column, not every gram on the row', () => {
+  const card: AnswerCard = {
+    title: 'Banana vs Apple Calories',
+    body: [
+      { type: 'tile', label: 'Medium banana', value: '105' },
+      { type: 'tile', label: 'Medium apple', value: '95' },
+      {
+        type: 'table',
+        columns: ['', 'Medium banana', 'Medium apple'],
+        rows: [
+          ['Calories', '105', '95'],
+          ['Carbs', '27 g', '25 g'],
+          ['Sugar', '14 g', '19 g'],
+        ],
+      },
+      { type: 'text', text: `${headline} A medium banana has about 5 calories and a medium apple about 95.` },
+    ],
+  };
+  const answer = calculationAnswer({
+    question: 'do the math',
+    original: 'calories in a medium banana and a medium apple',
+    priorTitle: card.title,
+    card,
+  });
+  const body = JSON.stringify(answer);
+  assert.equal(answer.subtitle, 'Total');
+  assert.match(body, /105/);
+  assert.match(body, /95/);
+  assert.match(body, /= 200/);
+  assert.equal(body.includes('143'), false);
+  assert.equal(body.includes('27'), false);
+  assert.equal(body.includes('Darkhorse'), false);
+  assert.equal(body.includes('about 5'), false);
+});
+
 test('a total and a count become a rate when the ask is just to calculate', () => {
   const card: AnswerCard = {
     title: 'Season Totals',

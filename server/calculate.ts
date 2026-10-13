@@ -20,8 +20,8 @@ const LABEL_WORD = /^(?:weight|weighs|weighing|rent|rents|utility|utilities|flou
 
 const ALIAS: Record<string, string[]> = {
   points: ['ppg', 'point', 'points', 'pts'],
-  rebounds: ['rpg', 'rebound', 'rebounds'],
-  assists: ['apg', 'assist', 'assists'],
+  rebounds: ['rpg', 'rebound', 'rebounds', 'reb'],
+  assists: ['apg', 'assist', 'assists', 'ast'],
   steals: ['spg', 'steal', 'steals'],
   blocks: ['bpg', 'block', 'blocks'],
   minutes: ['mpg', 'minute', 'minutes', 'mins'],
@@ -105,7 +105,7 @@ export function subjectTitle(query: string, prior?: string): string {
 const CLOCK_RE = /\b(\d{1,2}):(\d{2})(?::(\d{2}))?\b(?:\s*(minutes|minute|mins|min|hours|hour|hrs|hr|seconds|second|secs|sec))?/gi;
 const MONEY_RE = /[$€£¥]\s?(\d[\d,]*(?:\.\d+)?)(?:\s?(k|m|bn|million|billion|trillion|thousand))?/gi;
 const ABBR_RE = /\b(PPG|RPG|APG|SPG|BPG|MPG|FG%|FT%|3P%)\s*[:=]?\s*(\d[\d,]*(?:\.\d+)?)\b|\b(\d[\d,]*(?:\.\d+)?)\s*(PPG|RPG|APG|SPG|BPG|MPG|FG%|FT%|3P%)\b/gi;
-const LEAD_RE = /\b(points|point|pts|rebounds|rebound|assists|assist|steals|steal|blocks|block|games|game|minutes|minute|hours|hour|dollars|dollar|calories|kcal|people|cups|cup|kg|lb|lbs)\s*[:=]?\s*(\d[\d,]*(?:\.\d+)?)(?!\s*(?:%|percent|kg|lb|lbs|pounds|minutes|minute|hours|hour|points|point|games|game))/gi;
+const LEAD_RE = /\b(points|point|pts|rebounds|rebound|reb|assists|assist|ast|steals|steal|blocks|block|games|game|minutes|minute|hours|hour|dollars|dollar|calories|kcal|people|cups|cup|kg|lb|lbs)\s*[:=]?\s*(\d[\d,]*(?:\.\d+)?)(?!\s*(?:%|percent|kg|lb|lbs|pounds|minutes|minute|hours|hour|points|point|games|game))/gi;
 const UNIT_RE = /\b(\d[\d,]*(?:\.\d+)?)(?:\s*(million|billion|trillion|thousand))?\s*(%|percent|kg|kilograms|lb|lbs|pounds|minutes|minute|mins|min|hours|hour|hrs|hr|seconds|second|secs|sec|miles|mph|km\/h|km|meters|metres|feet|ft|people|users|years old|GB|TB|points|point|pts|rebounds|rebound|assists|assist|steals|steal|blocks|block|games|game|cups|cup|calories|kcal|dollars|dollar|servings|serving|items|item|days|day)/gi;
 
 interface Hit { start: number; end: number; figure: Figure }
@@ -152,9 +152,9 @@ function canonical(unit: string): string {
   if (['minute', 'minutes', 'min', 'mins'].includes(u)) return 'minutes';
   if (['hour', 'hours', 'hr', 'hrs'].includes(u)) return 'hours';
   if (['second', 'seconds', 'sec', 'secs'].includes(u)) return 'seconds';
-  if (['point', 'points', 'pts'].includes(u)) return 'points';
-  if (['rebound', 'rebounds'].includes(u)) return 'rebounds';
-  if (['assist', 'assists'].includes(u)) return 'assists';
+  if (['point', 'points', 'pts', 'ppg'].includes(u)) return 'points';
+  if (['rebound', 'rebounds', 'reb', 'rpg'].includes(u)) return 'rebounds';
+  if (['assist', 'assists', 'ast', 'apg'].includes(u)) return 'assists';
   if (['steal', 'steals'].includes(u)) return 'steals';
   if (['block', 'blocks'].includes(u)) return 'blocks';
   if (['game', 'games'].includes(u)) return 'games';
@@ -308,24 +308,35 @@ function dedupe(figures: Figure[]): Figure[] {
   return out;
 }
 
+function isMeasure(label: string): boolean {
+  const text = label.trim();
+  if (!text || text.length > 40 || /\d/.test(text)) return false;
+  if (LABEL_WORD.test(text) || /^weigh(?:s|ing)?$/i.test(text)) return true;
+  if (/^(?:PPG|RPG|APG|SPG|BPG|MPG|FG%|FT%|3P%|PTS|REB|AST)$/i.test(text)) return true;
+  return Object.values(ALIAS).some((words) => words.some((word) => new RegExp(`\\b${escapeReg(word)}\\b`, 'i').test(text)));
+}
+
 function fromLabeled(label: string, value: string, unit?: string): Figure[] {
   const blob = [label, value, unit].filter(Boolean).join(' ');
   const parsed = readFigures(blob);
-  const words = label.trim().split(/\s+/).filter(Boolean);
-  if (parsed.length > 1 || words.length > 6 || label.length > 48 || /\d/.test(label)) return parsed;
+  const header = label.trim();
+  const words = header.split(/\s+/).filter(Boolean);
+  if (parsed.length > 1 || words.length > 6 || header.length > 48 || /\d/.test(header)) return parsed;
   if (parsed.length === 1) {
-    const pretty = /^weigh(?:s|ing)?$/i.test(label.trim()) ? 'Weight' : label.trim();
+    if (!isMeasure(header)) return parsed;
+    const pretty = /^weigh(?:s|ing)?$/i.test(header) ? 'Weight' : header;
     return [{ ...parsed[0]!, label: pretty || parsed[0]!.label }];
   }
+  if (!isMeasure(header) && !unit) return [];
   const bare = value.match(/-?\d[\d,]*(?:\.\d+)?/);
   if (!bare || words.length === 0 || words.length > 4) return [];
   const amount = parseAmount(bare[0]!);
   if (!Number.isFinite(amount)) return [];
   if (!unit && bare[0]!.replace(/,/g, '').length === 4 && amount >= 1800 && amount <= 2099) return [];
-  const abbr = /^(?:PPG|RPG|APG|SPG|BPG|MPG|FG%|FT%|3P%)$/i.test(label.trim());
+  const abbr = /^(?:PPG|RPG|APG|SPG|BPG|MPG|FG%|FT%|3P%)$/i.test(header);
   return [{
-    label: label.trim(),
-    unit: canonical(unit || label),
+    label: header,
+    unit: canonical(unit || header),
     amount,
     display: formatAmount(amount),
     rate: abbr,
@@ -362,7 +373,16 @@ function figuresFromNode(node: CardNode): Figure[] {
     case 'callout':
       return readFigures(`${node.title ?? ''} ${node.text}`);
     case 'table':
-      return node.rows.flatMap((row) => row.flatMap((cell, i) => fromLabeled(node.columns[i] ?? '', cell)));
+      return node.rows.flatMap((row) => row.flatMap((cell, i) => {
+        const column = node.columns[i] ?? '';
+        const lead = row[0] ?? '';
+        if (i === 0 && !/\d/.test(cell)) return [];
+        const measure = [lead, column].find((part) => isMeasure(part)) ?? '';
+        const item = [column, lead].find((part) => part && part !== measure && !isMeasure(part) && !/\d/.test(part)) ?? '';
+        const parsed = fromLabeled(measure || column || lead, cell);
+        if (!item || parsed.length !== 1) return parsed;
+        return [{ ...parsed[0]!, label: `${item} ${parsed[0]!.label}`.replace(/\s+/g, ' ') }];
+      }));
     case 'chart':
       return node.data.flatMap((d) => fromLabeled(d.label, String(d.value), node.unit));
     case 'list':
@@ -409,7 +429,63 @@ function figuresFromNode(node: CardNode): Figure[] {
   }
 }
 
+function structuredFigures(node: CardNode): Figure[] {
+  switch (node.type) {
+    case 'stack':
+    case 'grid':
+    case 'section':
+    case 'scroller':
+      return node.children.flatMap(structuredFigures);
+    case 'tabs':
+      return node.tabs.flatMap((tab) => tab.children.flatMap(structuredFigures));
+    case 'hero':
+    case 'stat':
+    case 'tile':
+    case 'keyvalue':
+    case 'profile':
+    case 'table':
+    case 'chart':
+    case 'scaler':
+    case 'slider':
+      return figuresFromNode(node);
+    case 'heading':
+    case 'text':
+    case 'quote':
+    case 'draft':
+    case 'callout':
+    case 'list':
+    case 'timeline':
+    case 'steps':
+    case 'progress':
+    case 'rating':
+    case 'accordion':
+    case 'proscons':
+    case 'badges':
+    case 'reveal':
+    case 'pricing':
+    case 'divider':
+    case 'actions':
+    case 'citations':
+    case 'slot':
+    case 'image':
+    case 'gallery':
+    case 'links':
+    case 'video':
+    case 'code':
+    case 'choices':
+    case 'diagram':
+    case 'ticker':
+      return [];
+    default: {
+      const unreachable: never = node;
+      return unreachable;
+    }
+  }
+}
+
 export function figuresFromCard(card: AnswerCard): Figure[] {
+  const structured = dedupe(card.body.flatMap(structuredFigures));
+  if (structured.length >= 2) return structured;
   return dedupe(card.body.flatMap(figuresFromNode));
 }
 
@@ -446,20 +522,55 @@ function orderByQuestion(question: string, figures: Figure[]): Figure[] {
     .map((row) => row.figure);
 }
 
-function bareGroup(figures: Figure[]): Figure[] | undefined {
+/** One key per measure. Currency stays together; points do not merge with rebounds. */
+function measureKey(figure: Figure): string {
+  const names = aliases(figure);
+  const specific = Object.keys(ALIAS).find((name) => name !== 'dollars' && names.includes(name));
+  if (specific) return specific;
+  const unit = canonical(figure.unit || '');
+  if (unit === '$' || unit === '€' || unit === '£' || unit === '¥') return unit;
+  return unit || figure.label.toLowerCase();
+}
+
+function groupKey(figure: Figure): string {
+  const unit = canonical(figure.unit || '');
+  if (unit === '$' || unit === '€' || unit === '£' || unit === '¥') return unit;
+  return measureKey(figure);
+}
+
+/** The first figure of each measure, in card order. A later season line does not get added again. */
+function firstOfEach(figures: Figure[]): Figure[] {
+  const seen = new Set<string>();
+  const out: Figure[] = [];
+  for (const figure of figures) {
+    const key = measureKey(figure);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(figure);
+  }
+  return out;
+}
+
+function bareGroup(figures: Figure[], hint: string): Figure[] | undefined {
   const groups = new Map<string, Figure[]>();
   for (const figure of figures) {
     if (figure.clock || figure.rate) continue;
-    const key = canonical(figure.unit || figure.label);
+    const key = groupKey(figure);
     if (!key || key === '%' || key === 'time') continue;
     const list = groups.get(key) ?? [];
     list.push(figure);
     groups.set(key, list);
   }
   let best: Figure[] | undefined;
-  for (const list of groups.values()) {
+  let bestScore = -1;
+  for (const [key, list] of groups) {
     if (list.length < 2) continue;
-    if (!best || list.length > best.length) best = list;
+    const hinted = new RegExp(`\\b${escapeReg(key)}\\b`, 'i').test(hint) ? 2 : 0;
+    const score = hinted * 100 + list.length;
+    if (score > bestScore) {
+      best = list;
+      bestScore = score;
+    }
   }
   return best;
 }
@@ -579,7 +690,10 @@ export function calculationAnswer(input: {
   const title = subjectTitle(input.original, input.priorTitle);
   const op = operation(input.question);
   const all = gather(input.question, input.card, input.search).filter((figure) => !figure.clock);
-  const named = orderByQuestion(input.question, all.filter((figure) => figureNamed(input.question, figure)));
+  const every = /\b(?:each|every|all of them|both the)\b/i.test(input.question);
+  const named = orderByQuestion(input.question, every
+    ? all.filter((figure) => figureNamed(input.question, figure))
+    : firstOfEach(all.filter((figure) => figureNamed(input.question, figure))));
 
   const finish = (figures: Figure[], kind: Exclude<Op, 'bare' | 'rate'>): CalculationCard => ({
     title,
@@ -612,7 +726,7 @@ export function calculationAnswer(input: {
   }
 
   const pool = named.length >= 2 ? named : all.filter((figure) => !figure.rate);
-  const group = bareGroup(pool);
+  const group = bareGroup(pool, `${input.original} ${input.priorTitle ?? ''} ${input.question}`);
   if (group && (op === 'bare' || op === 'sum' || op === 'average' || op === 'product')) {
     const kind: Exclude<Op, 'bare' | 'rate'> = op === 'average' ? 'average' : op === 'product' ? 'product' : 'sum';
     return finish(group, kind);
