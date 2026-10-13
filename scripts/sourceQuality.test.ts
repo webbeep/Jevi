@@ -72,6 +72,30 @@ test('a research question leads with papers and a social post does not outrank a
   assert.ok(out.findIndex((row) => row.domain.includes('youtube')) > out.findIndex((row) => row.domain === 'doi.org'));
 });
 
+test('a named body leads, and a newer official page leads an old release', () => {
+  const ipcc = preferSources('What does the IPCC say about warming?', [
+    hit('www.newyorker.com', 'The climate issue', 'A magazine essay'),
+    hit('www.ipcc.ch', 'AR6 Synthesis Report', 'The latest assessment'),
+    hit('www.nytimes.com', 'Climate report', 'News coverage'),
+    hit('www.bbc.com', 'IPCC report', 'Summary'),
+  ]);
+  assert.equal(ipcc[0]?.domain, 'www.ipcc.ch');
+  const wolves = preferSources('How many wolves live in Minnesota?', [
+    hit('www.mprnews.org', 'Wolf count', 'About 2,900'),
+    hit('files.dnr.state.mn.us', 'Wolf survey', 'The population estimate'),
+    hit('www.startribune.com', 'Wolves', 'Local news'),
+    hit('www.duluthnewstribune.com', 'Wolves', 'Local news'),
+  ]);
+  assert.equal(wolves[0]?.domain, 'files.dnr.state.mn.us');
+  const milk = preferSources('Is raw milk legal according to the FDA?', [
+    hit('www.fda.gov', 'FDA 2007 release', 'A 2007 press release on raw milk'),
+    hit('www.fda.gov', 'Raw milk questions', 'Current consumer page'),
+    hit('www.nytimes.com', 'Raw milk', 'A feature'),
+    hit('www.cdc.gov', 'Raw milk', 'Risks'),
+  ]);
+  assert.equal(milk[0]?.title, 'Raw milk questions');
+});
+
 test('a list that is only foreign pages is kept', () => {
   const rows = [hit('fsyyhong.com', 'NBA 比分', '未开始 独行侠'), hit('iaixiong.com', '赛程', '火箭')];
   assert.equal(preferSources('NBA scores tonight', rows).length, 2);

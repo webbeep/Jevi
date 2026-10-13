@@ -30,6 +30,7 @@ import { FaviconStack, SourcesRail, SourcesSheet } from './Sources';
 import { type SessionActions, type Turn, liveBody, scrollToTurn, useSession } from './useSession';
 import { readChoices } from '../shared/choices';
 import { loadSnapshot, normalizeAnswerQuery, purgeDegradedSnapshots, saveSnapshot } from '../shared/answerKey';
+import { answerSlug } from '../shared/publicPage';
 import { cacheTtlS } from '../shared/cacheTtl';
 import { turnDegraded, turnsDegraded } from '../shared/degraded';
 import { MANUAL_RETRY_AFTER, OFFLINE_MESSAGE, clearPending, loadPending, savePending } from '../shared/offline';
@@ -257,7 +258,7 @@ export default function App() {
     noteDeviceAsk();
     setHistRev((n) => n + 1);
     typeahead.close();
-    history.pushState(null, '', `?${new URLSearchParams({ q: query })}`);
+    history.pushState(null, '', `/a/${answerSlug(query)}?${new URLSearchParams({ q: query })}`);
     session.search(query, { reset: true });
   };
   startSearchRef.current = startSearch;

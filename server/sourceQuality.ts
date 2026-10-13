@@ -121,6 +121,48 @@ export interface RankedHit {
   title: string;
   snippet?: string;
   domain: string;
+  date?: string;
+}
+
+const LEAGUE = new Set(['nba', 'nfl', 'mlb', 'nhl', 'ncaa', 'wnba', 'mls', 'ufc', 'pga', 'wwe']);
+const STATES = 'alabama:al,alaska:ak,arizona:az,arkansas:ar,california:ca,colorado:co,connecticut:ct,delaware:de,florida:fl,georgia:ga,hawaii:hi,idaho:id,illinois:il,indiana:in,iowa:ia,kansas:ks,kentucky:ky,louisiana:la,maine:me,maryland:md,massachusetts:ma,michigan:mi,minnesota:mn,mississippi:ms,missouri:mo,montana:mt,nebraska:ne,nevada:nv,new hampshire:nh,new jersey:nj,new mexico:nm,new york:ny,north carolina:nc,north dakota:nd,ohio:oh,oklahoma:ok,oregon:or,pennsylvania:pa,rhode island:ri,south carolina:sc,south dakota:sd,tennessee:tn,texas:tx,utah:ut,vermont:vt,virginia:va,washington:wa,west virginia:wv,wisconsin:wi,wyoming:wy';
+const OFFICIAL_ASK = /\b(how many|population|tax|taxes|law|laws|legal|illegal|ban|banned|regulation|statute|official|census)\b/i;
+
+function orgTokens(query: string): string[] {
+  return [...query.matchAll(/\b[A-Z]{3,8}\b/g)].map((match) => match[0].toLowerCase()).filter((word) => !LEAGUE.has(word) && word !== 'doi' && word !== 'pdf' && word !== 'url');
+}
+
+function placeHosts(query: string): string[] {
+  if (!OFFICIAL_ASK.test(query)) return [];
+  let rest = ` ${query.toLowerCase().replace(/[^a-z\s]/g, ' ').replace(/\s+/g, ' ')} `;
+  const hosts: string[] = [];
+  const names = STATES.split(',').map((pair) => {
+    const [name, code] = pair.split(':');
+    return [name!, code!] as const;
+  }).sort((a, b) => b[0].length - a[0].length);
+  for (const [name, code] of names) {
+    const needle = ` ${name} `;
+    if (!rest.includes(needle)) continue;
+    rest = rest.replaceAll(needle, ' ');
+    hosts.push(`.${code}.us`, `${code}.gov`);
+  }
+  return hosts;
+}
+
+function yearOf(row: RankedHit): number {
+  const dated = row.date?.match(/\b(?:19|20)\d{2}\b/);
+  if (dated) return Number(dated[0]);
+  const years = row.title.match(/\b(?:19|20)\d{2}\b/g);
+  if (!years?.length) return 0;
+  return Math.max(...years.map(Number));
+}
+
+/** 0 when the question names this host (IPCC → ipcc.ch) or the place's own official site. */
+function officialLead(domain: string, orgs: readonly string[], places: readonly string[]): number {
+  const host = domainOf(domain);
+  if (orgs.some((token) => host.includes(token))) return 0;
+  if (places.some((suffix) => host.endsWith(suffix) || host.includes(suffix.replace(/^\./, '')))) return 0;
+  return 1;
 }
 
 /**
@@ -151,6 +193,23 @@ export function preferSources<T extends RankedHit>(query: string, rows: readonly
   // question leads with papers and official pages. Other asks keep the engine's order, with
   // free-host pages that had to stay sunk to the back.
   const promote = /\b(who|whom|whose|biography|nobel|scores?|scoreboard|standings)\b/i.test(query);
+  const orgs = orgTokens(query);
+  const places = placeHosts(query);
+  const leadOf = (item: (typeof pool)[number]) => officialLead(item.row.domain || hostOf(item.row.url), orgs, places);
+  const byLead = (a: (typeof pool)[number], b: (typeof pool)[number]) => {
+    const lead = leadOf(a) - leadOf(b);
+    if (lead) return lead;
+    if (leadOf(a) === 0) {
+      const ay = yearOf(a.row);
+      const by = yearOf(b.row);
+      if (ay && by && ay !== by) return by - ay;
+      // A title that names an old year is a press release. The undated page on that host is the current one.
+      const stale = (year: number) => year > 0 && year < 2022;
+      if (stale(ay) && !by) return 1;
+      if (!ay && stale(by)) return -1;
+    }
+    return 0;
+  };
   if (PAPER_ASK.test(query)) {
     const rank = (item: (typeof pool)[number]) => {
       const domain = item.row.domain || hostOf(item.row.url);
@@ -158,10 +217,10 @@ export function preferSources<T extends RankedHit>(query: string, rows: readonly
       if (isScholarHost(domain) || item.tier === 0) return 0;
       return 1;
     };
-    if (pool.some((item) => rank(item) === 0)) pool.sort((a, b) => rank(a) - rank(b) || a.index - b.index);
-    else pool.sort((a, b) => Number(a.tier === 3) - Number(b.tier === 3) || a.index - b.index);
+    if (pool.some((item) => rank(item) === 0)) pool.sort((a, b) => byLead(a, b) || rank(a) - rank(b) || a.index - b.index);
+    else pool.sort((a, b) => byLead(a, b) || Number(a.tier === 3) - Number(b.tier === 3) || a.index - b.index);
   } else {
-    pool.sort((a, b) => (promote ? a.tier - b.tier : Number(a.tier === 3) - Number(b.tier === 3)) || a.index - b.index);
+    pool.sort((a, b) => byLead(a, b) || (promote ? a.tier - b.tier : Number(a.tier === 3) - Number(b.tier === 3)) || a.index - b.index);
   }
   return pool.map((item) => item.row);
 }

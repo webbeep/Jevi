@@ -304,10 +304,11 @@ async function readSse(body: ReadableStream<Uint8Array>, onText: (t: string) => 
   }
 }
 
-async function streamFrom(env: Env, p: Provider, system: string, user: string, maxTokens: number, think: boolean, onText: (t: string) => void, onReasoning: () => void): Promise<void> {
+async function streamFrom(env: Env, p: Provider, system: string, user: string, maxTokens: number, think: boolean, onText: (t: string) => void, onReasoning: () => void, budgetMs = 60_000): Promise<void> {
   switch (p.kind) {
     case 'http': {
       const deepseek = p.id === 'deepseek';
+      const total = Math.max(2000, Math.min(60_000, budgetMs));
       const res = await post(p, {
         model: p.model,
         messages: messages(system, user),
@@ -315,7 +316,7 @@ async function streamFrom(env: Env, p: Provider, system: string, user: string, m
         ...(think ? {} : { temperature: 0.4 }),
         stream: true,
         ...p.extra?.(think, p.model),
-      }, think ? 30_000 : 12_000, 60_000);
+      }, Math.min(think ? 30_000 : 12_000, total), total);
       if (!res.body) throw new ProviderError(`${p.label} sent no body`, 45_000);
       return readSse(res.body, onText, onReasoning);
     }
@@ -387,10 +388,18 @@ export async function llmLines(
   user: string,
   maxTokens: number,
   onLine: (line: string) => void,
-  opts: { think?: boolean; onThinking?: () => void } = {},
+  opts: { think?: boolean; onThinking?: () => void; deadlineMs?: number } = {},
 ): Promise<string> {
   let last: unknown;
+  // A stuck provider must not be retried until the card has waited for minutes.
+  const deadline = opts.deadlineMs ?? 25_000;
+  const started = Date.now();
   for (const p of candidates(env)) {
+    const remain = deadline - (Date.now() - started);
+    if (remain < 2000) {
+      last = new Error('answer timed out');
+      break;
+    }
     let text = '';
     let wrote = false;
     let thinking = false;
@@ -413,7 +422,7 @@ export async function llmLines(
         if (thinking) return;
         thinking = true;
         opts.onThinking?.();
-      });
+      }, remain);
       flush(true);
       if (!wrote) throw new ProviderError(`${p.label} returned nothing`, 0);
       return p.label;

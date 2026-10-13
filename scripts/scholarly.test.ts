@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { PAPER_ASK, paperTopic, withScholarly, workToResult } from '../server/scholarly.ts';
+import { PAPER_ASK, paperAnchor, paperTopic, withScholarly, workMatches, workToResult } from '../server/scholarly.ts';
 
 test('SPD-C4: paper asks are detected, shopping and everyday asks are not', () => {
   for (const q of ['Give me 3 real peer-reviewed papers on sleep deprivation and working memory, with DOIs', 'meta-analysis of creatine and cognition', 'research papers about microplastics', 'What does the research say about intermittent fasting and longevity?']) assert.ok(PAPER_ASK.test(q), q);
@@ -11,6 +11,14 @@ test('SPD-C4: topic drops task words', () => {
   assert.equal(paperTopic('Give me 3 real peer-reviewed papers on sleep deprivation and working memory, with DOIs'), 'sleep deprivation working memory');
   assert.equal(paperTopic('Find the original paper that introduced the Transformer architecture: authors, venue and arXiv ID'), 'Transformer architecture');
   assert.equal(paperTopic('What does the research say about intermittent fasting and longevity?'), 'intermittent fasting longevity');
+});
+
+test('a named author and year do not match a different year', () => {
+  const anchor = paperAnchor('What did the Ekelund 2016 paper on physical activity find?');
+  assert.deepEqual(anchor, { author: 'ekelund', year: 2016 });
+  assert.equal(workMatches({ publication_year: 1967, authorships: [{ author: { display_name: 'Ulf Ekelund' } }] }, anchor!), false);
+  assert.equal(workMatches({ publication_year: 2016, authorships: [{ author: { display_name: 'Ulf Ekelund' } }] }, anchor!), true);
+  assert.equal(paperAnchor('peer-reviewed papers on GLP-1'), undefined);
 });
 
 test('SPD-C4: a work becomes a doi.org source that states its DOI and year; web dupes of that DOI go', () => {

@@ -96,6 +96,34 @@ export async function fetchWikiDisambiguation(name: string): Promise<WikiHit | n
   return listed ?? plain;
 }
 
+/**
+ * The exact Wikipedia article for a bare name (keyless). The same article comes back on every
+ * ask, so a picker decision does not flip when the backup engines omit it. A disambiguation
+ * page is not this article.
+ */
+export async function fetchWikiArticle(name: string): Promise<WikiHit | null> {
+  const clean = name.trim().replace(/\s+/g, ' ');
+  if (!clean || clean.split(' ').length < 2) return null;
+  const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(clean.replace(/ /g, '_'))}`;
+  try {
+    const data = await fetchJsonCapped<WikiSummary>(
+      url,
+      { headers: { 'User-Agent': WIKI_UA, Accept: 'application/json' } },
+      DISAMBIG_MS,
+      WIKI_BODY_CAP,
+    );
+    if (data.type === 'disambiguation') return null;
+    const title = (data.title ?? '').trim();
+    if (!title || title.toLowerCase() !== clean.toLowerCase()) return null;
+    const extract = (data.extract ?? '').replace(/\s+/g, ' ').trim();
+    if (!extract || /\bmay refer to\b/i.test(extract)) return null;
+    const page = data.content_urls?.desktop?.page ?? `https://en.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g, '_'))}`;
+    return { title, url: page, snippet: clip(extract, 320) };
+  } catch {
+    return null;
+  }
+}
+
 
 /** REST summary lead image (keyless, 0 Serper) for a kept en.wikipedia.org/wiki/<Title> row. */
 export async function fetchWikiLeadImage(pageUrl: string): Promise<{ title: string; description?: string; thumb: string; url: string } | null> {

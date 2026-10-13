@@ -85,12 +85,12 @@ test('normalizeAnswerQuery collapses case, space, quotes and trailing punctuatio
 
 test('answerCacheUrl includes freshness and a context hash only when context is set', () => {
   const plain = answerCacheUrl({ query: '  Kindle  vs Kobo? ', freshness: 'week' });
-  assert.equal(plain, 'https://answer-cache.zo.internal/v1-e31?q=kindle%20vs%20kobo&f=week');
+  assert.equal(plain, 'https://answer-cache.zo.internal/v1-e32?q=kindle%20vs%20kobo&f=week');
   assert.equal(plain.includes('&c='), false);
   const empty = answerCacheUrl({ query: 'Kindle vs Kobo', freshness: 'any', context: '' });
   assert.equal(empty.includes('&c='), false);
   const withContext = answerCacheUrl({ query: 'Kindle vs Kobo', freshness: 'day', context: 'topic' });
-  assert.equal(withContext, `https://answer-cache.zo.internal/v1-e31?q=kindle%20vs%20kobo&f=day&c=${fnv1a('topic')}`);
+  assert.equal(withContext, `https://answer-cache.zo.internal/v1-e32?q=kindle%20vs%20kobo&f=day&c=${fnv1a('topic')}`);
   assert.equal(fnv1a('topic'), fnv1a('topic'));
   assert.notEqual(fnv1a('topic'), fnv1a('other'));
   assert.match(fnv1a('topic'), /^[0-9a-f]{8}$/);
@@ -426,4 +426,58 @@ test('a cache hit replays a large body without reparsing it', async () => {
   const elapsed = performance.now() - started;
   assert.equal(replay, stored);
   assert.ok(elapsed < 20, `hit took ${elapsed}ms`);
+});
+
+test('a finished search is saved as a public answer and a picker is not', async () => {
+  const saved: unknown[][] = [];
+  const db = {
+    prepare() {
+      return {
+        bind(...args: unknown[]) {
+          return {
+            async run() {
+              saved.push(args);
+            },
+          };
+        },
+      };
+    },
+  };
+  const mem = memoryCache();
+  const card = async (send: Send) => {
+    send('head', { title: 'Kindle and Kobo', subtitle: 'A side by side look' });
+    send('node', { index: 0, node: { type: 'text', text: 'Kindle is lighter.' } });
+    send('done', { engine: 'composed', removed: 0, pagesRead: 1, ms: 4 });
+  };
+  await finish(
+    await serveStream({
+      request: new Request('https://zo.page/api/stream', { method: 'POST' }),
+      env: { DB: db },
+      req: search('Kindle vs Kobo'),
+      run: card,
+      waitUntil: mem.waitUntil,
+      cache: mem.cache,
+    }),
+    mem.pending,
+  );
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0]?.[2], 'Kindle and Kobo');
+  assert.match(String(saved[0]?.[4]), /Kindle is lighter/);
+
+  const picker = async (send: Send) => {
+    send('node', { index: 0, node: { type: 'text', text: 'Which one?' } });
+    send('done', { choices: [{ name: 'A' }, { name: 'B' }] });
+  };
+  await finish(
+    await serveStream({
+      request: new Request('https://zo.page/api/stream', { method: 'POST' }),
+      env: { DB: db },
+      req: search('Who is Ray Lee'),
+      run: picker,
+      waitUntil: mem.waitUntil,
+      cache: mem.cache,
+    }),
+    mem.pending,
+  );
+  assert.equal(saved.length, 1);
 });

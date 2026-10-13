@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://zo.fyi/sitemap.xml
+Sitemap: https://zo2.pages.dev/sitemap

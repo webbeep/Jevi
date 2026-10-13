@@ -30,7 +30,7 @@ import {
   publicChoices,
   resolveEntity,
 } from './entity';
-import { fetchWikiDisambiguation, fetchWikiLeadImage } from './wikiSearch';
+import { fetchWikiArticle, fetchWikiDisambiguation, fetchWikiLeadImage } from './wikiSearch';
 import { type EntityHint, mentionsAny } from './imageGate';
 import type { RowImagePlan } from './pictures';
 import type { AnswerCard, CardNode, FollowupContext, FollowupIntent, LayoutPlan } from '../shared/card';
@@ -67,7 +67,7 @@ import { videoResults, wantsVideo, withVideos } from './videoSearch';
 import { guessFreshness, preferFresh, staleComplaint, stricter } from './freshness';
 import { isQuoteRow, liveQuote, quoteRow, tickerNode } from './liveQuote';
 import { splitPeople } from './peopleSplit';
-import { personSteer, threadPerson, topicOnly, withoutChosen } from './personSteer';
+import { personSteer, pronounFollow, roleFollow, threadPerson, topicOnly, withoutChosen } from './personSteer';
 import type { Send } from './sse';
 import { extraQueries, understand } from './understand';
 import { cacheBypass, testForce, validTestToken, wantsRefresh } from './token';
@@ -574,13 +574,18 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     const tryRelaxed = relaxed.length > 0 && relaxed.toLowerCase() !== query.trim().toLowerCase();
     let triedEntity = false;
     let recovered: 'relaxed' | 'entity' | 'knowledge' | 'seeds' | 'none' = 'none';
-    // A misspelling is corrected from pages the engines actually returned. When every
-    // provider failed, another search of the same words cannot reveal a spelling.
-    if (reason === 'empty') {
-      const room = SEARCH_CALL_CAP + (scope.ledger.bonus ?? 0) - searchCalls(scope.ledger);
-      if (room < 1) scope.ledger.bonus = (scope.ledger.bonus ?? 0) + (1 - room);
-      const looked = await searchWithLate({ q: query, freshness: 'any', count: 8, lite: true, ungated: true }, env, scope);
-      const fixed = spellingQuery(query, looked.response.results);
+    // A misspelling is corrected from pages the engines actually returned, including the
+    // keyless backup when a keyed engine is at its daily cap. When every provider failed,
+    // another search of the same words cannot reveal a spelling.
+    if (canRecoverSpelling(firstEngines)) {
+      let looked = found;
+      let fixed = spellingQuery(query, looked.response.results);
+      if (!fixed && !looked.response.results.length) {
+        const room = SEARCH_CALL_CAP + (scope.ledger.bonus ?? 0) - searchCalls(scope.ledger);
+        if (room < 1) scope.ledger.bonus = (scope.ledger.bonus ?? 0) + (1 - room);
+        looked = await searchWithLate({ q: query, freshness: 'any', count: 8, lite: true, ungated: true }, env, scope);
+        fixed = spellingQuery(query, looked.response.results);
+      }
       if (fixed) {
         send('rewrite', { query: fixed });
         let gated = applyPickGate(fixed, applyRelevance(fixed, { ...looked.response, query: fixed }, scope.ledger));
@@ -743,22 +748,35 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   // T444: before building a profile/person card, pick ONE entity from the top
   // results. Ambiguous names return choices instead of a mixed card.
   const plan = await planned;
-  // Bare person ask with no Wikipedia "may refer to" in the SERP: one keyless disambiguation lookup (0 Serper).
+  // Bare person ask: the exact article and, when the SERP lacks one, the disambiguation page.
+  // Both are keyless, so the same name resolves the same way when backup engines change.
   if (!live && isPersonAsk(query, plan.pattern) && !contextTerms(query).length && !priorEntity(context) && !nameIsTopic(query, results.results)) {
     const name = personSubject(query);
-    if (name && !results.results.some((r) => isDisambiguationPage(r))) {
-      const wiki = await fetchWikiDisambiguation(name).catch(() => null);
-      if (wiki) {
-        scope.ledger.search.wikipedia += 1;
-        const row = {
-          title: wiki.title,
-          url: wiki.url,
-          snippet: wiki.snippet,
+    if (name) {
+      const needArticle = !results.results.some((r) => {
+        try {
+          return decodeURIComponent(new URL(r.url).pathname).replace(/_/g, ' ').toLowerCase() === `/wiki/${name.toLowerCase()}`;
+        } catch {
+          return false;
+        }
+      });
+      const [wiki, article] = await Promise.all([
+        results.results.some((r) => isDisambiguationPage(r)) ? Promise.resolve(null) : fetchWikiDisambiguation(name).catch(() => null),
+        needArticle ? fetchWikiArticle(name).catch(() => null) : Promise.resolve(null),
+      ]);
+      const extra = [article, wiki].filter((hit): hit is NonNullable<typeof hit> => !!hit);
+      if (extra.length) {
+        scope.ledger.search.wikipedia += extra.length;
+        const rows = extra.map((hit) => ({
+          title: hit.title,
+          url: hit.url,
+          snippet: hit.snippet,
           domain: 'en.wikipedia.org',
-          engines: ['wikipedia'],
-        };
-        results = { ...results, results: [row, ...results.results.filter((r) => r.url !== wiki.url)] };
-        console.log(JSON.stringify({ zo: 'entity', wikiDisambiguation: true, title: wiki.title }));
+          engines: ['wikipedia' as const],
+        }));
+        const seen = new Set(rows.map((r) => r.url));
+        results = { ...results, results: [...rows, ...results.results.filter((r) => !seen.has(r.url))] };
+        console.log(JSON.stringify({ zo: 'entity', wikiArticle: !!article, wikiDisambiguation: !!wiki }));
       }
     }
     // EN4: the knowledge panel is a Wikipedia summary of the literal query, so put it in the row
@@ -901,6 +919,16 @@ async function ownSiteFor(query: string, entity: Entity, rows: SearchResult[], l
  * Payment, quota, rate, auth, and transport failures on every keyed provider mean search itself is down,
  * even when keyless Wikipedia answered empty. Only a provider that really searched and found nothing is "empty".
  */
+/**
+ * A capped keyed engine still leaves Wikipedia and the backup engines. A spelling can be read
+ * off those pages. A total outage, where every engine failed for a real error, cannot.
+ */
+function canRecoverSpelling(engines: EngineStatus[]): boolean {
+  if (!engines.length) return true;
+  const hard = (engine: EngineStatus) => !!engine.error && engine.error !== 'empty' && engine.error !== 'cap-daily';
+  return !engines.every(hard);
+}
+
 function noSourceReason(engines: EngineStatus[]): 'empty' | 'unavailable' {
   const keyed = engines.filter((engine) => engine.name !== 'wikipedia' && engine.name !== 'backup');
   const pool = keyed.length ? keyed : engines;
@@ -997,6 +1025,23 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
       avoid: new Set((req.search?.results ?? []).map((r) => normalizeUrl(r.url))),
       rejected: shown || person,
     });
+    return;
+  }
+
+  // A role ("the ML researcher") is a different person with that name, not another look at the card.
+  // A pronoun ("what degrees does he have?") stays on the person already on screen, and does not
+  // wait on a planner that can hang.
+  const named = threadPerson(req.original, req.context);
+  const role = req.intent !== 'adjust' ? roleFollow(req.question, named) : undefined;
+  if (role) {
+    send('rewrite', { query: role });
+    await searchAndDesign(send, env, role, 'any', [`The follow-up names a role of ${named}. Answer about that role, not a different ${named} already on screen.`, topicOnly(context)].filter(Boolean).join('\n'), started, scope, true);
+    return;
+  }
+  const pronoun = req.intent !== 'adjust' ? pronounFollow(req.question, named) : undefined;
+  if (pronoun) {
+    send('rewrite', { query: pronoun });
+    await searchAndDesign(send, env, pronoun, 'any', [`This question is about ${named}, the person already on screen.`, context].filter(Boolean).join('\n'), started, scope, true);
     return;
   }
 

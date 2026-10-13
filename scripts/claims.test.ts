@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { bindClaims, priceFor, retargetCites, shoppingAsk, type ClaimSource } from '../server/claims.ts';
+import { bindClaims, budgetAmounts, priceFor, retargetCites, salesTax, shoppingAsk, type ClaimSource } from '../server/claims.ts';
 import type { CardNode } from '../shared/card.ts';
 
 const sources: ClaimSource[] = [
@@ -56,4 +56,35 @@ test('shopping picks take a price from the page that names them', () => {
   assert.equal(items[1]?.meta, '$800');
   assert.equal(items[2]?.meta, '$749');
   assert.equal(items[0]?.meta, '$699');
+});
+
+test('a budget ceiling is not the product price', () => {
+  assert.deepEqual(budgetAmounts('Best laptop under $800'), [800]);
+  const catalog: ClaimSource[] = [
+    { n: 1, text: 'Dell XPS 13 is $999.99. Other thin laptops stay under $800.' },
+  ];
+  const list: CardNode = { type: 'list', style: 'number', items: [{ text: 'Dell XPS 13', meta: 'Under $800' }] };
+  const next = bindClaims(list, catalog, 'Best laptop under $800');
+  assert.equal(next.type === 'list' ? next.items[0]?.meta : '', '$999.99');
+});
+
+test('a city sales tax uses the combined rate once the item clears the exemption', () => {
+  const pages: ClaimSource[] = [
+    { n: 1, text: 'New York State sales tax is 4%.' },
+    { n: 2, text: 'The combined sales tax rate in New York City is 8.875%. Clothing and footwear priced under $110 are exempt from the 4% state tax. Items $110 and up pay the full combined rate.' },
+  ];
+  assert.deepEqual(salesTax('sales tax on $150 sneakers in New York City', pages), { rate: 8.875, n: 2 });
+  const text: CardNode = { type: 'text', text: 'Sales tax is 4% ($6).' };
+  const next = bindClaims(text, pages, 'What is the sales tax on $150 sneakers in New York City?');
+  const body = next.type === 'text' ? next.text : '';
+  assert.match(body, /8\.875%/);
+  assert.match(body, /\$13\.31/);
+  assert.match(body, /\[2\]/);
+  assert.doesNotMatch(body, /4%/);
+});
+
+test('a table drops a number no page states', () => {
+  const table: CardNode = { type: 'table', columns: ['Year', 'Estimate'], rows: [['2024', '2,900']] };
+  const next = bindClaims(table, sources, 'How many wolves are in Minnesota?');
+  assert.equal(next.type === 'table' ? next.rows[0]?.[1] : '', '');
 });

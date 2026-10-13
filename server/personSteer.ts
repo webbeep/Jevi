@@ -34,6 +34,30 @@ export function personSteer(question: string): PersonSteer | undefined {
  * A first name alone counts ("Who's Ricky" asked about anyone called Ricky; the Ricky Cheuk on the card
  * was only one pick), so "not this" offers the other Rickys rather than namesakes of the one on screen.
  */
+const ROLE_WORD = /\b(researcher|scientist|professor|scholar|actor|actress|player|coach|author|writer|founder|singer|rapper|politician|doctor|physician|athlete|footballer|economist|mathematician|physicist|engineer|director|mayor)\b/i;
+
+/**
+ * "The ML researcher" names a role, not the person already on screen.
+ * '' when the follow-up points back with a pronoun or does not name a role.
+ */
+export function roleFollow(question: string, person: string): string | undefined {
+  const q = question.trim().replace(/[?.!]+$/g, '');
+  if (!person || !/^(?:the|a|an)\s+/i.test(q) || !ROLE_WORD.test(q)) return undefined;
+  if (/\b(he|she|him|his|her|hers|they|them|their)\b/i.test(q)) return undefined;
+  const role = q.replace(/^(?:the|a|an)\s+/i, '').replace(/\s+/g, ' ').trim();
+  if (!role || role.length > 60) return undefined;
+  return `${person} ${role}`;
+}
+
+/** "What degrees does he have?" keeps the person on screen in the search. */
+export function pronounFollow(question: string, person: string): string | undefined {
+  const q = question.trim();
+  if (!person || q.split(/\s+/).length > 16) return undefined;
+  if (!/\b(he|she|him|his|her|hers|they|them|their)\b/i.test(q)) return undefined;
+  if (/^(?:write|draft|rewrite)\b/i.test(q)) return undefined;
+  return `${person} ${q.replace(/[?.!]+$/g, '')}`;
+}
+
 export function threadPerson(original: string, context?: string): string {
   for (const ask of [original, ...askedQuestions(context).reverse()]) {
     if (isPersonAsk(ask)) {

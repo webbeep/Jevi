@@ -1,5 +1,6 @@
 import { answerCacheUrl } from '../shared/answerKey';
 import { cacheTier, TIER_TTL_S } from '../shared/cacheTtl';
+import { savePublicAnswer } from './publicAnswer';
 import { type Send, sseResponse } from './sse';
 import type { StreamRequest } from './stream';
 import { cacheBypass, testForce, wantsRefresh } from './token';
@@ -36,14 +37,14 @@ export async function serveStream(o: {
 }): Promise<Response> {
   const cache = o.cache === undefined ? defaultCache() : o.cache;
   if (o.req.kind !== 'search') return sseResponse(o.run, { headers: { 'X-ZO-Cache': 'SKIP' } });
-  if (!cache) return sseResponse(o.run);
+  const query = o.req.query;
 
-  const key = new Request(answerCacheUrl({ query: o.req.query, freshness: o.req.freshness, context: o.req.context }));
+  const key = new Request(answerCacheUrl({ query, freshness: o.req.freshness, context: o.req.context }));
   const bypass = cacheBypass(o.request, o.env);
   const refresh = wantsRefresh(o.request);
   const tier = cacheTier(o.req.query, o.req.freshness);
   const ttl = TIER_TTL_S[tier];
-  if (!bypass && !refresh) {
+  if (cache && !bypass && !refresh) {
     try {
       const hit = await cache.match(key);
       if (hit) return new Response(hit.body, { headers: { ...HIT_HEADERS, 'X-ZO-TTL': `${tier}:${ttl}` } });
@@ -74,15 +75,23 @@ export async function serveStream(o: {
       if (testForce(o.request, o.env)) return;
       const last = frames.at(-1);
       if (!sawDone || sawError || !sawNode || extractive || !last?.startsWith('event: done\n')) return;
-      const put = cache
-        .put(
-          key,
-          new Response(frames.join(''), {
-            headers: { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': `public, max-age=${ttl}` },
-          }),
-        )
-        .catch(() => undefined);
-      if (o.waitUntil) o.waitUntil(put);
+      const jobs: Promise<unknown>[] = [
+        savePublicAnswer(o.env, query, frames).catch(() => undefined),
+      ];
+      if (cache) {
+        jobs.push(
+          cache
+            .put(
+              key,
+              new Response(frames.join(''), {
+                headers: { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': `public, max-age=${ttl}` },
+              }),
+            )
+            .catch(() => undefined),
+        );
+      }
+      const pending = Promise.all(jobs);
+      if (o.waitUntil) o.waitUntil(pending);
     },
     {
       headers: { 'X-ZO-Cache': bypass ? 'BYPASS' : refresh ? 'REFRESH' : 'MISS', 'X-ZO-TTL': `${tier}:${ttl}` },

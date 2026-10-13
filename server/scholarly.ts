@@ -16,6 +16,25 @@ const NOISE = new RegExp(
   'gi',
 );
 
+const AUTHOR_STOP = new Set(['give', 'what', 'which', 'when', 'where', 'find', 'show', 'list', 'does', 'do', 'the', 'and', 'for', 'how', 'who', 'why', 'peer', 'reviewed']);
+
+/**
+ * A paper question that names an author and a year ("Ekelund 2016"). A DOI from another year
+ * is a different paper and must not be cited. Undefined when either piece is missing.
+ */
+export function paperAnchor(query: string): { author: string; year: number } | undefined {
+  const year = query.match(/\b((?:19|20)\d{2})\b/);
+  if (!year) return undefined;
+  const author = query.split(/\s+/).map((word) => word.replace(/[^A-Za-z'-]/g, '')).find((word) => /^[A-Z][a-z]{3,}$/.test(word) && !AUTHOR_STOP.has(word.toLowerCase()));
+  if (!author) return undefined;
+  return { author: author.toLowerCase(), year: Number(year[1]) };
+}
+
+export function workMatches(work: { publication_year?: number; authorships?: { author?: { display_name?: string } }[] }, anchor: { author: string; year: number }): boolean {
+  if (work.publication_year !== anchor.year) return false;
+  return (work.authorships ?? []).some((row) => (row.author?.display_name ?? '').toLowerCase().includes(anchor.author));
+}
+
 /** "Give me 3 real peer-reviewed papers on sleep deprivation and working memory, with DOIs" → "sleep deprivation working memory". */
 export function paperTopic(query: string): string {
   return query
@@ -114,7 +133,9 @@ export async function scholarlyResults(query: string): Promise<SearchResult[]> {
   const started = Date.now();
   try {
     const found = await works(topic);
-    const out = found.works.map(workToResult).filter((r): r is SearchResult => !!r).slice(0, MAX);
+    const anchor = paperAnchor(query);
+    const matched = anchor ? found.works.filter((work) => workMatches(work, anchor)) : found.works;
+    const out = matched.map(workToResult).filter((r): r is SearchResult => !!r).slice(0, MAX);
     console.log(JSON.stringify({ zo: 'scholar', via: found.via, n: out.length, ms: Date.now() - started }));
     return out;
   } catch (err) {

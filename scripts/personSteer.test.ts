@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { movesOn } from '../server/ai.ts';
 import { personSubject } from '../server/entity.ts';
 import { notRejected, readPeople } from '../server/peopleSplit.ts';
-import { personSteer, threadPerson, topicOnly, withoutChosen } from '../server/personSteer.ts';
+import { personSteer, pronounFollow, roleFollow, threadPerson, topicOnly, withoutChosen } from '../server/personSteer.ts';
 import { plainQuotes } from '../server/queryClean.ts';
 
 test('"not this" and friends reject the person on screen', () => {
@@ -18,6 +18,13 @@ test('naming who they meant narrows to that person', () => {
   assert.deepEqual(personSteer('the one who works at Google'), { kind: 'narrow', detail: 'Google' });
   assert.deepEqual(personSteer('the Revco one'), { kind: 'narrow', detail: 'Revco' });
   assert.deepEqual(personSteer('not this , from blueflame ai'), { kind: 'narrow', detail: 'blueflame ai' });
+});
+
+test('a role follow-up keeps the name and drops the person already on the card', () => {
+  assert.equal(roleFollow('The ML researcher', 'Michael Jordan'), 'Michael Jordan ML researcher');
+  assert.equal(roleFollow('What degrees does he have?', 'Michael Jordan'), undefined);
+  assert.equal(pronounFollow('What degrees does he have?', 'Michael Jordan'), 'Michael Jordan What degrees does he have');
+  assert.equal(pronounFollow('Keep only Oregon schools', 'Jensen Huang'), undefined);
 });
 
 test('ordinary follow-ups are left to the rewrite', () => {
