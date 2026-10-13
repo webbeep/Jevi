@@ -61,7 +61,7 @@ interface WikiSummary {
  * Tries `Name (disambiguation)` then `Name`; returns a synthetic hit when the
  * extract says "may refer to" or "may also refer to".
  */
-const DISAMBIG_MS = 1200;
+const DISAMBIG_MS = 4000;
 
 async function wikiSummary(title: string): Promise<WikiHit | null> {
   // The REST summary for a disambiguation page is one sentence and drops the list.
@@ -102,9 +102,8 @@ async function wikiSummary(title: string): Promise<WikiHit | null> {
 export async function fetchWikiDisambiguation(name: string): Promise<WikiHit | null> {
   const clean = name.trim().replace(/\s+/g, ' ');
   if (!clean || clean.split(' ').length < 2) return null;
-  // Both titles at once. The old loop waited out a slow 404 before trying the name itself.
-  const [listed, plain] = await Promise.all([wikiSummary(`${clean} (disambiguation)`), wikiSummary(clean)]);
-  return listed ?? plain;
+  // The "(disambiguation)" page is the list. The plain title is the famous article and does not name the others.
+  return wikiSummary(`${clean} (disambiguation)`);
 }
 
 /**
