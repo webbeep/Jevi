@@ -1,0 +1,45 @@
+---
+description: Working conventions for zo.fyi from the standing product chat. Visual answers, campaign films, public contact, limits, and how we ship.
+alwaysApply: true
+---
+
+# ZO working conventions
+
+zo.fyi is a search and chat product. The promise is: ask anything, and get an answer you can see, adjust, and act on.
+
+## Answers
+
+- A good answer is something on screen: a chart, a comparison, the steps, a choice you can tap, or a draft you can send. A wall of text is the failure mode.
+- Show both search and ask. Follow-ups should change the card in place when the question is the same.
+- Numbers and claims stay tied to a page that actually contains them. Improve accuracy, actionability, and follow-up quality without making a measured score worse.
+- When a change is benchmarked, compare it with ChatGPT, Google AI Mode, and Perplexity.
+
+## Limits
+
+- Signed-in and signed-out per-user limits stay as they are.
+- A provider daily cap (Serper and the like) may be raised when more capacity has been bought. That is separate from the per-user limits.
+
+## Public site
+
+- The public contact is ask@zo.fyi. Do not put a personal Gmail address on the site, in Privacy, or in Terms.
+- Privacy and Terms stay visible on the home screen and in the account menu. The sign-in sheet is not the only place they appear.
+
+## Campaign films
+
+Make a new film when asked for another campaign video. Do not remake the one already posted.
+
+- Landscape, about 13 seconds, 1920×1080, 30 fps, 120 BPM. Picture changes land on the bar (about 3, 5, 7, 9, and 11 seconds).
+- Warm female voice (Kokoro `af_heart`). Each film tells a different story. The posted film is "see it." Later films cover changing an answer, and leaving with something you can send.
+- Music stays under the voice. While she speaks it sits about 24 dB below her. In the pauses it stays about 8 dB below her speaking level. If the music covers the words, lower the bed.
+- End on a plain `zo.fyi` card. Dark ground, Inter, a thin rainbow ring on the product card. Card changes must not overlap two blocks of text.
+- The in-app player often will not download. Put the mp4 in `films/` on a branch and give the raw GitHub link (`https://raw.githubusercontent.com/webbeep/Jevi/<branch>/films/<file>.mp4`). The site build does not ship that folder.
+- A post is one short claim, then zo.fyi. Example already live: "This is how Google AI Mode was supposed to be."
+
+## How we ship
+
+- Branch names are `cursor/<short-name>-a913`, lowercase.
+- Commit, push, and open a pull request. Do not merge unless asked.
+- A UI change is verified in the browser by using the flow, not by a single screenshot of the first paint.
+- Imports stay at the top of the file. A switch on a union or enum has a `never` check in the default.
+- This project deploys on Netlify. Read the Netlify skill for the feature you are touching before inventing a function, config, or data store.
+- Say what is true in plain sentences. Skip contrastive "X, not Y" phrasing.
