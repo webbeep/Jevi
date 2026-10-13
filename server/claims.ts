@@ -90,7 +90,10 @@ export function retargetCites(text: string, sources: readonly ClaimSource[]): st
     const cites = [...sentence.matchAll(/\[(\d+)\]/g)].map((match) => Number(match[1]));
     if (cites.length && cites.every((n) => covers(byNumber(sources, n), nums))) return [sentence];
     const page = sources.find((source) => covers(source, nums))?.n ?? bestPage(nums, sources, cites);
-    if (!page) return [sentence];
+    if (!page) {
+      const bare = stripNums(sentence.replace(/\s*\[\d+\]/g, ''), nums);
+      return bare ? [bare] : [];
+    }
     const missing = nums.filter((num) => !has(byNumber(sources, page), num));
     const bare = stripNums(sentence.replace(/\s*\[\d+\]/g, ''), missing);
     return bare ? [`${bare} [${page}]`] : [];
@@ -98,7 +101,8 @@ export function retargetCites(text: string, sources: readonly ClaimSource[]): st
 }
 
 export function priceFor(name: string, sources: readonly ClaimSource[]): { price: string; n: number } | undefined {
-  const words = name.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 3 && !PRICE_STOP.has(word));
+  const head = (name.split(/[(\[]/)[0] ?? name);
+  const words = head.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 3 && !PRICE_STOP.has(word)).slice(0, 2);
   if (!words.length || (words.length < 2 && words[0]!.length < 5)) return undefined;
   let found: { price: string; n: number } | undefined;
   for (const source of sources) {
@@ -149,7 +153,7 @@ function fillPrices(node: CardNode, sources: readonly ClaimSource[]): CardNode {
     }
     case 'tile': {
       if (hasPrice(node.value) || hasPrice(node.sub) || hasPrice(node.label)) return node;
-      const found = priceFor(`${node.label} ${node.value ?? ''} ${node.sub ?? ''}`, sources);
+      const found = priceFor(node.value || node.label, sources);
       if (!found) return node;
       if (!node.value) return { ...node, value: found.price, source: node.source ?? found.n };
       return { ...node, sub: node.sub ? `${found.price} · ${node.sub}` : found.price, source: node.source ?? found.n };
@@ -225,23 +229,40 @@ function retargetNode(node: CardNode, sources: readonly ClaimSource[]): CardNode
     }
     case 'hero': {
       const caption = node.caption ? retargetCites(node.caption, sources) : node.caption;
+      const nums = significant(node.value);
       const page = citeValue(node.value, sources, undefined);
-      if (!page) return caption === node.caption ? node : { ...node, caption };
+      if (!page) {
+        const stripped = nums.length ? stripNums(node.value, nums) : node.value;
+        const value = stripped && /\d/.test(stripped) ? stripped : nums.length ? '' : node.value;
+        return value === node.value && caption === node.caption ? node : { ...node, value, caption };
+      }
       const already = caption ? [...caption.matchAll(/\[(\d+)\]/g)].some((match) => Number(match[1]) === page) : false;
       const next = already ? caption : `${caption ? `${caption.replace(/\s*\[\d+\]/g, '').trim()} ` : ''}[${page}]`.trim();
       return next === node.caption ? node : { ...node, caption: next };
     }
     case 'tile': {
       const valueNums = significant(node.value ?? '');
-      const source = valueNums.length
-        ? (node.source && covers(byNumber(sources, node.source), valueNums) ? node.source : sources.find((item) => covers(item, valueNums))?.n)
-        : node.source;
+      let value = node.value;
+      let source = node.source;
+      if (valueNums.length) {
+        const full = node.source && covers(byNumber(sources, node.source), valueNums)
+          ? node.source
+          : sources.find((item) => covers(item, valueNums))?.n;
+        if (full) source = full;
+        else if (value) {
+          value = stripNums(value, valueNums);
+          if (!value || !/\d/.test(value)) value = undefined;
+          source = undefined;
+        }
+      }
       let sub = node.sub ? retargetCites(node.sub, sources) : node.sub;
       if (source && sub) {
         const missing = significant(sub).filter((num) => !has(byNumber(sources, source), num));
         if (missing.length) sub = stripNums(sub.replace(/\s*\[\d+\]/g, ''), missing);
+      } else if (sub && !source && valueNums.length) {
+        sub = stripNums(sub.replace(/\s*\[\d+\]/g, ''), significant(sub));
       }
-      return sub === node.sub && source === node.source ? node : { ...node, sub, source };
+      return value === node.value && sub === node.sub && source === node.source ? node : { ...node, value, sub, source };
     }
     case 'stat': {
       const page = citeValue(`${node.value} ${node.label} ${node.delta ?? ''}`, sources, undefined);

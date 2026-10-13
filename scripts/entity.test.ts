@@ -1144,6 +1144,8 @@ test('a famous person with an exact Wikipedia article is not split into a picker
     row('Legends profile: Michael Jordan', 'Michael Jordan is a six-time NBA champion.', 'https://www.nba.com/news/history-nba-legend-michael-jordan'),
     row('Michael Jordan Biography', 'Michael Jordan was drafted by the Chicago Bulls in 1984.', 'https://www.espn.com/nba/player/bio/_/id/1035/michael-jordan'),
     row('Michael Jordan (footballer)', 'Michael Jordan is an English footballer.', 'https://en.wikipedia.org/wiki/Michael_Jordan_(footballer)'),
+    row('Michael Jordan - Wikipedia', 'Michael Jordan may refer to: Michael Jordan (basketball), Michael B. Jordan (actor).', 'https://en.wikipedia.org/wiki/Michael_Jordan_(disambiguation)'),
+    row('Michael B. Jordan - Wikipedia', 'Michael B. Jordan is an American actor known for Creed and Black Panther.', 'https://en.wikipedia.org/wiki/Michael_B._Jordan'),
   ];
   const decision = resolveEntity('Who is Michael Jordan?', rows);
   assert.equal(decision.kind, 'single');

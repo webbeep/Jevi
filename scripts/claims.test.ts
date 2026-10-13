@@ -24,6 +24,15 @@ test('a tile source is the page that contains its number', () => {
   assert.equal(next.type === 'tile' ? next.sub : '', 'DNR');
 });
 
+test('a number no page states is dropped instead of cited', () => {
+  const text = retargetCites('Minnesota has about 2,300 wolves [1].', sources);
+  assert.doesNotMatch(text, /2,300/);
+  assert.doesNotMatch(text, /\[1\]/);
+  const tile: CardNode = { type: 'tile', label: 'Latest', value: '~2,300', sub: 'DNR 2025', source: 1 };
+  const next = bindClaims(tile, sources, 'How many wolves are in Minnesota?');
+  assert.equal(next.type === 'tile' ? next.value : 'x', undefined);
+});
+
 test('shopping picks take a price from the page that names them', () => {
   assert.equal(shoppingAsk('Best laptop under $800'), true);
   assert.equal(shoppingAsk('how do mRNA vaccines work'), false);
@@ -32,6 +41,7 @@ test('shopping picks take a price from the page that names them', () => {
     { n: 2, text: 'Dell XPS 13 is $800. HP OmniBook 5 tested at $749.' },
   ];
   assert.deepEqual(priceFor('HP OmniBook 5', catalog), { price: '$749', n: 2 });
+  assert.deepEqual(priceFor('MacBook Neo (A18 Pro)', catalog), { price: '$699', n: 1 });
   const list: CardNode = {
     type: 'list',
     style: 'number',

@@ -1286,6 +1286,23 @@ function qualifiedTitle(t: string, name: string): boolean {
 /** A different person with the same name: the SERP title is "John Smith (explorer)". */
 const qualifiedNamesake = (row: EntityRow, name: string) => qualifiedTitle(title(row.title ?? ''), name);
 
+/** "Michael B. Jordan" is a different person from "Michael Jordan": a token sits inside the name. */
+function insertedName(row: EntityRow, name: string): boolean {
+  const parts = name.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (parts.length < 2) return false;
+  const words = `${row.title ?? ''} ${wikiTitleOf(row)}`.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  const first = words.indexOf(parts[0]!);
+  if (first < 0) return false;
+  const last = words.indexOf(parts[parts.length - 1]!, first + 1);
+  return last > first && last - first > parts.length - 1;
+}
+
+function namesakeCluster(cluster: readonly number[], rows: readonly EntityRow[], name: string): boolean {
+  if (cluster.some((i) => exactWikiArticle(rows[i]!, name))) return false;
+  const pages = cluster.map((i) => rows[i]!).filter((row) => !isDisambiguationPage(row) && ((row.title ?? '').trim() || wikiTitleOf(row)));
+  return pages.length > 0 && pages.every((row) => insertedName(row, name));
+}
+
 /** The Wikipedia article title itself is disambiguated ("John Smith (explorer)"). */
 const wikiNamesake = (row: EntityRow, name: string) => qualifiedTitle(wikiTitleOf(row), name);
 
@@ -1500,8 +1517,9 @@ export function resolveEntity(
     }
   }
 
-  // Seed choices from a disambiguation page when clustering is thin.
-  if (!pickAsk && disambig.length) {
+  // A disambiguation page lists people who share a name. It does not override an exact article.
+  const exactArticle = eligible.some((e) => exactWikiArticle(e.row, name));
+  if (!exactArticle && !pickAsk && disambig.length) {
     const entries = disambiguationEntries(rows[disambig[0]!]!, name);
     if (entries.length >= 2) {
       const page = rows[disambig[0]!]!;
@@ -1553,12 +1571,15 @@ export function resolveEntity(
     .map((c) => ({ cluster: c, score: evidence(c) }))
     .sort((a, b) => b.score - a.score || b.cluster.length - a.cluster.length || a.cluster[0]! - b.cluster[0]!);
 
-  if (merged.length >= 2) {
+  // A page about "Michael B. Jordan" does not make "Michael Jordan" ambiguous.
+  const compared = famous ? ranked.filter((r) => !namesakeCluster(r.cluster, rows, name)) : ranked;
+  const rivals = compared.length ? compared : ranked;
+  if (rivals.length >= 2) {
     if (bare) {
-      const top = ranked[0]!.score;
+      const top = rivals[0]!.score;
       // Only offer a split when the runner-up is a real competitor (≥ half the top score).
-      if (ranked[1]!.score >= 0.5 * top) {
-        const choices = ranked
+      if (rivals[1]!.score >= 0.5 * top) {
+        const choices = rivals
           .filter((r) => r.score >= 0.5 * top)
           .slice(0, 3)
           .map((r) => toChoice(name, r.cluster, rows))
@@ -1576,7 +1597,8 @@ export function resolveEntity(
   }
 
   // Single: the top-ranked cluster for a bare ask (else the biggest), weak rows attached to it.
-  const pool = bare && merged.length ? [ranked[0]!.cluster] : merged;
+  const lead = famous ? ranked.find((r) => r.cluster.some((i) => exactWikiArticle(rows[i]!, name))) ?? rivals[0] : rivals[0];
+  const pool = bare && lead ? [lead.cluster] : merged;
   const clusters = attachWeak(pool.length ? pool : (weak.length ? [weak] : []), pool.length ? weak : []);
   if (!clusters.length) return { kind: 'skip' };
   const win = clusters[0]!;
