@@ -1,5 +1,6 @@
 import type { KeyPoint, SearchResponse, Stat, TimelineItem } from '../shared/types';
 import { isBlockPage, tidyBibtex } from './blockPage';
+import { figureValue, readFigures } from './calculate';
 import { completeSentences } from './polish';
 import { clip } from './util';
 
@@ -30,20 +31,19 @@ export function candidates(search: SearchResponse, limit = 40): Candidate[] {
   return out;
 }
 
-const STAT_RE =
-  /(?:[$€£¥]\s?\d[\d,.]*\s?(?:k|m|bn|million|billion|trillion)?|\d[\d,.]*\s?(?:%|percent|million|billion|trillion|thousand|km²?|kg|miles|mph|km\/h|meters|metres|feet|ft|people|users|years old|°[CF]?|GB|TB|hours|minutes))/i;
-
+/** One stat per measure. The label is that measure, and the value keeps its unit. A clock stays whole. */
 export function extractStats(cands: Candidate[], limit = 6): Stat[] {
   const stats: Stat[] = [];
-  const seenValues = new Set<string>();
+  const seen = new Set<string>();
   for (const c of cands) {
-    const m = c.text.match(STAT_RE);
-    if (!m) continue;
-    const value = m[0].trim();
-    if (seenValues.has(value)) continue;
-    seenValues.add(value);
-    stats.push({ value, label: clip(c.text, 110), url: c.url });
-    if (stats.length >= limit) break;
+    for (const figure of readFigures(c.text)) {
+      const value = figureValue(figure);
+      const key = `${figure.label.toLowerCase()}|${value}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      stats.push({ value, label: clip(figure.label, 40), url: c.url });
+      if (stats.length >= limit) return stats;
+    }
   }
   return stats;
 }

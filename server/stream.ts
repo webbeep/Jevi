@@ -55,6 +55,7 @@ import type { WebHit } from './cascade';
 import { domainOf } from './util';
 import { choicesIn, distinctActions, subjectWords } from './chips';
 import { anchoredFollowup, asksToCompare, cryptographyHint, faithfulQuery, isWritingAsk, needsOwnSearch, personQuestion, quickPlan, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
+import { calculationAnswer, isCalculationAsk } from './calculate';
 import { comparisonRepair, comparisonTitle } from './compareAnswer';
 import { withFinishedSentences } from './polish';
 import { queryWithPlace, readerPlace, settleReadings } from './readings';
@@ -957,6 +958,20 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
     const plan = quickPlan(req.question, 'chat');
     send('plan', plan);
     await design(send, env, { query: req.original, pattern: plan.pattern, depth: plan.depth, readPages: false, search: req.search, followup: { mode: 'chat', question: req.question }, context }, started, scope);
+    return;
+  }
+
+  // Arithmetic stays on the figures already on the card and in its sources. A new search
+  // is what let an unrelated headline become the answer.
+  if (req.intent !== 'search' && req.intent !== 'adjust' && isCalculationAsk(req.question)) {
+    const priorCard = from?.card ?? [...req.cards].reverse().find((c) => c.card)?.card;
+    const priorTitle = priorCard?.title || from?.title;
+    const answer = calculationAnswer({ question: req.question, original: req.original, priorTitle, card: priorCard, search: req.search });
+    const plan = quickPlan(req.original, 'chat');
+    send('plan', { ...plan, mode: 'chat' });
+    send('head', { title: answer.title, subtitle: answer.subtitle });
+    answer.nodes.forEach((node, index) => send('node', { index, node }));
+    send('done', { engine: 'reasoning', removed: 0, pagesRead: 0, ms: Date.now() - started });
     return;
   }
 

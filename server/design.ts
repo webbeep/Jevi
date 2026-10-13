@@ -3,6 +3,7 @@ import { fitNode } from '../shared/fitChart';
 import { knowledgeMatches } from '../shared/relevance';
 import type { SearchResponse } from '../shared/types';
 import { hasLlm, llmLines } from './llm';
+import { calculationAnswer, isCalculationAsk } from './calculate';
 import { candidates, extractStats, extractTimeline } from './extract';
 import { bindClaims, claimSources, type ClaimSource } from './claims';
 import { Grounding, groundNodes } from './ground';
@@ -151,6 +152,9 @@ function followupRules(f: FollowupContext | undefined, originalQuery: string): s
     case 'answer':
       return `\n\nTHIS IS A FOLLOW-UP. The original search was "${originalQuery}". Design a focused card that answers only the follow-up question "${f.question}". Do not repeat the original answer; pick the components that fit this question best.`;
     case 'chat':
+      if (isCalculationAsk(f.question)) {
+        return `\n\nTHIS IS A CALCULATION using only figures already on the card and in SOURCES for "${originalQuery}". The person asked: "${f.question}". The body is the arithmetic: the result first, then each figure with the unit and the label the source gave it. A clock time such as 15:07 stays whole. Do not summarize an article, and do not use a headline as the answer. The title is the subject already on screen, with that subject's capitalization.`;
+      }
       return `\n\nTHIS IS A CONVERSATION TURN, NOT A SEARCH. Reply to "${f.question}" like a thoughtful expert assistant: understand what they really need given the conversation, think it through, and give a direct, confident answer first, then the reasoning or steps that support it. Use the conversation, your general knowledge and the SOURCES where relevant. You may reason, calculate, compare, plan and advise here. Do not invent current specifics (today's prices, recent events, live figures, exact specs you are unsure of); when those matter, say what to check and add a "search" action for it. Only cite [n] when a statement really comes from that source.`;
     default: {
       const unreachable: never = f.mode;
@@ -197,7 +201,7 @@ RULES
 - A score or schedule is one row per game. Never repeat a matchup. If the sources do not list the games asked for, say so in one callout instead of listing games from another day.
 - A follow-up about one attribute (battery, price, storage) answers that attribute with the figures the sources state for the things being compared. Never paste an unfinished snippet, and never bring in a product the question did not name.
 - Numbered steps are 1, 2, 3 with no gaps. Keep every step a newcomer needs.
-- Never compute new numbers yourself (multiplying, converting, summing). When quantities should change with an amount (servings, loaves, people, budget), use a scaler node whose base and amounts are exactly the source values; the person rescales it live.
+- Never compute new numbers yourself (multiplying, converting, summing), except when the follow-up asks you to calculate from figures already on the card or in the sources. Then the body is that calculation, each number keeps the unit and label the source gave it, and a headline is not the answer. Otherwise, when quantities should change with an amount (servings, loaves, people, budget), use a scaler node whose base and amounts are exactly the source values; the person rescales it live.
 - Plan and subscription prices always go in a pricing node, as the published per-seat or flat amount with its source number. Set billing to annual when the source says billed annually, even if the number is per month. Never multiply by people or seats, and never write a dollar amount or team total anywhere else on the card. If the sources do not state a price, leave that amount out.
 - If the sources don't contain what the person asked for (for example a live reading or a price), say so honestly in a short callout and point to the best sources to check.
 - Leave out any source that isn't about the ask; never list one only to say it doesn't mention the subject ("mentions an NYU professor, but not Jessica Chen").
@@ -619,6 +623,19 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
 function extractive(req: DesignRequest, on: DesignEvents): DesignSummary {
   const { search, pattern: patternId, query } = req;
   const asked = req.followup?.question ?? query;
+  if (req.followup && isCalculationAsk(req.followup.question)) {
+    const answer = calculationAnswer({
+      question: req.followup.question,
+      original: query,
+      priorTitle: req.followup.baseCard?.title,
+      card: req.followup.baseCard,
+      search,
+    });
+    on.head({ title: answer.title, subtitle: answer.subtitle });
+    const emitNode = bindVerdict(req, on.node);
+    answer.nodes.forEach((node, i) => emitNode(node, i));
+    return { engine: 'reasoning', removed: 0 };
+  }
   const compared = patternId === 'compare' ? comparisonNodes(asked, search) : [];
   if (compared.length) {
     on.head({ title: comparisonTitle(asked, asked), subtitle: patternById(patternId).label });
