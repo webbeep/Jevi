@@ -24,6 +24,7 @@ test('a role follow-up keeps the name and drops the person already on the card',
   assert.equal(roleFollow('The ML researcher', 'Michael Jordan'), 'Michael Jordan ML researcher');
   assert.equal(roleFollow('What degrees does he have?', 'Michael Jordan'), undefined);
   assert.equal(pronounFollow('What degrees does he have?', 'Michael Jordan'), 'Michael Jordan What degrees does he have');
+  assert.equal(pronounFollow('Where does he teach?', 'Michael Jordan', 'basketball player'), 'Michael Jordan basketball player Where does he teach');
   assert.equal(pronounFollow('Keep only Oregon schools', 'Jensen Huang'), undefined);
 });
 

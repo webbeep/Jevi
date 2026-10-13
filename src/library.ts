@@ -29,7 +29,12 @@ function scanRefs(card: AnswerCard): number[] {
     else if (v && typeof v === 'object') {
       const o = v as Record<string, unknown>;
       if (o.type === 'citations' && Array.isArray(o.refs)) o.refs.forEach((r) => typeof r === 'number' && refs.add(r));
-      else Object.values(o).forEach(walk);
+      else {
+        for (const [key, child] of Object.entries(o)) {
+          if (key === 'source' && typeof child === 'number' && child >= 1) refs.add(child);
+          walk(child);
+        }
+      }
     }
   };
   walk(card.body);

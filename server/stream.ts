@@ -59,11 +59,11 @@ import { calculationAnswer, isCalculationAsk } from './calculate';
 import { comparisonRepair, comparisonTitle } from './compareAnswer';
 import { withFinishedSentences } from './polish';
 import { queryWithPlace, readerPlace, settleReadings } from './readings';
-import { isKeepOnly } from './refine';
-import { finishQuality, hostTier, preferSources } from './sourceQuality';
+import { isKeepOnly, keptBody } from './refine';
+import { finishQuality, hasOfficialHit, hostTier, officialProbe, preferSources } from './sourceQuality';
 import { isOwnSite, orcidSite, pickOwnSite, probeOwnSite, RESEARCH_ASK, withOwnSite } from './ownSite';
 import { quoteAsk } from '../shared/quoteAsk';
-import { scholarlyResults, withScholarly } from './scholarly';
+import { dropStrayDois, scholarlyResults, withScholarly } from './scholarly';
 import { videoResults, wantsVideo, withVideos } from './videoSearch';
 import { guessFreshness, preferFresh, staleComplaint, stricter } from './freshness';
 import { isQuoteRow, liveQuote, quoteRow, tickerNode } from './liveQuote';
@@ -224,12 +224,43 @@ const PEEK_ROWS = 8;
 
 const WHO_ASK = /^\s*(who\s+is|who\s+was|who's)\b/i;
 
-/** The model's split of the rows into people when it finds at least two; the heuristic choices otherwise. */
-async function sharperChoices(choices: EntityChoice[], rows: SearchResult[], env: Env): Promise<EntityChoice[]> {
-  const name = choices[0]?.name;
-  const split = name ? await splitPeople(name, rows, env) : undefined;
-  console.log(JSON.stringify({ zo: 'entity', kind: 'choices', choices: (split ?? choices).length, by: split ? 'model' : 'heuristic' }));
-  return split ?? choices;
+/**
+ * When the question names an agency or asks a place for a count or a rule, and that
+ * site is missing from the results, one more search looks for it. Ranking cannot
+ * lead with a page the engines never returned.
+ */
+/** The pages already spell a mistyped word. The card keeps the results; the label says so. */
+function noteSpelling(send: Send, typed: string, rows: readonly { title?: string; snippet?: string; url?: string }[]): void {
+  const fixed = spellingQuery(typed, rows);
+  if (fixed) send('rewrite', { query: fixed, spelling: true });
+}
+
+/** Words already on the card that tell this person from someone else with the same name. */
+function personCue(card: AnswerCard | undefined): string {
+  if (!card) return '';
+  const bits: string[] = [];
+  if (card.subtitle) bits.push(card.subtitle);
+  const walk = (nodes: readonly CardNode[]): void => {
+    for (const node of nodes) {
+      if (node.type === 'profile' && node.subtitle) bits.push(node.subtitle);
+      if ('children' in node && Array.isArray(node.children)) walk(node.children);
+    }
+  };
+  walk(card.body);
+  return bits.join(' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+}
+
+async function attachOfficial(query: string, results: SearchResponse, env: Env, scope: AskScope): Promise<SearchResponse> {
+  if (!results.results.length || hasOfficialHit(query, results.results)) return results;
+  const probe = officialProbe(query);
+  if (!probe) return results;
+  const room = SEARCH_CALL_CAP + (scope.ledger.bonus ?? 0) - searchCalls(scope.ledger);
+  if (room < 1) scope.ledger.bonus = (scope.ledger.bonus ?? 0) + 1;
+  const extra = await searchWithLate({ q: probe, freshness: 'any', count: 6, lite: true }, env, scope);
+  const add = extra.response.results.filter((row) => !results.results.some((have) => have.url === row.url));
+  if (!add.length) return results;
+  console.log(JSON.stringify({ zo: 'official', added: add.length, lead: add[0]?.domain }));
+  return { ...results, results: preferSources(query, [...add, ...results.results]) };
 }
 
 /** One more search, only when its rows are actually about the goal. The old "missing" note is not reused: its source numbers belonged to the rows that were wrong. */
@@ -553,6 +584,8 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   results = { ...results, results: preferFresh(results.results, span) };
   const scholar = await scholarly;
   if (scholar.length) results = { ...results, results: withScholarly(scholar, results.results) };
+  results = { ...results, results: dropStrayDois(query, results.results) };
+  results = await attachOfficial(query, results, env, scope);
   const clips = await videos;
   if (clips.length) results = { ...results, results: withVideos(clips, results.results) };
   const quote = await quoting;
@@ -588,7 +621,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
         fixed = spellingQuery(query, looked.response.results);
       }
       if (fixed) {
-        send('rewrite', { query: fixed });
+        send('rewrite', { query: fixed, spelling: true });
         let gated = applyPickGate(fixed, applyRelevance(fixed, { ...looked.response, query: fixed }, scope.ledger));
         let lateHit = looked.late;
         if (!gated.results.length) {
@@ -748,10 +781,11 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
 
   // T444: before building a profile/person card, pick ONE entity from the top
   // results. Ambiguous names return choices instead of a mixed card.
-  const plan = await planned;
+  // The layout model is not on this path: waiting for it is what made the picker take a minute.
+  const earlyPattern = heuristicPattern(query);
   // Bare person ask: the exact article and, when the SERP lacks one, the disambiguation page.
   // Both are keyless, so the same name resolves the same way when backup engines change.
-  if (!live && isPersonAsk(query, plan.pattern) && !contextTerms(query).length && !priorEntity(context) && !nameIsTopic(query, results.results)) {
+  if (!live && isPersonAsk(query, earlyPattern) && !contextTerms(query).length && !priorEntity(context) && !nameIsTopic(query, results.results)) {
     const name = personSubject(query);
     if (name) {
       const needArticle = !results.results.some((r) => {
@@ -805,21 +839,31 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     }
   }
   const prior = steer ? undefined : priorEntity(context);
-  const decision: EntityDecision = live ? { kind: 'skip' } : resolveEntity(query, results.results, { pattern: plan.pattern, prior });
+  const decision: EntityDecision = live ? { kind: 'skip' } : resolveEntity(query, results.results, { pattern: earlyPattern, prior });
+  // Heuristic choices go out immediately. A model pass here waited out a stuck call
+  // before the person could tap, which is the slow picker.
+  if (!steer && decision.kind === 'choices') {
+    noteSpelling(send, query, results.results);
+    scope.ledger.entity = { kind: 'choices', choices: decision.choices.length };
+    send('search', results);
+    send('done', { engine: 'extractive', removed: 0, pagesRead: 0, ms: Date.now() - started, choices: publicChoices(decision.choices) });
+    return;
+  }
+  const plan = await planned;
   // A bare "who is" for someone without an encyclopedia page, whose namesakes the heuristic dropped:
   // the model may still see several people worth offering ("who is Ed Chu" → oncologist, EPA official, CEO).
   const unsure = !steer && decision.kind === 'single' && !prior && decision.dropped.length >= 2 && WHO_ASK.test(query) && !distinguishingTerms(query).length
     && !results.knowledge && !decision.kept.some((i) => /\.wikipedia\.org\//i.test(results.results[i]?.url ?? ''));
   const split = rejectedSplit ?? (unsure ? await splitPeople(decision.entity.name, results.results, env) : undefined);
   if (split) console.log(JSON.stringify({ zo: 'entity', kind: 'choices', choices: split.length, by: 'model-over-single' }));
-  if (decision.kind === 'choices' || split) {
-    const choices = split ?? (decision.kind === 'choices' ? await sharperChoices(decision.choices, results.results, env) : []);
-    scope.ledger.entity = { kind: 'choices', choices: choices.length };
+  if (split) {
+    scope.ledger.entity = { kind: 'choices', choices: split.length };
     send('search', results);
     // Choices ride on the done event (FE readChoices() in shared/choices.ts); never cached.
-    send('done', { engine: 'extractive', removed: 0, pagesRead: 0, ms: Date.now() - started, choices: publicChoices(choices) });
+    send('done', { engine: 'extractive', removed: 0, pagesRead: 0, ms: Date.now() - started, choices: publicChoices(split) });
     return;
   }
+  noteSpelling(send, query, results.results);
   let designContext = context;
   let entityHint: ((entity: string) => EntityHint | undefined) | undefined;
   let boostQuery = query;
@@ -961,6 +1005,21 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
     return;
   }
 
+  // "Keep only …" filters the list already on the card. A new design dropped its sources.
+  if (req.intent === 'adjust' && isKeepOnly(req.question)) {
+    const priorCard = from?.card ?? [...req.cards].reverse().find((c) => c.card)?.card;
+    if (priorCard) {
+      const corpus = [JSON.stringify(priorCard), ...(req.search?.results ?? []).map((row) => `${row.title} ${row.snippet} ${row.content ?? ''}`)].join('\n');
+      const body = keptBody(priorCard.body, req.question, corpus);
+      const plan = quickPlan(req.original, 'answer');
+      send('plan', { ...plan, mode: 'refine' });
+      send('head', { title: priorCard.title, subtitle: priorCard.subtitle });
+      body.forEach((node, index) => send('node', { index, node }));
+      send('done', { engine: 'extractive', removed: 0, pagesRead: 0, ms: Date.now() - started });
+      return;
+    }
+  }
+
   // Arithmetic stays on the figures already on the card and in its sources. A new search
   // is what let an unrelated headline become the answer.
   if (req.intent !== 'search' && req.intent !== 'adjust' && isCalculationAsk(req.question)) {
@@ -1053,10 +1112,14 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
     await searchAndDesign(send, env, role, 'any', [`The follow-up names a role of ${named}. Answer about that role, not a different ${named} already on screen.`, topicOnly(context)].filter(Boolean).join('\n'), started, scope, true);
     return;
   }
-  const pronoun = req.intent !== 'adjust' ? pronounFollow(req.question, named) : undefined;
+  const cue = personCue(from?.card);
+  const pronoun = req.intent !== 'adjust' ? pronounFollow(req.question, named, cue) : undefined;
   if (pronoun) {
     send('rewrite', { query: pronoun });
-    await searchAndDesign(send, env, pronoun, 'any', [`This question is about ${named}, the person already on screen.`, context].filter(Boolean).join('\n'), started, scope, true);
+    const lock = cue
+      ? `This question is about ${named} (${cue}), the person already on screen. A different ${named} is the wrong person.`
+      : `This question is about ${named}, the person already on screen.`;
+    await searchAndDesign(send, env, pronoun, 'any', [lock, context].filter(Boolean).join('\n'), started, scope, true);
     return;
   }
 

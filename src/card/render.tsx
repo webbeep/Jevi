@@ -26,6 +26,13 @@ function hasSlot(n: CardNode): boolean {
   return n.type === 'slot' || ('children' in n && n.children.some(hasSlot));
 }
 
+/** A video row skips the rise. That animation is a transform, and a transformed ancestor makes the embed update late. */
+export function hasVideo(n: CardNode): boolean {
+  if (n.type === 'video') return true;
+  if (n.type === 'tabs') return n.tabs.some((tab) => tab.children.some(hasVideo));
+  return 'children' in n && n.children.some(hasVideo);
+}
+
 /** Small nodes that should stay side by side even on phones. */
 function isCompact(n: CardNode): boolean {
   return n.type === 'tile' || n.type === 'stat' || (n.type === 'slot' && n.shape === 'tile');
@@ -96,7 +103,7 @@ export function Nodes({ nodes, className, stagger = false }: { nodes: CardNode[]
         if (!placeholder) seen[n.type] = (seen[n.type] ?? 0) + 1;
         const key = placeholder ? `placeholder-${i}-${real}` : `${n.type}-${seen[n.type]}`;
         if (!placeholder) real += 1;
-        const enter = !placeholder || stagger;
+        const enter = (!placeholder || stagger) && !hasVideo(n);
         return (
           <EnterRow key={key} play={enter} delayMs={enter && stagger ? i * 55 : undefined}>
             <NodeBoundary>

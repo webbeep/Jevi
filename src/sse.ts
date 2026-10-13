@@ -27,7 +27,7 @@ export type StreamEvent =
   | { event: 'images'; data: ImageResult[] }
   | { event: 'designing'; data: { pagesRead: number; ms: number } }
   | { event: 'thinking'; data: Record<string, never> }
-  | { event: 'rewrite'; data: { query: string } }
+  | { event: 'rewrite'; data: { query: string; spelling?: boolean } }
   | { event: 'intent'; data: { intent: string; queries: string[] } }
   | { event: 'base'; data: { id: number } }
   | { event: 'credit'; data: ImageCredit }

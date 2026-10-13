@@ -1114,7 +1114,7 @@ test('a one-letter brand misspelling is corrected from the pages, and stops bein
     { title: 'Jensen Huang - NVIDIA', url: 'https://www.nvidia.com/en-us/about-nvidia/executive-bios/jensen-huang/', snippet: 'Jensen Huang is the founder and CEO of NVIDIA.' },
     { title: 'NVIDIA Corporation', url: 'https://en.wikipedia.org/wiki/Nvidia', snippet: 'NVIDIA designs GPUs. Jensen Huang has been CEO since it was founded.' },
   ];
-  assert.equal(spellingQuery('Jensen Huang Nvdia', pages), 'Jensen Huang, Nvidia');
+  assert.equal(spellingQuery('Jensen Huang Nvdia', pages), 'Jensen Huang, NVIDIA');
   assert.equal(spellingQuery('Jensen Huang Nvidia', pages), '');
   assert.equal(personSourceOk('Jensen Huang, Nvidia', pages[0]!), true);
 });
@@ -1136,7 +1136,7 @@ test('a bare ambiguous name still offers the other people when one of them has a
   assert.ok(decision.choices.length >= 2);
 });
 
-test('a famous person with an exact Wikipedia article is not split into a picker', () => {
+test('a famous person with an exact article and a second person on the disambiguation page is a picker', () => {
   const rows = [
     row('Michael Jordan - Wikipedia', 'Michael Jordan is an American businessman and former basketball player.', 'https://en.wikipedia.org/wiki/Michael_Jordan'),
     row('List of career achievements by Michael Jordan', 'Michael Jordan won six NBA championships with the Chicago Bulls.', 'https://en.wikipedia.org/wiki/List_of_career_achievements_by_Michael_Jordan'),
@@ -1148,5 +1148,17 @@ test('a famous person with an exact Wikipedia article is not split into a picker
     row('Michael B. Jordan - Wikipedia', 'Michael B. Jordan is an American actor known for Creed and Black Panther.', 'https://en.wikipedia.org/wiki/Michael_B._Jordan'),
   ];
   const decision = resolveEntity('Who is Michael Jordan?', rows);
-  assert.equal(decision.kind, 'single');
+  assert.equal(decision.kind, 'choices');
+  if (decision.kind !== 'choices') return;
+  assert.ok(decision.choices.length >= 2);
+});
+
+test('a famous person with an exact Wikipedia article and no second person stays one card', () => {
+  const rows = [
+    row('Michael Jordan - Wikipedia', 'Michael Jordan is an American businessman and former basketball player.', 'https://en.wikipedia.org/wiki/Michael_Jordan'),
+    row('List of career achievements by Michael Jordan', 'Michael Jordan won six NBA championships with the Chicago Bulls.', 'https://en.wikipedia.org/wiki/List_of_career_achievements_by_Michael_Jordan'),
+    row('Michael Jordan Stats', 'Michael Jordan played shooting guard for the Chicago Bulls.', 'https://www.basketball-reference.com/players/j/jordami01.html'),
+    row('Legends profile: Michael Jordan', 'Michael Jordan is a six-time NBA champion.', 'https://www.nba.com/news/history-nba-legend-michael-jordan'),
+  ];
+  assert.equal(resolveEntity('Who is Michael Jordan?', rows).kind, 'single');
 });

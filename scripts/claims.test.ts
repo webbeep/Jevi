@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { bindClaims, budgetAmounts, priceFor, retargetCites, salesTax, shoppingAsk, type ClaimSource } from '../server/claims.ts';
+import { bindClaims, budgetAmounts, claimSources, priceFor, retargetCites, salesTax, shoppingAsk, type ClaimSource } from '../server/claims.ts';
 import type { CardNode } from '../shared/card.ts';
 
 const sources: ClaimSource[] = [
@@ -81,6 +81,43 @@ test('a city sales tax uses the combined rate once the item clears the exemption
   assert.match(body, /\$13\.31/);
   assert.match(body, /\[2\]/);
   assert.doesNotMatch(body, /4%/);
+});
+
+test('a fetched page, not its snippet, is what a cited number has to match', () => {
+  const page = claimSources(
+    [{ title: 'Wolf news', snippet: 'The DNR counted 2,900 wolves.', domain: 'www.mprnews.org' }],
+    [{ n: 1, text: 'A feature about the survey. It does not give a population figure.' }],
+  );
+  const text = retargetCites('Minnesota has about 2,900 wolves [1].', page);
+  assert.doesNotMatch(text, /2,900/);
+});
+
+test('an agency label stays only when the cited host is that agency', () => {
+  const news: ClaimSource[] = [{ n: 1, text: 'The 2023 count was 2,294 wolves.', domain: 'www.mprnews.org' }];
+  const tile: CardNode = { type: 'tile', label: 'Latest estimate', value: '2,294', sub: 'DNR 2023', source: 1 };
+  const next = bindClaims(tile, news, 'How many wolves are in Minnesota?');
+  assert.doesNotMatch(next.type === 'tile' ? next.sub ?? '' : '', /DNR/);
+  assert.match(next.type === 'tile' ? next.sub ?? '' : '', /2023/);
+  const dnr: ClaimSource[] = [{ n: 1, text: 'The 2023 count was 2,294 wolves.', domain: 'files.dnr.state.mn.us' }];
+  const kept = bindClaims(tile, dnr, 'How many wolves are in Minnesota?');
+  assert.match(kept.type === 'tile' ? kept.sub ?? '' : '', /DNR/);
+});
+
+test('a product list drops a pick that has no price and keeps one that does', () => {
+  assert.equal(shoppingAsk('best hdmi cable for a tv'), true);
+  assert.equal(shoppingAsk('best ways to sleep'), false);
+  const catalog: ClaimSource[] = [
+    { n: 1, text: 'The MonoPrice cable is $8.99. Another listing has no price.' },
+  ];
+  const list: CardNode = {
+    type: 'list',
+    style: 'number',
+    items: [{ text: 'MonoPrice HDMI cable' }, { text: 'No name cable' }],
+  };
+  const next = bindClaims(list, catalog, 'best hdmi cable for a tv');
+  const items = next.type === 'list' ? next.items : [];
+  assert.equal(items.length, 1);
+  assert.equal(items[0]?.meta, '$8.99');
 });
 
 test('a table drops a number no page states', () => {

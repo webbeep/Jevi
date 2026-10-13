@@ -984,7 +984,7 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
   const choicesOnly = Boolean(choices && !turn.filling && turn.result && !turn.result.card.body.length);
 
   return (
-    <section id={`turn-${turn.id}`} data-turn={turn.id} data-degraded={degraded} className="scroll-mt-20 space-y-3 animate-in fade-in slide-in-from-bottom-3 duration-500">
+    <section id={`turn-${turn.id}`} data-turn={turn.id} data-degraded={degraded} className="scroll-mt-20 space-y-3 animate-in fade-in duration-500">
       {!first && (
         <div className="flex flex-col items-end gap-1.5">
           {turn.base && (
@@ -1004,6 +1004,11 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
 
       {(offlinePartial || !(turn.error && !turn.result)) && (
         <>
+          {turn.spelling && (
+            <p data-testid="spelling-note" className="text-xs text-muted-foreground">
+              Showing results for <span className="font-medium text-foreground">{turn.spelling}</span>
+            </p>
+          )}
           {turn.fromCache && <p data-testid="cache-note" className="text-xs text-muted-foreground">Saved answer · you're offline</p>}
           {turn.notice?.kind === 'no-sources' && (
             <p data-testid="no-sources-note" role="note" className="text-xs text-muted-foreground">

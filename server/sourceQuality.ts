@@ -157,6 +157,38 @@ function yearOf(row: RankedHit): number {
   return Math.max(...years.map(Number));
 }
 
+/**
+ * One extra search when the question names an agency or asks a place for a count or a rule,
+ * and that body's own site is not already in the results. The acronym is tried on the
+ * official endings search engines actually rank (.gov, .org, .int, .ch).
+ */
+export function officialProbe(query: string): string {
+  const orgs = orgTokens(query);
+  const places = placeHosts(query);
+  if (!orgs.length && !places.length) return '';
+  const sites: string[] = [];
+  for (const org of orgs.slice(0, 1)) {
+    for (const tld of ['gov', 'org', 'int', 'ch']) sites.push(`site:${org}.${tld}`);
+  }
+  for (const place of places) sites.push(`site:${place.replace(/^\./, '')}`);
+  const topic = query
+    .replace(/\b[A-Z]{2,8}\b/g, ' ')
+    .replace(/\b(?:what|does|do|did|the|is|are|say|says|said|about|how|many|much|live|lives|living|in|of|a|an|by|for|to|on|likely|according)\b/gi, ' ')
+    .replace(/[^a-z0-9\s-]/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 70);
+  return `${topic} (${sites.slice(0, 4).join(' OR ')})`.trim();
+}
+
+/** True when a result is the agency or the place named in the question, or the question names neither. */
+export function hasOfficialHit(query: string, rows: readonly { domain?: string; url?: string }[]): boolean {
+  const orgs = orgTokens(query);
+  const places = placeHosts(query);
+  if (!orgs.length && !places.length) return true;
+  return rows.some((row) => officialLead(row.domain || hostOf(row.url || ''), orgs, places) === 0);
+}
+
 /** 0 when the question names this host (IPCC → ipcc.ch) or the place's own official site. */
 function officialLead(domain: string, orgs: readonly string[], places: readonly string[]): number {
   const host = domainOf(domain);

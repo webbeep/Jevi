@@ -366,23 +366,25 @@ export function withinOneEdit(a: string, b: string): boolean {
  */
 export function nearOrgSpelling(term: string, rows: readonly { title?: string; snippet?: string; url?: string }[]): string {
   if (term.length < 5) return '';
-  const counts = new Map<string, number>();
+  const counts = new Map<string, { display: string; n: number }>();
   for (const row of rows) {
-    const seq = tokens(`${row.title ?? ''} ${row.snippet ?? ''} ${row.url ?? ''}`);
+    const seq = `${row.title ?? ''} ${row.snippet ?? ''} ${row.url ?? ''}`.split(/[^A-Za-z0-9]+/).filter((word) => word.length >= 1);
     for (let i = 0; i < seq.length; i++) {
       const w = seq[i]!;
       const cands = [w];
       const nxt = seq[i + 1];
       if (nxt && w.length >= 3 && nxt.length >= 3) cands.push(w + nxt);
       for (const cand of cands) {
-        if (cand.length < 5 || cand === term || !withinOneEdit(term, cand)) continue;
-        counts.set(cand, (counts.get(cand) ?? 0) + 1);
+        const key = cand.toLowerCase();
+        if (key.length < 5 || key === term || !withinOneEdit(term, key)) continue;
+        const prev = counts.get(key);
+        counts.set(key, { display: prev && prev.n >= 1 ? prev.display : cand, n: (prev?.n ?? 0) + 1 });
       }
     }
   }
   let best = '';
   let n = 0;
-  for (const [cand, count] of counts) if (count > n) { best = cand; n = count; }
+  for (const { display, n: count } of counts.values()) if (count > n) { best = display; n = count; }
   return best;
 }
 
@@ -1286,6 +1288,17 @@ function qualifiedTitle(t: string, name: string): boolean {
 /** A different person with the same name: the SERP title is "John Smith (explorer)". */
 const qualifiedNamesake = (row: EntityRow, name: string) => qualifiedTitle(title(row.title ?? ''), name);
 
+/**
+ * A different person who puts a token between the same first and last name
+ * ("Michael B. Jordan"). A parenthetical of the exact name, or a "Sr." after it, is not this.
+ */
+function middleInitialPerson(text: string, name: string): boolean {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length < 2) return false;
+  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`${esc(parts[0]!)}\\s+[A-Z]\\.\\s+${esc(parts[parts.length - 1]!)}`, 'i').test(text);
+}
+
 /** "Michael B. Jordan" is a different person from "Michael Jordan": a token sits inside the name. */
 function insertedName(row: EntityRow, name: string): boolean {
   const parts = name.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -1494,15 +1507,20 @@ export function resolveEntity(
     }
   }
 
+  // A disambiguation page that names someone with a middle initial ("Michael B. Jordan")
+  // is a second person. A bare parenthetical of the exact name is not.
+  const anotherPerson = disambig.length > 0 && middleInitialPerson(`${rows[disambig[0]!]?.title ?? ''} ${rows[disambig[0]!]?.snippet ?? ''}`, name);
+
   // Famous name: the exact Wikipedia article plus other en.wikipedia.org pages about the same
   // name is ONE dominant identity — never split it into choices (live: Obama, Taylor Swift).
+  // A second person named on the disambiguation page still gets a picker.
   if (!opts?.prior) {
     const exactHit = eligible.find((e) => exactWikiArticle(e.row, name));
     if (exactHit) {
       const exact = exactHit.i;
       // A namesake article ("John Smith (explorer)") proves ambiguity, not fame.
       const support = rows.filter((r, i) => i !== exact && wikiNamePage(r, name) && !qualifiedNamesake(r, name)).length;
-      if (support >= 2) {
+      if (support >= 2 && !anotherPerson) {
         const win = [...new Set([...(strong.find((c) => c.includes(exact)) ?? [exact]), ...weak])];
         // Another, disambiguated person is a different person: never credited to this one.
         const kept = eligible.map((e) => e.i).filter((i) => !qualifiedNamesake(rows[i]!, name));
@@ -1517,9 +1535,10 @@ export function resolveEntity(
     }
   }
 
-  // A disambiguation page lists people who share a name. It does not override an exact article.
+  // A disambiguation page lists people who share a name. An exact article stays one person
+  // unless that page also names someone with a middle initial, a different person.
   const exactArticle = eligible.some((e) => exactWikiArticle(e.row, name));
-  if (!exactArticle && !pickAsk && disambig.length) {
+  if ((!exactArticle || anotherPerson) && !pickAsk && disambig.length) {
     const entries = disambiguationEntries(rows[disambig[0]!]!, name);
     if (entries.length >= 2) {
       const page = rows[disambig[0]!]!;

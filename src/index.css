@@ -168,6 +168,12 @@
 .zo-rise {
   animation: zo-rise 640ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
+/* The embed paints its own frames. A transform, a filter, or a rounded overflow clip on this box snapshots the iframe, so playback updates late. The frame rounds itself. */
+.zo-video {
+  transform: none;
+  filter: none;
+  overflow: visible;
+}
 @keyframes zo-rise {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: none; }

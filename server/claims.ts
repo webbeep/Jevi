@@ -5,15 +5,21 @@ import { numberTokens } from './ground';
 export interface ClaimSource {
   n: number;
   text: string;
+  /** Host the citation points at, when the result has one. */
+  domain?: string;
 }
 
 const FREE = 2;
 const SHOPPING = /(?:^|\b)(?:best|top|cheap|budget|affordable)\b/i;
 const PRODUCT = /(?:\$\s?\d|\b(?:buy|price|prices|deal|deals|laptop|phone|tablet|headphone|monitor|camera|keyboard|tv|shoe)s?\b)/i;
+/** "Best ways to…" is advice. "Best HDMI cable" is a product list even when the noun is not in a list. */
+const ADVICE = /\b(?:ways|tips|practices|methods|reasons|ideas|strategies|habits)\b/i;
 const MONEY = /\$\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?/;
 const BUDGET = /\b(?:under|below|less than|cheaper than|up to|at most)\b/i;
 const TAX_ASK = /\b(?:sales\s+tax|tax)\b/i;
 const PRICE_STOP = new Set(['best', 'top', 'under', 'with', 'for', 'the', 'and', 'laptop', 'laptops', 'buy', 'cheap', 'budget', 'new', 'from', 'than', 'that', 'this']);
+/** Shared accessory nouns. They sit next to someone else's price and are not a product's name. */
+const PRICE_GENERIC = new Set(['cable', 'cables', 'cord', 'cords', 'adapter', 'adapters', 'wire', 'wires', 'case', 'cases', 'cover', 'covers', 'plug', 'plugs', 'item', 'model']);
 
 /** Dollar ceilings the question set ("under $800"). Those are not a product's price. */
 export function budgetAmounts(query: string): number[] {
@@ -42,18 +48,24 @@ function priced(text: string, ceilings: readonly number[]): string | undefined {
 }
 
 export function claimSources(
-  results: readonly { title?: string; snippet?: string; content?: string }[],
+  results: readonly { title?: string; snippet?: string; content?: string; domain?: string }[],
   pages: readonly { n: number; text: string }[],
 ): ClaimSource[] {
   const page = new Map(pages.map((item) => [item.n, item.text]));
-  return results.map((result, index) => ({
-    n: index + 1,
-    text: `${result.title ?? ''} ${result.snippet ?? ''} ${result.content ?? ''} ${page.get(index + 1) ?? ''}`,
-  }));
+  return results.map((result, index) => {
+    const read = page.get(index + 1);
+    // A fetched page is the citation. A number that exists only in the snippet is not on that page.
+    const text = read
+      ? `${result.title ?? ''}\n${read}`
+      : `${result.title ?? ''} ${result.snippet ?? ''} ${result.content ?? ''}`;
+    return { n: index + 1, text, domain: result.domain };
+  });
 }
 
 export function shoppingAsk(query: string): boolean {
-  return SHOPPING.test(query) && PRODUCT.test(query);
+  if (ADVICE.test(query) || !SHOPPING.test(query)) return false;
+  if (PRODUCT.test(query)) return true;
+  return !/^(?:how|why|what|who|when|where)\b/i.test(query.trim());
 }
 
 function significant(text: string): string[] {
@@ -102,6 +114,32 @@ function shownNumber(num: string): RegExp {
   return new RegExp(`\\$?\\s*${groups.join(',?')}(?:\\.0+)?`, 'g');
 }
 
+const AGENCY_SKIP = new Set(['AM', 'PM', 'US', 'UK', 'EU', 'UN', 'TV', 'ID', 'OK', 'NBA', 'NFL', 'MLB', 'NHL', 'GDP', 'USD', 'EUR', 'CEO', 'CFO', 'PDF', 'FAQ', 'DIY', 'GPS', 'HDMI', 'USB']);
+
+function agencyTokens(label: string): string[] {
+  return [...label.matchAll(/\b[A-Z]{2,8}\b/g)].map((match) => match[1] ?? match[0]).filter((token) => !AGENCY_SKIP.has(token));
+}
+
+function hostHasAgency(source: ClaimSource | undefined, token: string): boolean {
+  return !!source?.domain && source.domain.toLowerCase().includes(token.toLowerCase());
+}
+
+/**
+ * A figure labeled with an agency ("DNR", "CDC") keeps that label only when the
+ * cited page is that agency. A news page that mentions the number is not the agency.
+ */
+function withoutForeignAgency(label: string, source: ClaimSource | undefined): string {
+  if (!source?.domain) return label;
+  let out = label;
+  for (const token of agencyTokens(label)) {
+    if (hostHasAgency(source, token)) continue;
+    const attributed = new RegExp(`\\b${token}\\b\\s*(?:\\d{4}|survey|report|estimate|data|figures?)|\\b(?:according to|per|from)\\s+${token}\\b|^${token}$`, 'i');
+    if (!attributed.test(label)) continue;
+    out = out.replace(new RegExp(`\\b${token}\\b`), ' ');
+  }
+  return out.replace(/\s{2,}/g, ' ').replace(/\s+([,.;:)])/g, '$1').trim();
+}
+
 function stripNums(text: string, nums: readonly string[]): string {
   let out = text;
   for (const num of nums) out = out.replace(shownNumber(num), ' ');
@@ -130,24 +168,17 @@ export function retargetCites(text: string, sources: readonly ClaimSource[]): st
 
 export function priceFor(name: string, sources: readonly ClaimSource[], ceilings: readonly number[] = []): { price: string; n: number } | undefined {
   const head = (name.split(/[(\[]/)[0] ?? name);
-  const words = head.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 3 && !PRICE_STOP.has(word)).slice(0, 2);
-  if (!words.length || (words.length < 2 && words[0]!.length < 5)) return undefined;
+  const words = head.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 3 && !PRICE_STOP.has(word) && !PRICE_GENERIC.has(word));
+  if (!words.length) return undefined;
+  // The longest token is the one a page uses to name this product. A missing shorter token
+  // ("HDMI" beside "MonoPrice cable") must not hide the price, and a generic noun must not take it.
+  const lead = words.reduce((best, word) => (word.length > best.length ? word : best));
   let found: { price: string; n: number } | undefined;
   for (const source of sources) {
     const low = source.text.toLowerCase();
-    let at = -1;
-    let from = 0;
-    while (from < low.length) {
-      const hit = low.indexOf(words[0]!, from);
-      if (hit < 0) break;
-      if (words.every((word) => low.slice(hit, hit + 48).includes(word))) {
-        at = hit;
-        break;
-      }
-      from = hit + 1;
-    }
+    const at = low.indexOf(lead);
     if (at < 0) continue;
-    const after = priced(source.text.slice(at, at + 120), ceilings);
+    const after = priced(source.text.slice(at, at + 180), ceilings);
     const before = priced(source.text.slice(Math.max(0, at - 24), at), ceilings);
     const raw = after ?? before;
     if (!raw) continue;
@@ -253,7 +284,11 @@ function retargetNode(node: CardNode, sources: readonly ClaimSource[]): CardNode
     case 'callout':
     case 'quote':
     case 'draft': {
-      const text = retargetCites(node.text, sources);
+      const cited = retargetCites(node.text, sources);
+      const text = cited.split(/(?<=[.!?])\s+/).map((sentence) => {
+        const n = [...sentence.matchAll(/\[(\d+)\]/g)].map((match) => Number(match[1])).at(-1);
+        return withoutForeignAgency(sentence, byNumber(sources, n ?? 0));
+      }).join(' ');
       return text === node.text ? node : { ...node, text };
     }
     case 'heading': {
@@ -288,7 +323,7 @@ function retargetNode(node: CardNode, sources: readonly ClaimSource[]): CardNode
           source = undefined;
         }
       }
-      let sub = node.sub ? retargetCites(node.sub, sources) : node.sub;
+      let sub = node.sub ? withoutForeignAgency(retargetCites(node.sub, sources), byNumber(sources, source ?? 0)) : node.sub;
       if (source && sub) {
         const missing = significant(sub).filter((num) => !has(byNumber(sources, source), num));
         if (missing.length) sub = stripNums(sub.replace(/\s*\[\d+\]/g, ''), missing);
@@ -301,8 +336,16 @@ function retargetNode(node: CardNode, sources: readonly ClaimSource[]): CardNode
       const nums = significant(node.value);
       const page = nums.length ? sources.find((item) => covers(item, nums)) : undefined;
       const value = nums.length && !page ? stripNums(node.value, nums) : node.value;
+      const label = page ? withoutForeignAgency(node.label, page) : withoutForeignAgency(node.label, undefined);
       const delta = node.delta ? retargetCites(node.delta, sources) : node.delta;
-      return value === node.value && delta === node.delta ? node : { ...node, value, delta };
+      return value === node.value && delta === node.delta && label === node.label ? node : { ...node, value, label, delta };
+    }
+    case 'chart': {
+      const data = node.data.filter((point) => {
+        const nums = significant(String(point.value));
+        return !nums.length || sources.some((item) => covers(item, nums));
+      });
+      return data.length === node.data.length ? node : { ...node, data };
     }
     case 'table': {
       const rows = node.rows.map((row) => row.map((cell) => {
@@ -362,7 +405,6 @@ function retargetNode(node: CardNode, sources: readonly ClaimSource[]): CardNode
     case 'choices':
     case 'links':
     case 'citations':
-    case 'chart':
     case 'pricing':
     case 'scaler':
     case 'slider':
@@ -534,11 +576,71 @@ function applyTax(node: CardNode, query: string, pick: TaxPick): CardNode {
   }
 }
 
+/** A priced list drops a pick that still has no price. A list with no prices at all stays, so a miss does not empty the card. */
+function dropPriceless(node: CardNode, ceilings: readonly number[]): CardNode {
+  switch (node.type) {
+    case 'list': {
+      const priced = node.items.filter((item) => hasPrice(item.meta, ceilings) || hasPrice(item.text, ceilings));
+      if (!priced.length || priced.length === node.items.length) return node;
+      return { ...node, items: priced };
+    }
+    case 'stack':
+    case 'grid':
+    case 'section':
+    case 'scroller':
+      return { ...node, children: node.children.map((child) => dropPriceless(child, ceilings)) };
+    case 'tabs':
+      return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: tab.children.map((child) => dropPriceless(child, ceilings)) })) };
+    case 'text':
+    case 'callout':
+    case 'quote':
+    case 'draft':
+    case 'heading':
+    case 'hero':
+    case 'stat':
+    case 'tile':
+    case 'keyvalue':
+    case 'timeline':
+    case 'profile':
+    case 'table':
+    case 'steps':
+    case 'accordion':
+    case 'proscons':
+    case 'badges':
+    case 'actions':
+    case 'choices':
+    case 'links':
+    case 'citations':
+    case 'chart':
+    case 'pricing':
+    case 'scaler':
+    case 'slider':
+    case 'reveal':
+    case 'image':
+    case 'gallery':
+    case 'video':
+    case 'code':
+    case 'divider':
+    case 'progress':
+    case 'rating':
+    case 'diagram':
+    case 'ticker':
+    case 'slot':
+      return node;
+    default: {
+      const unreachable: never = node;
+      return unreachable;
+    }
+  }
+}
+
 /** Move each number's citation onto a page that states it, then fill a missing product price from that page. */
 export function bindClaims(node: CardNode, sources: readonly ClaimSource[], query: string): CardNode {
   if (!sources.length) return node;
   const aimed = retargetNode(node, sources);
   const tax = salesTax(query, sources);
   const taxed = tax ? applyTax(aimed, query, tax) : aimed;
-  return shoppingAsk(query) ? fillPrices(taxed, sources, budgetAmounts(query)) : taxed;
+  if (!shoppingAsk(query)) return taxed;
+  const ceilings = budgetAmounts(query);
+  return dropPriceless(fillPrices(taxed, sources, ceilings), ceilings);
 }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { CardNode } from '../shared/card.ts';
-import { finishQuality, hostTier, latinQuery, preferSources } from '../server/sourceQuality.ts';
+import { finishQuality, hasOfficialHit, hostTier, latinQuery, officialProbe, preferSources } from '../server/sourceQuality.ts';
 
 const hit = (domain: string, title: string, snippet = title) => ({ url: `https://${domain}/x`, domain, title, snippet });
 
@@ -94,6 +94,19 @@ test('a named body leads, and a newer official page leads an old release', () =>
     hit('www.cdc.gov', 'Raw milk', 'Risks'),
   ]);
   assert.equal(milk[0]?.title, 'Raw milk questions');
+});
+
+test('a named agency and a state count get an official-site search', () => {
+  const ipcc = officialProbe('What does the IPCC say is the likely global temperature increase by 2100?');
+  assert.match(ipcc, /site:ipcc\./);
+  assert.equal(hasOfficialHit('What does the IPCC say is the likely global temperature increase by 2100?', [
+    { domain: 'www.nytimes.com', url: 'https://www.nytimes.com/climate' },
+  ]), false);
+  assert.equal(hasOfficialHit('What does the IPCC say is the likely global temperature increase by 2100?', [
+    { domain: 'www.ipcc.ch', url: 'https://www.ipcc.ch/report' },
+  ]), true);
+  const wolves = officialProbe('How many wolves live in Minnesota?');
+  assert.match(wolves, /site:mn\.us|site:mn\.gov/);
 });
 
 test('a list that is only foreign pages is kept', () => {

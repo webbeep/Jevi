@@ -49,13 +49,15 @@ export function roleFollow(question: string, person: string): string | undefined
   return `${person} ${role}`;
 }
 
-/** "What degrees does he have?" keeps the person on screen in the search. */
-export function pronounFollow(question: string, person: string): string | undefined {
+/** "What degrees does he have?" keeps the person on screen in the search. `cue` is how the card already tells that person apart. */
+export function pronounFollow(question: string, person: string, cue = ''): string | undefined {
   const q = question.trim();
   if (!person || q.split(/\s+/).length > 16) return undefined;
   if (!/\b(he|she|him|his|her|hers|they|them|their)\b/i.test(q)) return undefined;
   if (/^(?:write|draft|rewrite)\b/i.test(q)) return undefined;
-  return `${person} ${q.replace(/[?.!]+$/g, '')}`;
+  const detail = cue.trim();
+  const known = detail && q.toLowerCase().includes(detail.toLowerCase()) ? '' : detail;
+  return `${person}${known ? ` ${known}` : ''} ${q.replace(/[?.!]+$/g, '')}`.replace(/\s+/g, ' ');
 }
 
 export function threadPerson(original: string, context?: string): string {

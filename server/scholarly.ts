@@ -7,7 +7,7 @@ import type { SearchResult } from '../shared/types';
  * OpenAlex relevance ranks follow-up work above the original there. OpenAlex is keyless and free (CC0 metadata); each work becomes a source whose
  * text states title, authors, year, venue and DOI, plus the abstract when OpenAlex has one.
  */
-export const PAPER_ASK = /\b(?:peer[- ]reviewed|dois?|journal articles?|meta[- ]analys[ie]s|systematic reviews?|scholarly|preprints?|(?:research|academic|scientific) papers?|papers (?:on|about|regarding|by|that)|what (?:does|do) (?:the )?research|research (?:says|shows|on|about|into|suggests)|scientific (?:evidence|literature|consensus)|clinical trials?)\b/i;
+export const PAPER_ASK = /\b(?:peer[- ]reviewed|dois?|journal articles?|meta[- ]analys[ie]s|systematic reviews?|scholarly|preprints?|(?:research|academic|scientific) papers?|papers (?:on|about|regarding|by|that)|what (?:does|do) (?:the )?research|research (?:says|shows|on|about|into|suggests)|scientific (?:evidence|literature|consensus)|clinical trials?|according to (?:a |the )?(?:study|studies|paper|trial)|(?:the )?study (?:on|of|found|shows|showed)|studies (?:on|of|found|show))\b/i;
 
 const TIMEOUT_MS = 2500;
 const MAX = 5;
@@ -125,6 +125,27 @@ async function works(topic: string): Promise<{ via: string; works: (Work & { abs
   return { via: 'crossref', works: items };
 }
 
+const DOI_IN_URL = /10\.\d{4,9}\/[^\s?#]+/i;
+
+/** A paper's title has to share the question's topic. An unrelated DOI, whatever its year, does not. */
+export function paperOnTopic(query: string, title: string, snippet = ''): boolean {
+  const topic = paperTopic(query).toLowerCase().split(/\s+/).filter((word) => word.length >= 3);
+  if (topic.length < 2) return true;
+  const text = `${title} ${snippet}`.toLowerCase();
+  const hit = topic.filter((word) => text.includes(word));
+  return hit.length >= Math.min(2, topic.length);
+}
+
+export function isDoiResult(row: { url?: string; title?: string; snippet?: string }): boolean {
+  return DOI_IN_URL.test(`${row.url ?? ''} ${row.title ?? ''} ${row.snippet ?? ''}`);
+}
+
+/** On a research question, a DOI stays only when that paper is about the question. */
+export function dropStrayDois<T extends { url?: string; title?: string; snippet?: string }>(query: string, rows: readonly T[]): T[] {
+  if (!PAPER_ASK.test(query)) return [...rows];
+  return rows.filter((row) => !isDoiResult(row) || paperOnTopic(query, row.title ?? '', row.snippet ?? ''));
+}
+
 /** Up to five works for a paper ask; [] on any failure (the web results still stand). */
 export async function scholarlyResults(query: string): Promise<SearchResult[]> {
   if (!PAPER_ASK.test(query)) return [];
@@ -135,7 +156,7 @@ export async function scholarlyResults(query: string): Promise<SearchResult[]> {
     const found = await works(topic);
     const anchor = paperAnchor(query);
     const matched = anchor ? found.works.filter((work) => workMatches(work, anchor)) : found.works;
-    const out = matched.map(workToResult).filter((r): r is SearchResult => !!r).slice(0, MAX);
+    const out = matched.map(workToResult).filter((r): r is SearchResult => !!r && paperOnTopic(query, r.title, r.snippet)).slice(0, MAX);
     console.log(JSON.stringify({ zo: 'scholar', via: found.via, n: out.length, ms: Date.now() - started }));
     return out;
   } catch (err) {

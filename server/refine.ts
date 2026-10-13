@@ -206,3 +206,39 @@ function walk(node: CardNode, terms: readonly string[], kind: Kind | undefined, 
     }
   }
 }
+
+function collectSources(node: CardNode, into: Set<number>): void {
+  const walk = (value: unknown, key?: string): void => {
+    if (key === 'source' && typeof value === 'number' && value >= 1) into.add(value);
+    if (typeof value === 'string') {
+      for (const match of value.matchAll(/\[(\d+)\]/g)) into.add(Number(match[1]));
+    } else if (Array.isArray(value)) value.forEach((item) => walk(item));
+    else if (value && typeof value === 'object') {
+      const record = value as Record<string, unknown>;
+      if (record.type === 'citations' && Array.isArray(record.refs)) {
+        for (const ref of record.refs) if (typeof ref === 'number' && ref >= 1) into.add(ref);
+      }
+      for (const [childKey, child] of Object.entries(record)) walk(child, childKey);
+    }
+  };
+  walk(node);
+}
+
+/**
+ * A "keep only" follow-up is the previous card with the other rows removed.
+ * The sources those rows already cited stay on the card.
+ */
+export function keptBody(body: readonly CardNode[], question: string, corpus: string): CardNode[] {
+  const next = body.flatMap((node) => {
+    if (node.type === 'citations') return [];
+    const kept = constrainNode(node, question, corpus);
+    return kept ? [kept] : [];
+  });
+  const refs = new Set<number>();
+  for (const node of next) collectSources(node, refs);
+  if (!refs.size) {
+    for (const node of body) if (node.type === 'citations') node.refs.forEach((ref) => refs.add(ref));
+  }
+  if (!refs.size) return next;
+  return [...next, { type: 'citations', refs: [...refs].sort((a, b) => a - b).slice(0, 8) }];
+}

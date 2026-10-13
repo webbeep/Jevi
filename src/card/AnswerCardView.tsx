@@ -24,7 +24,7 @@ import { LogoMark } from '../Logo';
 import { FaviconStack } from '../Sources';
 import { useCard } from './context';
 import { Icon } from './Icon';
-import { Nodes } from './render';
+import { hasVideo, Nodes } from './render';
 import { CardTitle } from './primitives';
 
 export function AnswerCardView({ card, ask = '', version, filling, streaming, status, pattern, alternatives, onPattern, simple, onSimple, onRegenerate, onRetry, toolbar, provisional = false, trail, revealLayout = false }: {
@@ -62,6 +62,8 @@ export function AnswerCardView({ card, ask = '', version, filling, streaming, st
   }, [toast]);
   // Cards saved before the server dropped them can still carry a "no chart" note beside the live chart.
   const body = useMemo(() => tickerBody(card.body).map((node) => fitNode(node, ask)), [card.body, ask]);
+  // A rounded overflow clip on an ancestor snapshots a cross-origin player, so its frames arrive late.
+  const embed = body.some(hasVideo);
   // The layout that was just on screen, kept for one beat so the answer can arrive over it
   // instead of the skeleton vanishing first.
   const layoutSnap = useRef<CardNode[]>([]);
@@ -114,7 +116,7 @@ export function AnswerCardView({ card, ask = '', version, filling, streaming, st
     <div role="status" aria-live="polite" className="pointer-events-none absolute right-3 top-3 z-20">
       {toast && <span className="block rounded-lg bg-foreground px-3 py-1.5 text-xs font-medium text-background shadow-float animate-in fade-in">{toast}</span>}
     </div>
-    <Card className="relative min-w-0 max-w-full gap-0 overflow-hidden rounded-2xl py-0 shadow-card">
+    <Card className={cn('relative min-w-0 max-w-full gap-0 rounded-2xl py-0 shadow-card', embed ? 'overflow-visible' : 'overflow-hidden')}>
       <div className="flex items-start gap-2.5 pb-1 pl-4 pr-2 pt-3.5 sm:gap-3 sm:pl-6 sm:pr-3 sm:pt-5">
         <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg border bg-background sm:size-9">
           {filling && !card.icon ? <LogoMark className="size-4 animate-pulse" /> : <Icon name={card.icon} fallback="layout-grid" className="size-4 text-foreground/80 sm:size-[18px]" />}
@@ -163,7 +165,7 @@ export function AnswerCardView({ card, ask = '', version, filling, streaming, st
         </div>
       )}
 
-      <div className={cn('min-w-0 px-4 pb-5 pt-3.5 transition-[opacity,filter] duration-500 sm:px-6 sm:pb-6 sm:pt-4', status && !streaming && 'pointer-events-none opacity-50 blur-[1px]', cited.length && 'pb-4 sm:pb-5')}>
+      <div className={cn('min-w-0 px-4 pb-5 pt-3.5 transition-[opacity] duration-500 sm:px-6 sm:pb-6 sm:pt-4', status && !streaming && 'pointer-events-none opacity-50', cited.length && 'pb-4 sm:pb-5')}>
         <CardTitle.Provider value={card.title}>
           <div ref={frameRef} className="grid w-full min-w-0 [&>*]:col-start-1 [&>*]:row-start-1 [&>*]:min-w-0" style={!revealLayout && heldHeight ? { minHeight: heldHeight } : undefined}>
             {trail && (
@@ -186,7 +188,7 @@ export function AnswerCardView({ card, ask = '', version, filling, streaming, st
       </div>
 
       {cited.length > 0 && (
-        <button onClick={onSources} className="flex h-11 w-full items-center gap-2.5 border-t px-4 text-left text-[13px] text-muted-foreground transition-colors animate-in fade-in hover:bg-foreground/[0.03] hover:text-foreground sm:px-6">
+        <button onClick={onSources} className={cn('flex h-11 w-full items-center gap-2.5 border-t px-4 text-left text-[13px] text-muted-foreground transition-colors animate-in fade-in hover:bg-foreground/[0.03] hover:text-foreground sm:px-6', embed && 'rounded-b-2xl')}>
           <FaviconStack domains={cited.map((r) => r.domain)} />
           <span className="min-w-0 flex-1 truncate">
             {cited.length} {cited.length === 1 ? 'source' : 'sources'}

@@ -78,6 +78,8 @@ export interface Turn {
   reconnects?: number;
   /** Set on the first turn when a snapshot was restored because the network was down. */
   fromCache?: boolean;
+  /** The spelling the results use, when the typed word was off by one. */
+  spelling?: string;
 }
 
 const emptyLive = (): LiveCard => ({ regions: [], nodes: [], raw: [], followups: [], credits: [] });
@@ -241,6 +243,7 @@ export function useSession() {
             return live.credits.some((c) => c.src === e.data.src) ? {} : { live: { ...live, credits: [...live.credits, e.data] } };
           });
         case 'rewrite':
+          if (e.data.spelling) return update(route, { spelling: e.data.query });
           return update(route, { kind: 'search', question: e.data.query, searchId: route, mode: undefined });
         case 'intent':
           return update(route, { intent: e.data });

@@ -1,10 +1,23 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { PAPER_ASK, paperAnchor, paperTopic, withScholarly, workMatches, workToResult } from '../server/scholarly.ts';
+import { PAPER_ASK, dropStrayDois, paperAnchor, paperOnTopic, paperTopic, withScholarly, workMatches, workToResult } from '../server/scholarly.ts';
 
 test('SPD-C4: paper asks are detected, shopping and everyday asks are not', () => {
   for (const q of ['Give me 3 real peer-reviewed papers on sleep deprivation and working memory, with DOIs', 'meta-analysis of creatine and cognition', 'research papers about microplastics', 'What does the research say about intermittent fasting and longevity?']) assert.ok(PAPER_ASK.test(q), q);
   for (const q of ['toilet paper on sale', 'best paper towels', 'wallpaper for iPhone', 'iPad Air vs iPad Pro for drawing, which one and how much?', 'Fact-check: Gmail lets you attach files up to 50 MB', 'newspaper headlines today', 'Find the original paper that introduced the Transformer architecture: authors, venue and arXiv ID']) assert.ok(!PAPER_ASK.test(q), q);
+});
+
+test('a research DOI stays only when the paper is about the question', () => {
+  const rows = [
+    { title: 'GLP-1 receptor agonists and weight loss', url: 'https://www.thelancet.com/journals/lancet/article', snippet: 'A Lancet trial of semaglutide.' },
+    { title: 'Unrelated peptide chemistry', url: 'https://doi.org/10.1000/2006.unrelated', snippet: 'DOI: 10.1000/2006.unrelated. Published 2006.' },
+    { title: 'Semaglutide and body weight', url: 'https://doi.org/10.1016/S0140-6736(21)00213-0', snippet: 'GLP-1 weight loss in The Lancet.' },
+  ];
+  const kept = dropStrayDois('What does the research say about GLP-1 and weight loss?', rows);
+  assert.equal(kept.some((row) => row.url.includes('2006')), false);
+  assert.equal(kept.some((row) => row.url.includes('thelancet.com')), true);
+  assert.equal(kept.some((row) => row.url.includes('10.1016')), true);
+  assert.equal(paperOnTopic('What does the research say about GLP-1 and weight loss?', 'Unrelated peptide chemistry', ''), false);
 });
 
 test('SPD-C4: topic drops task words', () => {
