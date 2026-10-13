@@ -1224,7 +1224,7 @@ export function isDisambiguationPage(row: EntityRow): boolean {
   const url = row.url ?? '';
   const snip = row.snippet ?? '';
   if (/\(disambiguation\)/i.test(titleText) || /\(disambiguation\)/i.test(url)) return true;
-  if (/\bmay refer to\b/i.test(titleText) || /\bmay refer to\b/i.test(snip)) return true;
+  if (/\bmay (?:also )?refer to\b/i.test(titleText) || /\bmay (?:also )?refer to\b/i.test(snip)) return true;
   return false;
 }
 

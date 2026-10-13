@@ -133,8 +133,8 @@ function withoutForeignAgency(label: string, source: ClaimSource | undefined): s
   let out = label;
   for (const token of agencyTokens(label)) {
     if (hostHasAgency(source, token)) continue;
-    const named = new RegExp(`\\b${token}\\b(?:'s)?\\s*[,:—–-]?\\s*(?:\\d{4}|survey|report|estimate|data|figures?)`, 'i');
-    const clause = new RegExp(`\\b(?:according to|per|from)\\s+(?:the\\s+)?(?:[A-Za-z]+\\s+){0,3}${token}(?:'s)?(?:\\s+(?:latest|recent|annual|new|current))?(?:\\s+(?:estimate|survey|report|data|figures?))?`, 'i');
+    const named = new RegExp(`\\b${token}\\b(?:'s)?\\s*[,:—–-]?\\s*(?:\\d{4}|survey|report|estimate|study|studies|data|figures?)`, 'i');
+    const clause = new RegExp(`\\b(?:according to|per|from)\\s+(?:the\\s+)?(?:[A-Za-z]+\\s+){0,3}${token}(?:'s)?(?:\\s+(?:latest|recent|annual|new|current))?(?:\\s+(?:estimate|survey|report|study|studies|data|figures?))?`, 'i');
     const exact = new RegExp(`^${token}$`, 'i').test(label.trim());
     if (!named.test(out) && !clause.test(out) && !exact) continue;
     out = out.replace(clause, ' ').replace(new RegExp(`\\b${token}\\b(?:'s)?`, 'i'), ' ');
@@ -326,13 +326,14 @@ function retargetNode(node: CardNode, sources: readonly ClaimSource[]): CardNode
         }
       }
       let sub = node.sub ? withoutForeignAgency(retargetCites(node.sub, sources), byNumber(sources, source ?? 0)) : node.sub;
+      const label = withoutForeignAgency(node.label, byNumber(sources, source ?? 0));
       if (source && sub) {
         const missing = significant(sub).filter((num) => !has(byNumber(sources, source), num));
         if (missing.length) sub = stripNums(sub.replace(/\s*\[\d+\]/g, ''), missing);
       } else if (sub && !source && valueNums.length) {
         sub = stripNums(sub.replace(/\s*\[\d+\]/g, ''), significant(sub));
       }
-      return value === node.value && sub === node.sub && source === node.source ? node : { ...node, value, sub, source };
+      return value === node.value && sub === node.sub && source === node.source && label === node.label ? node : { ...node, value, sub, source, label };
     }
     case 'stat': {
       const nums = significant(node.value);

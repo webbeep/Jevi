@@ -48,7 +48,7 @@ export async function fetchWikiSearch(q: string): Promise<WikiHit[]> {
   return parseWikiSearch(data);
 }
 
-/** REST summary shape used only for disambiguation detection (keyless). */
+/** REST summary shape for the exact article and its lead image. */
 interface WikiSummary {
   type?: string;
   title?: string;
@@ -59,30 +59,41 @@ interface WikiSummary {
 /**
  * Keyless Wikipedia disambiguation lookup for bare person names (0 Serper).
  * Tries `Name (disambiguation)` then `Name`; returns a synthetic hit when the
- * page is type=disambiguation or the extract says "may refer to".
+ * extract says "may refer to" or "may also refer to".
  */
 const DISAMBIG_MS = 1200;
 
 async function wikiSummary(title: string): Promise<WikiHit | null> {
-  const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title.replace(/ /g, '_'))}`;
+  // The REST summary for a disambiguation page is one sentence and drops the list.
+  // The extract includes the other people ("Michael B. Jordan"), which the summary never does.
+  const url = `https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&redirects=1&titles=${encodeURIComponent(title)}&format=json`;
   try {
-    const data = await fetchJsonCapped<WikiSummary>(
+    const data = await fetchJsonCapped<{ query?: { pages?: Record<string, { title?: string; extract?: string; missing?: string }> } }>(
       url,
       { headers: { 'User-Agent': WIKI_UA, Accept: 'application/json' } },
       DISAMBIG_MS,
       WIKI_BODY_CAP,
     );
-    const extract = (data.extract ?? '').trim();
-    // Require a real "may refer to" list — thin "(disambiguation)" pages (Obama) must not poison a famous name.
-    if (!/\bmay refer to\b/i.test(extract) || extract.length < 40) return null;
-    const page =
-      data.content_urls?.desktop?.page ??
-      `https://en.wikipedia.org/wiki/${encodeURIComponent((data.title ?? title).replace(/ /g, '_'))}`;
-    return {
-      title: data.title ?? title,
-      url: page,
-      snippet: clip(extract.replace(/\s+/g, ' '), 480),
+    const page = Object.values(data.query?.pages ?? {})[0];
+    if (!page || page.missing != null) return null;
+    const extract = (page.extract ?? '').replace(/\s+/g, ' ').trim();
+    // "may also refer to" is the list. A thin page with neither phrase must not split a famous name.
+    if (!/\bmay (?:also )?refer to\b/i.test(extract) || extract.length < 40) return null;
+    const pageTitle = page.title ?? title;
+    const hit = {
+      title: pageTitle,
+      url: `https://en.wikipedia.org/wiki/${encodeURIComponent(pageTitle.replace(/ /g, '_'))}`,
+      snippet: clip(extract, 1400),
     };
+    // A parenthetical namesake ("Michael Jordan (footballer)") is not enough. Obama's list is full of those.
+    // A middle initial ("Michael B. Jordan") is a second person, so that list is worth showing.
+    const asked = title.replace(/\s*\(disambiguation\)\s*$/i, '').trim().split(/\s+/).filter(Boolean);
+    if (asked.length >= 2) {
+      const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const middle = new RegExp(`${esc(asked[0]!)}\\s+[A-Z]\\.\\s+${esc(asked[asked.length - 1]!)}`, 'i');
+      if (!middle.test(`${hit.title} ${hit.snippet}`)) return null;
+    }
+    return hit;
   } catch {
     return null;
   }
