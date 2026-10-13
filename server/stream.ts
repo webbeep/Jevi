@@ -19,6 +19,7 @@ import {
   isPersonAsk,
   knowledgeForKept,
   knowledgeRow,
+  middleInitialPerson,
   nameIsTopic,
   personSourceOk,
   personSubject,
@@ -795,8 +796,10 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
           return false;
         }
       });
+      const listed = results.results.find((r) => isDisambiguationPage(r));
       const [wiki, article] = await Promise.all([
-        results.results.some((r) => isDisambiguationPage(r)) ? Promise.resolve(null) : fetchWikiDisambiguation(name).catch(() => null),
+        // A search snippet often stops before the other person. The extract is the list.
+        listed && middleInitialPerson(`${listed.title ?? ''} ${listed.snippet ?? ''}`, name) ? Promise.resolve(null) : fetchWikiDisambiguation(name).catch(() => null),
         needArticle ? fetchWikiArticle(name).catch(() => null) : Promise.resolve(null),
       ]);
       const extra = [article, wiki].filter((hit): hit is NonNullable<typeof hit> => !!hit);

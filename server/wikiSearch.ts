@@ -66,7 +66,7 @@ const DISAMBIG_MS = 1200;
 async function wikiSummary(title: string): Promise<WikiHit | null> {
   // The REST summary for a disambiguation page is one sentence and drops the list.
   // The extract includes the other people ("Michael B. Jordan"), which the summary never does.
-  const url = `https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&redirects=1&titles=${encodeURIComponent(title)}&format=json`;
+  const url = `https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&redirects=1&origin=*&titles=${encodeURIComponent(title)}&format=json`;
   try {
     const data = await fetchJsonCapped<{ query?: { pages?: Record<string, { title?: string; extract?: string; missing?: string }> } }>(
       url,

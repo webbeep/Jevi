@@ -1293,7 +1293,7 @@ const qualifiedNamesake = (row: EntityRow, name: string) => qualifiedTitle(title
  * A different person who puts a token between the same first and last name
  * ("Michael B. Jordan"). A parenthetical of the exact name, or a "Sr." after it, is not this.
  */
-function middleInitialPerson(text: string, name: string): boolean {
+export function middleInitialPerson(text: string, name: string): boolean {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length < 2) return false;
   const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

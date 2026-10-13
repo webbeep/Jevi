@@ -134,7 +134,7 @@ function withoutForeignAgency(label: string, source: ClaimSource | undefined): s
   for (const token of agencyTokens(label)) {
     if (hostHasAgency(source, token)) continue;
     const named = new RegExp(`\\b${token}\\b(?:'s)?\\s*[,:—–-]?\\s*(?:\\d{4}|survey|report|estimate|study|studies|data|figures?)`, 'i');
-    const clause = new RegExp(`\\b(?:according to|per|from)\\s+(?:the\\s+)?(?:[A-Za-z]+\\s+){0,3}${token}(?:'s)?(?:\\s+(?:latest|recent|annual|new|current))?(?:\\s+(?:estimate|survey|report|study|studies|data|figures?))?`, 'i');
+    const clause = new RegExp(`\\b(?:according to|per|from|cited by)\\s+(?:the\\s+)?(?:[A-Za-z]+\\s+){0,3}${token}(?:'s)?(?:\\s+(?:latest|recent|annual|new|current))?(?:\\s+(?:estimate|survey|report|study|studies|data|figures?))?`, 'i');
     const exact = new RegExp(`^${token}$`, 'i').test(label.trim());
     if (!named.test(out) && !clause.test(out) && !exact) continue;
     out = out.replace(clause, ' ').replace(new RegExp(`\\b${token}\\b(?:'s)?`, 'i'), ' ');
