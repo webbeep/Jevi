@@ -45,6 +45,21 @@ test('a Chinese score page drops once an official English scoreboard is in the l
   assert.ok(out.some((row) => row.domain === 'www.nba.com'));
 });
 
+test('a research question leads with papers and a social post does not outrank an official page', () => {
+  const rows = [
+    hit('www.reddit.com', 'Fasting thread', 'I tried intermittent fasting'),
+    hit('www.youtube.com', 'Fasting explained', 'A video about fasting and longevity'),
+    hit('www.nad.com', '16-hour fasting', 'A news recap of a mouse study'),
+    hit('pmc.ncbi.nlm.nih.gov', 'Intermittent fasting, longevity and disease', 'A review of the evidence'),
+    hit('doi.org', 'Time-restricted feeding and lifespan', 'Journal article'),
+    hit('www.nature.com', 'Fasting and ageing', 'Nature paper'),
+  ];
+  const out = preferSources('What does the research say about intermittent fasting and longevity?', rows);
+  assert.equal(out.some((row) => row.domain.includes('reddit')), false);
+  assert.ok(['pmc.ncbi.nlm.nih.gov', 'doi.org', 'www.nature.com'].includes(out[0]?.domain ?? ''));
+  assert.ok(out.findIndex((row) => row.domain.includes('youtube')) > out.findIndex((row) => row.domain === 'doi.org'));
+});
+
 test('a list that is only foreign pages is kept', () => {
   const rows = [hit('fsyyhong.com', 'NBA 比分', '未开始 独行侠'), hit('iaixiong.com', '赛程', '火箭')];
   assert.equal(preferSources('NBA scores tonight', rows).length, 2);

@@ -4,7 +4,9 @@ import { knowledgeMatches } from '../shared/relevance';
 import type { SearchResponse } from '../shared/types';
 import { hasLlm, llmLines } from './llm';
 import { candidates, extractStats, extractTimeline } from './extract';
+import { bindClaims, claimSources, type ClaimSource } from './claims';
 import { Grounding, groundNodes } from './ground';
+import { constrainNode } from './refine';
 import { PictureResolver, type RowImagePlan } from './pictures';
 import { Polisher } from './polish';
 import type { PageText } from './pages';
@@ -145,7 +147,7 @@ function followupRules(f: FollowupContext | undefined, originalQuery: string): s
   if (!f) return '';
   switch (f.mode) {
     case 'refine':
-      return `\n\nTHIS IS AN ADJUSTED VERSION of CURRENT CARD (below), which answered "${originalQuery}". The person asked: "${f.question}". Output a complete new card that applies the change: keep the same subject and everything that still applies, restructure freely if the change calls for a different layout, and make the change obvious in the subtitle. Mark the matching choices option as selected and move any slider or scaler to the requested value. The original card stays on screen above, so do not describe what changed in prose.`;
+      return `\n\nTHIS IS AN ADJUSTED VERSION of CURRENT CARD (below), which answered "${originalQuery}". The person asked: "${f.question}". Output a complete new card that applies the change: keep the same subject and everything that still applies, restructure freely if the change calls for a different layout, and make the change obvious in the subtitle. Mark the matching choices option as selected and move any slider or scaler to the requested value. A "keep only" change drops alternatives that do not match, and does not copy one school, employer, or team into a second role the current card did not give it. The original card stays on screen above, so do not describe what changed in prose.`;
     case 'answer':
       return `\n\nTHIS IS A FOLLOW-UP. The original search was "${originalQuery}". Design a focused card that answers only the follow-up question "${f.question}". Do not repeat the original answer; pick the components that fit this question best.`;
     case 'chat':
@@ -190,7 +192,7 @@ HEADER
 - subtitle: at most 8 words of useful context (what kind of answer, for whom, or how fresh), never a repeat of the title.
 
 RULES
-- Every number, value and fact must come from SOURCES or PAGE TEXT. Never estimate, never use typical or example values, never fill a slot from general knowledge. Any number not found in the sources is automatically deleted, so leave such nodes out.
+- Every number, value and fact must come from SOURCES or PAGE TEXT. Never estimate, never use typical or example values, never fill a slot from general knowledge. Any number not found in the sources is automatically deleted, so leave such nodes out. Cite a number only with the source that states that number. A research question prefers papers, preprints, and official pages over news and videos. A shopping pick includes its price when a source states one.
 - Write in the language of the question. Leave out a sentence that is in another language. A blog, slideshow, or classroom page that names a different year or number than an encyclopedia or official page is not a disagreement: use the encyclopedia or official figure, and do not add a disagreement callout.
 - A score or schedule is one row per game. Never repeat a matchup. If the sources do not list the games asked for, say so in one callout instead of listing games from another day.
 - A follow-up about one attribute (battery, price, storage) answers that attribute with the figures the sources state for the things being compared. Never paste an unfinished snippet, and never bring in a product the question did not name.
@@ -335,7 +337,7 @@ function emitReady(node: CardNode | undefined, bare: boolean): CardNode | undefi
   return bare ? uncite(node) : node;
 }
 
-function parseLine(line: string, g: Grounding, imageCount: number, query: string, sources?: PriceSource[], seatQuery?: string): Parsed | undefined {
+function parseLine(line: string, g: Grounding, imageCount: number, query: string, sources?: PriceSource[], seatQuery?: string, claims?: ClaimSource[], corpus = ''): Parsed | undefined {
   const json = line.replace(/^```(?:json)?|```$/g, '').replace(/^\s*(?:\d+[.)]|[-*•])\s*/, '').replace(/,$/, '').trim();
   if (!json.startsWith('{')) return undefined;
   let obj: Record<string, unknown>;
@@ -358,14 +360,19 @@ function parseLine(line: string, g: Grounding, imageCount: number, query: string
   const [clean] = sanitizeNodes([obj], imageCount, 0, { sources, query: seatQuery ?? query });
   const [grounded] = clean ? groundNodes([clean], g) : [];
   const fitted = grounded ? fitNode(grounded, seatQuery ?? query) : undefined;
-  const shown = fitted ? dropModelDiagram(fitted) : undefined;
+  const asked = seatQuery ?? query;
+  const bound = fitted && claims?.length ? bindClaims(fitted, claims, asked) : fitted;
+  const constrained = bound ? constrainNode(bound, asked, corpus) : undefined;
+  const shown = constrained ? dropModelDiagram(constrained) : undefined;
   return shown ? { kind: 'node', node: shown } : { kind: 'dropped' };
 }
 
 /** A node written outside the design stream (the answer review) passes the same sanitize and grounding gates. */
 export function gateNode(raw: unknown, req: DesignRequest): CardNode | undefined {
-  const g = new Grounding(corpusOf(req), req.followup?.mode === 'chat');
-  const parsed = parseLine(JSON.stringify(raw), g, Math.min(req.search.images.length, 12), req.query, priceSources(req), req.followup?.question ?? req.query);
+  const chat = req.followup?.mode === 'chat';
+  const g = new Grounding(corpusOf(req), chat);
+  const claims = chat ? [] : claimSources(req.search.results, req.pages);
+  const parsed = parseLine(JSON.stringify(raw), g, Math.min(req.search.images.length, 12), req.query, priceSources(req), req.followup?.question ?? req.query, claims, corpusOf(req));
   const node = parsed?.kind === 'node' ? emitReady(parsed.node, req.search.results.length === 0) : undefined;
   return req.ticker ? withoutCharts(node) : node;
 }
@@ -397,7 +404,9 @@ export async function designStream(req: DesignRequest, env: Env, on: DesignEvent
   if (!hasLlm(env)) return extractive(req, on);
 
   const chat = req.followup?.mode === 'chat';
-  const g = new Grounding(corpusOf(req), chat);
+  const corpus = corpusOf(req);
+  const claims = chat ? [] : claimSources(req.search.results, req.pages);
+  const g = new Grounding(corpus, chat);
   const polish = new Polisher(textCap(req));
   const pictures = new PictureResolver(env, req.search.images, on.credit, req.query, undefined, req.rowImages && { ...req.rowImages, results: req.search.results });
   const emitNode = bindVerdict(req, on.node);
@@ -422,7 +431,7 @@ export async function designStream(req: DesignRequest, env: Env, on: DesignEvent
     const sources = priceSources(req);
     via = await llmLines(env, SYSTEM_WHOLE, user, 2800, (line) => {
       lines++;
-      const parsed = parseLine(line, g, imageCount, req.query, sources, req.followup?.question ?? req.query);
+      const parsed = parseLine(line, g, imageCount, req.query, sources, req.followup?.question ?? req.query, claims, corpus);
       if (!parsed) {
         unparsed++;
         return;
@@ -519,7 +528,9 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
   const regions = diagramOn ? layoutWithDiagram(baseLayout, !!lead) : baseLayout;
   on.layout(regions);
   const sources = priceSources(req);
-  const g = new Grounding(corpusOf(req));
+  const corpus = corpusOf(req);
+  const claims = claimSources(req.search.results, req.pages);
+  const g = new Grounding(corpus);
   const pictures = new PictureResolver(env, req.search.images, on.credit, req.query, undefined, req.rowImages && { ...req.rowImages, results: req.search.results });
   const emitNode = bindVerdict(req, on.node);
   const polish = new Polisher(textCap(req));
@@ -533,7 +544,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
     let done = false;
     return llmLines(env, SYSTEM_REGION, user, 1200, (line) => {
       if (done) return;
-      const parsed = parseLine(line, g, imageCount, req.query, sources, req.followup?.question ?? req.query);
+      const parsed = parseLine(line, g, imageCount, req.query, sources, req.followup?.question ?? req.query, claims, corpus);
       if (parsed?.kind === 'node') {
         done = true;
         const node = emitReady(polish.apply(parsed.node), req.search.results.length === 0);
@@ -548,7 +559,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
     const user = `${shared}\n- YOU DESIGN FINISH. Output these lines:\n  1. {"title":string,"subtitle":string,"icon":string,"accent":tone} for the whole card\n  2. only if the answer has something worth adjusting, exploring or testing: one interactive node such as {"type":"pricing",...}, {"type":"choices",...} or {"type":"slider",...} that the regions above don't already cover. For plan or subscription prices this must be a pricing node.\n  3. {"type":"actions","items":[...]} with 2-4 useful next steps (prefer kind "refine" for changes to this card), none repeating an option of line 2\n  4. {"type":"citations","refs":[...]} with the source numbers that matter most\n  5. {"followups":[4 short follow-up questions a person would actually ask next, each naming the subject so it stands alone. A person is named, "Sergio de Larrea, Mavericks rookie", never "Who is", "What is", or "Why is" in front of the name. Never a fragment, a restatement of this card's title, a question that drops the subject, "Explain" in front of a title, or "one" used only to point.]}\n\nQUERY: ${query}`;
     let extra = 0;
     return llmLines(env, SYSTEM_REGION, user, 1000, (line) => {
-      const parsed = parseLine(line, g, imageCount, req.query, sources, req.followup?.question ?? req.query);
+      const parsed = parseLine(line, g, imageCount, req.query, sources, req.followup?.question ?? req.query, claims, corpus);
       if (!parsed) return;
       switch (parsed.kind) {
         case 'head':

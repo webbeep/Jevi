@@ -365,7 +365,7 @@ export function withinOneEdit(a: string, b: string): boolean {
  * '' when nothing on these pages is one edit away.
  */
 export function nearOrgSpelling(term: string, rows: readonly { title?: string; snippet?: string; url?: string }[]): string {
-  if (term.length < 6) return '';
+  if (term.length < 5) return '';
   const counts = new Map<string, number>();
   for (const row of rows) {
     const seq = tokens(`${row.title ?? ''} ${row.snippet ?? ''} ${row.url ?? ''}`);
@@ -375,7 +375,7 @@ export function nearOrgSpelling(term: string, rows: readonly { title?: string; s
       const nxt = seq[i + 1];
       if (nxt && w.length >= 3 && nxt.length >= 3) cands.push(w + nxt);
       for (const cand of cands) {
-        if (cand.length < 6 || cand === term || !withinOneEdit(term, cand)) continue;
+        if (cand.length < 5 || cand === term || !withinOneEdit(term, cand)) continue;
         counts.set(cand, (counts.get(cand) ?? 0) + 1);
       }
     }
@@ -407,6 +407,41 @@ export function vowelSwap(term: string): string {
   return '';
 }
 
+/**
+ * A mistyped word the pages already spell ("Nvdia" → "Nvidia"). '' when nothing qualifies.
+ * A corrected word that had been read as a third personal name is put after a comma, so
+ * "Jensen Huang Nvdia" becomes "Jensen Huang, Nvidia" and the company stays a detail.
+ */
+export function spellingQuery(query: string, rows: readonly { title?: string; snippet?: string; url?: string }[]): string {
+  const words = query.trim().split(/\s+/);
+  let changed = false;
+  const next = words.map((word) => {
+    const core = word.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, '');
+    if (core.length < 5) return word;
+    const low = core.toLowerCase();
+    const spell = nearOrgSpelling(low, rows);
+    if (!spell || spell === low) return word;
+    const typed = rows.some((row) => tokens(`${row.title ?? ''} ${row.snippet ?? ''} ${row.url ?? ''}`).includes(low));
+    if (typed) return word;
+    changed = true;
+    const capped = /^[A-Z]/.test(core) ? `${spell[0]!.toUpperCase()}${spell.slice(1)}` : spell;
+    return word.replace(core, capped);
+  });
+  if (!changed) return '';
+  const fixed = next.join(' ');
+  const parts = personSubject(query).split(' ').filter(Boolean);
+  if (parts.length >= 3) {
+    const last = parts[parts.length - 1]!.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const stillTyped = next.some((word) => word.toLowerCase().includes(last));
+    if (last.length >= 5 && !stillTyped) {
+      const person = parts.slice(0, -1).join(' ');
+      const detail = fixed.split(/\s+/).slice(parts.length - 1).join(' ');
+      return `${person}, ${detail}`.replace(/\s+/g, ' ').trim();
+    }
+  }
+  return fixed;
+}
+
 export function correctedPersonQuery(query: string, rows: readonly { title?: string; snippet?: string; url?: string }[]): string {
   const name = personSubject(query);
   const term = distinguishingTerms(query, name).find((t) => t.length >= 6);
@@ -418,7 +453,7 @@ export function correctedPersonQuery(query: string, rows: readonly { title?: str
 
 /** "Bleuflame" is "Blueflame", including when the page writes it as two words. */
 function mentionsOrg(term: string, seq: readonly string[]): boolean {
-  if (term.length < 6) return false;
+  if (term.length < 5) return false;
   for (let i = 0; i < seq.length; i++) {
     const w = seq[i]!;
     if (withinOneEdit(term, w)) return true;
@@ -1506,8 +1541,16 @@ export function resolveEntity(
   // A bare ask ranks its strong clusters; a cluster about the same person as the Wikipedia
   // "(qualifier)" cluster joins it first, so one man is never offered as two choices.
   const merged = bare ? mergeQualifierClusters(strong, rows, name) : strong;
+  // An exact Wikipedia article is one famous person: every page about them counts, so a
+  // single namesake cannot force a picker. Without that article, a pile of news about one
+  // person must not hide someone else — only the two strongest pages score.
+  const famous = rows.some((row) => exactWikiArticle(row, name));
+  const evidence = (cluster: number[]) => {
+    const weights = cluster.map((i) => rowWeight(rows[i]!, name)).sort((a, b) => b - a);
+    return (famous ? weights : weights.slice(0, 2)).reduce((sum, weight) => sum + weight, 0);
+  };
   const ranked = merged
-    .map((c) => ({ cluster: c, score: c.reduce((s, i) => s + rowWeight(rows[i]!, name), 0) }))
+    .map((c) => ({ cluster: c, score: evidence(c) }))
     .sort((a, b) => b.score - a.score || b.cluster.length - a.cluster.length || a.cluster[0]! - b.cluster[0]!);
 
   if (merged.length >= 2) {

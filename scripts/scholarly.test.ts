@@ -3,13 +3,14 @@ import { test } from 'node:test';
 import { PAPER_ASK, paperTopic, withScholarly, workToResult } from '../server/scholarly.ts';
 
 test('SPD-C4: paper asks are detected, shopping and everyday asks are not', () => {
-  for (const q of ['Give me 3 real peer-reviewed papers on sleep deprivation and working memory, with DOIs', 'meta-analysis of creatine and cognition', 'research papers about microplastics']) assert.ok(PAPER_ASK.test(q), q);
+  for (const q of ['Give me 3 real peer-reviewed papers on sleep deprivation and working memory, with DOIs', 'meta-analysis of creatine and cognition', 'research papers about microplastics', 'What does the research say about intermittent fasting and longevity?']) assert.ok(PAPER_ASK.test(q), q);
   for (const q of ['toilet paper on sale', 'best paper towels', 'wallpaper for iPhone', 'iPad Air vs iPad Pro for drawing, which one and how much?', 'Fact-check: Gmail lets you attach files up to 50 MB', 'newspaper headlines today', 'Find the original paper that introduced the Transformer architecture: authors, venue and arXiv ID']) assert.ok(!PAPER_ASK.test(q), q);
 });
 
 test('SPD-C4: topic drops task words', () => {
   assert.equal(paperTopic('Give me 3 real peer-reviewed papers on sleep deprivation and working memory, with DOIs'), 'sleep deprivation working memory');
   assert.equal(paperTopic('Find the original paper that introduced the Transformer architecture: authors, venue and arXiv ID'), 'Transformer architecture');
+  assert.equal(paperTopic('What does the research say about intermittent fasting and longevity?'), 'intermittent fasting longevity');
 });
 
 test('SPD-C4: a work becomes a doi.org source that states its DOI and year; web dupes of that DOI go', () => {

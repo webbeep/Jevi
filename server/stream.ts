@@ -6,6 +6,7 @@ import {
   askedQuestions,
   contextTerms,
   correctedPersonQuery,
+  spellingQuery,
   distinguishingTerms,
   vowelSwap,
   entityContextLine,
@@ -57,6 +58,7 @@ import { anchoredFollowup, asksToCompare, cryptographyHint, faithfulQuery, isWri
 import { comparisonRepair, comparisonTitle } from './compareAnswer';
 import { withFinishedSentences } from './polish';
 import { queryWithPlace, readerPlace, settleReadings } from './readings';
+import { isKeepOnly } from './refine';
 import { finishQuality, hostTier, preferSources } from './sourceQuality';
 import { isOwnSite, orcidSite, pickOwnSite, probeOwnSite, RESEARCH_ASK, withOwnSite } from './ownSite';
 import { quoteAsk } from '../shared/quoteAsk';
@@ -572,7 +574,34 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     const tryRelaxed = relaxed.length > 0 && relaxed.toLowerCase() !== query.trim().toLowerCase();
     let triedEntity = false;
     let recovered: 'relaxed' | 'entity' | 'knowledge' | 'seeds' | 'none' = 'none';
-    if (tryRelaxed) {
+    // A misspelling is corrected from pages the engines actually returned. When every
+    // provider failed, another search of the same words cannot reveal a spelling.
+    if (reason === 'empty') {
+      const room = SEARCH_CALL_CAP + (scope.ledger.bonus ?? 0) - searchCalls(scope.ledger);
+      if (room < 1) scope.ledger.bonus = (scope.ledger.bonus ?? 0) + (1 - room);
+      const looked = await searchWithLate({ q: query, freshness: 'any', count: 8, lite: true, ungated: true }, env, scope);
+      const fixed = spellingQuery(query, looked.response.results);
+      if (fixed) {
+        send('rewrite', { query: fixed });
+        let gated = applyPickGate(fixed, applyRelevance(fixed, { ...looked.response, query: fixed }, scope.ledger));
+        let lateHit = looked.late;
+        if (!gated.results.length) {
+          const againRoom = SEARCH_CALL_CAP + (scope.ledger.bonus ?? 0) - searchCalls(scope.ledger);
+          if (againRoom < 1) scope.ledger.bonus = (scope.ledger.bonus ?? 0) + (1 - againRoom);
+          const named = await searchWithLate({ q: fixed, freshness: 'any', count: 10, lite: true }, env, scope);
+          gated = applyPickGate(fixed, applyRelevance(fixed, { ...named.response, query: fixed }, scope.ledger));
+          lateHit = named.late;
+        }
+        if (gated.results.length) {
+          results = gated;
+          late = lateHit;
+          query = fixed;
+          recovered = 'entity';
+          console.log(JSON.stringify({ zo: 'spelling', query: fixed, kept: gated.results.length }));
+        }
+      }
+    }
+    if (!results.results.length && tryRelaxed) {
       const again = await searchWithLate({ q: relaxed, freshness: 'any', count: 20 }, env, scope);
       const gated = applyPickGate(query, applyRelevance(query, { ...again.response, query }, scope.ledger));
       if (gated.results.length) {
@@ -895,6 +924,7 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
 
   // Writing ("draft an email") is answered directly. A planner that calls it a search, then a rewriter,
   // is what turned "Draft the unblock email" into a lookup for the paper title and a banned IP address.
+  if (req.intent !== 'search' && isKeepOnly(req.question)) req = { ...req, intent: 'adjust' };
   if (req.intent !== 'search' && req.intent !== 'adjust' && isWritingAsk(req.question)) {
     const plan = quickPlan(req.question, 'chat');
     send('plan', plan);

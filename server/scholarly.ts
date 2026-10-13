@@ -7,12 +7,12 @@ import type { SearchResult } from '../shared/types';
  * OpenAlex relevance ranks follow-up work above the original there. OpenAlex is keyless and free (CC0 metadata); each work becomes a source whose
  * text states title, authors, year, venue and DOI, plus the abstract when OpenAlex has one.
  */
-export const PAPER_ASK = /\b(?:peer[- ]reviewed|dois?|journal articles?|meta[- ]analys[ie]s|systematic reviews?|scholarly|preprints?|(?:research|academic|scientific) papers?|papers (?:on|about|regarding|by|that))\b/i;
+export const PAPER_ASK = /\b(?:peer[- ]reviewed|dois?|journal articles?|meta[- ]analys[ie]s|systematic reviews?|scholarly|preprints?|(?:research|academic|scientific) papers?|papers (?:on|about|regarding|by|that)|what (?:does|do) (?:the )?research|research (?:says|shows|on|about|into|suggests)|scientific (?:evidence|literature|consensus)|clinical trials?)\b/i;
 
 const TIMEOUT_MS = 2500;
 const MAX = 5;
 const NOISE = new RegExp(
-  String.raw`\b(?:give|me|find|list|show|recommend|cite|what|which|are|is|the|a|an|some|any|good|key|top|best|recent|real|actual|please|three|five|ten|\d+|peer[- ]reviewed|papers?|studies|study|articles?|journal|scholarly|research|academic|sources?|with|their|its|and|or|dois?|doi|authors?|venue|arxiv|ids?|original|that|introduced|introduce|first|on|about|regarding|for|of|in|to)\b`,
+  String.raw`\b(?:give|me|find|list|show|shows|recommend|cite|what|which|are|is|does|do|say|says|the|a|an|some|any|good|key|top|best|recent|real|actual|please|three|five|ten|\d+|peer[- ]reviewed|papers?|studies|study|articles?|journal|scholarly|research|academic|sources?|with|their|its|and|or|dois?|doi|authors?|venue|arxiv|ids?|original|that|introduced|introduce|first|on|about|regarding|for|of|in|to)\b`,
   'gi',
 );
 

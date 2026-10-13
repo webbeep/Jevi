@@ -3,6 +3,7 @@
  * Deterministic: no network and no model call. A list is never emptied.
  */
 import type { CardNode } from '../shared/card';
+import { PAPER_ASK } from './scholarly';
 
 const AUTHORITY = [
   'wikipedia.org', 'britannica.com', 'nobelprize.org', 'medlineplus.gov', 'nih.gov', 'cdc.gov', 'who.int',
@@ -23,6 +24,17 @@ const WEAK = [
   'genially.com', 'livejournal.com', 'blogger.com',
 ];
 
+/** Forums and social posts. They stay when nothing else answered. */
+const SOCIAL = ['reddit.com', 'facebook.com', 'instagram.com', 'tiktok.com', 'pinterest.com', 'x.com', 'twitter.com', 'quora.com'];
+
+/** A paper, preprint, or journal. News and video rank behind these on a research question. */
+const SCHOLAR = [
+  'doi.org', 'arxiv.org', 'ncbi.nlm.nih.gov', 'nature.com', 'science.org', 'sciencedirect.com',
+  'springer.com', 'wiley.com', 'cell.com', 'thelancet.com', 'nejm.org', 'pnas.org', 'plos.org',
+  'frontiersin.org', 'mdpi.com', 'biorxiv.org', 'medrxiv.org', 'semanticscholar.org', 'jstor.org',
+  'acm.org', 'ieee.org',
+];
+
 const EN = new Set(['the', 'a', 'an', 'of', 'to', 'and', 'in', 'was', 'were', 'for', 'with', 'her', 'his', 'she', 'he', 'from', 'that', 'who', 'on', 'as', 'by', 'is', 'are', 'its', 'their', 'this', 'be', 'or', 'at', 'it', 'not']);
 const ROMANCE = new Set(['el', 'la', 'los', 'las', 'una', 'un', 'del', 'que', 'por', 'sus', 'para', 'donde', 'fue', 'era', 'en', 'se', 'de', 'al', 'su', 'como', 'también', 'tambien', 'con', 'esta', 'este', 'pero', 'porque', 'cuando', 'sobre', 'entre', 'desde', 'hasta']);
 
@@ -38,6 +50,28 @@ export function hostOf(url: string): string {
 
 function endsWithHost(domain: string, host: string): boolean {
   return domain === host || domain.endsWith(`.${host}`);
+}
+
+function domainOf(domain: string): string {
+  return domain.toLowerCase().replace(/^www\./, '');
+}
+
+function matchesHost(domain: string, hosts: readonly string[]): boolean {
+  const d = domainOf(domain);
+  return hosts.some((host) => d === host || d.endsWith(`.${host}`));
+}
+
+export function isSocialHost(domain: string): boolean {
+  return matchesHost(domain, SOCIAL);
+}
+
+export function isScholarHost(domain: string): boolean {
+  return matchesHost(domain, SCHOLAR);
+}
+
+export function isVideoHost(domain: string): boolean {
+  const d = domainOf(domain);
+  return d === 'youtube.com' || d === 'youtu.be' || d.endsWith('.youtube.com');
 }
 
 /** 0 is an encyclopedia or official page, 3 is a free-host blog. */
@@ -106,10 +140,24 @@ export function preferSources<T extends RankedHit>(query: string, rows: readonly
   if (native.length >= KEEP) pool = native;
   const solid = pool.filter((item) => item.tier < 3);
   if (solid.length >= KEEP) pool = solid;
-  // A person or a scoreboard should lead with the encyclopedia or the league. Other asks keep
-  // the engine's order, with free-host pages that had to stay sunk to the back.
+  const nonsocial = pool.filter((item) => !isSocialHost(item.row.domain || hostOf(item.row.url)));
+  if (nonsocial.length >= KEEP) pool = nonsocial;
+  // A person or a scoreboard should lead with the encyclopedia or the league. A research
+  // question leads with papers and official pages. Other asks keep the engine's order, with
+  // free-host pages that had to stay sunk to the back.
   const promote = /\b(who|whom|whose|biography|nobel|scores?|scoreboard|standings)\b/i.test(query);
-  pool.sort((a, b) => (promote ? a.tier - b.tier : Number(a.tier === 3) - Number(b.tier === 3)) || a.index - b.index);
+  if (PAPER_ASK.test(query)) {
+    const rank = (item: (typeof pool)[number]) => {
+      const domain = item.row.domain || hostOf(item.row.url);
+      if (isVideoHost(domain) || isSocialHost(domain)) return 3;
+      if (isScholarHost(domain) || item.tier === 0) return 0;
+      return 1;
+    };
+    if (pool.some((item) => rank(item) === 0)) pool.sort((a, b) => rank(a) - rank(b) || a.index - b.index);
+    else pool.sort((a, b) => Number(a.tier === 3) - Number(b.tier === 3) || a.index - b.index);
+  } else {
+    pool.sort((a, b) => (promote ? a.tier - b.tier : Number(a.tier === 3) - Number(b.tier === 3)) || a.index - b.index);
+  }
   return pool.map((item) => item.row);
 }
 
