@@ -161,7 +161,8 @@ test('an arXiv/preprint ask leads with arXiv rows; a DOI ask still keeps a prepr
   assert.ok(papers.some((w) => w.arxivId === '1706.03762'));
   const pre = pickWorks(found, 'attention is all you need arxiv preprint');
   assert.equal(pre[0]?.arxivId, '1706.03762');
-  assert.equal(pre.filter((w) => w.arxivId && !w.doi).length, 2);
+  assert.equal(pre.every((w) => w.arxivId), true);
+  assert.equal(pre.some((w) => w.doi && !w.arxivId), false);
   const rag = { doi: '10.18653/v1/2020.acl-main.450', arxivId: '2005.11401', title: 'Retrieval-Augmented Generation' };
   assert.equal(pickWorks([rag, ...found], 'an arXiv preprint on retrieval augmented generation')[0]?.arxivId, '2005.11401');
   assert.equal(workToResult(rag, true)?.url, 'https://arxiv.org/abs/2005.11401');

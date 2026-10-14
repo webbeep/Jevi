@@ -309,9 +309,8 @@ export function pickWorks(found: Work[], query: string): Work[] {
   const arxivOnly = found.filter((work) => arxivRow(work) && !journalDoi(work));
   const rest = found.filter((work) => !journalDoi(work) && !arxivRow(work));
   if (preprintAsk) {
-    const withArxiv = found.filter(arxivRow);
-    const without = found.filter((work) => !arxivRow(work));
-    return [...withArxiv, ...without].slice(0, MAX);
+    // Journal-only DOIs bury arxiv.org when the Atom API misses; a preprint ask wants arXiv rows.
+    return found.filter(arxivRow).slice(0, MAX);
   }
   const keepArxiv = Math.min(2, arxivOnly.length);
   return [...journal.slice(0, MAX - keepArxiv), ...arxivOnly, ...rest].slice(0, MAX);
