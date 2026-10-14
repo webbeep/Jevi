@@ -7,6 +7,7 @@ import { isBlockPage, readable, rememberBlocked } from './blockPage';
 import { readPage } from './htmlcap';
 import { isGenericPreview } from './images';
 import { type LateExtras, normalizeUrl } from './search';
+import { hasCatalogCopy } from './scholarly';
 import { HttpStatusError, type Env, stripHtml } from './util';
 
 export const BROWSER_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36';
@@ -184,7 +185,7 @@ export async function collectPages(
   // Only sources the designer is shown (numbered 1-12) are worth reading.
   const numbered = results.slice(0, 12).map((r, i) => ({ r, n: i + 1 }));
   const ready: PageText[] = numbered
-    .filter(({ r }) => r.content && r.content.length >= MIN_TEXT && !isBlockPage(r.content))
+    .filter(({ r }) => r.content && !isBlockPage(r.content) && (r.content.length >= MIN_TEXT || hasCatalogCopy(r)))
     .slice(0, count)
     .map(({ r, n }) => ({ n, url: r.url, text: r.content! }));
   if (ready.length >= need) return ready;

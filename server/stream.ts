@@ -64,7 +64,7 @@ import { isKeepOnly, keptBody } from './refine';
 import { finishQuality, hasOfficialHit, hostTier, officialProbe, preferSources } from './sourceQuality';
 import { isOwnSite, orcidSite, pickOwnSite, probeOwnSite, RESEARCH_ASK, withOwnSite } from './ownSite';
 import { quoteAsk } from '../shared/quoteAsk';
-import { dropStrayDois, scholarlyResults, withScholarly } from './scholarly';
+import { dropStrayDois, isPaperAsk, scholarlyResults, withScholarly } from './scholarly';
 import { videoResults, wantsVideo, withVideos } from './videoSearch';
 import { guessFreshness, preferFresh, staleComplaint, stricter } from './freshness';
 import { isQuoteRow, liveQuote, quoteRow, tickerNode } from './liveQuote';
@@ -310,7 +310,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
         ? DEEP_PAGES
         : pageBudget(req.readPages);
   // Usually it already ran on the literal search's rows while the rewrites were searching.
-  const briefing = !newSearch || chat ? undefined
+  const briefing = !newSearch || chat || isPaperAsk(req.query) ? undefined
     : req.earlyBrief ? req.earlyBrief.then((early) => early ? remapBrief(early.brief, early.judged, req.search.results) : undefined)
     : briefSources({ query: req.query, intent: req.intent, context: req.context, results: req.search.results, isLive: isQuoteRow, shown: req.ticker ? TICKER_SHOWN : undefined }, env);
   // Page reads overlap the source check. A rescue throws those pages away and reads the new rows.
@@ -519,7 +519,9 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     send('rewrite', { query: located });
     query = located;
   }
-  const understood = rewritten ? Promise.resolve(undefined) : understand(query, env, context).finally(() => mark(scope.ledger, 'understood'));
+  // A paper ask already runs the catalogs; skipping the intent rewrite saves a model call and two search slots.
+  const paper = isPaperAsk(query);
+  const understood = rewritten || paper ? Promise.resolve(undefined) : understand(query, env, context).finally(() => mark(scope.ledger, 'understood'));
   // The layout is chosen from the question itself, so it runs with the search instead of after the intent read.
   const planned = planLayout(query, env, {}).then((plan) => {
     send('plan', plan);
@@ -540,6 +542,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     // A first look at what the search found, shown while the rest of the search and the layout finish.
     const kept = preferSources(query, gateResults(query, hits.map(webRow)).kept);
     send('peek', kept.slice(0, PEEK_ROWS).map(({ title, url, domain, date }) => ({ title, url, domain, date })));
+    if (paper) return;
     earlyBrief = quoting.then(async (quote) => {
       const rows = [...(quote ? [quoteRow(quote)] : []), ...kept].slice(0, BRIEF_ROWS);
       const brief = await briefSources({ query, intent: intentNow, context, results: rows, isLive: isQuoteRow, shown: quote ? TICKER_SHOWN : undefined }, env);
@@ -569,7 +572,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
       return { more: routeExtras(route, moreQueries(query, [...sides, ...instant, ...extraQueries(query, x)])), freshness: freshness === 'any' ? x?.freshness ?? literalFresh : freshness };
     });
     // A price ask is answered by the live quote; the rewrites only add the news around it.
-    found = await searchWithLate({ q: queriesForAsk(query, []), more: routeExtras(route, moreQueries(query, [...sides, ...instant])), later, freshness: literalFresh, count: 20, waitExtras: deep, extrasCutMs: quoteAsk(query) ? QUOTE_EXTRAS_MS : undefined, onLiteral }, env, scope);
+    found = await searchWithLate({ q: queriesForAsk(query, []), more: routeExtras(route, moreQueries(query, [...sides, ...instant])), later, freshness: literalFresh, count: 20, waitExtras: deep && !paper, extrasCutMs: quoteAsk(query) ? QUOTE_EXTRAS_MS : undefined, onLiteral }, env, scope);
     mark(scope.ledger, 'found');
     u = await understood;
   } else {
@@ -928,7 +931,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   send('search', results);
   const boost = imageBoost(pattern, results, env, scope, boostQuery);
   const crypto = cryptographyHint(query, results.results);
-  await design(send, env, { query, pattern, depth: plan.depth, readPages: plan.readPages || deep || fromSeeds, search: results, context: [designContext, crypto].filter(Boolean).join('\n') || undefined, intent: u?.intent, deep, boost, entityHint, ticker: quote ? tickerNode(quote) : undefined, earlyBrief, website, allowRescue: true }, started, scope, late);
+  await design(send, env, { query, pattern, depth: plan.depth, readPages: plan.readPages || deep || fromSeeds, search: results, context: [designContext, crypto].filter(Boolean).join('\n') || undefined, intent: u?.intent, deep, boost, entityHint, ticker: quote ? tickerNode(quote) : undefined, earlyBrief, website, allowRescue: !isPaperAsk(query) }, started, scope, late);
 }
 
 /** The profile on the card, wherever the layout put it, links the person's own website. */

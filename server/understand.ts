@@ -1,6 +1,7 @@
 import type { Freshness, SearchResponse } from '../shared/types';
 import { diversify } from './diversify';
 import { hasLlm, llmJson } from './llm';
+import { isPaperAsk } from './scholarly';
 import { type LateExtras, normalizeUrl } from './search';
 import type { Env } from './util';
 
@@ -19,6 +20,7 @@ Reply as JSON: {"intent": string, "queries": string[], "freshness": "day"|"week"
 - intent: one sentence naming what they want to see, e.g. "A short summary of today's top news stories."
 - queries: 1-3 web search queries, best first, 3-10 words each. Spell out what the words imply: "news tldr today" wants today's top headlines summarised, not a site or channel called TLDR, so search "top news headlines <today's date>". When they mean now (today, latest, this week, current, live, score, price), name the date, month or year. Keep the literal text as a query only when it already finds the answer (names, products, exact phrases). The literal text is searched anyway, so never repeat it with one filler word ("X vs Y comparison"). For a comparison, write one query per option ("Pixel 10 specs price review") so every side gets sources.
 - freshness: how recent results must be; "day" for today's news, scores or prices; "any" for timeless things.
+- When they want papers, preprints, DOIs, PMC IDs, or an arXiv listing, do not add extra queries that only restate the paper hunt — a scholarly catalog is searched separately.
 - Never add facts or guesses about the answer itself.`;
 
 /** Reads the intent behind a query; falls back to nothing (the literal search alone) when slow or unavailable. */
@@ -47,8 +49,11 @@ export function nearLiteral(q: string, query: string): boolean {
   return added + dropped <= 1;
 }
 
-/** Searches that add something beyond the literal query. */
-export const extraQueries = (query: string, u: Understanding | undefined) => (u?.queries ?? []).filter((q) => !nearLiteral(q, query)).slice(0, 2);
+/** Searches that add something beyond the literal query. A paper ask already has the catalogs. */
+export const extraQueries = (query: string, u: Understanding | undefined) => {
+  if (isPaperAsk(query)) return [];
+  return (u?.queries ?? []).filter((q) => !nearLiteral(q, query)).slice(0, 2);
+};
 
 /**
  * Merges the intended searches with the literal one: results interleaved by rank across the intended

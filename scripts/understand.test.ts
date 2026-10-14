@@ -14,4 +14,10 @@ describe('rewrite queries', () => {
     const u = { intent: 'Compare the phones.', queries: ['iPhone 17 vs Pixel 10 comparison', 'iPhone 17 review specs 2026', 'Google Pixel 10 review specs 2026'], freshness: 'any' as const };
     assert.deepEqual(extraQueries('iphone 17 vs pixel 10', u), ['iPhone 17 review specs 2026', 'Google Pixel 10 review specs 2026']);
   });
+
+  test('a paper ask does not spend search slots on catalog rewrites', () => {
+    const u = { intent: 'Find papers.', queries: ['climate change extreme weather peer reviewed', 'climate attribution DOI 2024'], freshness: 'any' as const };
+    assert.deepEqual(extraQueries('Find recent academic publications on climate change and extreme weather, with DOIs or PMC IDs', u), []);
+    assert.deepEqual(extraQueries('attention is all you need arxiv preprint', u), []);
+  });
 });

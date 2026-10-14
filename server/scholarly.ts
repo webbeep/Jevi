@@ -1,17 +1,14 @@
 import type { SearchResult } from '../shared/types';
 
 /**
- * SPD-C4 (t457): a scholarly lane for paper/DOI asks. Web engines (LangSearch especially) return
- * news and PubMed stubs without DOIs, so "3 peer-reviewed papers with DOIs" came back with 2
- * sources and no DOI. Crossref is the fallback when OpenAlex rate-limits the edge. Single-paper lookups ("the original paper that introduced X") stay on the web:
- * OpenAlex relevance ranks follow-up work above the original there. OpenAlex is keyless and free (CC0 metadata); each work becomes a source whose
- * text states title, authors, year, venue and DOI, plus the abstract when OpenAlex has one.
+ * A scholarly lane for paper / DOI / PMC / arXiv asks. Web engines return news and PubMed stubs
+ * without identifiers, so a request for papers came back with two sources and no DOI. OpenAlex,
+ * Crossref, and the arXiv Atom API run in parallel (all keyless). Crossref still covers OpenAlex
+ * rate-limits on the edge. Single-paper lookups ("the original paper that introduced X") stay on
+ * the web: catalog relevance ranks follow-up work above the original there. Consumer "paper"
+ * (towels, toilet paper) also stays on the web.
  */
-/**
- * A paper, DOI, PMC, or academic-publication ask. Consumer "paper" (towels, toilet paper)
- * and a lookup for the original paper that introduced something stay on the web.
- */
-export const PAPER_ASK = /\b(?:peer[- ]reviewed|dois?|pmc(?:\s+ids?)?|pubmed|pmids?|journal articles?|meta[- ]analys[ie]s|systematic reviews?|scholarly|preprints?|(?:research|academic|scientific|scholarly) (?:papers?|publications?|articles?|literature)|academic publications?|(?:papers?|publications?|articles?) (?:on|about|regarding|by|that|with)|what (?:does|do) (?:the )?research|what (?:did|do|does) (?:the |a )?(?:studies|study|research|papers?)|research (?:says|shows|on|about|into|suggests)|scientific (?:evidence|literature|consensus)|clinical trials?|according to (?:a |the )?(?:study|studies|paper|trial)|(?:the )?study (?:on|of|found|shows|showed)|studies (?:on|of|found|find|show)|papers?)\b/i;
+export const PAPER_ASK = /\b(?:peer[- ]reviewed|dois?|pmc(?:\s+ids?)?|pubmed|pmids?|journal articles?|meta[- ]analys[ie]s|systematic reviews?|scholarly|preprints?|\barxiv\b|(?:research|academic|scientific|scholarly) (?:papers?|publications?|articles?|literature)|academic publications?|(?:papers?|publications?|articles?) (?:on|about|regarding|by|that|with)|what (?:does|do) (?:the )?research|what (?:did|do|does) (?:the |a )?(?:studies|study|research|papers?)|research (?:says|shows|on|about|into|suggests)|scientific (?:evidence|literature|consensus)|clinical trials?|according to (?:a |the )?(?:study|studies|paper|trial)|(?:the )?study (?:on|of|found|shows|showed)|studies (?:on|of|found|find|show)|papers?)\b/i;
 
 const CONSUMER_PAPER = /\b(?:toilet|wax|wrapping|tissue|baking|butcher|sand)\s*papers?\b|\bpapers?\s+towels?\b|\b(?:wall|news|term)\s*papers?\b/i;
 const ORIGINAL_PAPER = /\boriginal papers? that introduced\b/i;
@@ -21,14 +18,19 @@ export function isPaperAsk(query: string): boolean {
   return PAPER_ASK.test(query);
 }
 
-const TIMEOUT_MS = 2500;
+const TIMEOUT_MS = 1800;
 const MAX = 5;
 const NOISE = new RegExp(
-  String.raw`\b(?:give|me|find|list|show|shows|recommend|cite|what|which|are|is|does|do|say|says|the|a|an|some|any|good|key|top|best|recent|real|actual|please|three|five|ten|\d+|peer[- ]reviewed|papers?|publications?|studies|study|articles?|journal|scholarly|research|academic|scientific|literature|sources?|with|their|its|and|or|dois?|doi|pmc|pubmed|pmid|pmids?|authors?|venue|arxiv|ids?|original|that|introduced|introduce|first|on|about|regarding|for|of|in|to)\b`,
+  String.raw`\b(?:give|me|find|list|show|shows|recommend|cite|what|which|are|is|does|do|say|says|the|a|an|some|any|good|key|top|best|recent|real|actual|please|three|five|ten|\d+|peer[- ]reviewed|papers?|publications?|studies|study|articles?|journal|scholarly|research|academic|scientific|literature|sources?|with|their|its|and|or|dois?|doi|pmc|pubmed|pmid|pmids?|authors?|venue|arxiv|preprints?|ids?|original|that|introduced|introduce|first|on|about|regarding|for|of|in|to)\b`,
   'gi',
 );
 
 const AUTHOR_STOP = new Set(['give', 'what', 'which', 'when', 'where', 'find', 'show', 'list', 'does', 'do', 'the', 'and', 'for', 'how', 'who', 'why', 'peer', 'reviewed']);
+
+const UA = 'zo-search/1.0 (https://zo.fyi; ask@zo.fyi)';
+const ARXIV_ID = /(?:arxiv\.org\/(?:abs|pdf)\/|arxiv:\s*|\/arxiv\.)(\d{4}\.\d{4,5}|[a-z-]+\/\d{7})(?:v\d+)?/i;
+const ARXIV_DOI = /^10\.48550\/arxiv\./i;
+const DOI_IN_URL = /10\.\d{4,9}\/[^\s?#]+/i;
 
 /**
  * A paper question that names an author and a year ("Ekelund 2016"). A DOI from another year
@@ -57,14 +59,16 @@ export function paperTopic(query: string): string {
     .trim();
 }
 
-type Work = {
+export type Work = {
   doi?: string;
+  arxivId?: string;
   title?: string;
   publication_year?: number;
   cited_by_count?: number;
   authorships?: { author?: { display_name?: string } }[];
   primary_location?: { source?: { display_name?: string } | null } | null;
   abstract_inverted_index?: Record<string, number[]> | null;
+  abstract?: string;
 };
 
 function abstractOf(index: Work['abstract_inverted_index']): string {
@@ -74,20 +78,84 @@ function abstractOf(index: Work['abstract_inverted_index']): string {
   return words.filter(Boolean).join(' ');
 }
 
-export function workToResult(w: Work & { abstract?: string }): SearchResult | undefined {
-  const doi = w.doi?.replace(/^https?:\/\/doi\.org\//i, '');
-  if (!doi || !w.title) return undefined;
+export function normalizeDoi(doi?: string): string | undefined {
+  const d = doi?.replace(/^https?:\/\/doi\.org\//i, '').replace(/^doi:/i, '').replace(/\/+$/, '').toLowerCase();
+  return d || undefined;
+}
+
+export function normalizeArxivId(raw?: string): string | undefined {
+  if (!raw) return undefined;
+  const trimmed = raw.trim();
+  const fromUrl = trimmed.match(ARXIV_ID)?.[1];
+  const id = (fromUrl ?? trimmed.replace(/^arxiv:/i, '')).replace(/v\d+$/i, '').replace(/\.pdf$/i, '');
+  if (!/^(?:\d{4}\.\d{4,5}|[a-z-]+\/\d{7})$/i.test(id)) return undefined;
+  return id.toLowerCase();
+}
+
+function decodeXml(s: string): string {
+  return s
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function xmlTag(xml: string, name: string): string {
+  const m = xml.match(new RegExp(`<${name}(?:\\s[^>]*)?>([\\s\\S]*?)</${name}>`, 'i'));
+  return m ? decodeXml(m[1]) : '';
+}
+
+function xmlTags(xml: string, name: string): string[] {
+  return [...xml.matchAll(new RegExp(`<${name}(?:\\s[^>]*)?>([\\s\\S]*?)</${name}>`, 'gi'))].map((m) => decodeXml(m[1])).filter(Boolean);
+}
+
+/** One arXiv Atom entry → the shared Work shape. */
+export function arxivToWork(entry: string): Work {
+  const id = normalizeArxivId(xmlTag(entry, 'id')) ?? normalizeArxivId(entry);
+  const doi = normalizeDoi(xmlTag(entry, 'arxiv:doi')) ?? normalizeDoi(xmlTag(entry, 'doi'));
+  const published = xmlTag(entry, 'published');
+  const year = published.match(/^(\d{4})/)?.[1];
+  const names = [...entry.matchAll(/<author\b[\s\S]*?<name>([\s\S]*?)<\/name>/gi)].map((m) => decodeXml(m[1])).filter(Boolean);
+  const venue = xmlTag(entry, 'arxiv:journal_ref') || (id ? 'arXiv' : '');
+  return {
+    doi,
+    arxivId: id,
+    title: xmlTag(entry, 'title'),
+    publication_year: year ? Number(year) : undefined,
+    authorships: names.map((display_name) => ({ author: { display_name } })),
+    primary_location: { source: venue ? { display_name: venue } : null },
+    abstract: xmlTag(entry, 'summary'),
+  };
+}
+
+export function parseArxivFeed(xml: string): Work[] {
+  return [...xml.matchAll(/<entry\b[\s\S]*?<\/entry>/gi)].map((m) => arxivToWork(m[0])).filter((w) => w.title && (w.arxivId || w.doi));
+}
+
+export function workToResult(w: Work): SearchResult | undefined {
+  if (!w.title) return undefined;
+  const doi = normalizeDoi(w.doi);
+  const arxivId = w.arxivId ?? (doi && ARXIV_DOI.test(doi) ? normalizeArxivId(doi) : undefined);
+  if (!doi && !arxivId) return undefined;
+  const journalDoi = doi && !ARXIV_DOI.test(doi) ? doi : undefined;
+  const url = journalDoi ? `https://doi.org/${journalDoi}` : arxivId ? `https://arxiv.org/abs/${arxivId}` : `https://doi.org/${doi}`;
+  const domain = journalDoi ? 'doi.org' : arxivId ? 'arxiv.org' : 'doi.org';
   const names = (w.authorships ?? []).map((a) => a.author?.display_name).filter((n): n is string => !!n);
   const authors = names.length > 3 ? `${names.slice(0, 3).join(', ')} et al.` : names.join(', ');
   const venue = w.primary_location?.source?.display_name ?? '';
   const year = w.publication_year ? String(w.publication_year) : '';
-  const meta = [authors && `Authors: ${authors}`, year && `Published: ${year}`, venue && `Venue: ${venue}`, `DOI: ${doi}`, `Cited by ${w.cited_by_count ?? 0} works`].filter(Boolean).join('. ');
+  const ids = [journalDoi && `DOI: ${journalDoi}`, arxivId && `arXiv: ${arxivId}`, doi && !journalDoi && `DOI: ${doi}`].filter(Boolean);
+  const meta = [authors && `Authors: ${authors}`, year && `Published: ${year}`, venue && `Venue: ${venue}`, ...ids, `Cited by ${w.cited_by_count ?? 0} works`].filter(Boolean).join('. ');
   const abstract = w.abstract || abstractOf(w.abstract_inverted_index);
   return {
     title: w.title,
-    url: `https://doi.org/${doi}`,
+    url,
     snippet: `${meta}.`.slice(0, 300),
-    domain: 'doi.org',
+    domain,
     engines: ['web'],
     ...(year ? { date: year } : {}),
     content: `${w.title}\n${meta}.${abstract ? `\n\nAbstract: ${abstract}` : ''}`,
@@ -105,7 +173,7 @@ type CrossrefItem = {
 };
 
 /** Crossref work → the same Work shape (abstract is JATS markup; tags dropped). */
-export function crossrefToWork(c: CrossrefItem): Work & { abstract?: string } {
+export function crossrefToWork(c: CrossrefItem): Work {
   return {
     doi: c.DOI,
     title: c.title?.[0],
@@ -118,26 +186,77 @@ export function crossrefToWork(c: CrossrefItem): Work & { abstract?: string } {
 }
 
 async function getJson<T>(url: string): Promise<T> {
-  const res = await fetch(url, { headers: { Accept: 'application/json', 'User-Agent': 'zo-search (scholarly lane)' }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+  const res = await fetch(url, { headers: { Accept: 'application/json', 'User-Agent': UA }, signal: AbortSignal.timeout(TIMEOUT_MS) });
   if (!res.ok) throw new Error(`status ${res.status}`);
   return (await res.json()) as T;
 }
 
-/** OpenAlex first; Crossref when OpenAlex refuses (it rate-limits shared edge IPs). */
-async function works(topic: string): Promise<{ via: string; works: (Work & { abstract?: string })[] }> {
-  try {
-    const data = await getJson<{ results?: Work[] }>(`https://api.openalex.org/works?search=${encodeURIComponent(topic)}&filter=has_doi:true&per_page=8&select=doi,title,publication_year,cited_by_count,authorships,primary_location,abstract_inverted_index`);
-    if (data.results?.length) return { via: 'openalex', works: data.results };
-  } catch {
-    /* fall through to Crossref */
-  }
-  const data = await getJson<{ message?: { items?: CrossrefItem[] } }>(`https://api.crossref.org/works?query=${encodeURIComponent(topic)}&filter=type:journal-article&rows=20&select=DOI,title,issued,container-title,author,is-referenced-by-count,abstract`);
-  // Crossref relevance puts meeting abstracts (0 citations) beside real papers; keep the 20 most relevant, most-cited first.
-  const items = (data.message?.items ?? []).map(crossrefToWork).sort((a, b) => (b.cited_by_count ?? 0) - (a.cited_by_count ?? 0));
-  return { via: 'crossref', works: items };
+async function getText(url: string, accept: string): Promise<string> {
+  const res = await fetch(url, { headers: { Accept: accept, 'User-Agent': UA }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+  if (!res.ok) throw new Error(`status ${res.status}`);
+  return res.text();
 }
 
-const DOI_IN_URL = /10\.\d{4,9}\/[^\s?#]+/i;
+async function openAlexWorks(topic: string): Promise<Work[]> {
+  const data = await getJson<{ results?: Work[] }>(`https://api.openalex.org/works?search=${encodeURIComponent(topic)}&filter=has_doi:true&per_page=8&select=doi,title,publication_year,cited_by_count,authorships,primary_location,abstract_inverted_index`);
+  return data.results ?? [];
+}
+
+async function crossrefWorks(topic: string): Promise<Work[]> {
+  const data = await getJson<{ message?: { items?: CrossrefItem[] } }>(`https://api.crossref.org/works?query=${encodeURIComponent(topic)}&filter=type:journal-article&rows=20&select=DOI,title,issued,container-title,author,is-referenced-by-count,abstract`);
+  // Crossref relevance puts meeting abstracts (0 citations) beside real papers; keep the 20 most relevant, most-cited first.
+  return (data.message?.items ?? []).map(crossrefToWork).sort((a, b) => (b.cited_by_count ?? 0) - (a.cited_by_count ?? 0));
+}
+
+async function arxivWorks(topic: string): Promise<Work[]> {
+  const q = encodeURIComponent(topic);
+  const xml = await getText(`https://export.arxiv.org/api/query?search_query=${q}&start=0&max_results=8&sortBy=relevance&sortOrder=descending`, 'application/atom+xml');
+  return parseArxivFeed(xml);
+}
+
+function settledWorks(label: string, settled: PromiseSettledResult<Work[]>): { via: string; works: Work[] } | undefined {
+  if (settled.status !== 'fulfilled' || !settled.value.length) return undefined;
+  return { via: label, works: settled.value };
+}
+
+/**
+ * One paper from several catalogs. A journal DOI wins over an arXiv-only copy of the same work.
+ * First-seen order is OpenAlex, then Crossref, then arXiv, so peer-reviewed rows lead.
+ */
+export function mergeWorks(groups: { via: string; works: Work[] }[]): { via: string; works: Work[] } {
+  const byDoi = new Map<string, Work>();
+  const byArxiv = new Map<string, Work>();
+  const out: Work[] = [];
+  const remember = (work: Work) => {
+    const doi = normalizeDoi(work.doi);
+    const ax = work.arxivId ?? (doi && ARXIV_DOI.test(doi) ? normalizeArxivId(doi) : undefined);
+    if (doi) byDoi.set(doi, work);
+    if (ax) byArxiv.set(ax, work);
+  };
+  const add = (incoming: Work) => {
+    const doi = normalizeDoi(incoming.doi);
+    const ax = incoming.arxivId ?? (doi && ARXIV_DOI.test(doi) ? normalizeArxivId(doi) : undefined);
+    const have = (doi && byDoi.get(doi)) || (ax && byArxiv.get(ax)) || undefined;
+    if (have) {
+      if (!have.arxivId && ax) have.arxivId = ax;
+      if (!have.doi && doi) have.doi = doi;
+      if ((incoming.cited_by_count ?? 0) > (have.cited_by_count ?? 0)) have.cited_by_count = incoming.cited_by_count;
+      if (!have.abstract && incoming.abstract) have.abstract = incoming.abstract;
+      if (!have.abstract_inverted_index && incoming.abstract_inverted_index) have.abstract_inverted_index = incoming.abstract_inverted_index;
+      return;
+    }
+    out.push(incoming);
+    remember(incoming);
+  };
+  for (const group of groups) for (const work of group.works) add(work);
+  return { via: groups.map((g) => g.via).join('+') || 'none', works: out };
+}
+
+/** OpenAlex, Crossref, and arXiv in parallel. Any empty or failing catalog is skipped. */
+async function works(topic: string): Promise<{ via: string; works: Work[] }> {
+  const [oa, cr, ax] = await Promise.allSettled([openAlexWorks(topic), crossrefWorks(topic), arxivWorks(topic)]);
+  return mergeWorks([settledWorks('openalex', oa), settledWorks('crossref', cr), settledWorks('arxiv', ax)].filter((g): g is { via: string; works: Work[] } => !!g));
+}
 
 /** A paper's title has to share the question's topic. An unrelated DOI, whatever its year, does not. */
 export function paperOnTopic(query: string, title: string, snippet = ''): boolean {
@@ -158,6 +277,51 @@ export function dropStrayDois<T extends { url?: string; title?: string; snippet?
   return rows.filter((row) => !isDoiResult(row) || paperOnTopic(query, row.title ?? '', row.snippet ?? ''));
 }
 
+function paperKey(url: string): string {
+  const lower = url.toLowerCase();
+  const doi = lower.match(/10\.\d{4,9}\/[^\s?#]+/)?.[0];
+  if (doi) {
+    if (ARXIV_DOI.test(doi)) return `arxiv:${normalizeArxivId(doi) ?? doi}`;
+    return `doi:${doi}`;
+  }
+  const ax = normalizeArxivId(lower);
+  return ax ? `arxiv:${ax}` : lower;
+}
+
+function journalDoi(work: Work): boolean {
+  const doi = normalizeDoi(work.doi);
+  return !!doi && !ARXIV_DOI.test(doi);
+}
+
+function arxivRow(work: Work): boolean {
+  const doi = normalizeDoi(work.doi);
+  return !!work.arxivId || !!(doi && ARXIV_DOI.test(doi));
+}
+
+/**
+ * Journal DOIs lead on a DOI/PMC ask. An arXiv/preprint ask leads with arXiv rows.
+ * Otherwise up to two arXiv-only works stay in the five, so a preprint is not crowded out.
+ */
+export function pickWorks(found: Work[], query: string): Work[] {
+  const preprintAsk = /\b(?:arxiv|preprints?)\b/i.test(query) && !/\b(?:dois?|pmc|pubmed|pmids?)\b/i.test(query);
+  const journal = found.filter(journalDoi);
+  const arxivOnly = found.filter((work) => arxivRow(work) && !journalDoi(work));
+  const rest = found.filter((work) => !journalDoi(work) && !arxivRow(work));
+  if (preprintAsk) return [...arxivOnly, ...journal, ...rest].slice(0, MAX);
+  const keepArxiv = Math.min(2, arxivOnly.length);
+  return [...journal.slice(0, MAX - keepArxiv), ...arxivOnly, ...rest].slice(0, MAX);
+}
+
+function keysOf(row: { url: string; snippet?: string; content?: string }): string[] {
+  const keys = new Set([paperKey(row.url)]);
+  const blob = `${row.url} ${row.snippet ?? ''} ${row.content ?? ''}`;
+  const doi = blob.toLowerCase().match(/10\.\d{4,9}\/[^\s,;]+/)?.[0];
+  if (doi) keys.add(ARXIV_DOI.test(doi) ? `arxiv:${normalizeArxivId(doi) ?? doi}` : `doi:${doi.replace(/\/+$/, '')}`);
+  const ax = normalizeArxivId(blob);
+  if (ax) keys.add(`arxiv:${ax}`);
+  return [...keys];
+}
+
 /** Up to five works for a paper ask; [] on any failure (the web results still stand). */
 export async function scholarlyResults(query: string): Promise<SearchResult[]> {
   if (!isPaperAsk(query)) return [];
@@ -168,7 +332,8 @@ export async function scholarlyResults(query: string): Promise<SearchResult[]> {
     const found = await works(topic);
     const anchor = paperAnchor(query);
     const matched = anchor ? found.works.filter((work) => workMatches(work, anchor)) : found.works;
-    const out = matched.map(workToResult).filter((r): r is SearchResult => !!r && paperOnTopic(query, r.title, r.snippet)).slice(0, MAX);
+    const onTopic = matched.filter((work) => paperOnTopic(query, work.title ?? '', work.abstract ?? ''));
+    const out = pickWorks(onTopic, query).map(workToResult).filter((r): r is SearchResult => !!r).slice(0, MAX);
     console.log(JSON.stringify({ zo: 'scholar', via: found.via, n: out.length, ms: Date.now() - started }));
     return out;
   } catch (err) {
@@ -177,11 +342,15 @@ export async function scholarlyResults(query: string): Promise<SearchResult[]> {
   }
 }
 
-/** Scholarly sources first (they carry the DOIs), then the web results that are not the same DOI. */
+/** Scholarly sources first (they carry the DOIs and arXiv ids), then the web results that are not the same paper. */
 export function withScholarly(scholar: readonly SearchResult[], web: readonly SearchResult[]): SearchResult[] {
   if (!scholar.length) return [...web];
-  const dois = new Set(scholar.map((r) => r.url.toLowerCase()));
-  const doiOf = (u: string) => u.toLowerCase().match(/10\.\d{4,9}\/[^\s?#]+/)?.[0];
-  const known = new Set(scholar.map((r) => doiOf(r.url)));
-  return [...scholar, ...web.filter((r) => !dois.has(r.url.toLowerCase()) && !(doiOf(r.url) && known.has(doiOf(r.url))))];
+  const known = new Set(scholar.flatMap(keysOf));
+  return [...scholar, ...web.filter((r) => !keysOf(r).some((key) => known.has(key)))];
+}
+
+/** Catalog copy already on the row (abstract / DOI / arXiv id) — skip fetching the landing page. */
+export function hasCatalogCopy(row: { content?: string }): boolean {
+  const text = row.content ?? '';
+  return text.length > 0 && (/\bDOI:/i.test(text) || /\barXiv:/i.test(text) || /\bAbstract:/i.test(text));
 }
