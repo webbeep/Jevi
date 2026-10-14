@@ -192,8 +192,8 @@ async function getJson<T>(url: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-async function getText(url: string, accept: string): Promise<string> {
-  const res = await fetch(url, { headers: { Accept: accept, 'User-Agent': UA }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+async function getText(url: string, accept: string, timeoutMs = TIMEOUT_MS): Promise<string> {
+  const res = await fetch(url, { headers: { Accept: accept, 'User-Agent': UA }, signal: AbortSignal.timeout(timeoutMs) });
   if (!res.ok) throw new Error(`status ${res.status}`);
   return res.text();
 }
@@ -211,8 +211,20 @@ async function crossrefWorks(topic: string): Promise<Work[]> {
 
 async function arxivWorks(topic: string): Promise<Work[]> {
   const q = encodeURIComponent(topic);
-  const xml = await getText(`https://export.arxiv.org/api/query?search_query=${q}&start=0&max_results=8&sortBy=relevance&sortOrder=descending`, 'application/atom+xml');
-  return parseArxivFeed(xml);
+  const paths = [
+    `https://export.arxiv.org/api/query?search_query=${q}&start=0&max_results=8&sortBy=relevance&sortOrder=descending`,
+    `http://export.arxiv.org/api/query?search_query=${q}&start=0&max_results=8&sortBy=relevance&sortOrder=descending`,
+  ];
+  let last: unknown;
+  for (const url of paths) {
+    try {
+      const parsed = parseArxivFeed(await getText(url, 'application/atom+xml', 3000));
+      if (parsed.length) return parsed;
+    } catch (err) {
+      last = err;
+    }
+  }
+  throw last instanceof Error ? last : new Error('arxiv empty');
 }
 
 function settledWorks(label: string, settled: PromiseSettledResult<Work[]>): { via: string; works: Work[] } | undefined {
