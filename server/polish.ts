@@ -31,6 +31,38 @@ function sentencePrefix(text: string): string[] {
 }
 
 /**
+ * A year, count, or name must be a real token. A hole ("In he founded", "[year]", "founded in .")
+ * drops the empty clause; the rest of the sentence stays when it still reads.
+ */
+export function withoutEmptySlots(text: string): string {
+  const parts = text.split(/(?<=[.!?])\s+/);
+  const kept = parts.flatMap((sentence) => {
+    const next = repairHole(sentence);
+    return next ? [next] : [];
+  });
+  return kept.join(' ').replace(/\s+/g, ' ').trim();
+}
+
+function repairHole(sentence: string): string {
+  let s = sentence.replace(/\[(?!\d+\])[^\]]+\]/g, '');
+  s = s.replace(/\b(?:in|on|at|during|since|from|by)\s+[—–_]+(?:\s+|$)/gi, ' ');
+  // "In he founded" — the year between the preposition and the pronoun never arrived.
+  s = s.replace(/\b(?:in|on|at|during|since|from|by)\s+(?=(?:he|she|they|it|we)\b)/gi, '');
+  s = s.replace(/\s+\b(?:in|on|at|during|since|from|by)\s*([.,;:])/gi, '$1');
+  s = s.replace(/\s+/g, ' ').replace(/\s+([,.;:!?])/g, '$1').replace(/^[,;:\s]+/, '').trim();
+  if (!s) return '';
+  s = s.replace(/^[a-z]/, (ch) => ch.toUpperCase());
+  const bare = s.replace(/\[\d+\]/g, '');
+  if (/\[(?!\d+\])[^\]]+\]/.test(s)) return '';
+  if (/\b(?:in|on|at|of|by|from|since|during)\s+(?:he|she|they|it|we)\b/i.test(bare)) return '';
+  if (/\b(?:in|on|at|by|from)\s*[.,;:]/i.test(bare)) return '';
+  if (/\s[—–_]\s/.test(bare)) return '';
+  // A count that lost its number: "has about wolves" / "about  people".
+  if (!/\d/.test(bare) && /\b(?:about|approximately|around|nearly)\s+[A-Za-z]/i.test(bare)) return '';
+  return s;
+}
+
+/**
  * Drops a trailing ellipsis and the unfinished words in front of it
  * ("First player in Big 12 …"), keeping the last sentence that actually ended.
  * A short clause with no sentence at all is left out; a longer one is kept without the ellipsis.
@@ -119,11 +151,11 @@ export class Polisher {
         return tabs.length ? { ...node, tabs } : undefined;
       }
       case 'text': {
-        const text = this.fresh(trimToSentences(node.text, this.textCap));
+        const text = this.fresh(trimToSentences(withoutEmptySlots(node.text), this.textCap));
         return text ? { ...node, text } : undefined;
       }
       case 'callout': {
-        const text = this.fresh(trimToSentences(node.text, Math.min(this.textCap, 280)));
+        const text = this.fresh(trimToSentences(withoutEmptySlots(node.text), Math.min(this.textCap, 280)));
         return text ? { ...node, text } : undefined;
       }
       case 'hero':
@@ -163,7 +195,7 @@ export class Polisher {
 /** Every sentence on the node ends. A text node that was only an unfinished tail is dropped. */
 export function withFinishedSentences(node: CardNode): CardNode | undefined {
   if (node.type === 'text' || node.type === 'callout' || node.type === 'quote') {
-    const text = completeSentences(node.text);
+    const text = completeSentences(withoutEmptySlots(node.text));
     if (!text) return undefined;
     return text === node.text ? node : { ...node, text };
   }

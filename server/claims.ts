@@ -1,5 +1,6 @@
 import type { CardNode } from '../shared/card';
 import { numberTokens } from './ground';
+import { withoutEmptySlots } from './polish';
 
 /** One search result, numbered the way the card cites it, with the text the card was allowed to use. */
 export interface ClaimSource {
@@ -145,12 +146,14 @@ function withoutForeignAgency(label: string, source: ClaimSource | undefined): s
 function stripNums(text: string, nums: readonly string[]): string {
   let out = text;
   for (const num of nums) out = out.replace(shownNumber(num), ' ');
-  return out.replace(/\s{2,}/g, ' ').replace(/\s+([,.;:)])/g, '$1').replace(/\(\s*\)/g, '').trim();
+  out = out.replace(/\s{2,}/g, ' ').replace(/\s+([,.;:)])/g, '$1').replace(/\(\s*\)/g, '').trim();
+  return withoutEmptySlots(out);
 }
 
 /** Point each cited number at a page that contains it, and drop a number no cited page states. */
 export function retargetCites(text: string, sources: readonly ClaimSource[]): string {
-  if (!sources.length || !/\d/.test(text)) return text;
+  if (!sources.length) return withoutEmptySlots(text);
+  if (!/\d/.test(text)) return withoutEmptySlots(text);
   const parts = text.split(/(?<=[.!?])\s+/);
   return parts.flatMap((sentence) => {
     const nums = significant(sentence);
@@ -164,7 +167,7 @@ export function retargetCites(text: string, sources: readonly ClaimSource[]): st
     }
     const missing = nums.filter((num) => !has(byNumber(sources, page), num));
     const bare = stripNums(sentence.replace(/\s*\[\d+\]/g, ''), missing);
-    return bare ? [`${bare} [${page}]`] : [];
+    return bare ? [`${bare.replace(/\s*\[\d+\]\s*$/, '').trim()} [${page}]`] : [];
   }).join(' ');
 }
 

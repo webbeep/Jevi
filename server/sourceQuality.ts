@@ -4,7 +4,7 @@
  */
 import type { CardNode } from '../shared/card';
 import { shoppingAsk } from './claims';
-import { PAPER_ASK } from './scholarly';
+import { isPaperAsk } from './scholarly';
 
 const AUTHORITY = [
   'wikipedia.org', 'britannica.com', 'nobelprize.org', 'medlineplus.gov', 'nih.gov', 'cdc.gov', 'who.int',
@@ -79,7 +79,12 @@ export function isVideoHost(domain: string): boolean {
 export function hostTier(domain: string): 0 | 1 | 2 | 3 {
   const d = domain.toLowerCase().replace(/^www\./, '');
   if (!d) return 2;
-  if (AUTHORITY.some((host) => endsWithHost(d, host)) || /\.(?:gov|edu|mil)(?:\.[a-z]{2})?$/.test(d)) return 0;
+  // A state site (dnr.state.mn.us) is official, same as .gov. Commercial .us is not.
+  if (
+    AUTHORITY.some((host) => endsWithHost(d, host))
+    || /\.(?:gov|edu|mil)(?:\.[a-z]{2})?$/.test(d)
+    || /\.state\.[a-z]{2}\.us$/.test(d)
+  ) return 0;
   if (PRESS.some((host) => endsWithHost(d, host))) return 1;
   if (WEAK.some((host) => endsWithHost(d, host))) return 3;
   return 2;
@@ -126,14 +131,33 @@ export interface RankedHit {
 
 const LEAGUE = new Set(['nba', 'nfl', 'mlb', 'nhl', 'ncaa', 'wnba', 'mls', 'ufc', 'pga', 'wwe']);
 const STATES = 'alabama:al,alaska:ak,arizona:az,arkansas:ar,california:ca,colorado:co,connecticut:ct,delaware:de,florida:fl,georgia:ga,hawaii:hi,idaho:id,illinois:il,indiana:in,iowa:ia,kansas:ks,kentucky:ky,louisiana:la,maine:me,maryland:md,massachusetts:ma,michigan:mi,minnesota:mn,mississippi:ms,missouri:mo,montana:mt,nebraska:ne,nevada:nv,new hampshire:nh,new jersey:nj,new mexico:nm,new york:ny,north carolina:nc,north dakota:nd,ohio:oh,oklahoma:ok,oregon:or,pennsylvania:pa,rhode island:ri,south carolina:sc,south dakota:sd,tennessee:tn,texas:tx,utah:ut,vermont:vt,virginia:va,washington:wa,west virginia:wv,wisconsin:wi,wyoming:wy';
-const OFFICIAL_ASK = /\b(how many|population|tax|taxes|law|laws|legal|illegal|ban|banned|regulation|statute|official|census)\b/i;
+/** A count, outbreak, or official figure — government and journal-of-record pages outrank blogs. */
+const OFFICIAL_ASK = /\b(?:how many|number of|population|tax|taxes|law|laws|legal|illegal|ban|banned|regulation|statute|official|census|outbreak|incidence|prevalence)\b/i;
+const PLACE_FACT = /\b(?:how many|number of|population|census|outbreak|lakes?|count)\b/i;
+
+/** Journals of record the question names. Bare "nature" or "science" are too common to count. */
+const JOURNALS: readonly (readonly [RegExp, string])[] = [
+  [/\bthe lancet\b|\blancet (?:study|trial|paper|journal|series)\b/i, 'thelancet.com'],
+  [/\bnejm\b|\bnew england journal\b/i, 'nejm.org'],
+  [/\bjama\b/i, 'jamanetwork.com'],
+  [/\bbmj\b/i, 'bmj.com'],
+  [/\bpnas\b/i, 'pnas.org'],
+];
+
+function journalHosts(query: string): string[] {
+  const hosts: string[] = [];
+  for (const [pattern, host] of JOURNALS) {
+    if (pattern.test(query)) hosts.push(host);
+  }
+  return hosts;
+}
 
 function orgTokens(query: string): string[] {
   return [...query.matchAll(/\b[A-Z]{3,8}\b/g)].map((match) => match[0].toLowerCase()).filter((word) => !LEAGUE.has(word) && word !== 'doi' && word !== 'pdf' && word !== 'url');
 }
 
 function placeHosts(query: string): string[] {
-  if (!OFFICIAL_ASK.test(query)) return [];
+  if (!OFFICIAL_ASK.test(query) && !PLACE_FACT.test(query)) return [];
   let rest = ` ${query.toLowerCase().replace(/[^a-z\s]/g, ' ').replace(/\s+/g, ' ')} `;
   const hosts: string[] = [];
   const names = STATES.split(',').map((pair) => {
@@ -165,12 +189,19 @@ function yearOf(row: RankedHit): number {
 export function officialProbe(query: string): string {
   const orgs = orgTokens(query);
   const places = placeHosts(query);
-  if (!orgs.length && !places.length) return '';
+  const journals = journalHosts(query);
+  const count = OFFICIAL_ASK.test(query);
+  if (!orgs.length && !places.length && !journals.length && !count) return '';
   const sites: string[] = [];
-  for (const org of orgs.slice(0, 1)) {
-    for (const tld of ['gov', 'org', 'int', 'ch']) sites.push(`site:${org}.${tld}`);
-  }
+  // A named journal is the page to fetch. An all-caps token in the same question ("GLP-1") is not an agency.
+  for (const host of journals) sites.push(`site:${host}`);
   for (const place of places) sites.push(`site:${place.replace(/^\./, '')}`);
+  if (!journals.length) {
+    for (const org of orgs.slice(0, 1)) {
+      for (const tld of ['gov', 'org', 'int', 'ch']) sites.push(`site:${org}.${tld}`);
+    }
+  }
+  if (!sites.length && count) sites.push('site:.gov');
   const topic = query
     .replace(/\b[A-Z]{2,8}\b/g, ' ')
     .replace(/\b(?:what|does|do|did|the|is|are|say|says|said|about|how|many|much|live|lives|living|in|of|a|an|by|for|to|on|likely|according)\b/gi, ' ')
@@ -185,15 +216,25 @@ export function officialProbe(query: string): string {
 export function hasOfficialHit(query: string, rows: readonly { domain?: string; url?: string }[]): boolean {
   const orgs = orgTokens(query);
   const places = placeHosts(query);
-  if (!orgs.length && !places.length) return true;
-  return rows.some((row) => officialLead(row.domain || hostOf(row.url || ''), orgs, places) === 0);
+  const journals = journalHosts(query);
+  if (orgs.length || places.length || journals.length) {
+    return rows.some((row) => officialLead(row.domain || hostOf(row.url || ''), orgs, places, journals) === 0);
+  }
+  if (OFFICIAL_ASK.test(query)) {
+    return rows.some((row) => {
+      const domain = row.domain || hostOf(row.url || '');
+      return hostTier(domain) === 0 || isScholarHost(domain);
+    });
+  }
+  return true;
 }
 
-/** 0 when the question names this host (IPCC → ipcc.ch) or the place's own official site. */
-function officialLead(domain: string, orgs: readonly string[], places: readonly string[]): number {
+/** 0 when the question names this host (IPCC → ipcc.ch), the place's own site, or a named journal. */
+function officialLead(domain: string, orgs: readonly string[], places: readonly string[], journals: readonly string[]): number {
   const host = domainOf(domain);
   if (orgs.some((token) => host.includes(token))) return 0;
   if (places.some((suffix) => host.endsWith(suffix) || host.includes(suffix.replace(/^\./, '')))) return 0;
+  if (journals.some((name) => host === name || host.endsWith(`.${name}`))) return 0;
   return 1;
 }
 
@@ -227,7 +268,10 @@ export function preferSources<T extends RankedHit>(query: string, rows: readonly
   const promote = /\b(who|whom|whose|biography|nobel|scores?|scoreboard|standings)\b/i.test(query);
   const orgs = orgTokens(query);
   const places = placeHosts(query);
-  const leadOf = (item: (typeof pool)[number]) => officialLead(item.row.domain || hostOf(item.row.url), orgs, places);
+  const journals = journalHosts(query);
+  const paper = isPaperAsk(query);
+  const official = OFFICIAL_ASK.test(query) || journals.length > 0;
+  const leadOf = (item: (typeof pool)[number]) => officialLead(item.row.domain || hostOf(item.row.url), orgs, places, journals);
   const byLead = (a: (typeof pool)[number], b: (typeof pool)[number]) => {
     const lead = leadOf(a) - leadOf(b);
     if (lead) return lead;
@@ -242,7 +286,7 @@ export function preferSources<T extends RankedHit>(query: string, rows: readonly
     }
     return 0;
   };
-  if (PAPER_ASK.test(query)) {
+  if (paper || official) {
     const rank = (item: (typeof pool)[number]) => {
       const domain = item.row.domain || hostOf(item.row.url);
       if (isVideoHost(domain) || isSocialHost(domain)) return 3;

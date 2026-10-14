@@ -1,10 +1,20 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { PAPER_ASK, dropStrayDois, paperAnchor, paperOnTopic, paperTopic, withScholarly, workMatches, workToResult } from '../server/scholarly.ts';
+import { dropStrayDois, isPaperAsk, paperAnchor, paperOnTopic, paperTopic, withScholarly, workMatches, workToResult } from '../server/scholarly.ts';
 
 test('SPD-C4: paper asks are detected, shopping and everyday asks are not', () => {
-  for (const q of ['Give me 3 real peer-reviewed papers on sleep deprivation and working memory, with DOIs', 'meta-analysis of creatine and cognition', 'research papers about microplastics', 'What does the research say about intermittent fasting and longevity?', 'What did studies find about GLP-1 drugs and weight loss?']) assert.ok(PAPER_ASK.test(q), q);
-  for (const q of ['toilet paper on sale', 'best paper towels', 'wallpaper for iPhone', 'iPad Air vs iPad Pro for drawing, which one and how much?', 'Fact-check: Gmail lets you attach files up to 50 MB', 'newspaper headlines today', 'Find the original paper that introduced the Transformer architecture: authors, venue and arXiv ID']) assert.ok(!PAPER_ASK.test(q), q);
+  for (const q of [
+    'Give me 3 real peer-reviewed papers on sleep deprivation and working memory, with DOIs',
+    'meta-analysis of creatine and cognition',
+    'research papers about microplastics',
+    'What does the research say about intermittent fasting and longevity?',
+    'What did studies find about GLP-1 drugs and weight loss?',
+    'Find recent academic publications on climate change and extreme weather, with DOIs or PMC IDs',
+    'academic publications on climate attribution',
+    'climate papers with PMC IDs',
+    'papers on extreme weather attribution',
+  ]) assert.ok(isPaperAsk(q), q);
+  for (const q of ['toilet paper on sale', 'best paper towels', 'wallpaper for iPhone', 'iPad Air vs iPad Pro for drawing, which one and how much?', 'Fact-check: Gmail lets you attach files up to 50 MB', 'newspaper headlines today', 'Find the original paper that introduced the Transformer architecture: authors, venue and arXiv ID']) assert.ok(!isPaperAsk(q), q);
 });
 
 test('a research DOI stays only when the paper is about the question', () => {
@@ -24,6 +34,7 @@ test('SPD-C4: topic drops task words', () => {
   assert.equal(paperTopic('Give me 3 real peer-reviewed papers on sleep deprivation and working memory, with DOIs'), 'sleep deprivation working memory');
   assert.equal(paperTopic('Find the original paper that introduced the Transformer architecture: authors, venue and arXiv ID'), 'Transformer architecture');
   assert.equal(paperTopic('What does the research say about intermittent fasting and longevity?'), 'intermittent fasting longevity');
+  assert.equal(paperTopic('Find recent academic publications on climate change and extreme weather, with DOIs or PMC IDs'), 'climate change extreme weather');
 });
 
 test('a named author and year do not match a different year', () => {

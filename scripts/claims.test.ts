@@ -28,9 +28,23 @@ test('a number no page states is dropped instead of cited', () => {
   const text = retargetCites('Minnesota has about 2,300 wolves [1].', sources);
   assert.doesNotMatch(text, /2,300/);
   assert.doesNotMatch(text, /\[1\]/);
+  assert.doesNotMatch(text, /about wolves/i);
   const tile: CardNode = { type: 'tile', label: 'Latest', value: '~2,300', sub: 'DNR 2025', source: 1 };
   const next = bindClaims(tile, sources, 'How many wolves are in Minnesota?');
   assert.equal(next.type === 'tile' ? next.value : 'x', undefined);
+});
+
+test('a missing year drops the clause instead of leaving a hole', () => {
+  const pages: ClaimSource[] = [{ n: 1, text: 'He later started a research lab. No founding year is given.' }];
+  const text = retargetCites('In 2021 he founded Eureka Labs [1].', pages);
+  assert.doesNotMatch(text, /In he /i);
+  assert.doesNotMatch(text, /2021/);
+  assert.match(text, /founded Eureka Labs/i);
+  const placeholder: CardNode = { type: 'text', text: 'In [year] he founded Eureka Labs.' };
+  const next = bindClaims(placeholder, pages, 'When did he found Eureka Labs?');
+  const body = next.type === 'text' ? next.text : '';
+  assert.doesNotMatch(body, /\[year\]/i);
+  assert.doesNotMatch(body, /In he /i);
 });
 
 test('shopping picks take a price from the page that names them', () => {

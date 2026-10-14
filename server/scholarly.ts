@@ -7,12 +7,24 @@ import type { SearchResult } from '../shared/types';
  * OpenAlex relevance ranks follow-up work above the original there. OpenAlex is keyless and free (CC0 metadata); each work becomes a source whose
  * text states title, authors, year, venue and DOI, plus the abstract when OpenAlex has one.
  */
-export const PAPER_ASK = /\b(?:peer[- ]reviewed|dois?|journal articles?|meta[- ]analys[ie]s|systematic reviews?|scholarly|preprints?|(?:research|academic|scientific) papers?|papers (?:on|about|regarding|by|that)|what (?:does|do) (?:the )?research|what (?:did|do|does) (?:the |a )?(?:studies|study|research|papers?)|research (?:says|shows|on|about|into|suggests)|scientific (?:evidence|literature|consensus)|clinical trials?|according to (?:a |the )?(?:study|studies|paper|trial)|(?:the )?study (?:on|of|found|shows|showed)|studies (?:on|of|found|find|show))\b/i;
+/**
+ * A paper, DOI, PMC, or academic-publication ask. Consumer "paper" (towels, toilet paper)
+ * and a lookup for the original paper that introduced something stay on the web.
+ */
+export const PAPER_ASK = /\b(?:peer[- ]reviewed|dois?|pmc(?:\s+ids?)?|pubmed|pmids?|journal articles?|meta[- ]analys[ie]s|systematic reviews?|scholarly|preprints?|(?:research|academic|scientific|scholarly) (?:papers?|publications?|articles?|literature)|academic publications?|(?:papers?|publications?|articles?) (?:on|about|regarding|by|that|with)|what (?:does|do) (?:the )?research|what (?:did|do|does) (?:the |a )?(?:studies|study|research|papers?)|research (?:says|shows|on|about|into|suggests)|scientific (?:evidence|literature|consensus)|clinical trials?|according to (?:a |the )?(?:study|studies|paper|trial)|(?:the )?study (?:on|of|found|shows|showed)|studies (?:on|of|found|find|show)|papers?)\b/i;
+
+const CONSUMER_PAPER = /\b(?:toilet|wax|wrapping|tissue|baking|butcher|sand)\s*papers?\b|\bpapers?\s+towels?\b|\b(?:wall|news|term)\s*papers?\b/i;
+const ORIGINAL_PAPER = /\boriginal papers? that introduced\b/i;
+
+export function isPaperAsk(query: string): boolean {
+  if (CONSUMER_PAPER.test(query) || ORIGINAL_PAPER.test(query)) return false;
+  return PAPER_ASK.test(query);
+}
 
 const TIMEOUT_MS = 2500;
 const MAX = 5;
 const NOISE = new RegExp(
-  String.raw`\b(?:give|me|find|list|show|shows|recommend|cite|what|which|are|is|does|do|say|says|the|a|an|some|any|good|key|top|best|recent|real|actual|please|three|five|ten|\d+|peer[- ]reviewed|papers?|studies|study|articles?|journal|scholarly|research|academic|sources?|with|their|its|and|or|dois?|doi|authors?|venue|arxiv|ids?|original|that|introduced|introduce|first|on|about|regarding|for|of|in|to)\b`,
+  String.raw`\b(?:give|me|find|list|show|shows|recommend|cite|what|which|are|is|does|do|say|says|the|a|an|some|any|good|key|top|best|recent|real|actual|please|three|five|ten|\d+|peer[- ]reviewed|papers?|publications?|studies|study|articles?|journal|scholarly|research|academic|scientific|literature|sources?|with|their|its|and|or|dois?|doi|pmc|pubmed|pmid|pmids?|authors?|venue|arxiv|ids?|original|that|introduced|introduce|first|on|about|regarding|for|of|in|to)\b`,
   'gi',
 );
 
@@ -142,13 +154,13 @@ export function isDoiResult(row: { url?: string; title?: string; snippet?: strin
 
 /** On a research question, a DOI stays only when that paper is about the question. */
 export function dropStrayDois<T extends { url?: string; title?: string; snippet?: string }>(query: string, rows: readonly T[]): T[] {
-  if (!PAPER_ASK.test(query)) return [...rows];
+  if (!isPaperAsk(query)) return [...rows];
   return rows.filter((row) => !isDoiResult(row) || paperOnTopic(query, row.title ?? '', row.snippet ?? ''));
 }
 
 /** Up to five works for a paper ask; [] on any failure (the web results still stand). */
 export async function scholarlyResults(query: string): Promise<SearchResult[]> {
-  if (!PAPER_ASK.test(query)) return [];
+  if (!isPaperAsk(query)) return [];
   const topic = paperTopic(query);
   if (topic.length < 3) return [];
   const started = Date.now();

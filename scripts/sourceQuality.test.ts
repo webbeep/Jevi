@@ -10,6 +10,9 @@ test('an English question keeps Latin script and drops a free-host blog once bet
   assert.equal(latinQuery('居里夫人是谁'), false);
   assert.equal(hostTier('en.wikipedia.org'), 0);
   assert.equal(hostTier('espn.com'), 0);
+  assert.equal(hostTier('files.dnr.state.mn.us'), 0);
+  assert.equal(hostTier('www.fda.gov'), 0);
+  assert.equal(hostTier('worldatlas.com'), 2);
   assert.equal(hostTier('cuadernodeaula.blogspot.com'), 3);
   assert.equal(hostTier('view.genially.com'), 3);
   const rows = [
@@ -107,6 +110,40 @@ test('a named agency and a state count get an official-site search', () => {
   ]), true);
   const wolves = officialProbe('How many wolves live in Minnesota?');
   assert.match(wolves, /site:mn\.us|site:mn\.gov/);
+  const outbreak = officialProbe('How many cases in the FDA outbreak?');
+  assert.match(outbreak, /site:fda\./);
+  const lakes = officialProbe('How many lakes are in Minnesota?');
+  assert.match(lakes, /site:mn\.us|site:mn\.gov/);
+  const lakeCount = officialProbe('Minnesota lake count');
+  assert.match(lakeCount, /site:mn\.us|site:mn\.gov/);
+  const journal = officialProbe('What did The Lancet report on GLP-1 and weight loss?');
+  assert.match(journal, /site:thelancet\.com/);
+  const count = officialProbe('How many foodborne outbreak cases were confirmed last year?');
+  assert.match(count, /site:\.gov/);
+});
+
+test('government, a journal of record, and a state page lead a count or a paper ask', () => {
+  const lakes = preferSources('How many lakes are in Minnesota?', [
+    hit('www.worldatlas.com', 'Minnesota lakes', 'Thousands of lakes'),
+    hit('www.onlyinyourstate.com', 'Minnesota lake list', 'A travel roundup'),
+    hit('files.dnr.state.mn.us', 'Minnesota lake census', 'The official count'),
+    hit('www.startribune.com', 'Lakes', 'Local news'),
+  ]);
+  assert.equal(lakes[0]?.domain, 'files.dnr.state.mn.us');
+  const outbreak = preferSources('How many cases in the FDA outbreak?', [
+    hit('www.foodsafetynews.com', 'Outbreak roundup', 'A blog count'),
+    hit('www.cidrap.umn.edu', 'Outbreak news', 'A recap'),
+    hit('www.fda.gov', 'Outbreak investigation', 'The agency count'),
+    hit('www.nytimes.com', 'Outbreak', 'News coverage'),
+  ]);
+  assert.equal(outbreak[0]?.domain, 'www.fda.gov');
+  const lancet = preferSources('What did studies find about GLP-1 drugs and weight loss?', [
+    hit('www.healthline.com', 'GLP-1 recap', 'A consumer recap'),
+    hit('www.thelancet.com', 'Semaglutide trial', 'The Lancet trial'),
+    hit('www.webmd.com', 'Weight loss drugs', 'A explainer'),
+    hit('www.cnn.com', 'Ozempic', 'News coverage'),
+  ]);
+  assert.equal(lancet[0]?.domain, 'www.thelancet.com');
 });
 
 test('a list that is only foreign pages is kept', () => {
