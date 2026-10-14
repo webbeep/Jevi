@@ -64,7 +64,7 @@ import { isKeepOnly, keptBody } from './refine';
 import { finishQuality, hasOfficialHit, hostTier, officialProbe, preferSources } from './sourceQuality';
 import { isOwnSite, orcidSite, pickOwnSite, probeOwnSite, RESEARCH_ASK, withOwnSite } from './ownSite';
 import { quoteAsk } from '../shared/quoteAsk';
-import { dropStrayDois, isPaperAsk, scholarlyResults, withScholarly } from './scholarly';
+import { dropStrayDois, isPaperAsk, leadPreprints, scholarlyResults, withScholarly } from './scholarly';
 import { videoResults, wantsVideo, withVideos } from './videoSearch';
 import { guessFreshness, preferFresh, staleComplaint, stricter } from './freshness';
 import { isQuoteRow, liveQuote, quoteRow, tickerNode } from './liveQuote';
@@ -588,6 +588,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   results = { ...results, results: preferFresh(results.results, span) };
   const scholar = await scholarly;
   if (scholar.length) results = { ...results, results: withScholarly(scholar, results.results) };
+  results = { ...results, results: leadPreprints(query, results.results) };
   results = { ...results, results: dropStrayDois(query, results.results) };
   results = await attachOfficial(query, results, env, scope);
   const clips = await videos;

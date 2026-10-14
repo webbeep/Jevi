@@ -4,7 +4,7 @@
  */
 import type { CardNode } from '../shared/card';
 import { shoppingAsk } from './claims';
-import { isPaperAsk } from './scholarly';
+import { isPaperAsk, isPreprintAsk } from './scholarly';
 
 const AUTHORITY = [
   'wikipedia.org', 'britannica.com', 'nobelprize.org', 'medlineplus.gov', 'nih.gov', 'cdc.gov', 'who.int',
@@ -288,9 +288,12 @@ export function preferSources<T extends RankedHit>(query: string, rows: readonly
     return 0;
   };
   if (paper || official) {
+    const preprint = isPreprintAsk(query);
     const rank = (item: (typeof pool)[number]) => {
       const domain = item.row.domain || hostOf(item.row.url);
       if (isVideoHost(domain) || isSocialHost(domain)) return 3;
+      if (preprint && (domain.replace(/^www\./, '') === 'arxiv.org' || domain.endsWith('.arxiv.org'))) return 0;
+      if (preprint && (isScholarHost(domain) || item.tier === 0)) return 1;
       if (isScholarHost(domain) || item.tier === 0) return 0;
       return 1;
     };

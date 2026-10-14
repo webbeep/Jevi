@@ -5,6 +5,8 @@ import {
   dropStrayDois,
   hasCatalogCopy,
   isPaperAsk,
+  isPreprintAsk,
+  leadPreprints,
   mergeWorks,
   pickWorks,
   normalizeArxivId,
@@ -167,4 +169,24 @@ test('an arXiv/preprint ask leads with arXiv rows; a DOI ask still keeps a prepr
   assert.equal(pickWorks([rag, ...found], 'an arXiv preprint on retrieval augmented generation')[0]?.arxivId, '2005.11401');
   assert.equal(workToResult(rag, true)?.url, 'https://arxiv.org/abs/2005.11401');
   assert.equal(workToResult(rag)?.url, 'https://doi.org/10.18653/v1/2020.acl-main.450');
+});
+
+test('a preprint ask still leads with arxiv.org when the Atom catalog missed', () => {
+  assert.equal(isPreprintAsk('an arXiv preprint on retrieval augmented generation'), true);
+  assert.equal(isPreprintAsk('Find recent academic publications on climate change and extreme weather, with DOIs or PMC IDs'), false);
+  assert.equal(isPreprintAsk('What did studies find about GLP-1 drugs and weight loss?'), false);
+  const web = [
+    { title: 'Nursing RAG', url: 'https://doi.org/10.1016/j.ijnss.2025.10.005', domain: 'doi.org', snippet: '', engines: ['web'] },
+    { title: 'Survey', url: 'https://doi.org/10.21275/sr24502103758', domain: 'doi.org', snippet: '', engines: ['web'] },
+    { title: 'Notes', url: 'https://doi.org/10.21275/sr251104092705', domain: 'doi.org', snippet: '', engines: ['web'] },
+    { title: 'Review', url: 'https://doi.org/10.55248/gengpi.6.0125.0635', domain: 'doi.org', snippet: '', engines: ['web'] },
+    { title: 'Case', url: 'https://doi.org/10.51473/rcmos.v1i2.2024.736', domain: 'doi.org', snippet: '', engines: ['web'] },
+    { title: 'Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks', url: 'https://arxiv.org/abs/2005.11401', domain: 'arxiv.org', snippet: '', engines: ['web'] },
+    { title: 'html copy', url: 'https://arxiv.org/html/2005.11401v4', domain: 'arxiv.org', snippet: '', engines: ['web'] },
+  ];
+  const led = leadPreprints('an arXiv preprint on retrieval augmented generation', web);
+  assert.equal(led[0]?.url, 'https://arxiv.org/abs/2005.11401');
+  assert.equal(led[0]?.domain, 'arxiv.org');
+  assert.equal(led.filter((row) => row.domain === 'arxiv.org').length, 1);
+  assert.equal(leadPreprints('What did studies find about GLP-1 drugs and weight loss?', web)[0]?.domain, 'doi.org');
 });

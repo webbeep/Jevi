@@ -18,6 +18,11 @@ export function isPaperAsk(query: string): boolean {
   return PAPER_ASK.test(query);
 }
 
+/** An arXiv or preprint ask, not a DOI/PMC journal hunt. Journal-paper asks keep doi.org and PMC first. */
+export function isPreprintAsk(query: string): boolean {
+  return isPaperAsk(query) && /\b(?:arxiv|preprints?)\b/i.test(query) && !/\b(?:dois?|pmc|pubmed|pmids?)\b/i.test(query);
+}
+
 const TIMEOUT_MS = 1800;
 const MAX = 5;
 const NOISE = new RegExp(
@@ -28,7 +33,7 @@ const NOISE = new RegExp(
 const AUTHOR_STOP = new Set(['give', 'what', 'which', 'when', 'where', 'find', 'show', 'list', 'does', 'do', 'the', 'and', 'for', 'how', 'who', 'why', 'peer', 'reviewed']);
 
 const UA = 'zo-search/1.0 (https://zo.fyi; ask@zo.fyi)';
-const ARXIV_ID = /(?:arxiv\.org\/(?:abs|pdf)\/|arxiv:\s*|\/arxiv\.)(\d{4}\.\d{4,5}|[a-z-]+\/\d{7})(?:v\d+)?/i;
+const ARXIV_ID = /(?:arxiv\.org\/(?:abs|pdf|html)\/|arxiv:\s*|\/arxiv\.)(\d{4}\.\d{4,5}|[a-z-]+\/\d{7})(?:v\d+)?/i;
 const ARXIV_DOI = /^10\.48550\/arxiv\./i;
 const DOI_IN_URL = /10\.\d{4,9}\/[^\s?#]+/i;
 
@@ -66,7 +71,7 @@ export type Work = {
   publication_year?: number;
   cited_by_count?: number;
   authorships?: { author?: { display_name?: string } }[];
-  primary_location?: { source?: { display_name?: string } | null } | null;
+  primary_location?: { source?: { display_name?: string } | null; landing_page_url?: string | null } | null;
   abstract_inverted_index?: Record<string, number[]> | null;
   abstract?: string;
 };
@@ -109,8 +114,11 @@ function xmlTag(xml: string, name: string): string {
   return m ? decodeXml(m[1]) : '';
 }
 
-function xmlTags(xml: string, name: string): string[] {
-  return [...xml.matchAll(new RegExp(`<${name}(?:\\s[^>]*)?>([\\s\\S]*?)</${name}>`, 'gi'))].map((m) => decodeXml(m[1])).filter(Boolean);
+function arxivIdOf(work: Work): string | undefined {
+  const doi = normalizeDoi(work.doi);
+  return work.arxivId
+    ?? normalizeArxivId(work.primary_location?.landing_page_url ?? undefined)
+    ?? (doi && ARXIV_DOI.test(doi) ? normalizeArxivId(doi) : undefined);
 }
 
 /** One arXiv Atom entry → the shared Work shape. */
@@ -198,9 +206,10 @@ async function getText(url: string, accept: string, timeoutMs = TIMEOUT_MS): Pro
   return res.text();
 }
 
-async function openAlexWorks(topic: string): Promise<Work[]> {
-  const data = await getJson<{ results?: Work[] }>(`https://api.openalex.org/works?search=${encodeURIComponent(topic)}&filter=has_doi:true&per_page=8&select=doi,title,publication_year,cited_by_count,authorships,primary_location,abstract_inverted_index`);
-  return data.results ?? [];
+async function openAlexWorks(topic: string, preprint = false): Promise<Work[]> {
+  const filter = preprint ? '' : '&filter=has_doi:true';
+  const data = await getJson<{ results?: Work[] }>(`https://api.openalex.org/works?search=${encodeURIComponent(topic)}${filter}&per_page=8&select=doi,title,publication_year,cited_by_count,authorships,primary_location,abstract_inverted_index`);
+  return (data.results ?? []).map((work) => ({ ...work, arxivId: arxivIdOf(work) }));
 }
 
 async function crossrefWorks(topic: string): Promise<Work[]> {
@@ -266,8 +275,8 @@ export function mergeWorks(groups: { via: string; works: Work[] }[]): { via: str
 }
 
 /** OpenAlex, Crossref, and arXiv in parallel. Any empty or failing catalog is skipped. */
-async function works(topic: string): Promise<{ via: string; works: Work[] }> {
-  const [oa, cr, ax] = await Promise.allSettled([openAlexWorks(topic), crossrefWorks(topic), arxivWorks(topic)]);
+async function works(topic: string, preprint = false): Promise<{ via: string; works: Work[] }> {
+  const [oa, cr, ax] = await Promise.allSettled([openAlexWorks(topic, preprint), crossrefWorks(topic), arxivWorks(topic)]);
   return mergeWorks([settledWorks('openalex', oa), settledWorks('crossref', cr), settledWorks('arxiv', ax)].filter((g): g is { via: string; works: Work[] } => !!g));
 }
 
@@ -316,7 +325,7 @@ function arxivRow(work: Work): boolean {
  * Otherwise up to two arXiv-only works stay in the five, so a preprint is not crowded out.
  */
 export function pickWorks(found: Work[], query: string): Work[] {
-  const preprintAsk = /\b(?:arxiv|preprints?)\b/i.test(query) && !/\b(?:dois?|pmc|pubmed|pmids?)\b/i.test(query);
+  const preprintAsk = isPreprintAsk(query);
   const journal = found.filter(journalDoi);
   const arxivOnly = found.filter((work) => arxivRow(work) && !journalDoi(work));
   const rest = found.filter((work) => !journalDoi(work) && !arxivRow(work));
@@ -345,11 +354,11 @@ export async function scholarlyResults(query: string): Promise<SearchResult[]> {
   if (topic.length < 3) return [];
   const started = Date.now();
   try {
-    const found = await works(topic);
+    const preprintAsk = isPreprintAsk(query);
+    const found = await works(topic, preprintAsk);
     const anchor = paperAnchor(query);
     const matched = anchor ? found.works.filter((work) => workMatches(work, anchor)) : found.works;
     const onTopic = matched.filter((work) => paperOnTopic(query, work.title ?? '', work.abstract ?? ''));
-    const preprintAsk = /\b(?:arxiv|preprints?)\b/i.test(query) && !/\b(?:dois?|pmc|pubmed|pmids?)\b/i.test(query);
     const out = pickWorks(onTopic, query).map((work) => workToResult(work, preprintAsk)).filter((r): r is SearchResult => !!r).slice(0, MAX);
     console.log(JSON.stringify({ zo: 'scholar', via: found.via, n: out.length, ms: Date.now() - started }));
     return out;
@@ -357,6 +366,39 @@ export async function scholarlyResults(query: string): Promise<SearchResult[]> {
     console.log(JSON.stringify({ zo: 'scholar', n: 0, ms: Date.now() - started, error: String(err instanceof Error ? err.message : err).slice(0, 60) }));
     return [];
   }
+}
+
+export function isArxivResult(row: { url?: string; domain?: string }): boolean {
+  const domain = (row.domain ?? '').toLowerCase().replace(/^www\./, '');
+  return domain === 'arxiv.org' || domain.endsWith('.arxiv.org') || !!normalizeArxivId(row.url ?? '');
+}
+
+/** pdf/html arXiv links become the abs page, so a preprint ask cites one canonical URL. */
+export function toArxivAbs<T extends { url: string; domain?: string }>(row: T): T {
+  const id = normalizeArxivId(row.url);
+  if (!id) return row;
+  return { ...row, url: `https://arxiv.org/abs/${id}`, domain: 'arxiv.org' };
+}
+
+/**
+ * On a preprint ask, arxiv.org leads even when the Atom catalog missed and only web rows remain.
+ * A DOI/PMC ask is left alone so journal sources stay first.
+ */
+export function leadPreprints<T extends { url: string; domain?: string }>(query: string, rows: readonly T[]): T[] {
+  if (!isPreprintAsk(query) || !rows.length) return [...rows];
+  const canon = rows.map((row) => toArxivAbs(row));
+  const seen = new Set<string>();
+  const arxiv: T[] = [];
+  const rest: T[] = [];
+  for (const row of canon) {
+    if (isArxivResult(row)) {
+      const key = normalizeArxivId(row.url) ?? row.url.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      arxiv.push(row);
+    } else rest.push(row);
+  }
+  return [...arxiv, ...rest];
 }
 
 /** Scholarly sources first (they carry the DOIs and arXiv ids), then the web results that are not the same paper. */

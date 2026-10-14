@@ -148,6 +148,30 @@ test('government, a journal of record, and a state page lead a count or a paper 
   assert.equal(lancet[0]?.domain, 'www.thelancet.com');
 });
 
+test('a preprint ask leads with arxiv.org; a DOI ask still leads with the journal', () => {
+  const rows = [
+    hit('doi.org', 'Nursing RAG', 'A journal article'),
+    hit('doi.org', 'RAG notes', 'Another DOI'),
+    hit('arxiv.org', 'Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks', 'arXiv:2005.11401'),
+    hit('pmc.ncbi.nlm.nih.gov', 'RAG review', 'A PMC paper'),
+  ];
+  const pre = preferSources('an arXiv preprint on retrieval augmented generation', rows);
+  assert.equal(pre[0]?.domain, 'arxiv.org');
+  const climate = preferSources('Find recent academic publications on climate change and extreme weather, with DOIs or PMC IDs', [
+    hit('climatecommunication.yale.edu', 'How to communicate', 'A recap'),
+    hit('doi.org', 'Extreme events', 'A journal article'),
+    hit('pmc.ncbi.nlm.nih.gov', 'Climate health', 'A PMC paper'),
+    hit('arxiv.org', 'A climate preprint', 'arXiv'),
+  ]);
+  assert.ok(['doi.org', 'pmc.ncbi.nlm.nih.gov'].includes(climate[0]?.domain ?? ''));
+  const glp = preferSources('What did studies find about GLP-1 drugs and weight loss?', [
+    hit('www.healthline.com', 'GLP-1 recap', 'A consumer recap'),
+    hit('doi.org', 'Semaglutide trial', 'Journal article'),
+    hit('pmc.ncbi.nlm.nih.gov', 'Weight loss review', 'PMC'),
+  ]);
+  assert.ok(['doi.org', 'pmc.ncbi.nlm.nih.gov'].includes(glp[0]?.domain ?? ''));
+});
+
 test('a list that is only foreign pages is kept', () => {
   const rows = [hit('fsyyhong.com', 'NBA 比分', '未开始 独行侠'), hit('iaixiong.com', '赛程', '火箭')];
   assert.equal(preferSources('NBA scores tonight', rows).length, 2);
