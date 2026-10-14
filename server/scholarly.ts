@@ -136,14 +136,15 @@ export function parseArxivFeed(xml: string): Work[] {
   return [...xml.matchAll(/<entry\b[\s\S]*?<\/entry>/gi)].map((m) => arxivToWork(m[0])).filter((w) => w.title && (w.arxivId || w.doi));
 }
 
-export function workToResult(w: Work): SearchResult | undefined {
+export function workToResult(w: Work, preferArxiv = false): SearchResult | undefined {
   if (!w.title) return undefined;
   const doi = normalizeDoi(w.doi);
   const arxivId = w.arxivId ?? (doi && ARXIV_DOI.test(doi) ? normalizeArxivId(doi) : undefined);
   if (!doi && !arxivId) return undefined;
   const journalDoi = doi && !ARXIV_DOI.test(doi) ? doi : undefined;
-  const url = journalDoi ? `https://doi.org/${journalDoi}` : arxivId ? `https://arxiv.org/abs/${arxivId}` : `https://doi.org/${doi}`;
-  const domain = journalDoi ? 'doi.org' : arxivId ? 'arxiv.org' : 'doi.org';
+  const useArxiv = !!arxivId && (preferArxiv || !journalDoi);
+  const url = useArxiv ? `https://arxiv.org/abs/${arxivId}` : journalDoi ? `https://doi.org/${journalDoi}` : `https://doi.org/${doi}`;
+  const domain = useArxiv ? 'arxiv.org' : 'doi.org';
   const names = (w.authorships ?? []).map((a) => a.author?.display_name).filter((n): n is string => !!n);
   const authors = names.length > 3 ? `${names.slice(0, 3).join(', ')} et al.` : names.join(', ');
   const venue = w.primary_location?.source?.display_name ?? '';
@@ -307,7 +308,11 @@ export function pickWorks(found: Work[], query: string): Work[] {
   const journal = found.filter(journalDoi);
   const arxivOnly = found.filter((work) => arxivRow(work) && !journalDoi(work));
   const rest = found.filter((work) => !journalDoi(work) && !arxivRow(work));
-  if (preprintAsk) return [...arxivOnly, ...journal, ...rest].slice(0, MAX);
+  if (preprintAsk) {
+    const withArxiv = found.filter(arxivRow);
+    const without = found.filter((work) => !arxivRow(work));
+    return [...withArxiv, ...without].slice(0, MAX);
+  }
   const keepArxiv = Math.min(2, arxivOnly.length);
   return [...journal.slice(0, MAX - keepArxiv), ...arxivOnly, ...rest].slice(0, MAX);
 }
@@ -333,7 +338,8 @@ export async function scholarlyResults(query: string): Promise<SearchResult[]> {
     const anchor = paperAnchor(query);
     const matched = anchor ? found.works.filter((work) => workMatches(work, anchor)) : found.works;
     const onTopic = matched.filter((work) => paperOnTopic(query, work.title ?? '', work.abstract ?? ''));
-    const out = pickWorks(onTopic, query).map(workToResult).filter((r): r is SearchResult => !!r).slice(0, MAX);
+    const preprintAsk = /\b(?:arxiv|preprints?)\b/i.test(query) && !/\b(?:dois?|pmc|pubmed|pmids?)\b/i.test(query);
+    const out = pickWorks(onTopic, query).map((work) => workToResult(work, preprintAsk)).filter((r): r is SearchResult => !!r).slice(0, MAX);
     console.log(JSON.stringify({ zo: 'scholar', via: found.via, n: out.length, ms: Date.now() - started }));
     return out;
   } catch (err) {

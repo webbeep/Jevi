@@ -519,9 +519,9 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     send('rewrite', { query: located });
     query = located;
   }
-  // A paper ask already runs the catalogs; skipping the intent rewrite saves a model call and two search slots.
+  // A paper ask already runs the catalogs, so extras and rescue stay off; the intent read still names the card.
   const paper = isPaperAsk(query);
-  const understood = rewritten || paper ? Promise.resolve(undefined) : understand(query, env, context).finally(() => mark(scope.ledger, 'understood'));
+  const understood = rewritten ? Promise.resolve(undefined) : understand(query, env, context).finally(() => mark(scope.ledger, 'understood'));
   // The layout is chosen from the question itself, so it runs with the search instead of after the intent read.
   const planned = planLayout(query, env, {}).then((plan) => {
     send('plan', plan);
