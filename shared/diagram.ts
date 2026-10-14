@@ -104,6 +104,20 @@ function numbersOk(text: string, corpus: string): boolean {
   });
 }
 
+/** Article sections. They sit in the sources and are not how something works. */
+const OUTLINE = new Set([
+  'introduction', 'intro', 'overview', 'background', 'summary', 'conclusion', 'applications', 'application',
+  'limitations', 'limitation', 'architecture', 'innovation', 'history', 'definition', 'basics', 'fundamentals',
+  'examples', 'example', 'references', 'contents', 'abstract', 'discussion', 'about', 'advantages',
+  'disadvantages', 'pros', 'cons', 'faq', 'training', 'key',
+]);
+
+/** "Introduction" / "Key Innovation" name a heading, not a part of the mechanism. */
+function outlineLabel(label: string): boolean {
+  const words = contentWords(label);
+  return words.length > 0 && words.every((word) => OUTLINE.has(word));
+}
+
 function wordsIn(label: string, corpus: string): boolean {
   const words = contentWords(label);
   if (!words.length) return false;
@@ -159,6 +173,14 @@ function sequential(nodes: { id: string }[]): RawEdge[] {
  * Keeps a diagram only when its labels are in the sources (or the question, which is part of `corpus`).
  * `kind` is the kind the question asked for. The compiled Mermaid is ours, not the model's.
  */
+/** The model named stages and none of them survived. Ask once more for real parts. */
+export function diagramNeedsRetry(raw: unknown, accepted: DiagramCard | undefined): boolean {
+  if (accepted) return false;
+  if (!raw || typeof raw !== 'object') return false;
+  const nodes = (raw as { nodes?: unknown }).nodes;
+  return Array.isArray(nodes) && nodes.length >= 3;
+}
+
 export function acceptDiagram(raw: unknown, corpus: string, kind: DiagramKind): DiagramCard | undefined {
   if (!raw || typeof raw !== 'object' || !corpus.trim()) return undefined;
   const n = raw as Record<string, unknown>;
@@ -172,8 +194,9 @@ export function acceptDiagram(raw: unknown, corpus: string, kind: DiagramKind): 
     const detailRaw = typeof row.detail === 'string' ? row.detail : '';
     if (hostile(labelRaw) || (detailRaw && hostile(detailRaw))) continue;
     const label = plain(labelRaw, 48);
-    if (label.length < 2 || !wordsIn(label, corpus) || !numbersOk(label, corpus)) continue;
-    const detail = detailRaw && detailOk(detailRaw, corpus) ? plain(detailRaw, 240) : undefined;
+    if (label.length < 2 || outlineLabel(label) || !wordsIn(label, corpus) || !numbersOk(label, corpus)) continue;
+    const named = detailRaw && contentWords(label).some((word) => word.length >= 4 && detailRaw.toLowerCase().includes(word));
+    const detail = named && detailOk(detailRaw, corpus) ? plain(detailRaw, 240) : undefined;
     nodes.push({ id: `n${nodes.length}`, label, detail: detail || undefined });
   }
   if (nodes.length < 3) return undefined;
@@ -224,7 +247,7 @@ export function diagramDocument(node: DiagramCard, dark: boolean): string {
   const fill = dark ? '#18181b' : '#ffffff';
   const soft = dark ? '#27272a' : '#f4f4f5';
   const steps = node.nodes.map((step, i) => {
-    const arrow = node.kind === 'flow' && i < node.nodes.length - 1 ? '<span class="arrow" aria-hidden="true"></span>' : '';
+    const arrow = i < node.nodes.length - 1 ? '<span class="arrow" aria-hidden="true"></span>' : '';
     return `<button type="button" data-i="${i}" aria-pressed="${i === 0 ? 'true' : 'false'}"><span class="n">${i + 1}</span><span class="label">${esc(step.label)}</span></button>${arrow}`;
   }).join('');
   const details = JSON.stringify(node.nodes.map((step) => step.detail ?? '')).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026');

@@ -4,6 +4,7 @@ import type { CardNode } from '../shared/card.ts';
 import {
   DIAGRAM_SANDBOX,
   acceptDiagram,
+  diagramNeedsRetry,
   diagramDocument,
   diagramIntent,
   diagramRegionIndex,
@@ -98,6 +99,44 @@ test('diagrams stay off until ZO_DIAGRAMS is explicitly on', () => {
 });
 
 const CORPUS = 'Photosynthesis uses light, chlorophyll, water, and carbon dioxide to make sugar. The light reactions happen in the chloroplast.';
+
+const LLM = 'The decoder generates the output text one token at a time. The attention mechanism focuses on specific parts of the input text. Introduction Training Key Innovation Architecture Limitations Applications.';
+
+test('article sections are not a diagram of how something works', () => {
+  const toc = acceptDiagram({
+    type: 'diagram',
+    title: 'Large Language Models',
+    nodes: [
+      { id: 'a', label: 'Introduction', detail: 'Large language models are a type of artificial intelligence designed to understand and generate human-like text.' },
+      { id: 'b', label: 'Training' },
+      { id: 'c', label: 'Key Innovation' },
+      { id: 'd', label: 'Architecture' },
+      { id: 'e', label: 'Limitations' },
+      { id: 'f', label: 'Applications' },
+    ],
+  }, LLM, 'concept');
+  assert.equal(toc, undefined);
+  const card = acceptDiagram({
+    nodes: [
+      { id: 'a', label: 'Token', detail: 'The decoder generates the output text one token at a time.' },
+      { id: 'b', label: 'Attention', detail: 'The attention mechanism focuses on specific parts of the input text.' },
+      { id: 'c', label: 'Decoder', detail: 'The decoder generates the output text one token at a time.' },
+    ],
+  }, LLM, 'concept');
+  assert.ok(card);
+  assert.deepEqual(card.nodes.map((n) => n.label), ['Token', 'Attention', 'Decoder']);
+  assert.match(card.nodes[0]?.detail ?? '', /token/);
+  assert.match(diagramDocument(card, true), /class="arrow"/);
+  assert.equal(diagramNeedsRetry({
+    nodes: [
+      { label: 'Introduction' },
+      { label: 'Training' },
+      { label: 'Architecture' },
+    ],
+  }, undefined), true);
+  assert.equal(diagramNeedsRetry({ nodes: [] }, undefined), false);
+  assert.equal(diagramNeedsRetry({ nodes: [{ label: 'Token' }, { label: 'Attention' }, { label: 'Decoder' }] }, card), false);
+});
 
 test('a diagram keeps source-backed stages and drops an invented one', () => {
   const card = acceptDiagram({
