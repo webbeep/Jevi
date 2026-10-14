@@ -222,6 +222,7 @@ async function arxivWorks(topic: string): Promise<Work[]> {
   const q = encodeURIComponent(topic);
   const paths = [
     `https://export.arxiv.org/api/query?search_query=${q}&start=0&max_results=8&sortBy=relevance&sortOrder=descending`,
+    `https://arxiv.org/api/query?search_query=${q}&start=0&max_results=8&sortBy=relevance&sortOrder=descending`,
     `http://export.arxiv.org/api/query?search_query=${q}&start=0&max_results=8&sortBy=relevance&sortOrder=descending`,
   ];
   let last: unknown;

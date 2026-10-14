@@ -157,6 +157,12 @@ test('a preprint ask leads with arxiv.org; a DOI ask still leads with the journa
   ];
   const pre = preferSources('an arXiv preprint on retrieval augmented generation', rows);
   assert.equal(pre[0]?.domain, 'arxiv.org');
+  const again = preferSources('an arXiv preprint on retrieval augmented generation', [
+    hit('www.fda.gov', 'An agency page', 'Not a preprint'),
+    ...rows,
+  ]);
+  assert.equal(again[0]?.domain, 'arxiv.org');
+  assert.equal(again[0]?.title, 'Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks');
   const climate = preferSources('Find recent academic publications on climate change and extreme weather, with DOIs or PMC IDs', [
     hit('climatecommunication.yale.edu', 'How to communicate', 'A recap'),
     hit('doi.org', 'Extreme events', 'A journal article'),

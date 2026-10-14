@@ -929,6 +929,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
       }
     }
   }
+  results = { ...results, results: leadPreprints(query, results.results) };
   send('search', results);
   const boost = imageBoost(pattern, results, env, scope, boostQuery);
   const crypto = cryptographyHint(query, results.results);

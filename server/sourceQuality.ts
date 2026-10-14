@@ -4,7 +4,7 @@
  */
 import type { CardNode } from '../shared/card';
 import { shoppingAsk } from './claims';
-import { isPaperAsk, isPreprintAsk } from './scholarly';
+import { isPaperAsk, isPreprintAsk, leadPreprints } from './scholarly';
 
 const AUTHORITY = [
   'wikipedia.org', 'britannica.com', 'nobelprize.org', 'medlineplus.gov', 'nih.gov', 'cdc.gov', 'who.int',
@@ -297,12 +297,15 @@ export function preferSources<T extends RankedHit>(query: string, rows: readonly
       if (isScholarHost(domain) || item.tier === 0) return 0;
       return 1;
     };
-    if (pool.some((item) => rank(item) === 0)) pool.sort((a, b) => byLead(a, b) || rank(a) - rank(b) || a.index - b.index);
+    // A preprint ask ranks arxiv.org first, including after a later official re-sort.
+    // Journal-paper asks still use official-lead then scholar, so doi.org / PMC stay first.
+    if (preprint) pool.sort((a, b) => rank(a) - rank(b) || byLead(a, b) || a.index - b.index);
+    else if (pool.some((item) => rank(item) === 0)) pool.sort((a, b) => byLead(a, b) || rank(a) - rank(b) || a.index - b.index);
     else pool.sort((a, b) => byLead(a, b) || Number(a.tier === 3) - Number(b.tier === 3) || a.index - b.index);
   } else {
     pool.sort((a, b) => byLead(a, b) || (promote ? a.tier - b.tier : Number(a.tier === 3) - Number(b.tier === 3)) || a.index - b.index);
   }
-  return pool.map((item) => item.row);
+  return leadPreprints(query, pool.map((item) => item.row));
 }
 
 function keepSentences(query: string, text: string): string {
