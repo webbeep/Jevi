@@ -40,7 +40,7 @@ import type { EngineStatus, Freshness, ImageResult, SearchResponse, SearchResult
 import { rewriteQuery } from './ai';
 import { type DesignRequest, designParallel, designStream, gateNode } from './design';
 import { BRIEF_ROWS, briefSources, remapBrief, type SourceBrief } from './brief';
-import { onTopicCount, rescueQuery, sourcesMiss } from './rescue';
+import { gapQuery, onTopicCount, rescueQuery, sourcesMiss } from './rescue';
 import { keepPictures, reviewCard, type Review } from './review';
 import { permitted } from './images';
 import { hasLlm } from './llm';
@@ -321,16 +321,38 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   let brief = await briefWait?.finally(() => mark(scope.ledger, 'brief'));
   if (brief) console.log(JSON.stringify({ zo: 'brief', use: brief.use.length, stale: brief.stale, offTopic: brief.offTopic, conflicts: brief.conflicts.length, missing: !!brief.missing }));
   let rescued = false;
+  let reread = false;
   if (req.allowRescue && brief && !chat && sourcesMiss(brief)) {
     const again = await rescueSources(send, env, req, brief, scope);
     if (again) {
       req = { ...req, search: again.search };
       brief = again.brief;
       rescued = true;
+      reread = true;
       void reading.catch(() => undefined);
     }
   }
-  const pages = rescued ? await collectPages(req.search.results, env, budget, undefined, scope) : await reading;
+  // A partial set still names a missing fact (the birth year, the later season). Add those rows.
+  // Do not throw away the pages that already answer the other half of the question.
+  if (req.allowRescue && brief && !chat && !rescued) {
+    const alt = gapQuery(req.query, brief);
+    if (alt) {
+      const room = SEARCH_CALL_CAP + (scope.ledger.bonus ?? 0) - searchCalls(scope.ledger);
+      if (room < 1) scope.ledger.bonus = (scope.ledger.bonus ?? 0) + (1 - room);
+      const again = await searchWithLate({ q: alt, freshness: req.search.freshness === 'any' ? guessFreshness(req.query) : req.search.freshness, count: 8, lite: true }, env, scope);
+      const gated = applyRelevance(alt, { ...again.response, query: alt }, scope.ledger);
+      const add = gated.results.filter((row) => !req.search.results.some((have) => have.url === row.url)).slice(0, 4);
+      if (add.length) {
+        req = { ...req, search: { ...req.search, results: [...req.search.results, ...add] } };
+        send('peek', add.slice(0, PEEK_ROWS).map(({ title, url, domain, date }) => ({ title, url, domain, date })));
+        send('search', req.search);
+        reread = true;
+        void reading.catch(() => undefined);
+        console.log(JSON.stringify({ zo: 'gap', alt, added: add.length }));
+      }
+    }
+  }
+  const pages = reread ? await collectPages(req.search.results, env, budget, undefined, scope) : await reading;
   mark(scope.ledger, 'pages');
   const fresh = pages.filter((p) => !req.search.results[p.n - 1]?.content);
   if (fresh.length) send('pages', fresh.map(({ n, url, text }) => ({ n, url, text })));

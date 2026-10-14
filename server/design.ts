@@ -257,14 +257,19 @@ function briefRules(req: DesignRequest): string {
 
 function timeRules(req: DesignRequest): string {
   const today = `- Today is ${new Date().toISOString().slice(0, 10)} (UTC).`;
+  const askedQuery = req.followup?.question ?? req.query;
+  const newest = /\b(?:most recent|latest|current|this year|this season)\b/i.test(askedQuery)
+    ? '- The ask wants the newest instance. When the sources name several seasons, years, or editions, answer with the highest one that has the figure. An earlier season or year is not the most recent, latest, or current.'
+    : '';
   const asked = stricter(guessFreshness(req.query), guessFreshness(req.followup?.question ?? ''));
-  if (asked !== 'day' && asked !== 'week') return today;
+  if (asked !== 'day' && asked !== 'week') return [today, newest].filter(Boolean).join('\n');
   const span = asked === 'day' ? 'today or the past 24 hours' : 'the past 7 days';
   return [
     today,
+    newest,
     `- This ask is time-sensitive: lead with items dated ${span} (use the source dates) and say when each happened. Leave older items out, or put them last under an "Earlier" label; never present them as today's.`,
     '- Every stat, number and item must be about what was asked: no market indices, stock prices or app rankings unless the ask is about markets, stocks or rankings.',
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 }
 
 function taskBlock(req: DesignRequest): string {

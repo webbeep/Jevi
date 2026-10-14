@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { onTopicCount, rescueQuery, sourcesMiss } from '../server/rescue.ts';
+import { gapQuery, onTopicCount, rescueQuery, sourcesMiss } from '../server/rescue.ts';
 import type { SourceBrief } from '../server/brief.ts';
 
 const brief = (over: Partial<SourceBrief>): SourceBrief => ({
@@ -21,6 +21,15 @@ test('a result set that answers nothing is searched again', () => {
   assert.equal(sourcesMiss(brief({ use: [1], missing: 'the box score' })), false);
   assert.equal(sourcesMiss(brief({ missing: undefined, partial: true, offTopic: [1, 2] })), true);
   assert.equal(sourcesMiss(brief({ missing: undefined, offTopic: [] })), false);
+});
+
+test('a partial set searches for the fact it is still missing', () => {
+  const partial = brief({ use: [1], missing: "Stephen Baldwin's date of birth" });
+  const next = gapQuery('How old was Stephen Baldwin when Hailey and Justin got married?', partial);
+  assert.ok(next);
+  assert.match(next!, /\bbirth\b/);
+  assert.equal(gapQuery('How old was Stephen Baldwin when Hailey and Justin got married?', brief({ use: [], missing: "Stephen Baldwin's date of birth" })), undefined);
+  assert.equal(gapQuery('How old was Stephen Baldwin when Hailey and Justin got married?', brief({ use: [1], missing: undefined })), undefined);
 });
 
 test('the rescue search names the subject the question dropped', () => {

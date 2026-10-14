@@ -56,6 +56,8 @@ function repairHole(sentence: string): string {
   s = s.replace(/\b(?:in|on|at|during|since|from|by)\s+[—–_]+(?:\s+|$)/gi, ' ');
   // "In he founded" — the year between the preposition and the pronoun never arrived.
   s = s.replace(/\b(?:in|on|at|during|since|from|by)\s+(?=(?:he|she|they|it|we)\b)/gi, '');
+  // "EPs in and 2023" — the year between the preposition and "and" was removed.
+  s = s.replace(/\b(?:in|on|at|during|since|from|by)\s+(?=and\b)/gi, '');
   s = s.replace(/\s+\b(?:in|on|at|during|since|from|by)\s*([.,;:])/gi, '$1');
   s = s.replace(/\s+/g, ' ').replace(/\s+([,.;:!?])/g, '$1').replace(/^[,;:\s]+/, '').trim();
   if (!s) return '';
@@ -182,7 +184,11 @@ export class Polisher {
         };
       }
       case 'list': {
-        const items = node.items.filter((i) => this.short(i.text)).map((i) => ({ ...i, imageRef: this.image(i.imageRef) }));
+        const items = node.items.flatMap((i) => {
+          const text = withoutEmptySlots(i.text);
+          if (!text || !this.short(text)) return [];
+          return [{ ...i, text, imageRef: this.image(i.imageRef) }];
+        });
         return items.length ? { ...node, items } : undefined;
       }
       case 'profile':
@@ -233,7 +239,7 @@ export function withFinishedSentences(node: CardNode): CardNode | undefined {
   }
   if (node.type === 'list') {
     const items = node.items.flatMap((item) => {
-      const text = completeSentences(item.text);
+      const text = completeSentences(withoutEmptySlots(item.text));
       return text ? [{ ...item, text }] : [];
     });
     if (!items.length) return undefined;

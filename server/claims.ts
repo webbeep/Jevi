@@ -159,7 +159,7 @@ export function retargetCites(text: string, sources: readonly ClaimSource[]): st
     const nums = significant(sentence);
     if (!nums.length) return [sentence];
     const cites = [...sentence.matchAll(/\[(\d+)\]/g)].map((match) => Number(match[1]));
-    if (cites.length && cites.every((n) => covers(byNumber(sources, n), nums))) return [sentence];
+    if (cites.length && cites.every((n) => covers(byNumber(sources, n), nums))) return [withoutEmptySlots(sentence)];
     const page = sources.find((source) => covers(source, nums))?.n ?? bestPage(nums, sources, cites);
     if (!page) {
       const bare = stripNums(sentence.replace(/\s*\[\d+\]/g, ''), nums);

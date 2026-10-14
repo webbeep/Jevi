@@ -21,6 +21,17 @@ const wordsOf = (text: string) =>
 
 const isDate = (w: string) => MONTH.test(w) || /^(19|20)\d{2}$/.test(w);
 
+/**
+ * Some rows answer the ask, and the brief still names a fact none of them have.
+ * One more search should add that fact. It must not replace the rows that already answer.
+ * Undefined when nothing is missing, when nothing was usable (the full rescue handles that),
+ * or when the next query would repeat the question.
+ */
+export function gapQuery(query: string, brief: SourceBrief): string | undefined {
+  if (!brief.missing || brief.use.length === 0) return undefined;
+  return rescueQuery(query, brief);
+}
+
 /** Nothing in the results answers the ask, or every judged row was about something else. */
 export function sourcesMiss(brief: SourceBrief): boolean {
   if (brief.use.length > 0) return false;

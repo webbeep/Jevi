@@ -196,6 +196,13 @@ describe('T444 entity disambiguation', () => {
     assert.equal(isPersonAsk('who is the fastest animal'), false);
     assert.equal(isPersonAsk('Who is Datasite, owner of Blueflame AI'), false);
     assert.equal(isPersonAsk('Who is Drake?'), true);
+    assert.equal(isPersonAsk("Who was Japan's Prime Minister after Ichirō Hatoyama left office on December 23, 1956?"), false);
+    const office = gateResults("Who was Japan's Prime Minister after Ichirō Hatoyama left office on December 23, 1956?", [
+      row('Tanzan Ishibashi', 'Tanzan Ishibashi succeeded Ichirō Hatoyama as Prime Minister of Japan in December 1956.', 'https://en.wikipedia.org/wiki/Tanzan_Ishibashi'),
+    ]);
+    assert.equal(office.kept.length, 1);
+    assert.equal(isPersonAsk('Who is the Secretary?'), false);
+    assert.equal(isPersonAsk('Who is President Barack Obama'), true);
   });
 
   test('entityHintFor names the person for person labels and stays silent otherwise', () => {

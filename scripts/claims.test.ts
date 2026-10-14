@@ -24,6 +24,14 @@ test('a tile source is the page that contains its number', () => {
   assert.equal(next.type === 'tile' ? next.sub : '', 'DNR');
 });
 
+test('a grounded year still drops the clauses whose year is already missing', () => {
+  const page: ClaimSource[] = [{ n: 3, text: 'The band released an EP in 2023.' }];
+  const text = retargetCites('The band formed in, debut EP in, first album in, then EPs in and 2023. [3]', page);
+  assert.doesNotMatch(text, /\bin,/);
+  assert.doesNotMatch(text, /\bin and\b/);
+  assert.match(text, /2023/);
+});
+
 test('a number no page states is dropped instead of cited', () => {
   const text = retargetCites('Minnesota has about 2,300 wolves [1].', sources);
   assert.doesNotMatch(text, /2,300/);

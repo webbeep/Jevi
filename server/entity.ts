@@ -557,6 +557,9 @@ export function isPersonAsk(query: string, pattern?: string): boolean {
   if (MACHINE_ADDRESS.test(query)) return false;
   if (COMPARE_ASK.test(query) && !WHO_IS.test(query.trim())) return false;
   const subject = personSubject(query);
+  // "Who was Japan's Prime Minister after Hatoyama" names an office, not a person.
+  // The person gate would require that office title as a full name and drop every page.
+  if (officeSubject(subject)) return false;
   if (pattern === 'profile') return subject !== '';
   if (WHO_IS.test(query.trim()) || ABOUT.test(query.trim())) {
     // "Who is Datasite, owner of BlueFlame AI": one name word plus more words is a company asked about
@@ -580,6 +583,9 @@ const BUSINESS_TOPIC = /[$€£]\s?\d|\b\d+(?:\.\d+)?\s?(?:[mbk]|million|billion
 
 /** Single-word roles (lowercase) plus a few two-word ones. */
 const ROLE2 = ['software engineer', 'software developer', 'concert pianist', 'general dentist', 'prime minister', 'chief executive', 'medical doctor'];
+
+const OFFICE_FILLER = new Set(['the', 'of', 'a', 'an', 'and']);
+
 const ROLE1 = new Set([
   'actor', 'actress', 'engineer', 'mayor', 'mayoral', 'dentist', 'pianist', 'president', 'presidential',
   'senator', 'doctor', 'physician', 'lawyer', 'attorney', 'professor', 'teacher', 'ceo', 'cto', 'cfo', 'coo',
@@ -592,6 +598,19 @@ const ROLE1 = new Set([
   'novelist', 'scholar', 'restaurateur', 'businessman', 'businesswoman', 'dean', 'principal', 'quarterback', 'pitcher', 'chairman', 'spokesperson',
   'nurse', 'librarian', 'pastor', 'rabbi', 'monk', 'chief', 'king', 'queen', 'prince', 'princess',
 ]);
+
+/**
+ * The subject is an office ("Japan's Prime Minister", "Secretary"), not a person's name.
+ * A title in front of a name ("President Barack Obama") stays a person: the extra words are not roles.
+ * A multi-word role phrase is an office even with a place in front of it.
+ */
+function officeSubject(subject: string): boolean {
+  const low = subject.toLowerCase().replace(/['’]s\b/g, ' ').replace(/[^a-z\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!low) return false;
+  if (ROLE2.some((role) => new RegExp(`\\b${role}\\b`).test(low))) return true;
+  const words = low.split(' ').filter((word) => word && !OFFICE_FILLER.has(word));
+  return words.length > 0 && words.every((word) => ROLE1.has(word));
+}
 
 /** Maps a matched role token to its canonical display + core. */
 function canonRole(matched: string): { display: string; core: string } {
