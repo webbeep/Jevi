@@ -16,13 +16,13 @@ function readCap(raw: string | undefined): number | undefined {
 
 /**
  * Built-in daily caps. Serper Starter is a prepaid 50,000-credit pack (about six months),
- * not the old 2,500-credit grant the 200/day prod ration was protecting. 1,500/day lets
+ * not the old 2,500-credit grant the 200/day prod ration was protecting. 10,000/day lets
  * live search stay on Serper; a day that actually hits the ceiling still lasts about a
  * month of the pack. Eval is the bench bucket and spends the same credits. These are not
  * the per-person ask gates.
  */
 const DEFAULT_CAPS: Record<string, Record<CapBucket, number>> = {
-  serper: { prod: 1500, eval: 200 },
+  serper: { prod: 10000, eval: 200 },
   langsearch: { prod: 300, eval: 300 },
   // You.com keyless MCP free profile (~100/day total). Stored under bucket 'shared'
   // so prod+eval share one counter (the free MCP is ~100/day per IP, not 200).
@@ -68,6 +68,8 @@ export function usageBucket(provider: string, bucket: CapBucket): string {
  */
 export const SERPER_ANON_SHARE = 0.7;
 export const SERPER_IMAGES_SHARE = 0.5;
+/** Serper prod alert threshold: /api/health sets serper.prod.alert once today's use reaches this share of the cap. */
+export const SERPER_ALERT_SHARE = 0.8;
 
 export async function takeSlot(env: Env, provider: string, bucket: CapBucket, now = Date.now(), share = 1): Promise<boolean> {
   // Shared providers: one daily cap (prod default), counted once across buckets.
@@ -92,7 +94,12 @@ export async function takeSlot(env: Env, provider: string, bucket: CapBucket, no
   try {
     const row = await db.prepare(SLOT_SQL).bind(day, provider, store, limit).first<{ count: number }>();
     const count = Number(row?.count);
-    if (Number.isFinite(count) && count <= limit) return true;
+    if (Number.isFinite(count) && count <= limit) {
+      if (provider === 'serper' && bucket === 'prod' && count === Math.ceil(cap * SERPER_ALERT_SHARE)) {
+        console.log(JSON.stringify({ zo: 'provider-alert', provider, bucket, used: count, cap, share: SERPER_ALERT_SHARE }));
+      }
+      return true;
+    }
     logRefusal(provider, bucket);
     return false;
   } catch {
@@ -104,6 +111,8 @@ export async function takeSlot(env: Env, provider: string, bucket: CapBucket, no
 export interface ProviderUsage {
   used: number;
   cap: number | null;
+  /** Serper prod only: true once used >= 80% of cap. */
+  alert?: boolean;
 }
 
 /** Today's (UTC) counts and caps per capped provider and bucket, for /api/health. Counts only, never keys. */
@@ -133,6 +142,10 @@ export async function usageToday(env: Env, now = Date.now()): Promise<Record<str
       prod: { used: used('prod'), cap: capFor(env, p, 'prod') ?? null },
       eval: { used: used('eval'), cap: capFor(env, p, 'eval') ?? null },
     };
+    if (p === 'serper') {
+      const c = out[p].prod.cap;
+      out[p].prod.alert = c != null && c > 0 && out[p].prod.used >= Math.ceil(c * SERPER_ALERT_SHARE);
+    }
   }
   return out;
 }

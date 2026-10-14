@@ -109,7 +109,7 @@ export interface HealthResponse {
   llm: string[];
   keyedEngines: string[];
   /** Today's (UTC) provider calls vs daily cap per bucket; providers null when D1 is unavailable. */
-  providerUsage?: { day: string; providers: Record<string, Record<'prod' | 'eval', { used: number; cap: number | null }>> | null };
+  providerUsage?: { day: string; providers: Record<string, Record<'prod' | 'eval', { used: number; cap: number | null; alert?: boolean }>> | null };
 }
 
 /** Stream event when a search returned nothing usable and the card is general knowledge. */
