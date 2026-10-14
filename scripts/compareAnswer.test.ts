@@ -6,7 +6,7 @@ import { asksToCompare } from '../server/askGuard.ts';
 import { answersComparison, comparisonNodes, comparisonRepair, comparisonTitle, mentionsSide } from '../server/compareAnswer.ts';
 import { candidates } from '../server/extract.ts';
 import { compareSideQueries } from '../server/patterns.ts';
-import { Polisher, completeSentences, withoutEmptySlots } from '../server/polish.ts';
+import { Polisher, completeSentences, emptyFigure, withoutEmptySlots } from '../server/polish.ts';
 
 const ASK = 'AJ Dybantsa vs 2026 NBA rookies vs past draft classes';
 const CLIPPED = 'Get to Know AJ Dybantsa · Led the nation in scoring (25.5 ppg), total points (894), field goals made (308) and free throws made (229). · First player in Big 12 …';
@@ -23,6 +23,9 @@ test('a trailing ellipsis keeps the last finished sentence, including decimals',
   assert.equal(withoutEmptySlots('In [year] he founded Eureka Labs.'), 'He founded Eureka Labs.');
   assert.equal(withoutEmptySlots('Karpathy founded Eureka Labs in .'), 'Karpathy founded Eureka Labs.');
   assert.equal(withoutEmptySlots('Minnesota has about wolves.'), '');
+  assert.equal(emptyFigure('Unknown'), true);
+  assert.equal(emptyFigure('11,842'), false);
+  assert.equal(new Polisher(200).apply({ type: 'stat', label: 'FDA cases', value: 'Unknown' }), undefined);
 });
 
 test('a short text cap does not split a decimal into a sentence', () => {

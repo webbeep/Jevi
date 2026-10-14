@@ -118,6 +118,8 @@ test('a named agency and a state count get an official-site search', () => {
   assert.match(lakeCount, /site:mn\.us|site:mn\.gov/);
   const journal = officialProbe('What did The Lancet report on GLP-1 and weight loss?');
   assert.match(journal, /site:thelancet\.com/);
+  assert.doesNotMatch(journal, /site:glp\./);
+  assert.equal(officialProbe('What did studies find about GLP-1 drugs and weight loss?'), '');
   const count = officialProbe('How many foodborne outbreak cases were confirmed last year?');
   assert.match(count, /site:\.gov/);
 });

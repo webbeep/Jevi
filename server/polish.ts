@@ -43,6 +43,14 @@ export function withoutEmptySlots(text: string): string {
   return kept.join(' ').replace(/\s+/g, ' ').trim();
 }
 
+/** A count or year written as Unknown, an em dash, or a [placeholder] is an empty slot. */
+export function emptyFigure(value: string | undefined): boolean {
+  if (value === undefined) return false;
+  const v = value.trim();
+  if (!v) return true;
+  return /^(?:unknown|n\/?a|tbd|none|[—–\-?]|\[(?:year|name|count|date|number|amount)\])$/i.test(v);
+}
+
 function repairHole(sentence: string): string {
   let s = sentence.replace(/\[(?!\d+\])[^\]]+\]/g, '');
   s = s.replace(/\b(?:in|on|at|during|since|from|by)\s+[—–_]+(?:\s+|$)/gi, ' ');
@@ -158,14 +166,25 @@ export class Polisher {
         const text = this.fresh(trimToSentences(withoutEmptySlots(node.text), Math.min(this.textCap, 280)));
         return text ? { ...node, text } : undefined;
       }
-      case 'hero':
-        return { ...node, caption: node.caption && (this.fresh(trimToSentences(node.caption, 160)) || undefined) };
+      case 'hero': {
+        if (emptyFigure(node.value)) return undefined;
+        return { ...node, caption: node.caption && (this.fresh(trimToSentences(withoutEmptySlots(node.caption), 160)) || undefined) };
+      }
+      case 'stat':
+        return emptyFigure(node.value) ? undefined : node;
+      case 'tile': {
+        if (emptyFigure(node.value) && emptyFigure(node.sub)) return undefined;
+        return {
+          ...node,
+          imageRef: this.image(node.imageRef),
+          value: emptyFigure(node.value) ? undefined : node.value,
+          sub: emptyFigure(node.sub) ? undefined : node.sub,
+        };
+      }
       case 'list': {
         const items = node.items.filter((i) => this.short(i.text)).map((i) => ({ ...i, imageRef: this.image(i.imageRef) }));
         return items.length ? { ...node, items } : undefined;
       }
-      case 'tile':
-        return { ...node, imageRef: this.image(node.imageRef) };
       case 'profile':
         return { ...node, imageRef: this.image(node.imageRef) };
       case 'image': {
@@ -194,15 +213,23 @@ export class Polisher {
 
 /** Every sentence on the node ends. A text node that was only an unfinished tail is dropped. */
 export function withFinishedSentences(node: CardNode): CardNode | undefined {
+  if (node.type === 'hero') {
+    if (emptyFigure(node.value)) return undefined;
+    if (!node.caption) return node;
+    const caption = completeSentences(withoutEmptySlots(node.caption));
+    return caption === node.caption ? node : { ...node, caption: caption || undefined };
+  }
+  if (node.type === 'stat' && emptyFigure(node.value)) return undefined;
+  if (node.type === 'tile') {
+    if (emptyFigure(node.value) && emptyFigure(node.sub)) return undefined;
+    const value = emptyFigure(node.value) ? undefined : node.value;
+    const sub = emptyFigure(node.sub) ? undefined : node.sub;
+    return value === node.value && sub === node.sub ? node : { ...node, value, sub };
+  }
   if (node.type === 'text' || node.type === 'callout' || node.type === 'quote') {
     const text = completeSentences(withoutEmptySlots(node.text));
     if (!text) return undefined;
     return text === node.text ? node : { ...node, text };
-  }
-  if (node.type === 'hero') {
-    if (!node.caption) return node;
-    const caption = completeSentences(node.caption);
-    return caption === node.caption ? node : { ...node, caption: caption || undefined };
   }
   if (node.type === 'list') {
     const items = node.items.flatMap((item) => {

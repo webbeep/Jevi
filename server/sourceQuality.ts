@@ -153,7 +153,8 @@ function journalHosts(query: string): string[] {
 }
 
 function orgTokens(query: string): string[] {
-  return [...query.matchAll(/\b[A-Z]{3,8}\b/g)].map((match) => match[0].toLowerCase()).filter((word) => !LEAGUE.has(word) && word !== 'doi' && word !== 'pdf' && word !== 'url');
+  // A research code ("GLP-1") is not an agency: the letters sit next to a hyphenated number.
+  return [...query.matchAll(/\b[A-Z]{3,8}\b(?!-\d)/g)].map((match) => match[0].toLowerCase()).filter((word) => !LEAGUE.has(word) && word !== 'doi' && word !== 'pdf' && word !== 'url');
 }
 
 function placeHosts(query: string): string[] {
