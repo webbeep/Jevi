@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { factAnswer, hopQueries, nextHop, patchFactLead } from '../server/hops.ts';
+import { factAnswer, hopQueries, nextHop, patchFactLead, placeFactLead } from '../server/hops.ts';
 import { bindClaims, type ClaimSource } from '../server/claims.ts';
 import type { CardNode } from '../shared/card.ts';
 
@@ -94,6 +94,21 @@ test('a wrong age on the card is replaced by the age the dates imply', () => {
   const next = patchFactLead(hero, '52');
   assert.equal(next && next.type === 'hero' ? next.value : '', '52');
   assert.equal(patchFactLead({ type: 'hero', value: '52', label: 'Age' }, '52'), undefined);
+});
+
+test('a card that states the dates and not the age gains an age hero', () => {
+  const kv: CardNode = {
+    type: 'keyvalue',
+    items: [
+      { label: 'Born', value: 'May 12, 1966' },
+      { label: 'Married', value: 'September 13, 2018' },
+    ],
+  };
+  const next = placeFactLead([kv], { lead: '52', label: 'Age', note: '' });
+  assert.equal(next?.[0]?.type, 'hero');
+  assert.equal(next?.[0] && next[0].type === 'hero' ? next[0].value : '', '52');
+  assert.equal(next?.[1], kv);
+  assert.equal(placeFactLead([{ type: 'hero', value: '52', label: 'Age' }], { lead: '52', label: 'Age', note: '' }), undefined);
 });
 
 test('a derived age stays on the card when the pages state the two dates', () => {

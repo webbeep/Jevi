@@ -10,6 +10,8 @@ import type { CardNode } from '../shared/card';
 export interface FactAnswer {
   /** The figure the card should lead with: an age, a rounded quotient, a year, a score, a century. */
   lead: string;
+  /** Short hero label for that figure. */
+  label: string;
   /** Why that figure, in words the designer can cite from the sources. */
   note: string;
 }
@@ -344,6 +346,7 @@ export function factAnswer(query: string, corpus: string): FactAnswer | undefine
       if (years >= 0 && years < 120) {
         return {
           lead: String(years),
+          label: 'Age',
           note: `${clean(age[1]!)} was born ${birth.raw}. The event was ${event.raw}. The age is ${years}. Do not use anyone else's age.`,
         };
       }
@@ -369,6 +372,7 @@ export function factAnswer(query: string, corpus: string): FactAnswer | undefine
       const lead = tenth ? (Math.round(quotient * 10) / 10).toFixed(1) : String(Math.round(quotient));
       return {
         lead,
+        label: 'Answer',
         note: `${numer.raw} divided by ${denom.raw} is ${lead}. Lead with ${lead}, not with either length.`,
       };
     }
@@ -377,23 +381,23 @@ export function factAnswer(query: string, corpus: string): FactAnswer | undefine
   if (SCORE.test(query) && NEWEST.test(query)) {
     const scores = seasonScores(corpus);
     const best = scores.sort((a, b) => b.season - a.season)[0];
-    if (best) return { lead: best.score, note: `The newest season with a score is season ${best.season} at ${best.score}. An earlier season is not the current one.` };
+    if (best) return { lead: best.score, label: 'Score', note: `The newest season with a score is season ${best.season} at ${best.score}. An earlier season is not the current one.` };
   }
 
   const yearAsk = query.match(WHAT_YEAR);
   if (yearAsk) {
     const verb = eventVerb(yearAsk[1]!);
     const year = verb && yearNear(corpus, verb);
-    if (year) return { lead: year, note: `The sources state ${year} for that event. Lead with ${year}.` };
+    if (year) return { lead: year, label: 'Year', note: `The sources state ${year} for that event. Lead with ${year}.` };
   }
 
   if (/\bcentury\b/i.test(query)) {
     const said = corpus.match(/\b(\d{1,2}(?:st|nd|rd|th)|nineteenth|eighteenth|seventeenth|twentieth)\s+century\b/i);
-    if (said) return { lead: `the ${said[1]!.toLowerCase()} century`.replace(/^the nineteenth/, 'the 19th').replace(/^the eighteenth/, 'the 18th').replace(/^the twentieth/, 'the 20th'), note: `The sources name ${said[0]}. Lead with that century.` };
+    if (said) return { lead: `the ${said[1]!.toLowerCase()} century`.replace(/^the nineteenth/, 'the 19th').replace(/^the eighteenth/, 'the 18th').replace(/^the twentieth/, 'the 20th'), label: 'Century', note: `The sources name ${said[0]}. Lead with that century.` };
     const year = yearNear(corpus, /\b(?:named|called|name|chosen|coined)\b/i);
     if (year) {
       const lead = centuryOf(Number(year));
-      return { lead, note: `The name is tied to ${year}, which is ${lead}. Lead with the century.` };
+      return { lead, label: 'Century', note: `The name is tied to ${year}, which is ${lead}. Lead with the century.` };
     }
   }
 
@@ -421,6 +425,21 @@ function nodeText(node: CardNode): string {
     default:
       return '';
   }
+}
+
+/**
+ * The card leads with the figure the facts imply.
+ * A wrong hero number is replaced. A card that never states the figure gains a hero.
+ * Undefined when the figure is already on the card.
+ */
+export function placeFactLead(nodes: CardNode[], fact: FactAnswer): CardNode[] | undefined {
+  if (nodes.some((node) => nodeText(node).toLowerCase().includes(fact.lead.toLowerCase()))) return undefined;
+  for (let i = 0; i < nodes.length; i++) {
+    const next = patchFactLead(nodes[i]!, fact.lead);
+    if (!next) continue;
+    return nodes.map((node, at) => (at === i ? next : node));
+  }
+  return [{ type: 'hero', value: fact.lead, label: fact.label }, ...nodes];
 }
 
 /** The first answer-shaped number or century that is not already the grounded lead. */

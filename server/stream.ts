@@ -40,7 +40,7 @@ import type { EngineStatus, Freshness, ImageResult, SearchResponse, SearchResult
 import { rewriteQuery } from './ai';
 import { type DesignRequest, designParallel, designStream, gateNode } from './design';
 import { BRIEF_ROWS, briefSources, remapBrief, type SourceBrief } from './brief';
-import { factAnswer, hopQueries, nextHop, patchFactLead } from './hops';
+import { factAnswer, hopQueries, nextHop, placeFactLead } from './hops';
 import { gapQuery, onTopicCount, rescueQuery, sourcesMiss } from './rescue';
 import { keepPictures, reviewCard, type Review } from './review';
 import { permitted } from './images';
@@ -500,14 +500,14 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   };
   const settleFacts = () => {
     if (!facts) return;
-    for (const index of [...shown.keys()].sort((a, b) => a - b)) {
-      const node = shown.get(index);
-      const patched = node && patchFactLead(node, facts.lead);
-      if (!patched) continue;
-      shown.set(index, patched);
-      send('node', { index, node: patched });
-      break;
-    }
+    const indexes = [...shown.keys()].sort((a, b) => a - b);
+    const nodes = indexes.map((index) => shown.get(index)!);
+    const next = placeFactLead(nodes, facts);
+    if (!next) return;
+    next.forEach((node, index) => {
+      shown.set(index, node);
+      send('node', { index, node });
+    });
   };
   if (arrived.ready && arrived.review) applyReview(send, designReq, shown, arrived.review, started);
   settleComparison();
