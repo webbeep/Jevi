@@ -1,4 +1,5 @@
 import type { CardNode } from '../shared/card';
+import { factAnswer } from './hops';
 import { numberTokens } from './ground';
 import { withoutEmptySlots } from './polish';
 
@@ -150,8 +151,15 @@ function stripNums(text: string, nums: readonly string[]): string {
   return withoutEmptySlots(out);
 }
 
+/** A number the sources imply: an age, a rounded quotient, a century, the newest score, the event's year. */
+function keepsDerived(query: string, text: string, sources: readonly ClaimSource[]): boolean {
+  if (!query || !text) return false;
+  const answer = factAnswer(query, sources.map((source) => source.text).join('\n'));
+  return !!answer && text.toLowerCase().includes(answer.lead.toLowerCase());
+}
+
 /** Point each cited number at a page that contains it, and drop a number no cited page states. */
-export function retargetCites(text: string, sources: readonly ClaimSource[]): string {
+export function retargetCites(text: string, sources: readonly ClaimSource[], query = ''): string {
   if (!sources.length) return withoutEmptySlots(text);
   if (!/\d/.test(text)) return withoutEmptySlots(text);
   const parts = text.split(/(?<=[.!?])\s+/);
@@ -162,6 +170,7 @@ export function retargetCites(text: string, sources: readonly ClaimSource[]): st
     if (cites.length && cites.every((n) => covers(byNumber(sources, n), nums))) return [withoutEmptySlots(sentence)];
     const page = sources.find((source) => covers(source, nums))?.n ?? bestPage(nums, sources, cites);
     if (!page) {
+      if (keepsDerived(query, sentence, sources)) return [sentence];
       const bare = stripNums(sentence.replace(/\s*\[\d+\]/g, ''), nums);
       return bare ? [bare] : [];
     }
@@ -276,20 +285,20 @@ function fillPrices(node: CardNode, sources: readonly ClaimSource[], ceilings: r
   }
 }
 
-function retargetNode(node: CardNode, sources: readonly ClaimSource[]): CardNode {
+function retargetNode(node: CardNode, sources: readonly ClaimSource[], query = ''): CardNode {
   switch (node.type) {
     case 'stack':
     case 'grid':
     case 'section':
     case 'scroller':
-      return { ...node, children: node.children.map((child) => retargetNode(child, sources)) };
+      return { ...node, children: node.children.map((child) => retargetNode(child, sources, query)) };
     case 'tabs':
-      return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: tab.children.map((child) => retargetNode(child, sources)) })) };
+      return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: tab.children.map((child) => retargetNode(child, sources, query)) })) };
     case 'text':
     case 'callout':
     case 'quote':
     case 'draft': {
-      const cited = retargetCites(node.text, sources);
+      const cited = retargetCites(node.text, sources, query);
       const text = cited.split(/(?<=[.!?])\s+/).map((sentence) => {
         const n = [...sentence.matchAll(/\[(\d+)\]/g)].map((match) => Number(match[1])).at(-1);
         return withoutForeignAgency(sentence, byNumber(sources, n ?? 0));
@@ -297,13 +306,16 @@ function retargetNode(node: CardNode, sources: readonly ClaimSource[]): CardNode
       return text === node.text ? node : { ...node, text };
     }
     case 'heading': {
-      const text = retargetCites(node.text, sources);
+      const text = retargetCites(node.text, sources, query);
       return text === node.text ? node : { ...node, text };
     }
     case 'hero': {
-      const caption = node.caption ? retargetCites(node.caption, sources) : node.caption;
+      const caption = node.caption ? retargetCites(node.caption, sources, query) : node.caption;
       const nums = significant(node.value);
       const page = citeValue(node.value, sources, undefined);
+      if (!page && keepsDerived(query, node.value, sources)) {
+        return caption === node.caption ? node : { ...node, caption };
+      }
       if (!page) {
         const stripped = nums.length ? stripNums(node.value, nums) : node.value;
         const value = stripped && /\d/.test(stripped) ? stripped : nums.length ? '' : node.value;
@@ -322,7 +334,9 @@ function retargetNode(node: CardNode, sources: readonly ClaimSource[]): CardNode
           ? node.source
           : sources.find((item) => covers(item, valueNums))?.n;
         if (full) source = full;
-        else if (value) {
+        else if (value && keepsDerived(query, value, sources)) {
+          // The figure is the age, quotient, year, or score the sources imply.
+        } else if (value) {
           value = stripNums(value, valueNums);
           if (!value || !/\d/.test(value)) value = undefined;
           source = undefined;
@@ -341,7 +355,7 @@ function retargetNode(node: CardNode, sources: readonly ClaimSource[]): CardNode
     case 'stat': {
       const nums = significant(node.value);
       const page = nums.length ? sources.find((item) => covers(item, nums)) : undefined;
-      const value = nums.length && !page ? stripNums(node.value, nums) : node.value;
+      const value = nums.length && !page && !keepsDerived(query, node.value, sources) ? stripNums(node.value, nums) : node.value;
       const label = page ? withoutForeignAgency(node.label, page) : withoutForeignAgency(node.label, undefined);
       const delta = node.delta ? retargetCites(node.delta, sources) : node.delta;
       return value === node.value && delta === node.delta && label === node.label ? node : { ...node, value, label, delta };
@@ -389,7 +403,7 @@ function retargetNode(node: CardNode, sources: readonly ClaimSource[]): CardNode
     }
     case 'keyvalue': {
       const items = node.items.map((item) => {
-        const value = retargetCites(item.value, sources);
+        const value = retargetCites(item.value, sources, query);
         return value === item.value ? item : { ...item, value };
       });
       return items.every((item, index) => item === node.items[index]) ? node : { ...node, items };
@@ -643,7 +657,7 @@ function dropPriceless(node: CardNode, ceilings: readonly number[]): CardNode {
 /** Move each number's citation onto a page that states it, then fill a missing product price from that page. */
 export function bindClaims(node: CardNode, sources: readonly ClaimSource[], query: string): CardNode {
   if (!sources.length) return node;
-  const aimed = retargetNode(node, sources);
+  const aimed = retargetNode(node, sources, query);
   const tax = salesTax(query, sources);
   const taxed = tax ? applyTax(aimed, query, tax) : aimed;
   if (!shoppingAsk(query)) return taxed;

@@ -115,6 +115,8 @@ export interface DesignRequest {
   rowImages?: RowImagePlan;
   /** Which sources answer the goal as of today, judged before designing. */
   brief?: SourceBrief;
+  /** A figure the sources already imply (an age, a quotient, the newest score, a year, a century). */
+  facts?: { lead: string; note: string };
   /** Server-built lead (live price and chart) the card opens with; the model designs what follows. */
   ticker?: CardNode;
 }
@@ -201,7 +203,7 @@ RULES
 - A score or schedule is one row per game. Never repeat a matchup. If the sources do not list the games asked for, say so in one callout instead of listing games from another day.
 - A follow-up about one attribute (battery, price, storage) answers that attribute with the figures the sources state for the things being compared. Never paste an unfinished snippet, and never bring in a product the question did not name.
 - Numbered steps are 1, 2, 3 with no gaps. Keep every step a newcomer needs.
-- Never compute new numbers yourself (multiplying, converting, summing), except when the follow-up asks you to calculate from figures already on the card or in the sources. Then the body is that calculation, each number keeps the unit and label the source gave it, and a headline is not the answer. Otherwise, when quantities should change with an amount (servings, loaves, people, budget), use a scaler node whose base and amounts are exactly the source values; the person rescales it live.
+- Never compute new numbers yourself (multiplying, converting, summing), except in two cases. When the TASK says the sources already imply a lead figure, that figure is the hero. When the follow-up asks you to calculate from figures already on the card or in the sources, the body is that calculation, each number keeps the unit and label the source gave it, and a headline is not the answer. When quantities should change with an amount (servings, loaves, people, budget), use a scaler node whose base and amounts are exactly the source values; the person rescales it live.
 - Plan and subscription prices always go in a pricing node, as the published per-seat or flat amount with its source number. Set billing to annual when the source says billed annually, even if the number is per month. Never multiply by people or seats, and never write a dollar amount or team total anywhere else on the card. If the sources do not state a price, leave that amount out.
 - If the sources don't contain what the person asked for (for example a live reading or a price), say so honestly in a short callout and point to the best sources to check.
 - Leave out any source that isn't about the ask; never list one only to say it doesn't mention the subject ("mentions an NYU professor, but not Jessica Chen").
@@ -283,6 +285,7 @@ function taskBlock(req: DesignRequest): string {
     `- ${DEPTH_HINT[req.depth]}`,
     req.intent ? `- What the person wants: ${req.intent} Answer that; sources that only match their words but not this are background at most.` : '',
     req.simple ? '- Write for a 10-year-old: plain words and a friendly analogy.' : '',
+    req.facts ? `- The sources already imply the answer. Lead with ${req.facts.lead}. ${req.facts.note}` : '',
     timeRules(req),
     liveQuoteRule(req),
     briefRules(req),

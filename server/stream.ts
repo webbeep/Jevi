@@ -1,4 +1,4 @@
-import { DEEP_PAGES, routeExtras, routeOf } from './router';
+import { DEEP_PAGES, routeOf } from './router';
 import { serperImages } from './cascade';
 import { publicEvent } from './publicPayload';
 import {
@@ -40,6 +40,7 @@ import type { EngineStatus, Freshness, ImageResult, SearchResponse, SearchResult
 import { rewriteQuery } from './ai';
 import { type DesignRequest, designParallel, designStream, gateNode } from './design';
 import { BRIEF_ROWS, briefSources, remapBrief, type SourceBrief } from './brief';
+import { factAnswer, hopQueries, nextHop, patchFactLead } from './hops';
 import { gapQuery, onTopicCount, rescueQuery, sourcesMiss } from './rescue';
 import { keepPictures, reviewCard, type Review } from './review';
 import { permitted } from './images';
@@ -378,7 +379,13 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   const quoteCard = isQuoteRow(req.search.results[0]);
   const designer = req.followup || quoteCard ? designStream : designParallel;
   const rowImages = chat || quoteCard ? undefined : rowImagePlan(req, env, scope);
-  const designReq: DesignRequest = { ...req, pages, brief, context: req.context?.slice(0, 4000), rowImages };
+  const factCorpus = [
+    ...req.search.results.map((row) => `${row.title} ${row.snippet ?? ''}`),
+    ...pages.map((page) => page.text),
+  ].join('\n');
+  const facts = factAnswer(req.query, factCorpus);
+  if (facts) console.log(JSON.stringify({ zo: 'facts', lead: facts.lead }));
+  const designReq: DesignRequest = { ...req, pages, brief, facts, context: req.context?.slice(0, 4000), rowImages };
   const shown = new Map<number, CardNode>();
   const subject = subjectWords(req.query, req.followup?.question);
   let head: Omit<AnswerCard, 'body'> | undefined;
@@ -491,14 +498,27 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       send('node', { index: patch.index, node: patch.node });
     }
   };
+  const settleFacts = () => {
+    if (!facts) return;
+    for (const index of [...shown.keys()].sort((a, b) => a - b)) {
+      const node = shown.get(index);
+      const patched = node && patchFactLead(node, facts.lead);
+      if (!patched) continue;
+      shown.set(index, patched);
+      send('node', { index, node: patched });
+      break;
+    }
+  };
   if (arrived.ready && arrived.review) applyReview(send, designReq, shown, arrived.review, started);
   settleComparison();
+  settleFacts();
   publishReadings();
   send('done', { ...summary, pagesRead: pages.length, ms: Date.now() - started });
   if (pendingReview && !arrived.ready) {
     const review = await pendingReview;
     if (review) applyReview(send, designReq, shown, review, started);
     settleComparison();
+    settleFacts();
     publishReadings();
     mark(scope.ledger, 'reviewed');
   } else if (pendingReview) {
@@ -574,6 +594,12 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   };
   const route = routeOf(query);
   scope.ledger.route = route;
+  // Fact hops take the rewrite slots first. A two-fact question spends both, even on the quick route.
+  const hopList = paper ? [] : hopQueries(query);
+  const withHops = (extras: string[]) => {
+    const room = Math.max(route === 'deep' ? 2 : 1, Math.min(hopList.length, 2));
+    return moreQueries(query, [...hopList, ...extras]).slice(0, room);
+  };
   const deep = route === 'deep';
   let found: Awaited<ReturnType<typeof searchWithLate>>;
   let u: Awaited<typeof understood>;
@@ -591,18 +617,18 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     const literalFresh = freshness === 'any' ? guessFreshness(query) : freshness;
     const later = understood.then((x) => {
       if (x) send('intent', { intent: x.intent, queries: x.queries });
-      return { more: routeExtras(route, moreQueries(query, [...sides, ...instant, ...extraQueries(query, x)])), freshness: freshness === 'any' ? x?.freshness ?? literalFresh : freshness };
+      return { more: withHops([...sides, ...instant, ...extraQueries(query, x)]), freshness: freshness === 'any' ? x?.freshness ?? literalFresh : freshness };
     });
     // A price ask is answered by the live quote; the rewrites only add the news around it.
-    found = await searchWithLate({ q: queriesForAsk(query, []), more: routeExtras(route, moreQueries(query, [...sides, ...instant])), later, freshness: literalFresh, count: 20, waitExtras: deep && !paper, extrasCutMs: quoteAsk(query) ? QUOTE_EXTRAS_MS : undefined, onLiteral }, env, scope);
+    found = await searchWithLate({ q: queriesForAsk(query, []), more: withHops([...sides, ...instant]), later, freshness: literalFresh, count: 20, waitExtras: deep && !paper, extrasCutMs: quoteAsk(query) ? QUOTE_EXTRAS_MS : hopList.length ? 1500 : undefined, onLiteral }, env, scope);
     mark(scope.ledger, 'found');
     u = await understood;
   } else {
     u = undefined;
     // Literal question first. Planner rewrites are the later calls, still inside the cap.
     const q = queriesForAsk(query, instant);
-    const more = routeExtras(route, moreQueries(query, [...sides, ...instant]));
-    found = await searchWithLate({ q, more, freshness: freshness === 'any' ? guessFreshness(query) : freshness, count: 20, onLiteral }, env, scope);
+    const more = withHops([...sides, ...instant]);
+    found = await searchWithLate({ q, more, freshness: freshness === 'any' ? guessFreshness(query) : freshness, count: 20, extrasCutMs: hopList.length ? 1500 : undefined, onLiteral }, env, scope);
   }
   let results = applyPickGate(query, applyRelevance(query, { ...found.response, query }, scope.ledger));
   // "AI news today" must not lead with last week's launch: past-window rows drop once enough current ones remain.
@@ -620,6 +646,33 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   if (live) {
     results = { ...results, results: [live, ...results.results.filter((r) => !isQuoteRow(r))] };
     console.log(JSON.stringify({ zo: 'quote', symbol: quote!.symbol, source: quote!.source, ms: Date.now() - started }));
+  }
+  // A question that needs another fact keeps searching until that fact is in hand, or the time is gone.
+  if (!paper && results.results.length) {
+    // A parallel hop that the time cut dropped is still missing, so it can be asked again here.
+    const asked: string[] = [];
+    let left = 2;
+    while (left > 0 && Date.now() - started < 5200) {
+      const corpus = results.results.slice(0, 12).map((row) => `${row.title} ${row.snippet ?? ''}`).join('\n');
+      const beforeLead = factAnswer(query, corpus)?.lead;
+      const alt = nextHop(query, corpus, { hosts: results.results.map((row) => row.domain), asked });
+      if (!alt) break;
+      asked.push(alt.toLowerCase());
+      left -= 1;
+      const room = SEARCH_CALL_CAP + (scope.ledger.bonus ?? 0) - searchCalls(scope.ledger);
+      if (room < 1) scope.ledger.bonus = (scope.ledger.bonus ?? 0) + (1 - room);
+      const again = await searchWithLate({ q: alt, freshness: guessFreshness(query), count: 8, lite: true }, env, scope);
+      const gated = applyRelevance(alt, { ...again.response, query: alt }, scope.ledger);
+      const add = gated.results.filter((row) => !results.results.some((have) => have.url === row.url)).slice(0, 6);
+      if (!add.length) break;
+      const promoted = [...add, ...results.results];
+      const afterLead = factAnswer(query, promoted.slice(0, 12).map((row) => `${row.title} ${row.snippet ?? ''}`).join('\n'))?.lead;
+      // Pages that supplied the missing fact lead, so the card is read from them.
+      results = { ...results, results: afterLead && afterLead !== beforeLead ? promoted : [...results.results, ...add] };
+      send('peek', add.slice(0, PEEK_ROWS).map(({ title, url, domain, date }) => ({ title, url, domain, date })));
+      send('search', results);
+      console.log(JSON.stringify({ zo: 'hop', alt, added: add.length }));
+    }
   }
   let late: Promise<LateExtras> | undefined = found.late;
   // EN4 part 8: set when the answer is rebuilt from the rows behind a Which-one? pick, so the
