@@ -1,3 +1,4 @@
+import { boundAsk } from '../shared/queryBound';
 import { isBlockPage } from './blockPage';
 import { cleanMarkdown } from '../shared/text';
 import type { EngineStatus, Freshness, ImageResult } from '../shared/types';
@@ -74,7 +75,7 @@ function plannedExtras(q: Query): string[] {
   const seen = new Set([base]);
   const out: string[] = [];
   for (const raw of q.more ?? []) {
-    const text = raw.replace(/\s+/g, ' ').trim().slice(0, 180);
+    const text = boundAsk(raw);
     const key = text.toLowerCase();
     if (!text || seen.has(key)) continue;
     seen.add(key);
@@ -286,13 +287,14 @@ function serperPics(list: (SerperPic | undefined)[]): ImageResult[] {
  * Counts against the Serper daily cap (same bucket). Never throws; https originals only.
  */
 export async function serperImages(query: string, env: Env, bucket: CapBucket, onCall?: () => void, timeoutMs = 2500): Promise<ImageResult[]> {
-  if (!hasKey(env, 'SERPER_API_KEY') || engineDead('serper')) return [];
+  const q = boundAsk(query, 200);
+  if (!q || !hasKey(env, 'SERPER_API_KEY') || engineDead('serper')) return [];
   if (!(await takeSlot(env, 'serper', bucket, undefined, bucket === 'prod' ? SERPER_IMAGES_SHARE : 1))) return [];
   onCall?.();
   try {
     const data = await fetchJson<{ images?: SerperPic[] }>(
       'https://google.serper.dev/images',
-      { method: 'POST', headers: { 'X-API-KEY': env.SERPER_API_KEY!, 'Content-Type': 'application/json' }, body: JSON.stringify({ q: query.slice(0, 200), num: 10 }) },
+      { method: 'POST', headers: { 'X-API-KEY': env.SERPER_API_KEY!, 'Content-Type': 'application/json' }, body: JSON.stringify({ q, num: 10 }) },
       timeoutMs,
     );
     return serperPics(data.images ?? []).slice(0, 8);

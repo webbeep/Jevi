@@ -92,6 +92,10 @@ test('a price follow-up names the instrument already on screen', () => {
   assert.equal(quoteFollowQuery("what's the price", ['Tesla', 'tesla stock']), 'tesla stock what\'s the price');
   assert.equal(quoteFollowQuery('why is it moving today?', ['Btc Usd']), undefined);
   assert.equal(quoteFollowQuery('how much does the battery weigh', ['iphone 17']), undefined);
+  const long = 'AI Data Center Debt vs 2008 MBS Based on 2008 scenario and outcome, how the stock and companies will play out and who gets hurt when the debt comes due';
+  assert.ok(long.length > 120);
+  assert.equal(quoteFollowQuery(long, ['AI Data Center Debt vs 2008 MBS']), undefined);
+  assert.equal(long.slice(0, 120).endsWith(' '), false);
 });
 
 test('a query carrying an address is never a person to disambiguate', () => {

@@ -8,6 +8,8 @@
  * Pure: no DOM, no network.
  */
 
+import { boundAsk } from './queryBound';
+
 /** The card box a tapped follow-up is about. Every string is trimmed and at most REF_MAX chars; sourceUrl is https only. */
 export interface AskRef { label?: string; value?: string; entity?: string; sourceUrl?: string; snippet?: string }
 
@@ -366,7 +368,7 @@ export function withRef(query: string, ref: AskRef | undefined): string {
   const thing = ref.value ?? ref.label;
   if (thing && shortThing(thing) && !mentions(q, thing)) q = `${q} ${thing}`;
   if (ref.entity && !mentions(q, ref.entity)) q = `${q} ${ref.entity}`;
-  return q.replace(/\s+/g, ' ').trim().slice(0, 300);
+  return boundAsk(q);
 }
 
 /**

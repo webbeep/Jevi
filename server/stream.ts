@@ -36,6 +36,7 @@ import { type EntityHint, mentionsAny } from './imageGate';
 import type { RowImagePlan } from './pictures';
 import type { AnswerCard, CardNode, FollowupContext, FollowupIntent, LayoutPlan } from '../shared/card';
 import { type AskRef, cardSearchQuery, plainFollowup, refContext, topicOf, usefulFollowups, withRef } from '../shared/askAbout';
+import { QUOTE_MAX } from '../shared/quoteAsk';
 import type { EngineStatus, Freshness, ImageResult, SearchResponse, SearchResult } from '../shared/types';
 import { rewriteQuery } from './ai';
 import { type DesignRequest, designParallel, designStream, gateNode } from './design';
@@ -1334,6 +1335,13 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
   if (quoted) {
     send('rewrite', { query: quoted });
     await searchAndDesign(send, env, quoted, 'any', context, started, scope, true, undefined, undefined, chart);
+    return;
+  }
+
+  // A long question is searched as written. The previous card stays in the conversation,
+  // and the words they typed are the search — not a stub cut to fit a shorter check.
+  if (req.intent !== 'adjust' && standsAlone(req.question) && req.question.trim().length > QUOTE_MAX) {
+    await searchAndDesign(send, env, req.question.trim(), 'any', context, started, scope, false, undefined, undefined, chart);
     return;
   }
 

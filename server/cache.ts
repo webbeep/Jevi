@@ -1,3 +1,4 @@
+import { boundAsk } from '../shared/queryBound';
 import type { SearchResponse } from '../shared/types';
 import type { Env } from './util';
 
@@ -55,7 +56,7 @@ export function packSearch(res: SearchResponse): string {
       }
     : undefined;
   const body: SearchResponse = {
-    query: res.query.slice(0, 300),
+    query: boundAsk(res.query),
     freshness: res.freshness,
     results,
     images,

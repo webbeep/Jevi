@@ -1,3 +1,4 @@
+import { boundAsk } from '../shared/queryBound';
 import { estimateCost } from './router';
 import { clearSkipCache } from './engineSkip';
 import { expandCashtags } from './queryClean';
@@ -128,7 +129,7 @@ export function failureOf(err: unknown): { fall: boolean; dead: boolean; reason:
   return { fall: true, dead: false, reason: 'error' };
 }
 
-const cleanQuery = (s: string) => s.replace(/\s+/g, ' ').trim().slice(0, 180);
+const cleanQuery = (s: string) => boundAsk(s);
 
 /**
  * The person's question, with cashtags spelled out ("$rdw" → "RDW stock"). It is always

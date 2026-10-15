@@ -1,3 +1,4 @@
+import { boundAsk } from '../../shared/queryBound';
 import { applyGate } from '../../server/auth/gate';
 import { recordAsk } from '../../server/auth/history';
 import { cleanRef } from '../../shared/askAbout';
@@ -29,20 +30,21 @@ function clean(body: StreamRequest | null): StreamRequest | undefined {
   const context = text(body.context, 6000) || undefined;
   switch (body.kind) {
     case 'search': {
-      const query = text(body.query, 300);
+      const query = boundAsk(typeof body.query === 'string' ? body.query : '');
       return query ? { kind: 'search', query, freshness: FRESHNESS.has(body.freshness) ? body.freshness : 'any', context } : undefined;
     }
     case 'design': {
       const search = clampSearch(body.search);
-      const query = text(body.query, 300);
+      const query = boundAsk(typeof body.query === 'string' ? body.query : '');
       return search && query ? { ...body, query, search, context } : undefined;
     }
     case 'followup': {
       const search = clampSearch(body.search);
-      const question = text(body.question, 600);
+      const question = boundAsk(typeof body.question === 'string' ? body.question : '');
       const cards = Array.isArray(body.cards) ? body.cards.slice(-8).map((c) => ({ ...c, title: text(c.title, 120) })) : [];
       const ref = cleanRef(body.ref);
-      return search && question ? { ...body, question, original: text(body.original, 300), search, cards, context, ...(ref ? { ref } : {}) } : undefined;
+      const original = boundAsk(typeof body.original === 'string' ? body.original : '');
+      return search && question ? { ...body, question, original, search, cards, context, ...(ref ? { ref } : {}) } : undefined;
     }
     default: {
       const unknown: never = body;

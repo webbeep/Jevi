@@ -120,8 +120,11 @@ function stockAsk(raw: string, q: string): QuoteAsk | undefined {
   return { kind: 'stock', lookup: name };
 }
 
+/** Longer than this is an essay that mentions a market, not a request for one instrument's price. */
+export const QUOTE_MAX = 120;
+
 export function quoteAsk(query: string): QuoteAsk | undefined {
-  if (!query.trim() || query.length > 120) return undefined;
+  if (!query.trim() || query.length > QUOTE_MAX) return undefined;
   const q = norm(query);
   const short = q.trim().split(' ').length <= 6;
   return cryptoPair(q)

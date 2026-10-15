@@ -1,3 +1,4 @@
+import { boundAsk } from '../../shared/queryBound';
 import type { Freshness } from '../../shared/types';
 import { newLedger } from '../../server/budget';
 import { publicSearch } from '../../server/publicPayload';
@@ -9,7 +10,7 @@ const FRESHNESS: Freshness[] = ['any', 'day', 'week', 'month', 'year'];
 
 export const onRequestGet: PagesFunction<Env> = async ({ request, env, waitUntil }) => {
   const url = new URL(request.url);
-  const q = url.searchParams.get('q')?.trim().slice(0, 300);
+  const q = boundAsk(url.searchParams.get('q') ?? '');
   if (!q) return errorJson('Missing q', 400);
   const f = url.searchParams.get('freshness') as Freshness;
   const freshness = FRESHNESS.includes(f) ? f : 'any';

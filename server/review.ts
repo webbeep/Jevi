@@ -1,3 +1,4 @@
+import { boundAsk } from '../shared/queryBound';
 import type { AnswerCard, CardNode } from '../shared/card';
 import type { SearchResult } from '../shared/types';
 import { BRIEF_ROWS, rowLine, type SourceBrief } from './brief';
@@ -65,7 +66,7 @@ export function readReview(raw: Raw | undefined, indices: Set<number>): Review |
   // A note about the card's own wording is an editor's remark, not something the reader should see.
   const note = said && !SELF_REMARK.test(said) ? said : undefined;
   const followups = Array.isArray(raw.followups)
-    ? raw.followups.filter((f): f is string => typeof f === 'string' && !!f.trim()).map((f) => f.trim().slice(0, 120)).slice(0, 4)
+    ? raw.followups.filter((f): f is string => typeof f === 'string' && !!f.trim()).map((f) => boundAsk(f)).filter(Boolean).slice(0, 4)
     : [];
   const ok = raw.verdict === 'ok' || (!fixes.length && !note && !followups.length);
   return { ok, problems, fixes: ok ? [] : fixes, note: ok ? undefined : note, ...(!ok && followups.length ? { followups } : {}) };

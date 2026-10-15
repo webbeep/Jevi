@@ -167,6 +167,16 @@ describe('runway', { concurrency: 1 }, () => {
     assert.deepEqual(moreQueries('news tldr today', ['top headlines today', 'tldr news site']), ['top headlines today', 'tldr news site']);
     assert.equal(queriesForAsk('  Foo   Bar ', []), 'Foo Bar');
     assert.equal(queriesForAsk('foo', ['foo', 'FOO']), 'foo');
+    const longAsk = Array.from({ length: 70 }, (_, i) => `word${i}`).join(' ');
+    assert.ok(longAsk.length > 300);
+    assert.equal(queriesForAsk(longAsk, []), longAsk);
+    const over = `${Array.from({ length: 800 }, (_, i) => `word${i}`).join(' ')} tail`;
+    const cut = queriesForAsk(over, []);
+    assert.ok(cut.length <= 2000);
+    assert.ok(cut.length < over.length);
+    assert.ok(over.startsWith(cut));
+    assert.equal(over[cut.length], ' ');
+    assert.equal(queriesForAsk('a'.repeat(2100), []), '');
     assert.deepEqual(moreQueries('foo', ['foo', 'FOO', 'bar']), ['bar']);
     assert.equal(validTestToken('secret', undefined), false);
     assert.equal(validTestToken('nope', 'secret'), false);

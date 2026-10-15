@@ -195,6 +195,8 @@ describe('T444 entity disambiguation', () => {
     assert.equal(isPersonAsk('best tablets', 'profile'), false);
     assert.equal(isPersonAsk('who is the fastest animal'), false);
     assert.equal(isPersonAsk('Who is Datasite, owner of Blueflame AI'), false);
+    assert.equal(isPersonAsk('Who is Tim from Blueflame'), true);
+    assert.equal(isPersonAsk('Who is Tim at Blueflame AI'), true);
     assert.equal(isPersonAsk('Who is Drake?'), true);
     assert.equal(isPersonAsk("Who was Japan's Prime Minister after Ichirō Hatoyama left office on December 23, 1956?"), false);
     const office = gateResults("Who was Japan's Prime Minister after Ichirō Hatoyama left office on December 23, 1956?", [
@@ -1171,4 +1173,35 @@ test('a famous person with an exact Wikipedia article and no second person stays
     row('Legends profile: Michael Jordan', 'Michael Jordan is a six-time NBA champion.', 'https://www.nba.com/news/history-nba-legend-michael-jordan'),
   ];
   assert.equal(resolveEntity('Who is Michael Jordan?', rows).kind, 'single');
+});
+
+test('a given name plus a workplace does not merge two people onto one card', () => {
+  const rows = [
+    row('Tim Blue - Wikipedia', 'Tim Blue (born July 10, 1984) is a former professional basketball player and power forward.', 'https://en.wikipedia.org/wiki/Tim_Blue'),
+    row('Tim Lee - Software Engineer at BlueFlame AI | LinkedIn', 'Tim Lee is a software engineer at BlueFlame AI. Education: NJIT. Previously at Eco-Enterprise.', 'https://www.linkedin.com/in/timlee'),
+    row('BlueFlame AI', 'BlueFlame AI builds an agent for finance teams.', 'https://blueflame.ai/'),
+  ];
+  const decision = resolveEntity('Who is Tim from Blueflame', rows, { pattern: 'profile' });
+  assert.equal(decision.kind, 'choices');
+  if (decision.kind !== 'choices') return;
+  const names = decision.choices.map((choice) => choice.name.toLowerCase());
+  assert.ok(names.some((name) => name.includes('tim blue')));
+  assert.ok(names.some((name) => name.includes('tim lee')));
+  for (const choice of decision.choices) {
+    const text = (choice.seeds ?? []).map((i) => `${rows[i]!.title} ${rows[i]!.snippet ?? ''}`).join(' ');
+    if (choice.name.toLowerCase().includes('tim blue')) assert.doesNotMatch(text, /BlueFlame|NJIT|Eco-Enterprise/);
+    if (choice.name.toLowerCase().includes('tim lee')) assert.doesNotMatch(text, /basketball|power forward/);
+  }
+});
+
+test('one person who matches the workplace is still one card, without the other pages', () => {
+  const rows = [
+    row('Tim Lee - Software Engineer at BlueFlame AI', 'Tim Lee is a software engineer at BlueFlame AI in New Jersey.', 'https://www.linkedin.com/in/timlee'),
+    row('BlueFlame AI', 'BlueFlame AI builds an agent for finance teams.', 'https://blueflame.ai/'),
+  ];
+  const decision = resolveEntity('Who is Tim from Blueflame', rows, { pattern: 'profile' });
+  assert.equal(decision.kind, 'single');
+  if (decision.kind !== 'single') return;
+  assert.match(decision.entity.name, /Tim Lee/);
+  assert.deepEqual(decision.kept, [0]);
 });

@@ -1,3 +1,4 @@
+import { boundAsk } from '../shared/queryBound';
 import { isBriefingQuery } from '../shared/recency.ts';
 import type { EngineStatus, Freshness, SearchResult } from '../shared/types';
 import type { Env } from './util';
@@ -82,7 +83,9 @@ export function socialSources(posts: SocialPost[]): SearchResult[] {
 /** One searchPosts call. public.api.bsky.app 403s from this network; the AppView host is the documented unauthenticated fallback. */
 export async function blueskySearch(query: string, timeoutMs = SOCIAL_TIMEOUT_MS): Promise<SocialPost[]> {
   const u = new URL(APPVIEW);
-  u.searchParams.set('q', query.slice(0, 200));
+  const q = boundAsk(query, 200);
+  if (!q) return [];
+  u.searchParams.set('q', q);
   u.searchParams.set('limit', String(SOCIAL_LIMIT));
   u.searchParams.set('sort', 'latest');
   const res = await fetch(u.toString(), { headers: { Accept: 'application/json', 'User-Agent': UA }, signal: AbortSignal.timeout(timeoutMs) });

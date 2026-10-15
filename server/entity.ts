@@ -1,4 +1,5 @@
 import { NAME_PARTICLE } from '../shared/askAbout';
+import { boundAsk } from '../shared/queryBound';
 import { nameLike, tokens, type EntityHint } from './imageGate';
 import { isBlockedHost, isFictionHost } from './spamHosts';
 
@@ -553,6 +554,24 @@ const wordCount = (s: string) => s.trim().split(/\s+/).filter(Boolean).length;
 
 const MACHINE_ADDRESS = /\b(?:\d{1,3}\.){3}\d{1,3}\b|\b(?:[0-9a-f]{1,4}:){2,}/i;
 
+/**
+ * "Who is Tim from Blueflame": a given name plus where they are. Still a person.
+ * "Who is Datasite, owner of BlueFlame AI": a company and an appositive, not a person.
+ */
+export function givenWithPlace(query: string): boolean {
+  const q = query.trim();
+  if (!WHO_IS.test(q) && !ABOUT.test(q)) return false;
+  const name = personSubject(q);
+  if (!name || /\s/.test(name)) return false;
+  if (looksLikeOrgToken(name) || ORG_TAIL.test(name) || ROLE1.has(name.toLowerCase())) return false;
+  const rest = q.replace(/\?+\s*$/, '').replace(WHO_IS, '').replace(ABOUT, '').replace(LEAD_Q, '').trim();
+  const at = rest.toLowerCase().indexOf(name.toLowerCase());
+  if (at < 0) return false;
+  const after = rest.slice(at + name.length).trim();
+  if (!after || /^[,:]/.test(after) || /\b(?:owners?|company|startup|firm)\b/i.test(after)) return false;
+  return /^(?:from|at|with)\s+\S/i.test(after);
+}
+
 export function isPersonAsk(query: string, pattern?: string): boolean {
   if (MACHINE_ADDRESS.test(query)) return false;
   if (COMPARE_ASK.test(query) && !WHO_IS.test(query.trim())) return false;
@@ -564,8 +583,9 @@ export function isPersonAsk(query: string, pattern?: string): boolean {
   if (WHO_IS.test(query.trim()) || ABOUT.test(query.trim())) {
     // "Who is Datasite, owner of BlueFlame AI": one name word plus more words is a company asked about
     // with context; the person gate needs a full name, so it would drop every source.
+    // "Who is Tim from Blueflame" names a person and where they are, so it stays a person.
     const rest = query.trim().replace(/\?+\s*$/, '').replace(WHO_IS, '').replace(ABOUT, '');
-    if (wordCount(subject) < 2 && wordCount(rest) > wordCount(subject)) return false;
+    if (wordCount(subject) < 2 && wordCount(rest) > wordCount(subject) && !givenWithPlace(query)) return false;
     return subject !== '';
   }
   // SPD-C1 (t457): a capitalised phrase inside a longer sentence is the topic, not a person lookup
@@ -676,7 +696,7 @@ export function commaDetailQuery(query: string): string {
     if (/^[a-z]/.test(w) && w.length > 1) return w[0]!.toUpperCase() + w.slice(1);
     return w;
   });
-  return `${name} ${words.join(' ')}`.slice(0, 160);
+  return boundAsk(`${name} ${words.join(' ')}`);
 }
 
 const title = (s: string) => s.trim().replace(/\s+/g, ' ').replace(/[.,;:!?]+$/, '');
@@ -1184,7 +1204,7 @@ function choiceQuery(name: string, top: { role?: string; org?: string; location?
   const query = title([name, ...tail].join(' '));
   // A pick that re-asks the bare name just brings the choices back, so it only stands when
   // there is no org/location to ask about.
-  if (tail.length && personSubject(query) === name) return query.slice(0, 120);
+  if (tail.length && personSubject(query) === name) return boundAsk(query);
   // personSubject keeps a 3-token Cap phrase as a name, so a lone org/location word joins it
   // ("Ray Lee Arsenal" → the person "Ray Lee Arsenal") or is dropped for it. A lowercase
   // connector stops the capitalised run and still asks for the words that pick this person
@@ -1193,11 +1213,11 @@ function choiceQuery(name: string, top: { role?: string; org?: string; location?
   const budget = 2;
   if (org.length) {
     const withOrg = title(`${name} of ${org.slice(0, budget).join(' ')}`);
-    if (personSubject(withOrg) === name) return withOrg.slice(0, 120);
+    if (personSubject(withOrg) === name) return boundAsk(withOrg);
   }
   if (loc.length) {
     const withLoc = title(`${name} in ${loc.slice(0, budget).join(' ')}`);
-    if (personSubject(withLoc) === name) return withLoc.slice(0, 120);
+    if (personSubject(withLoc) === name) return boundAsk(withLoc);
   }
   // Nothing asks for the org/location without breaking the name: never a name no source carries.
   return title(name);
@@ -1482,6 +1502,70 @@ export function disambiguationEntries(row: EntityRow, name: string): { role?: st
     .map((e) => ({ label: e.label, role: e.role, org: e.org, location: e.location }));
 }
 
+/** Full names in a row whose given name matches the asked name ("Tim" → "Tim Blue", "Timothy Lee"). */
+function fullNamesMatching(row: EntityRow, first: string): string[] {
+  const forms = firstNameForms(first.toLowerCase());
+  const alt = forms.map((form) => {
+    const body = form.slice(1).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return `${form[0]!.toUpperCase()}${body}|${form[0]!.toLowerCase()}${body}`;
+  }).join('|');
+  const re = new RegExp(`\\b(?:${alt})\\s+([A-Z][a-zA-Z'’-]{1,})\\b`, 'g');
+  const text = `${row.title ?? ''} ${row.snippet ?? ''}`;
+  const out: string[] = [];
+  for (const match of text.matchAll(re)) {
+    const surname = match[1]!;
+    const lowSurname = surname.toLowerCase();
+    if (COMMON.has(lowSurname) || ROLE1.has(lowSurname) || DESCRIPTOR_WORDS.has(lowSurname) || ROLE_TAIL.has(lowSurname)) continue;
+    if (looksLikeOrgToken(surname) || ORG_TAIL.test(surname) || GENERIC_ORG.test(surname) || SPORTS_LEAGUE.test(surname)) continue;
+    const given = match[0].split(/\s+/)[0]!;
+    const full = `${given[0]!.toUpperCase()}${given.slice(1)} ${surname}`;
+    if (!out.some((name) => name.toLowerCase() === full.toLowerCase())) out.push(full);
+  }
+  return out;
+}
+
+/**
+ * A given name plus a workplace still names people. Rows that carry different full names
+ * are different people: ask which one, and never keep both on one card.
+ * One full name is that person only. Rows that never name them stay off the card.
+ */
+function peopleNamedLike(first: string, rows: EntityRow[]): EntityDecision | undefined {
+  const buckets = new Map<string, { name: string; rows: number[] }>();
+  for (let i = 0; i < rows.length; i++) {
+    const names = fullNamesMatching(rows[i]!, first);
+    const keys = [...new Set(names.map((name) => name.toLowerCase()))];
+    if (keys.length !== 1) continue;
+    const key = keys[0]!;
+    const found = buckets.get(key) ?? { name: names[0]!, rows: [] };
+    found.rows.push(i);
+    buckets.set(key, found);
+  }
+  const groups = [...buckets.values()].sort((a, b) => b.rows.length - a.rows.length || a.rows[0]! - b.rows[0]!);
+  if (!groups.length) return undefined;
+  if (groups.length >= 2) {
+    const choices = groups.map((group) => toChoice(group.name, group.rows, rows)).filter(offerChoice).slice(0, 3);
+    if (choices.length >= 2) return { kind: 'choices', choices };
+    if (choices.length === 1) {
+      const only = groups.find((group) => group.name === choices[0]!.name) ?? groups[0]!;
+      const kept = new Set(only.rows);
+      return {
+        kind: 'single',
+        entity: buildEntity(only.name, only.rows, rows),
+        kept: only.rows,
+        dropped: rows.map((_, i) => i).filter((i) => !kept.has(i)),
+      };
+    }
+  }
+  const only = groups[0]!;
+  const kept = new Set(only.rows);
+  return {
+    kind: 'single',
+    entity: buildEntity(only.name, only.rows, rows),
+    kept: only.rows,
+    dropped: rows.map((_, i) => i).filter((i) => !kept.has(i)),
+  };
+}
+
 export function resolveEntity(
   query: string,
   rows: EntityRow[],
@@ -1490,6 +1574,12 @@ export function resolveEntity(
   if (!isPersonAsk(query, opts?.pattern) || nameIsTopic(query, rows)) return { kind: 'skip' };
   const name = personSubject(query);
   if (!name || !rows.length) return { kind: 'skip' };
+  // A first name and a workplace ("who is Tim from Blueflame") is not one person yet.
+  // Two full names in the sources are a choice; one full name keeps only that person's rows.
+  if (!opts?.prior && !/\s/.test(name) && givenWithPlace(query)) {
+    const named = peopleNamedLike(name, rows);
+    if (named) return named;
+  }
   // A one-token famous ask ("Who is Obama"): one Wikipedia article for the token, plus other
   // Wikipedia pages about it, is one dominant identity — resolve that person instead of skipping.
   // The article title has 2+ words, so the follow-up ask can never come back here.

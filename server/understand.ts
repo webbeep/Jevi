@@ -1,3 +1,4 @@
+import { boundAsk } from '../shared/queryBound';
 import type { Freshness, SearchResponse } from '../shared/types';
 import { diversify } from './diversify';
 import { hasLlm, llmJson } from './llm';
@@ -33,7 +34,7 @@ export async function understand(query: string, env: Env, context?: string, time
   if (!out || typeof out.intent !== 'string') return undefined;
   const queries = (Array.isArray(out.queries) ? out.queries : [])
     .filter((q): q is string => typeof q === 'string' && q.trim().length > 1)
-    .map((q) => q.trim().slice(0, 120))
+    .map((q) => boundAsk(q))
     .slice(0, 3);
   return { intent: out.intent.trim().slice(0, 200), queries, freshness: FRESHNESS.has(out.freshness as Freshness) ? (out.freshness as Freshness) : 'any' };
 }

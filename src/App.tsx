@@ -16,6 +16,7 @@ import { ArrowUp, CornerDownRight, CornerLeftUp, History, Plus, RotateCw, Search
 import type { AnswerCard, CardNode } from '../shared/card';
 import { packHistorySources, type HistorySource } from '../shared/historyCard';
 import { topicOf, usefulFollowups, type AskRef } from '../shared/askAbout';
+import { boundAsk } from '../shared/queryBound';
 import type { SearchResponse } from '../shared/types';
 import { api } from './api';
 import { AnswerCardView } from './card/AnswerCardView';
@@ -745,7 +746,7 @@ function Composer({ actions, topic, mainRef }: { actions: SessionActions; topic:
       const el = node instanceof Element ? node : node?.parentElement;
       const turnEl = el?.closest<HTMLElement>('[data-turn]');
       if (text.length < 3 || !turnEl || !mainRef.current?.contains(turnEl)) return;
-      const next = { text: text.slice(0, 600), turnId: Number(turnEl.dataset.turn) };
+      const next = { text: boundAsk(text), turnId: Number(turnEl.dataset.turn) };
       setQuote((q) => (q?.text === next.text && q.turnId === next.turnId ? q : next));
     };
     document.addEventListener('selectionchange', onSelect);

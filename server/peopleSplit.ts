@@ -1,3 +1,4 @@
+import { boundAsk } from '../shared/queryBound';
 import type { SearchResult } from '../shared/types';
 import type { EntityChoice } from './entity';
 import { hasLlm, llmJson } from './llm';
@@ -41,7 +42,7 @@ export function readPeople(raw: Raw | undefined, name: string, count: number, mi
       .filter((n): n is number => Number.isInteger(n) && n >= 1 && n <= count && !taken.has(n - 1))
       .map((n) => n - 1);
     const descriptor = p.who.trim().replace(/\s+/g, ' ').slice(0, 60);
-    const query = p.query.trim().replace(/\s+/g, ' ').slice(0, 100);
+    const query = boundAsk(p.query);
     if (!seeds.length || !descriptor || !query.toLowerCase().includes(surname)) continue;
     if (/\b(professionals|people|profiles|users|persons|accounts|members)\s+named\b|\bpeople search\b/i.test(`${descriptor} ${query}`)) continue;
     seeds.forEach((i) => taken.add(i));

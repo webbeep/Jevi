@@ -1,3 +1,4 @@
+import { ASK_MAX, boundAsk } from '../../shared/queryBound.ts';
 import { packHistoryPayload, packHistorySources, unpackHistoryPayload } from '../../shared/historyCard.ts';
 import type { AnswerCard } from '../../shared/card.ts';
 import { randomId } from './crypto.ts';
@@ -14,7 +15,7 @@ import { json } from '../util.ts';
  * - `GET /api/account/usage` returns counts only, from the same D1 counter the gate uses.
  */
 const CARD_MAX = 64 * 1024;
-const QUERY_MAX = 500;
+const QUERY_MAX = ASK_MAX;
 const PAGE = 20;
 /** A finished card attaches to that question's latest row within this window. */
 const ATTACH_MS = 30 * 60_000;
@@ -34,7 +35,7 @@ const hashOf = (q: string) => sha256Hex(normalize(q));
 /** Called from /api/stream after the gate let a signed-in ask through. Never throws. */
 export async function recordAsk(env: Env, userId: string, query: string, kind: 'search' | 'followup', now = new Date()): Promise<void> {
   const db = d1(env);
-  const q = query.trim().slice(0, QUERY_MAX);
+  const q = boundAsk(query, QUERY_MAX);
   if (!db || !q) return;
   try {
     const hash = await hashOf(q);
@@ -157,7 +158,7 @@ export async function handleHistoryCard(request: Request, env: Env, now = new Da
   } catch {
     return json({ error: 'Invalid JSON body' }, 400);
   }
-  const query = typeof body.query === 'string' ? body.query.trim().slice(0, QUERY_MAX) : '';
+  const query = typeof body.query === 'string' ? boundAsk(body.query, QUERY_MAX) : '';
   if (!query || !body.card || typeof body.card !== 'object') return json({ error: 'Invalid card' }, 400);
   const results = packHistorySources(Array.isArray(body.results) ? body.results : []);
   const cardJson = JSON.stringify(packHistoryPayload(body.card as AnswerCard, results));
@@ -220,7 +221,7 @@ export async function handleHistoryTouchQuery(request: Request, env: Env, now = 
   } catch {
     return json({ error: 'Invalid JSON body' }, 400);
   }
-  const query = typeof body.query === 'string' ? body.query.trim().slice(0, QUERY_MAX) : '';
+  const query = typeof body.query === 'string' ? boundAsk(body.query, QUERY_MAX) : '';
   if (!query) return json({ error: 'Invalid query' }, 400);
   try {
     const db = d1(env)!;

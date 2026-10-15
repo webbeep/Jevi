@@ -1,6 +1,6 @@
 import { askFacet, personName } from '../shared/askAbout';
 import type { CardNode, FollowupMode, LayoutPlan } from '../shared/card';
-import { quoteAsk } from '../shared/quoteAsk';
+import { quoteAsk, QUOTE_MAX } from '../shared/quoteAsk';
 import { isBlockPage } from './blockPage';
 import { isCalculationAsk } from './calculate';
 import { repeatsCallout } from './chips';
@@ -89,12 +89,16 @@ export function quoteFollowQuery(question: string, subjects: readonly string[]):
   const q = question.trim();
   if (!q) return undefined;
   if (quoteAsk(q)) return q;
-  if (!PRICE_CUE.test(q)) return undefined;
+  // A long question is the question. Chopping it so a ticker check would accept the stub
+  // searched that stub ("… who g") and charted whatever symbol survived inside it.
+  if (!PRICE_CUE.test(q) || q.length > QUOTE_MAX) return undefined;
   for (const subject of subjects) {
-    const head = subject.trim().split(/\s+/).slice(0, 10).join(' ');
-    if (!head) continue;
-    const combined = `${head} ${q}`.replace(/\s+/g, ' ').trim().slice(0, 120);
-    if (quoteAsk(combined)) return combined;
+    let words = subject.trim().split(/\s+/).filter(Boolean).slice(0, 10);
+    while (words.length) {
+      const combined = `${words.join(' ')} ${q}`.replace(/\s+/g, ' ').trim();
+      if (combined.length <= QUOTE_MAX && quoteAsk(combined)) return combined;
+      words = words.slice(0, -1);
+    }
   }
   return undefined;
 }

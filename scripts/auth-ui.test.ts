@@ -48,12 +48,19 @@ test('routeGate sends device to the sheet and signed or ip inline', () => {
   assert.equal(routeGate('other'), 'signed');
 });
 
-test('capHistory clips to 200 chars and caps at 50 unique questions', () => {
-  const long = `${'a'.repeat(HISTORY_MAX_CHARS + 40)}`;
+test('capHistory keeps a long question whole and caps at 50 unique questions', () => {
+  const long = Array.from({ length: 40 }, (_, i) => `word${i}`).join(' ');
+  assert.ok(long.length > 200);
   const capped = capHistory([`  ${long}  `, long, 'Second']);
   assert.equal(capped.length, 2);
-  assert.equal(capped[0].length, HISTORY_MAX_CHARS);
+  assert.equal(capped[0], long);
   assert.equal(capped[1], 'Second');
+  const over = `${Array.from({ length: 800 }, (_, i) => `word${i}`).join(' ')} tail`;
+  const cut = capHistory([over])[0] ?? '';
+  assert.ok(cut.length <= HISTORY_MAX_CHARS);
+  assert.ok(over.startsWith(cut));
+  assert.equal(over[cut.length], ' ');
+  assert.equal(capHistory(['a'.repeat(HISTORY_MAX_CHARS + 5)]).length, 0);
 
   const many = Array.from({ length: 60 }, (_, i) => `q${i}`);
   const fifty = capHistory(many);
@@ -75,7 +82,7 @@ test('mergeHistory keeps device timestamps, adds server-only rows, and caps', ()
   );
   assert.deepEqual(merged.map((row) => row.q), [
     'Server newest',
-    'z'.repeat(HISTORY_MAX_CHARS),
+    'z'.repeat(250),
     'Device newest',
     'shared',
   ]);

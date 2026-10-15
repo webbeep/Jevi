@@ -1,3 +1,5 @@
+import { ASK_MAX, boundAsk } from '../../shared/queryBound';
+
 /** Pure auth helpers. No DOM, so unit tests can import this file directly. */
 
 export type AuthReturnStatus = 'ok' | 'cancelled' | 'error' | null;
@@ -52,10 +54,10 @@ export function routeGate(reason: string): GateRoute {
 }
 
 export const HISTORY_CAP = 50;
-export const HISTORY_MAX_CHARS = 200;
+export const HISTORY_MAX_CHARS = ASK_MAX;
 
 export function clipHistoryQuery(raw: string): string {
-  return raw.trim().slice(0, HISTORY_MAX_CHARS);
+  return boundAsk(raw, HISTORY_MAX_CHARS);
 }
 
 /** Newest-first list, deduped case-insensitively, clipped, capped at 50. */

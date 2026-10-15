@@ -1,4 +1,5 @@
 import type { CardNode } from '../shared/card';
+import { boundAsk } from '../shared/queryBound';
 
 /**
  * A question whose answer needs more than one fact: the birth date and the event,
@@ -458,7 +459,7 @@ export function nextHop(query: string, corpus: string, ctx: HopContext = {}): st
   const seen = new Set((ctx.asked ?? []).map((q) => q.toLowerCase()));
   const candidates: string[] = [];
   const offer = (q: string) => {
-    const text = clean(q).slice(0, 160);
+    const text = boundAsk(clean(q));
     if (text.length < 8 || seen.has(text.toLowerCase()) || text.toLowerCase() === clean(query).toLowerCase()) return;
     candidates.push(text);
   };
