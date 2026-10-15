@@ -1179,19 +1179,45 @@ test('a given name plus a workplace does not merge two people onto one card', ()
   const rows = [
     row('Tim Blue - Wikipedia', 'Tim Blue (born July 10, 1984) is a former professional basketball player and power forward.', 'https://en.wikipedia.org/wiki/Tim_Blue'),
     row('Tim Lee - Software Engineer at BlueFlame AI | LinkedIn', 'Tim Lee is a software engineer at BlueFlame AI. Education: NJIT. Previously at Eco-Enterprise.', 'https://www.linkedin.com/in/timlee'),
+    row('Tim Park - Product Manager at BlueFlame AI | LinkedIn', 'Tim Park leads product at BlueFlame AI in New York.', 'https://www.linkedin.com/in/timpark'),
     row('BlueFlame AI', 'BlueFlame AI builds an agent for finance teams.', 'https://blueflame.ai/'),
   ];
   const decision = resolveEntity('Who is Tim from Blueflame', rows, { pattern: 'profile' });
   assert.equal(decision.kind, 'choices');
   if (decision.kind !== 'choices') return;
   const names = decision.choices.map((choice) => choice.name.toLowerCase());
-  assert.ok(names.some((name) => name.includes('tim blue')));
   assert.ok(names.some((name) => name.includes('tim lee')));
+  assert.ok(names.some((name) => name.includes('tim park')));
+  assert.ok(!names.some((name) => name.includes('tim blue')));
   for (const choice of decision.choices) {
     const text = (choice.seeds ?? []).map((i) => `${rows[i]!.title} ${rows[i]!.snippet ?? ''}`).join(' ');
-    if (choice.name.toLowerCase().includes('tim blue')) assert.doesNotMatch(text, /BlueFlame|NJIT|Eco-Enterprise/);
-    if (choice.name.toLowerCase().includes('tim lee')) assert.doesNotMatch(text, /basketball|power forward/);
+    if (choice.name.toLowerCase().includes('tim lee')) assert.doesNotMatch(text, /basketball|power forward|product/);
   }
+});
+
+test('the workplace in the ask picks the person, not namesakes that share a shorter word', () => {
+  const rows = [
+    row('Tim Blue - Wikipedia', 'Tim Blue (born July 10, 1984) is a former professional basketball player and power forward.', 'https://en.wikipedia.org/wiki/Tim_Blue'),
+    row('Timothy Estrada - BlueFlame AI', 'As a Software Engineer at Eco-Enterprise, I direct the architectural design and evolution… · Experience: BlueFlame AI · Education: New Jersey Institute of ...', 'https://www.linkedin.com/in/tim-estrada'),
+    row('Tim DeGrange', 'Tim DeGrange is a Principal at Blue Owl and member of the Direct Lending Investment Team.', 'https://www.blueowl.com/team/tim-degrange'),
+    row('Blue Practice — Narrative Strategy', 'Blue Practice is Tim Gnatek — a senior narrative strategist and former journalist.', 'https://bluepractice.com/'),
+    row('Blueflame AI | AI Deal Intelligence', 'Blueflame connects, synthesizes, and activates proprietary firm intelligence.', 'https://blueflame.ai/'),
+  ];
+  for (const q of ['Who is Tim from Blueflame', 'who is tim from blueflame']) {
+    const decision = resolveEntity(q, rows, { pattern: 'profile' });
+    assert.equal(decision.kind, 'single', q);
+    if (decision.kind !== 'single') continue;
+    assert.equal(decision.entity.name, 'Timothy Estrada');
+    assert.deepEqual(decision.kept, [1]);
+  }
+});
+
+test('namesakes stay a choice when no page names the workplace', () => {
+  const rows = [
+    row('Tim Blue - Wikipedia', 'Tim Blue (born July 10, 1984) is a former professional basketball player.', 'https://en.wikipedia.org/wiki/Tim_Blue'),
+    row('Tim Grimm (Actor)', 'Tim Grimm was born on September 27, 1960, in Columbus, Ohio, and is an actor.', 'https://example.org/tim-grimm'),
+  ];
+  assert.equal(resolveEntity('Who is Tim from Blueflame', rows, { pattern: 'profile' }).kind, 'choices');
 });
 
 test('one person who matches the workplace is still one card, without the other pages', () => {

@@ -189,8 +189,11 @@ export function personSubject(query: string): string {
     return run.slice(0, Math.min(cut, cap)).join(' ');
   }
   // Lowercase person asks only after who/about: "who is barack obama" (not "open source database" or "zxqv").
-  if (hadWho && words.length <= 4 && words.every((w) => /^[a-z0-9][a-z0-9.'-]*$/i.test(w) && !COMMON.has(w.toLowerCase()))) {
-    return words.map((w) => w[0]!.toUpperCase() + w.slice(1)).join(' ');
+  // "who is tim from blueflame": the name ends before from / at / with; the rest is the workplace.
+  const placeAt = words.findIndex((w, i) => i >= 1 && /^(from|at|with)$/i.test(w) && i + 1 < words.length);
+  const nameWords = placeAt > 0 ? words.slice(0, placeAt) : words;
+  if (hadWho && nameWords.length <= 4 && nameWords.every((w) => /^[a-z0-9][a-z0-9.'-]*$/i.test(w) && !COMMON.has(w.toLowerCase()))) {
+    return nameWords.map((w) => w[0]!.toUpperCase() + w.slice(1)).join(' ');
   }
   return '';
 }
@@ -570,6 +573,22 @@ export function givenWithPlace(query: string): boolean {
   const after = rest.slice(at + name.length).trim();
   if (!after || /^[,:]/.test(after) || /\b(?:owners?|company|startup|firm)\b/i.test(after)) return false;
   return /^(?:from|at|with)\s+\S/i.test(after);
+}
+
+/** The workplace words of a given-name ask ("Who is Tim from Blueflame" → ["blueflame"]), in any case. */
+function placeWords(query: string, name: string): string[] {
+  const rest = query.trim().replace(/\?+\s*$/, '').replace(WHO_IS, '').replace(ABOUT, '').replace(LEAD_Q, '').trim();
+  const at = rest.toLowerCase().indexOf(name.toLowerCase());
+  const after = at < 0 ? '' : rest.slice(at + name.length).trim().replace(/^(?:from|at|with)\s+/i, '');
+  return [...new Set(tokens(after).filter((t) => t.length >= 3 && !COMMON.has(t) && !GENERIC_PLACE_WORD.has(t)))];
+}
+
+const GENERIC_PLACE_WORD = new Set(['the', 'inc', 'llc', 'ltd', 'corp', 'company', 'group', 'labs', 'lab', 'team']);
+
+/** The row names the workplace as a word or the head of a compound ("BlueFlame AI", "blueflame.ai"), not a shorter namesake word ("Blue"). */
+function namesPlace(row: EntityRow, place: string[]): boolean {
+  const words = tokens(`${row.title ?? ''} ${row.snippet ?? ''} ${(row.url ?? '').replace(/[./]/g, ' ')}`);
+  return place.some((t) => words.includes(t) || (t.length >= 5 && words.some((w) => w.startsWith(t))));
 }
 
 export function isPersonAsk(query: string, pattern?: string): boolean {
@@ -1529,7 +1548,7 @@ function fullNamesMatching(row: EntityRow, first: string): string[] {
  * are different people: ask which one, and never keep both on one card.
  * One full name is that person only. Rows that never name them stay off the card.
  */
-function peopleNamedLike(first: string, rows: EntityRow[]): EntityDecision | undefined {
+function peopleNamedLike(first: string, rows: EntityRow[], place: string[]): EntityDecision | undefined {
   const buckets = new Map<string, { name: string; rows: number[] }>();
   for (let i = 0; i < rows.length; i++) {
     const names = fullNamesMatching(rows[i]!, first);
@@ -1540,7 +1559,10 @@ function peopleNamedLike(first: string, rows: EntityRow[]): EntityDecision | und
     found.rows.push(i);
     buckets.set(key, found);
   }
-  const groups = [...buckets.values()].sort((a, b) => b.rows.length - a.rows.length || a.rows[0]! - b.rows[0]!);
+  const all = [...buckets.values()].sort((a, b) => b.rows.length - a.rows.length || a.rows[0]! - b.rows[0]!);
+  // The workplace in the ask picks the people: namesakes whose pages never name it are not offered.
+  const placed = place.length ? all.filter((group) => group.rows.some((i) => namesPlace(rows[i]!, place))) : [];
+  const groups = placed.length ? placed : all;
   if (!groups.length) return undefined;
   if (groups.length >= 2) {
     const choices = groups.map((group) => toChoice(group.name, group.rows, rows)).filter(offerChoice).slice(0, 3);
@@ -1577,7 +1599,7 @@ export function resolveEntity(
   // A first name and a workplace ("who is Tim from Blueflame") is not one person yet.
   // Two full names in the sources are a choice; one full name keeps only that person's rows.
   if (!opts?.prior && !/\s/.test(name) && givenWithPlace(query)) {
-    const named = peopleNamedLike(name, rows);
+    const named = peopleNamedLike(name, rows, placeWords(query, name));
     if (named) return named;
   }
   // A one-token famous ask ("Who is Obama"): one Wikipedia article for the token, plus other
