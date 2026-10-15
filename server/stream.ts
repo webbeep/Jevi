@@ -41,7 +41,7 @@ import { rewriteQuery } from './ai';
 import { type DesignRequest, designParallel, designStream, gateNode } from './design';
 import { BRIEF_ROWS, briefSources, remapBrief, type SourceBrief } from './brief';
 import { groundMembers } from './claims';
-import { alignFactProse, cardFacts, factAnswer, hopQueries, leadMemberRows, nextHop, placeFactLead, unsupportedYear } from './hops';
+import { alignFactProse, cardFacts, factAnswer, hasMemberWork, hopQueries, leadMemberRows, nextHop, placeFactLead, unsupportedYear } from './hops';
 import { gapQuery, onTopicCount, rescueQuery, sourcesMiss } from './rescue';
 import { keepPictures, reviewCard, type Review } from './review';
 import { permitted } from './images';
@@ -340,7 +340,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   let reread = false;
   const implied = factAnswer(req.query, req.search.results.map((row) => `${row.title} ${row.snippet ?? ''}`).join('\n'));
   // A replacing rescue is for the wrong subject. It must not drop the hop page that states the missing fact.
-  if (req.allowRescue && brief && !chat && !implied && !req.hopUrls?.length && sourcesMiss(brief)) {
+  if (req.allowRescue && brief && !chat && !implied && !req.hopUrls?.length && !hasMemberWork(req.query, req.search.results) && sourcesMiss(brief)) {
     const again = await rescueSources(send, env, req, brief, scope);
     if (again) {
       req = { ...req, search: again.search };

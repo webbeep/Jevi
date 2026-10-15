@@ -412,10 +412,14 @@ function individualInCorpus(corpus: string, name: string, act: string): boolean 
   return false;
 }
 
-/**
- * Pages about the named work lead, and a hop page stays in front.
- * A page that only matches the activity does not get read ahead of the work.
- */
+/** True when this is a which-members question and a row already names the work. */
+export function hasMemberWork(query: string, rows: readonly { title?: string; snippet?: string; url?: string }[]): boolean {
+  const work = memberWork(query);
+  if (!work || !MEMBER_ASK.test(query)) return false;
+  const needle = work.toLowerCase();
+  return rows.some((row) => `${row.title ?? ''} ${row.snippet ?? ''} ${row.url ?? ''}`.toLowerCase().includes(needle));
+}
+
 export function leadMemberRows<T extends { title?: string; snippet?: string; url?: string }>(
   query: string,
   rows: readonly T[],
