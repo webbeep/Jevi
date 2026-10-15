@@ -69,7 +69,11 @@ function pictures(r) {
     if (!n || typeof n !== 'object') return;
     if (Array.isArray(n)) return n.forEach(walk);
     if (typeof n.imageRef === 'number' && pool[n.imageRef]) found.push({ at: n.type ?? 'item', label: n.label ?? n.name ?? n.text, ...pool[n.imageRef] });
-    if (n.imageSrc) found.push({ at: n.type ?? 'item', label: n.label ?? n.name ?? n.text, thumb: n.imageSrc, title: '' });
+    if (n.imageSrc) {
+      const known = pool.find((p) => p.thumb === n.imageSrc || p.url === n.imageSrc);
+      const credit = (r.of?.('credit') ?? []).find((c) => c.src === n.imageSrc);
+      found.push({ at: n.type ?? 'item', label: n.label ?? n.name ?? n.text, thumb: n.imageSrc, title: known?.title ?? '', url: known?.url ?? credit?.link ?? '' });
+    }
     if (n.type === 'stat' && n.image) found.push({ at: 'stat', label: n.label, thumb: n.image, title: '' });
     if (n.type === 'gallery') {
       for (const ref of n.refs ?? []) if (pool[ref]) found.push({ at: 'gallery', ...pool[ref] });
