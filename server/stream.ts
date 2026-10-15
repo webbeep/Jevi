@@ -136,6 +136,8 @@ interface DesignArgs {
   earlyBrief?: Promise<EarlyBrief | undefined>;
   /** A search that just ran. A wrong result set gets one different search before the card says nothing was found. */
   allowRescue?: boolean;
+  /** Rows a fact hop just added. A replacing rescue must not drop them before they are read. */
+  hopUrls?: string[];
   /** Source number of the person's own website, linked from the profile. */
   website?: number;
 }
@@ -295,7 +297,19 @@ function pagesCanWait(req: DesignArgs): boolean {
 
 async function design(send: Send, env: Env, req: DesignArgs, started: number, scope: AskScope, late?: Promise<LateExtras>) {
   // Follow-ups keep the sources already gated for the original question.
-  if (!req.followup) req = { ...req, search: applyRelevance(req.query, req.search, scope.ledger) };
+  if (!req.followup) {
+    const before = req.search.results;
+    const gated = applyRelevance(req.query, req.search, scope.ledger);
+    const lead = factAnswer(req.query, before.map((row) => `${row.title} ${row.snippet ?? ''}`).join('\n'))?.lead;
+    const kept = new Set(gated.results.map((row) => row.url));
+    const want = new Set(req.hopUrls ?? []);
+    // Hop rows, and any row that states the implied figure, stay at the front so they are read.
+    const carry = before.filter((row) => !kept.has(row.url) && (want.has(row.url) || (lead ? `${row.title} ${row.snippet ?? ''}`.toLowerCase().includes(lead.toLowerCase()) : false)));
+    const merged = [...carry, ...gated.results];
+    const hopped = merged.filter((row) => want.has(row.url));
+    const rest = merged.filter((row) => !want.has(row.url));
+    req = { ...req, search: { ...gated, results: [...hopped, ...rest] } };
+  }
   // Cards already on screen point into this search's image list by index, so only a new search may reorder it.
   const newSearch = !req.followup;
   // Writing and code are made for the person, not looked up, so they are composed like a conversation turn.
@@ -323,7 +337,9 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   if (brief) console.log(JSON.stringify({ zo: 'brief', use: brief.use.length, stale: brief.stale, offTopic: brief.offTopic, conflicts: brief.conflicts.length, missing: !!brief.missing }));
   let rescued = false;
   let reread = false;
-  if (req.allowRescue && brief && !chat && sourcesMiss(brief)) {
+  const implied = factAnswer(req.query, req.search.results.map((row) => `${row.title} ${row.snippet ?? ''}`).join('\n'));
+  // A replacing rescue is for the wrong subject. It must not drop the hop page that states the missing fact.
+  if (req.allowRescue && brief && !chat && !implied && !req.hopUrls?.length && sourcesMiss(brief)) {
     const again = await rescueSources(send, env, req, brief, scope);
     if (again) {
       req = { ...req, search: again.search };
@@ -381,7 +397,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   const rowImages = chat || quoteCard ? undefined : rowImagePlan(req, env, scope);
   const factCorpus = [
     ...req.search.results.map((row) => `${row.title} ${row.snippet ?? ''}`),
-    ...pages.map((page) => page.text),
+    ...pages.map((page) => `${req.search.results[page.n - 1]?.title ?? ''} ${page.text}`),
   ].join('\n');
   const facts = factAnswer(req.query, factCorpus);
   if (facts) console.log(JSON.stringify({ zo: 'facts', lead: facts.lead }));
@@ -648,6 +664,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     console.log(JSON.stringify({ zo: 'quote', symbol: quote!.symbol, source: quote!.source, ms: Date.now() - started }));
   }
   // A question that needs another fact keeps searching until that fact is in hand, or the time is gone.
+  const hopUrls: string[] = [];
   if (!paper && results.results.length) {
     // A parallel hop that the time cut dropped is still missing, so it can be asked again here.
     const asked: string[] = [];
@@ -668,10 +685,12 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
       const promoted = [...add, ...results.results];
       const afterLead = factAnswer(query, promoted.slice(0, 12).map((row) => `${row.title} ${row.snippet ?? ''}`).join('\n'))?.lead;
       // Pages that supplied the missing fact lead, so the card is read from them.
-      results = { ...results, results: afterLead && afterLead !== beforeLead ? promoted : [...results.results, ...add] };
+      for (const row of add) hopUrls.push(row.url);
+      // The new pages lead so they are the ones read. A later rescue must not throw them away.
+      results = { ...results, results: [...add, ...results.results] };
       send('peek', add.slice(0, PEEK_ROWS).map(({ title, url, domain, date }) => ({ title, url, domain, date })));
       send('search', results);
-      console.log(JSON.stringify({ zo: 'hop', alt, added: add.length }));
+      console.log(JSON.stringify({ zo: 'hop', alt, added: add.length, domains: add.map((row) => row.domain), lead: afterLead ?? beforeLead }));
     }
   }
   let late: Promise<LateExtras> | undefined = found.late;
@@ -1008,7 +1027,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   send('search', results);
   const boost = imageBoost(pattern, results, env, scope, boostQuery);
   const crypto = cryptographyHint(query, results.results);
-  await design(send, env, { query, pattern, depth: plan.depth, readPages: plan.readPages || deep || fromSeeds, search: results, context: [designContext, crypto].filter(Boolean).join('\n') || undefined, intent: u?.intent, deep, boost, entityHint, ticker: quote ? tickerNode(quote) : undefined, earlyBrief, website, allowRescue: !isPaperAsk(query) }, started, scope, late);
+  await design(send, env, { query, pattern, depth: plan.depth, readPages: plan.readPages || deep || fromSeeds, search: results, context: [designContext, crypto].filter(Boolean).join('\n') || undefined, intent: u?.intent, deep, boost, entityHint, ticker: quote ? tickerNode(quote) : undefined, earlyBrief, website, allowRescue: !isPaperAsk(query), hopUrls }, started, scope, late);
 }
 
 /** The profile on the card, wherever the layout put it, links the person's own website. */

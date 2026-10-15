@@ -161,12 +161,16 @@ function showTitle(query: string): string {
 
 function seasonScores(text: string): { season: number; score: string }[] {
   const out: { season: number; score: string }[] = [];
-  const re = /season\s+(\d+)[^\d%]{0,50}(\d{1,3})\s*%|(\d{1,3})\s*%[^\d]{0,50}season\s+(\d+)/gi;
+  const re = /season\s+(\d+)[^\d%]{0,140}(\d{1,3})\s*(?:%|percent\b)|(\d{1,3})\s*(?:%|percent\b)[^\d%]{0,140}season\s+(\d+)/gi;
   for (const match of text.matchAll(re)) {
     const season = Number(match[1] ?? match[4]);
     const score = match[2] ?? match[3];
-    if (season && score) out.push({ season, score: `${score}%` });
+    if (season && score && Number(score) <= 100) out.push({ season, score: `${score}%` });
   }
+  // A season page titles the season and states "Tomatometer 85" without repeating the word season beside the number.
+  const meter = /tomatometer[\s\S]{0,80}?(\d{1,3})\b/i.exec(text);
+  const titled = /\bseason\s+(\d+)\b/i.exec(text);
+  if (meter && titled && Number(meter[1]) <= 100) out.push({ season: Number(titled[1]), score: `${meter[1]}%` });
   return out;
 }
 
@@ -280,10 +284,10 @@ export function nextHop(query: string, corpus: string, ctx: HopContext = {}): st
       ].map((match) => Number(match[1])).filter((n) => n > 0 && n < 40);
       const scoredMax = scores.reduce((max, row) => Math.max(max, row.season), 0);
       const mentionedMax = mentioned.reduce((max, n) => Math.max(max, n), 0);
-      const lookedAhead = (ctx.asked ?? []).some((item) => /season\s+\d+\s+tomatometer/i.test(item));
+      const lookedAhead = (ctx.asked ?? []).some((item) => /season\s+\d+\s+rotten tomatoes/i.test(item));
       const target = mentionedMax > scoredMax ? mentionedMax : !lookedAhead && scoredMax > 0 ? scoredMax + 1 : mentionedMax;
       if (!scores.length || target > scoredMax) {
-        offer(target ? `${title} season ${target} tomatometer score` : `${title} latest season tomatometer score`);
+        offer(target ? `${title} season ${target} rotten tomatoes` : `${title} latest season rotten tomatoes`);
       }
     }
   }

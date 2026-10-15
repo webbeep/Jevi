@@ -41,9 +41,9 @@ test('the newest season with a score wins', () => {
   const corpus = 'Season 1 Tomatometer 84%. Season 2 Tomatometer 85%. Season 3 has not premiered.';
   assert.equal(factAnswer(SCORE, corpus)?.lead, '85%');
   const missing = nextHop(SCORE, 'The show has 2 seasons and no critic score is printed.', {});
-  assert.match(missing ?? '', /season 2 tomatometer/i);
+  assert.match(missing ?? '', /season 2 rotten tomatoes/i);
   const ahead = nextHop(SCORE, 'Season 1 Tomatometer 84%.', {});
-  assert.match(ahead ?? '', /season 2 tomatometer/i);
+  assert.match(ahead ?? '', /season 2 rotten tomatoes/i);
   assert.equal(nextHop(SCORE, 'Season 1 Tomatometer 84%. Season 2 Tomatometer 85%.', { asked: [ahead ?? ''] }), undefined);
 });
 
