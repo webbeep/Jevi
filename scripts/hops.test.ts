@@ -240,6 +240,19 @@ test('an age with only the event year is the two possible ages, and a wrong hero
   assert.equal(factAnswer(AGE, `${corpus}\nHailey Baldwin and Justin Bieber married on September 13, 2018.`)?.lead, '52');
 });
 
+test('a card with labeled birth and wedding rows leads with the subject\'s age, not someone else\'s', () => {
+  const card: CardNode[] = [
+    { type: 'hero', value: '24', label: "Stephen Baldwin at Hailey & Justin's wedding" },
+    { type: 'keyvalue', items: [{ label: 'Born', value: 'May 12, 1966 [1]' }, { label: 'Wedding', value: 'Sept 13, 2018 [6]' }] },
+  ];
+  const fact = cardFacts(AGE, card);
+  assert.equal(fact?.lead, '52');
+  const led = placeFactLead(card, fact!);
+  assert.equal(led?.[0] && led[0].type === 'hero' ? led[0].value : '', '52');
+  const two: CardNode[] = [{ type: 'keyvalue', items: [{ label: 'Born', value: 'May 12, 1966' }, { label: 'Born', value: 'March 1, 1994' }, { label: 'Wedding', value: 'Sept 13, 2018' }] }];
+  assert.equal(cardFacts(AGE, two), undefined);
+});
+
 test('a card that states the dates and not the age gains an age hero', () => {
   const kv: CardNode = {
     type: 'keyvalue',

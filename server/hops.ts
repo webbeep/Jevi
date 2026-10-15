@@ -681,7 +681,22 @@ export function factAnswer(query: string, corpus: string): FactAnswer | undefine
 
 /** The same figure, read off the card when the card already states the inputs. */
 export function cardFacts(query: string, nodes: CardNode[]): FactAnswer | undefined {
-  return factAnswer(query, nodes.map(nodeText).join('\n'));
+  return factAnswer(query, [...nodes.map(nodeText), ...labeledBirth(query, nodes)].join('\n'));
+}
+
+/** A card about the person writes "Born: May 12, 1966" without the name. One such row is that person's birth. */
+function labeledBirth(query: string, nodes: readonly CardNode[]): string[] {
+  const who = query.match(AGE)?.[1];
+  if (!who) return [];
+  const born: string[] = [];
+  const visit = (node: CardNode) => {
+    if (node.type === 'keyvalue') for (const item of node.items) if (/^(?:born|birth ?date|date of birth|birthday)$/i.test(item.label.trim())) born.push(item.value);
+    if (node.type === 'tile' && /^(?:born|birth ?date|date of birth|birthday)$/i.test(node.label.trim()) && node.value) born.push(node.value);
+    if (node.type === 'stack' || node.type === 'grid' || node.type === 'section' || node.type === 'scroller') node.children.forEach(visit);
+  };
+  nodes.forEach(visit);
+  const dates = [...new Set(born.flatMap((value) => datesIn(value).map((date) => date.raw)))];
+  return dates.length === 1 ? [`${clean(who)} was born ${dates[0]}.`] : [];
 }
 
 function hasLead(text: string, lead: string): boolean {
