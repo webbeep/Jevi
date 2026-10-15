@@ -556,7 +556,9 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   const settleFacts = () => {
     const indexes = [...shown.keys()].sort((a, b) => a - b);
     const nodes = indexes.map((index) => shown.get(index)!);
-    const grounded = facts ?? cardFacts(req.query, nodes);
+    const fromCard = cardFacts(req.query, nodes);
+    // A year-only age from the sources gives way to the full dates the card itself shows.
+    const grounded = facts && !(facts.accept && fromCard && !fromCard.accept) ? facts : fromCard ?? facts;
     if (!grounded) {
       for (const index of indexes) {
         const node = shown.get(index);
