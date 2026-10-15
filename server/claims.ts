@@ -1,4 +1,5 @@
 import type { CardNode } from '../shared/card';
+import { SENTENCE_BREAK } from '../shared/text';
 import { factAnswer } from './hops';
 import { numberTokens } from './ground';
 import { withoutEmptySlots } from './polish';
@@ -166,7 +167,7 @@ function keepsDerived(query: string, text: string, sources: readonly ClaimSource
 export function retargetCites(text: string, sources: readonly ClaimSource[], query = ''): string {
   if (!sources.length) return withoutEmptySlots(text);
   if (!/\d/.test(text)) return withoutEmptySlots(text);
-  const parts = text.split(/(?<=[.!?])\s+/);
+  const parts = text.split(SENTENCE_BREAK);
   return parts.flatMap((sentence) => {
     const nums = significant(sentence);
     if (!nums.length) return [sentence];
@@ -303,7 +304,7 @@ function retargetNode(node: CardNode, sources: readonly ClaimSource[], query = '
     case 'quote':
     case 'draft': {
       const cited = retargetCites(node.text, sources, query);
-      const text = cited.split(/(?<=[.!?])\s+/).map((sentence) => {
+      const text = cited.split(SENTENCE_BREAK).map((sentence) => {
         const n = [...sentence.matchAll(/\[(\d+)\]/g)].map((match) => Number(match[1])).at(-1);
         return withoutForeignAgency(sentence, byNumber(sources, n ?? 0));
       }).join(' ');
@@ -470,7 +471,7 @@ export function salesTax(query: string, sources: readonly ClaimSource[]): TaxPic
   const place = placePhrase(query);
   let best: { rate: number; n: number; score: number } | undefined;
   for (const source of sources) {
-    const sentences = source.text.split(/(?<=[.!?])\s+/);
+    const sentences = source.text.split(SENTENCE_BREAK);
     for (const sentence of sentences) {
       const percents = [...sentence.matchAll(/(\d{1,2}(?:\.\d+)?)\s*%/g)].map((match) => Number(match[1]));
       if (!percents.length) continue;
@@ -915,7 +916,7 @@ function placeCredits(nodes: CardNode[], missing: readonly string[], credited: b
       return { ...node, children: [...node.children, ...tiles] };
     }
     if ((node.type === 'text' || node.type === 'callout' || node.type === 'quote') && credited) {
-      const text = node.text.split(/(?<=[.!?])\s+/).filter((sentence) => !ABSTAIN.test(sentence)).join(' ').trim();
+      const text = node.text.split(SENTENCE_BREAK).filter((sentence) => !ABSTAIN.test(sentence)).join(' ').trim();
       if (!placed && !text) {
         placed = true;
         return { type: 'grid' as const, cols: gridCols(tiles.length), children: tiles };
@@ -1071,7 +1072,7 @@ export function groundMembers(query: string, nodes: CardNode[], sources: readonl
       case 'draft': {
         const groupClaim = (sentence: string) => /\b(?:all|every|each|entire|whole)\b/i.test(sentence) && /\b(?:appeared|appear|starred|featured|cast)\b/i.test(sentence);
         const yesCount = credited.filter(inGroup).length;
-        const kept = node.text.split(/(?<=[.!?])\s+/).filter((sentence) => {
+        const kept = node.text.split(SENTENCE_BREAK).filter((sentence) => {
           if (groupClaim(sentence) && yesCount < Math.max(members.length, 1)) {
             changed = true;
             return false;

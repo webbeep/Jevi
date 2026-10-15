@@ -342,3 +342,13 @@ test('a table No turns Yes for a cast member a source credits alone', () => {
   assert.equal(rows.find((row) => row[0] === 'Matt LeBlanc')?.[1], 'Yes');
   assert.deepEqual(rows.find((row) => row[0] === 'Lisa Kudrow'), ['Lisa Kudrow', 'No', 'No music video credit found']);
 });
+
+test('a month abbreviation is not a sentence break, so no citation lands inside a date', () => {
+  const pages: ClaimSource[] = [
+    { n: 1, text: 'Walt Disney World opened on October 1, 1971. Its 50th anniversary was celebrated in 2021.' },
+    { n: 3, text: 'Remy\'s Ratatouille Adventure opened Oct. 1, 2021, exactly 50 years after the park opened.' },
+  ];
+  const text = retargetCites('Exactly 50 years later, on Oct. 1, 2021, Remy\'s Ratatouille Adventure opened [3].', pages);
+  assert.doesNotMatch(text, /Oct\.\s*\[\d+\]/);
+  assert.match(text, /Oct\. 1, 2021/);
+});

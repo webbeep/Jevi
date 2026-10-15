@@ -13,6 +13,9 @@ export function decodeEntities(s: string): string {
   });
 }
 
+/** Where one sentence ends. "Oct. 1", "Dr. Lee", "Michael I. Jordan" and "U.S. law" are not breaks. */
+export const SENTENCE_BREAK = /(?<=[.!?])(?<!\b(?:Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec|Mr|Mrs|Ms|Dr|Prof|St|Jr|Sr|vs|No|Gen|Gov|Sen|Rep|Mt|Ft)\.)(?<!\b(?:U\.S|U\.K|e\.g|i\.e)\.)(?<!(?:^|\s)[A-Z]\.)\s+/;
+
 export function stripHtml(s: string): string {
   return decodeEntities(s.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
 }
