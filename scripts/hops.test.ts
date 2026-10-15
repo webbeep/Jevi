@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { factAnswer, hopQueries, nextHop, patchFactLead, placeFactLead } from '../server/hops.ts';
+import { factAnswer, hopQueries, nextHop, patchFactLead, placeFactLead, unsupportedYear } from '../server/hops.ts';
 import { bindClaims, type ClaimSource } from '../server/claims.ts';
 import type { CardNode } from '../shared/card.ts';
 
@@ -35,6 +35,9 @@ test('a what-year question looks past the host that never states the year', () =
   const next = nextHop(YEAR, corpus, { hosts: ['en.wikipedia.org'] });
   assert.match(next ?? '', /sold her dressmaking shop year/i);
   assert.equal(factAnswer(YEAR, 'She sold the dressmaking shop in 1972 to fund the launch.')?.lead, '1972');
+  assert.equal(unsupportedYear(YEAR, 'In 1977 he launched the Y\'s label.', '1977'), true);
+  const again = nextHop(YEAR, corpus, { hosts: ['en.wikipedia.org'], asked: [next ?? ''] });
+  assert.match(again ?? '', /Yohji Yamamoto sold/i);
 });
 
 test('the newest season with a score wins', () => {

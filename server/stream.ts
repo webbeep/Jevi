@@ -40,7 +40,7 @@ import type { EngineStatus, Freshness, ImageResult, SearchResponse, SearchResult
 import { rewriteQuery } from './ai';
 import { type DesignRequest, designParallel, designStream, gateNode } from './design';
 import { BRIEF_ROWS, briefSources, remapBrief, type SourceBrief } from './brief';
-import { factAnswer, hopQueries, nextHop, placeFactLead } from './hops';
+import { factAnswer, hopQueries, nextHop, placeFactLead, unsupportedYear } from './hops';
 import { gapQuery, onTopicCount, rescueQuery, sourcesMiss } from './rescue';
 import { keepPictures, reviewCard, type Review } from './review';
 import { permitted } from './images';
@@ -515,8 +515,18 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     }
   };
   const settleFacts = () => {
-    if (!facts) return;
     const indexes = [...shown.keys()].sort((a, b) => a - b);
+    if (!facts) {
+      for (const index of indexes) {
+        const node = shown.get(index);
+        if (!node || node.type !== 'hero' || !unsupportedYear(req.query, factCorpus, node.value)) continue;
+        const next = { ...node, value: 'Not stated' };
+        shown.set(index, next);
+        send('node', { index, node: next });
+        break;
+      }
+      return;
+    }
     const nodes = indexes.map((index) => shown.get(index)!);
     const next = placeFactLead(nodes, facts);
     if (!next) return;

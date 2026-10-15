@@ -167,11 +167,16 @@ function seasonScores(text: string): { season: number; score: string }[] {
     const score = match[2] ?? match[3];
     if (season && score && Number(score) <= 100) out.push({ season, score: `${score}%` });
   }
-  // A season page titles the season and states "Tomatometer 85" without repeating the word season beside the number.
-  const meter = /tomatometer[\s\S]{0,80}?(\d{1,3})\b/i.exec(text);
-  const titled = /\bseason\s+(\d+)\b/i.exec(text);
-  if (meter && titled && Number(meter[1]) <= 100) out.push({ season: Number(titled[1]), score: `${meter[1]}%` });
   return out;
+}
+
+/** A what-year hero whose year is not the one next to the event verb. */
+export function unsupportedYear(query: string, corpus: string, value: string): boolean {
+  if (!WHAT_YEAR.test(query) || !/^\d{4}$/.test(value)) return false;
+  const clause = query.match(WHAT_YEAR)?.[1] ?? query;
+  const verb = eventVerb(clause);
+  if (!verb) return false;
+  return yearNear(corpus, verb) !== value;
 }
 
 function lengths(text: string): { n: number; unit: 'mi' | 'km'; at: number; raw: string }[] {
@@ -271,7 +276,16 @@ export function nextHop(query: string, corpus: string, ctx: HopContext = {}): st
   const yearAsk = query.match(WHAT_YEAR);
   if (yearAsk) {
     const verb = eventVerb(yearAsk[1]!);
-    if (verb && !yearNear(corpus, verb)) offer(`${pastClause(yearAsk[1]!)} year`);
+    if (verb && !yearNear(corpus, verb)) {
+      const past = `${pastClause(yearAsk[1]!)} year`;
+      const asked = (ctx.asked ?? []).map((item) => item.toLowerCase());
+      if (!asked.includes(past.toLowerCase())) offer(past);
+      else {
+        const name = yearAsk[1]!.match(/\b[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2}/);
+        const pastWord = VERBS.find((item) => item.ask.test(yearAsk[1]!))?.past;
+        if (name && pastWord) offer(`${name[0]} ${pastWord}`);
+      }
+    }
   }
 
   if (SCORE.test(query) && NEWEST.test(query)) {
@@ -285,8 +299,9 @@ export function nextHop(query: string, corpus: string, ctx: HopContext = {}): st
       const scoredMax = scores.reduce((max, row) => Math.max(max, row.season), 0);
       const mentionedMax = mentioned.reduce((max, n) => Math.max(max, n), 0);
       const lookedAhead = (ctx.asked ?? []).some((item) => /season\s+\d+\s+rotten tomatoes/i.test(item));
-      const target = mentionedMax > scoredMax ? mentionedMax : !lookedAhead && scoredMax > 0 ? scoredMax + 1 : mentionedMax;
-      if (!scores.length || target > scoredMax) {
+      // One season past the highest scored one. A later season named only as upcoming is not searched again.
+      const target = !scores.length ? mentionedMax : !lookedAhead ? scoredMax + 1 : 0;
+      if (target > scoredMax) {
         offer(target ? `${title} season ${target} rotten tomatoes` : `${title} latest season rotten tomatoes`);
       }
     }
