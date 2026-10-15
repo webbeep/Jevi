@@ -470,8 +470,10 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     head: (h) => {
       const question = questionOf();
       const person = designReq.pattern === 'profile' ? designReq.person?.name : undefined;
-      // A card about one chosen person is titled with their name, not the first name and workplace that were asked.
-      const title = designReq.pattern === 'compare' ? comparisonTitle(question, h.title) : person && !namesPerson(h.title, person) ? person : h.title;
+      // A card about one person is titled with their name, not the words that were asked ("Tim from BlueFlame AI", "Who Is Jensen Huang").
+      // An ask about something of theirs ("Jensen Huang net worth") keeps that in the title.
+      const named = person && (!namesPerson(h.title, person) || !askTopic(question, person));
+      const title = designReq.pattern === 'compare' ? comparisonTitle(question, h.title) : named ? person : h.title;
       head = title === h.title ? h : { ...h, title };
       publishReadings();
     },
