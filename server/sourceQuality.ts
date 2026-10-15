@@ -25,12 +25,13 @@ export function isNewsroom(domain: string): boolean {
   return matchesHost(domain, NEWSROOM);
 }
 
+const KEEP_WITHOUT_FORMAT = 5;
 const WHEN_WORDS = new Set(['today', 'tonight', 'yesterday', 'latest', 'now', 'current', 'live', 'week', 'this', 'recent', 'breaking', 'the', 'and', 'what', 'whats']);
 const askWords = (text: string) => text.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 3);
 
 /**
  * A word the rewrites left out says how to answer, not what to find ("news tldr today" wants a summary,
- * not tldr.tech). Rows that carry it in their name follow the others. Nothing is dropped.
+ * not tldr.tech). Rows that carry it in their name follow the others, and leave once enough others remain.
  */
 export function sinkFormatWords<T extends RankedHit>(query: string, rewrites: readonly string[], rows: readonly T[]): T[] {
   if (!rewrites.length) return [...rows];
@@ -38,7 +39,8 @@ export function sinkFormatWords<T extends RankedHit>(query: string, rewrites: re
   const format = askWords(query).filter((word) => !kept.has(word) && !/^\d+$/.test(word) && !WHEN_WORDS.has(word));
   if (!format.length) return [...rows];
   const branded = (row: T) => format.some((word) => `${row.domain} ${row.title}`.toLowerCase().includes(word));
-  return [...rows.filter((row) => !branded(row)), ...rows.filter(branded)];
+  const others = rows.filter((row) => !branded(row));
+  return others.length >= KEEP_WITHOUT_FORMAT ? others : [...others, ...rows.filter(branded)];
 }
 
 const PRESS = [

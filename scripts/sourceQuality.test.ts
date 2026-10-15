@@ -228,4 +228,6 @@ test('a word the rewrites left out sinks the rows named after it', () => {
   assert.deepEqual(sinkFormatWords('news tldr today', rewrites, rows).map((r) => r.domain), ['nytimes.com', 'euronews.com', 'tldr.tech', 'thecorenews.substack.com']);
   assert.deepEqual(sinkFormatWords('nba scores tonight', ['NBA scores October 15 2026'], rows).map((r) => r.domain), rows.map((r) => r.domain));
   assert.deepEqual(sinkFormatWords('news tldr today', [], rows), rows);
+  const many = [...rows, row('apnews.com', 'AP top stories'), row('bbc.com', 'BBC News'), row('wkrn.com', "Today's top stories")];
+  assert.deepEqual(sinkFormatWords('news tldr today', rewrites, many).map((r) => r.domain), ['nytimes.com', 'euronews.com', 'apnews.com', 'bbc.com', 'wkrn.com']);
 });
