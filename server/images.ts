@@ -159,21 +159,25 @@ export async function commons(query: string, n = 6): Promise<ImageResult[]> {
     });
 }
 
-/** Openverse, restricted to licenses that allow commercial use. */
+/** Openverse, restricted to licenses that allow commercial use and a cropped or resized copy. */
 export async function openverse(query: string, n: number): Promise<ImageResult[]> {
   const data = await fetchJson<{ results?: { url: string; thumbnail?: string; title?: string; foreign_landing_url?: string; creator?: string; license?: string; license_version?: string; provider?: string }[] }>(
-    `https://api.openverse.org/v1/images/?q=${encodeURIComponent(query)}&page_size=${n}&mature=false&license_type=commercial`,
+    `https://api.openverse.org/v1/images/?q=${encodeURIComponent(query)}&page_size=${n}&mature=false&license=by,by-sa,cc0,pdm`,
     { headers: { 'User-Agent': UA } },
     TIMEOUT_MS,
   );
-  return (data.results ?? []).map((r) => ({
-    url: r.foreign_landing_url ?? r.url,
-    thumb: r.thumbnail ?? r.url,
-    title: r.title ?? '',
-    source: domainOf(r.foreign_landing_url ?? r.url),
-    license: 'open' as const,
-    credit: [r.creator, r.license && `${r.license === 'cc0' || r.license === 'pdm' ? r.license.toUpperCase() : `CC ${r.license.toUpperCase()}`} ${r.license_version ?? ''}`.trim(), r.provider].filter(Boolean).join(' · '),
-  }));
+  return (data.results ?? []).flatMap((r) => {
+    const license = r.license ? `${r.license === 'cc0' || r.license === 'pdm' ? r.license.toUpperCase() : `CC ${r.license.toUpperCase()}`} ${r.license_version ?? ''}`.trim() : '';
+    if (!license || restricted(license)) return [];
+    return [{
+      url: r.foreign_landing_url ?? r.url,
+      thumb: r.thumbnail ?? r.url,
+      title: r.title ?? '',
+      source: domainOf(r.foreign_landing_url ?? r.url),
+      license: 'open' as const,
+      credit: [author(r.creator), license, r.provider].filter(Boolean).join(' · '),
+    }];
+  });
 }
 
 async function pexels(query: string, env: Env, n: number): Promise<ImageResult[]> {
