@@ -726,16 +726,22 @@ function workOf(query: string): string | undefined {
   return query.match(/\b(?:series|show|film|movie|play|band|team)\s+([A-Z][\w'’.-]+(?:\s+[A-Z][\w'’.-]+)*)/)?.[1];
 }
 
-/** The verb in this sentence is about this person, and the sentence is not a group list. */
-function attributesAct(sentence: string, last: string, act: string | undefined, clues: readonly string[]): boolean {
+/** The verb in this sentence is about this person, and the sentence is not a group or theme credit. */
+function attributesAct(sentence: string, person: string, act: string | undefined, clues: readonly string[]): boolean {
+  const last = lastOf(person);
   if (last.length < 3) return false;
-  const verb = 'appeared|appears|appear|starred|stars|featured|features|starring|seen';
-  const own = new RegExp(`\\b${escapeName(last)}\\b[^.]{0,100}\\b(?:${verb})\\b`, 'i');
-  const billed = new RegExp(`\\b(?:starring|featuring|features)\\s+(?:[A-Z][\\w'’.-]+\\s+){0,3}${escapeName(last)}\\b`, 'i');
-  if (!own.test(sentence) && !billed.test(sentence)) return false;
-  if (/\b(?:the\s+)?(?:main\s+|entire\s+|whole\s+)?cast\b/i.test(sentence) && !new RegExp(`\\b${escapeName(last)}\\s+(?:${verb})\\b`, 'i').test(sentence)) return false;
   const lower = sentence.toLowerCase();
-  return (act ? lower.includes(act) : false) || clues.some((clue) => clue.length >= 5 && lower.includes(clue));
+  const topical = (act ? lower.includes(act) : false) || clues.some((clue) => clue.length >= 5 && lower.includes(clue));
+  if (!topical) return false;
+  if (/\btheme\s+(?:song|video)\b/i.test(sentence)) return false;
+  if (/\b(?:the\s+)?(?:main\s+|entire\s+|whole\s+)?cast\b/i.test(sentence) && !new RegExp(`\\b${escapeName(last)}\\s+(?:appeared|appears|starred|featured|was|is)\\b`, 'i').test(sentence)) return false;
+  const verb = 'appeared|appears|appear|starred|stars|featured|features|starring|seen|been';
+  for (const match of sentence.matchAll(new RegExp(`\\b(?:${verb})\\b`, 'gi'))) {
+    const before = sentence.slice(Math.max(0, (match.index ?? 0) - 140), match.index ?? 0);
+    const nearest = peopleIn(before).at(-1);
+    if (nearest && samePerson(nearest, person)) return true;
+  }
+  return false;
 }
 
 /**
@@ -762,7 +768,7 @@ function individualCredit(
     const re = new RegExp(`\\b${escapeName(last)}\\b`, 'gi');
     for (const match of text.matchAll(re)) {
       const sentence = sentenceAt(text, match.index ?? 0);
-      if (!attributesAct(sentence, last, act, clues)) continue;
+      if (!attributesAct(sentence, person, act, clues)) continue;
       const extra = new Set(peopleIn(sentence).map((name) => lastOf(name).toLowerCase()).filter((name) => name && name !== last.toLowerCase()));
       for (const name of others) {
         if (new RegExp(`\\b${escapeName(name)}\\b`, 'i').test(sentence)) extra.add(name.toLowerCase());

@@ -116,7 +116,7 @@ test('a which-members question searches someone the pages have not credited', ()
   const corpus = 'Main cast: Jennifer Aniston, Courteney Cox, Lisa Kudrow, Matt LeBlanc. Courteney Cox appeared in a music video.';
   const next = nextHop(query, corpus, {});
   assert.match(next ?? '', /Jennifer Aniston/);
-  assert.match(next ?? '', /music video/);
+  assert.match(next ?? '', /music video appearance/);
   assert.doesNotMatch(next ?? '', /Courteney Cox/);
 });
 

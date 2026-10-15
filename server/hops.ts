@@ -450,8 +450,8 @@ export function nextHop(query: string, corpus: string, ctx: HopContext = {}): st
       });
       const pool = roster.length >= 3 ? roster : names;
       const pending = pool.filter((name) => !credited(name));
-      if (pending.length) offer(`${pending.slice(0, 3).join(' ')} ${act}`);
-      else if (names.length >= 3 && !names.some(credited)) offer(`${names.slice(0, 4).join(' ')} ${act}`);
+      if (pending.length) offer(`${pending[0]} ${act} appearance`);
+      else if (names.length >= 3 && !names.some(credited)) offer(`${names[0]} ${act} appearance`);
     }
   }
 

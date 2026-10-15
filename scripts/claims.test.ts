@@ -219,3 +219,30 @@ test('an abstaining cast card names only the people a source credits alone', () 
   const yes = tiles.filter((node) => node.type === 'tile' && node.value === 'Yes').map((node) => node.type === 'tile' ? node.label : '');
   assert.deepEqual(yes.filter((name) => /Kudrow|Springsteen|Perry|Schwimmer|Etheridge/.test(name)), []);
 });
+
+test('the person next to the verb is credited, and a theme-song list is not', () => {
+  const query = 'Of the 6 main cast members of the series Friends, which have appeared in music videos?';
+  const nodes: CardNode[] = [
+    { type: 'tile', label: 'Jennifer Aniston', value: 'No' },
+    { type: 'tile', label: 'Courteney Cox', value: 'No' },
+    { type: 'tile', label: 'Lisa Kudrow', value: 'No' },
+    { type: 'tile', label: 'Matt LeBlanc', value: 'No' },
+    { type: 'tile', label: 'Joey Tribbiani', value: 'Yes' },
+  ];
+  const pages: ClaimSource[] = [
+    { n: 1, text: 'Courteney Cox is not the only Friends star to make this list, and to have been in a music video. Matt LeBlanc can be seen in one too.' },
+    { n: 2, text: 'Before he became Joey Tribbiani, Matt LeBlanc appeared in more than one music video.' },
+    { n: 3, text: 'The Friends theme song music video has appearances by Jennifer Aniston, Courteney Cox, Lisa Kudrow, Matt LeBlanc, Matthew Perry and David Schwimmer.' },
+    { n: 4, text: 'Jennifer Aniston appeared in Melissa Etheridge\'s music video.' },
+  ];
+  const next = groundMembers(query, nodes, pages) ?? nodes;
+  const valueOf = (label: string) => {
+    const tile = next.find((node) => node.type === 'tile' && node.label === label);
+    return tile && tile.type === 'tile' ? tile.value : '';
+  };
+  assert.equal(valueOf('Courteney Cox'), 'Yes');
+  assert.equal(valueOf('Matt LeBlanc'), 'Yes');
+  assert.equal(valueOf('Jennifer Aniston'), 'Yes');
+  assert.equal(valueOf('Lisa Kudrow'), 'No');
+  assert.equal(valueOf('Joey Tribbiani'), 'No');
+});
