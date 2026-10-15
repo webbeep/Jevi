@@ -316,3 +316,29 @@ test('a roundup title does not take the credit away from the person in the sente
   assert.equal(valueOf('Lisa Kudrow'), 'No');
   assert.equal(valueOf('Jennifer Aniston'), 'No');
 });
+
+test('a table No turns Yes for a cast member a source credits alone', () => {
+  const query = 'Of the 6 main cast members of the series Friends, which have appeared in music videos?';
+  const nodes: CardNode[] = [
+    {
+      type: 'table',
+      columns: ['Cast member', 'Music video?', 'Note'],
+      rows: [
+        ['Courteney Cox', 'No', ''],
+        ['Matt LeBlanc', 'No', ''],
+        ['Lisa Kudrow', 'No', 'No music video credit found'],
+      ],
+    },
+    { type: 'keyvalue', items: [{ label: 'Courteney Cox', value: 'Bruce Springsteen, "Dancing in the Dark" (1984) [3]' }] },
+  ];
+  const pages: ClaimSource[] = [
+    { n: 1, text: 'Main cast: Jennifer Aniston, Courteney Cox, Lisa Kudrow, Matt LeBlanc, Matthew Perry and David Schwimmer.' },
+    { n: 3, text: 'Courteney Cox appeared in Bruce Springsteen\'s music video for Dancing in the Dark. Matt LeBlanc appeared in Jon Bon Jovi\'s music video for Miracle.' },
+  ];
+  const next = groundMembers(query, nodes, pages) ?? nodes;
+  const table = next.find((node) => node.type === 'table');
+  const rows = table && table.type === 'table' ? table.rows : [];
+  assert.deepEqual(rows.find((row) => row[0] === 'Courteney Cox'), ['Courteney Cox', 'Yes', '']);
+  assert.equal(rows.find((row) => row[0] === 'Matt LeBlanc')?.[1], 'Yes');
+  assert.deepEqual(rows.find((row) => row[0] === 'Lisa Kudrow'), ['Lisa Kudrow', 'No', 'No music video credit found']);
+});

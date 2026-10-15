@@ -1037,7 +1037,13 @@ export function groundMembers(query: string, nodes: CardNode[], sources: readonl
             return next;
           }
           const blob = row.join(' ');
-          if (!affirmsAppearance(blob)) return row;
+          if (!affirmsAppearance(blob)) {
+            // The same card often credits the person elsewhere ("Courteney Cox · Dancing in the Dark [3]") while the table says No.
+            const yesNo = row.findIndex((cell) => /^\s*no\s*$/i.test(cell ?? ''));
+            if (yesNo < 0 || !inGroup(person) || !(creditedPerson(person) || individualCredit(sources, person, group, [], act))) return row;
+            changed = true;
+            return row.map((cell, index) => (index === yesNo ? 'Yes' : /\b(?:no|not)\b.*\b(?:found|credit|named|source)\b/i.test(cell ?? '') ? '' : cell));
+          }
           if (own) return row;
           changed = true;
           return row.map((cell) => {
