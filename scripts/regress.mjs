@@ -185,7 +185,9 @@ const CASES = [
   { name: 'news tldr today leads with news', run: async () => {
     const r = await stream({ kind: 'search', query: 'news tldr today', freshness: 'any' });
     const top = (r.search?.results ?? []).slice(0, 5);
-    return { r, ok: top.filter((x) => /headline|news|bulletin/i.test(x.title)).length >= 4, detail: top.map((x) => x.domain).join(', ') };
+    const newsy = (x) => /headline|news|bulletin|top stories/i.test(x.title) || /(?:^|\.)(?:reuters|apnews|bbc|nytimes|theguardian|washingtonpost|npr|cnn|nbcnews|cbsnews|euronews|aljazeera|wsj|bloomberg|usatoday|axios|politico)\.(?:com|org|co\.uk)$/.test(x.domain);
+    const ok = !!top[0] && newsy(top[0]) && top.filter(newsy).length >= 4 && !top.some((x) => /tldr/i.test(`${x.domain} ${x.title}`));
+    return { r, ok, detail: top.map((x) => x.domain).join(', ') };
   } },
   { name: 'Tomatometer newest season', run: async () => {
     const r = await stream({ kind: 'search', query: "What's the current Tomatometer score of the most recent season of The Lord of the Rings: The Rings of Power on Rotten Tomatoes?", freshness: 'any' });
