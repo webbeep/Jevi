@@ -49,6 +49,8 @@ interface Query {
   extrasCutMs?: number;
   /** The literal search's rows, as soon as they land (before the rewrites' results). */
   onLiteral?: (hits: WebHit[]) => void;
+  /** A side search (a hop, the agency probe). Its landing is not the ask's literal search. */
+  lite?: boolean;
 }
 
 /** Gated literal hits that make the ask answerable without waiting on a slow intent read. */
@@ -565,7 +567,7 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUnt
       break;
     }
     const landed = (r: Settled): Settled => {
-      mark(ledger, 'literal');
+      if (!q.lite) mark(ledger, 'literal');
       const hits = r.ok ? r.value.hits.filter((h) => h.url && h.title) : [];
       // Any rows are enough to start the source check. It used to wait for four, so a thin
       // literal search only began that check after the rewrites had already finished.

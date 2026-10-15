@@ -265,13 +265,27 @@ function personCue(card: AnswerCard | undefined): string {
   return bits.join(' ').replace(/\s+/g, ' ').trim().slice(0, 80);
 }
 
-async function attachOfficial(query: string, results: SearchResponse, env: Env, scope: AskScope): Promise<SearchResponse> {
+type OfficialSearch = Awaited<ReturnType<typeof searchWithLate>>;
+
+/** The agency or place search, started with the literal one so the card does not wait for it after the main search. */
+function startOfficial(query: string, env: Env, scope: AskScope): Promise<OfficialSearch | undefined> | undefined {
+  const probe = officialProbe(query);
+  if (!probe) return undefined;
+  // Its own call slot, so the rewrites keep theirs.
+  scope.ledger.bonus = (scope.ledger.bonus ?? 0) + 1;
+  return searchWithLate({ q: probe, freshness: 'any', count: 6, lite: true }, env, scope).catch(() => undefined);
+}
+
+async function attachOfficial(query: string, results: SearchResponse, env: Env, scope: AskScope, early?: Promise<OfficialSearch | undefined>): Promise<SearchResponse> {
   if (!results.results.length || hasOfficialHit(query, results.results)) return results;
   const probe = officialProbe(query);
   if (!probe) return results;
-  const room = SEARCH_CALL_CAP + (scope.ledger.bonus ?? 0) - searchCalls(scope.ledger);
-  if (room < 1) scope.ledger.bonus = (scope.ledger.bonus ?? 0) + 1;
-  const extra = await searchWithLate({ q: probe, freshness: 'any', count: 6, lite: true }, env, scope);
+  let extra = early ? await early : undefined;
+  if (!extra) {
+    const room = SEARCH_CALL_CAP + (scope.ledger.bonus ?? 0) - searchCalls(scope.ledger);
+    if (room < 1) scope.ledger.bonus = (scope.ledger.bonus ?? 0) + 1;
+    extra = await searchWithLate({ q: probe, freshness: 'any', count: 6, lite: true }, env, scope);
+  }
   const add = extra.response.results.filter((row) => !results.results.some((have) => have.url === row.url));
   if (!add.length) return results;
   console.log(JSON.stringify({ zo: 'official', added: add.length, lead: add[0]?.domain }));
@@ -667,6 +681,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
 
   // Keyless, in parallel with the web search: a price ask is answered from the live quote, not old articles.
   const quoting = liveQuote(query).finally(() => mark(scope.ledger, 'quote'));
+  const officialEarly = paper ? undefined : startOfficial(query, env, scope);
   // A person named with what they do ("Jessica Hamrick DeepMind", a tapped Which-one? choice) is often too
   // little-known for the engines to surface their own website, so guess it from the name while the search runs.
   const siteLookup = !steer && isPersonAsk(query) && contextTerms(query).length ? lookupOwnSite(query) : undefined;
@@ -733,7 +748,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   if (scholar.length) results = { ...results, results: withScholarly(scholar, results.results) };
   results = { ...results, results: leadPreprints(query, results.results) };
   results = { ...results, results: dropStrayDois(query, results.results) };
-  results = await attachOfficial(query, results, env, scope);
+  results = await attachOfficial(query, results, env, scope, officialEarly);
   const clips = await videos;
   if (clips.length) results = { ...results, results: withVideos(clips, results.results) };
   const quote = await quoting;
