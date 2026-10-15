@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import type { CardNode } from '../shared/card.ts';
 import type { ImageResult, SearchResult } from '../shared/types.ts';
 import { PictureResolver } from '../server/pictures.ts';
-import { properName, targetFor } from '../server/imageGate.ts';
+import { accepts, namesakeLabel, properName, targetFor } from '../server/imageGate.ts';
 import { personFacts, profileFallback } from '../server/profileFallback.ts';
 import { priorEntity, resolveEntity } from '../server/entity.ts';
 import type { Env } from '../server/util.ts';
@@ -124,4 +124,14 @@ test('a picked choice is final: the chosen person resolves to one card, not anot
   const prior = priorEntity('Chosen person: Michael B. Jordan — American actor');
   const decision = resolveEntity('Michael B. Jordan', rows, { pattern: 'profile', prior });
   assert.equal(decision.kind, 'single');
+});
+
+test('a middle-initial person does not take the famous namesake\'s pictures', () => {
+  assert.equal(namesakeLabel('Michael I. Jordan', "Bird Key - 'Michael Jordan'"), true);
+  assert.equal(namesakeLabel('Michael I. Jordan', 'Michael I. Jordan at Berkeley'), false);
+  assert.equal(namesakeLabel('Michael I. Jordan', 'Prof. Jordan lecture'), false);
+  assert.equal(namesakeLabel('Michael Jordan', 'Michael Jordan dunk'), false);
+  const target = { kind: 'named' as const, entity: 'Michael I. Jordan' };
+  assert.equal(accepts(target, pic("Bird Key - 'Michael Jordan'", 'https://live.staticflickr.com/boat.jpg', 'https://www.flickr.com/photos/boat')), false);
+  assert.equal(accepts(target, pic('Michael I. Jordan, UC Berkeley', 'https://upload.wikimedia.org/mij.jpg', 'https://commons.wikimedia.org/mij')), true);
 });

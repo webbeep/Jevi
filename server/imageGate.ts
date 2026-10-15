@@ -238,7 +238,21 @@ export function accepts(target: PicTarget, img: Pick<ImageResult, 'title' | 'url
     return domains.some((d) => !!d && [hostOf(img.url), hostOf(img.thumb)].some((h) => h === d || h.endsWith(`.${d}`)));
   }
   const words = hay(img);
+  if (namesakeLabel(target.entity, `${img.title ?? ''} ${img.source ?? ''}`)) return false;
   return namesOf(target).some((need) => need.slice(0, 3).every((t) => hit(t, words))) && contextOk(target, words, [img.url, img.thumb]);
+}
+
+/**
+ * A middle initial is what tells Michael I. Jordan from Michael Jordan.
+ * A label that writes the first and last name side by side, without the initial, is the other person.
+ */
+export function namesakeLabel(entity: string, label: string): boolean {
+  const parts = entity.trim().match(/^(\p{L}[\p{L}'’-]+)\s+(\p{L})\.?\s+(\p{L}[\p{L}'’-]+)$/u);
+  if (!parts) return false;
+  const [, first, initial, last] = parts;
+  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (new RegExp(`\\b${esc(first!)}\\s+${esc(initial!)}\\.?\\s+${esc(last!)}\\b`, 'iu').test(label)) return false;
+  return new RegExp(`\\b${esc(first!)}\\s+${esc(last!)}\\b`, 'iu').test(label);
 }
 
 /** Looser check for galleries and card-level pictures: the subject's main token appears in the picture's title or URLs. */
