@@ -1231,3 +1231,12 @@ test('one person who matches the workplace is still one card, without the other 
   assert.match(decision.entity.name, /Tim Lee/);
   assert.deepEqual(decision.kept, [0]);
 });
+
+test('a picked person whose page spells the workplace as two words still has that page', () => {
+  const q = 'Tim Kemp Blueflame Services Director';
+  const row = { title: 'Tim Kemp Blue Flame - --Plumbing,Heating and Electrical', url: 'https://uk.linkedin.com/in/tim-kemp', snippet: '' };
+  const longer = { title: 'Tim Kemp Blue - Painter', url: 'https://example.com/tim-kemp-blue', snippet: '' };
+  assert.equal(personSourceOk(q, row), true);
+  assert.equal(personSourceOk(q, longer), false);
+  assert.deepEqual(pickSeeds(q, [row, longer]).seeds, [0]);
+});

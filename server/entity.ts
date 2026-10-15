@@ -496,7 +496,8 @@ export function personSourceOk(query: string, row: EntityRow, name = personSubje
   const opening = pageOpening(row);
   // The full name is often only in the page text ("Ricky C." in the title, "Ricky Cheuk" in the body).
   const named = !!name && (hasFullPersonName(name, row) || truncatedName(name, row)
-    || (!!opening && hasFullPersonName(name, { title: opening, url: row.url, snippet: '' })));
+    || (!!opening && hasFullPersonName(name, { title: opening, url: row.url, snippet: '' }))
+    || nameBeforeTerm(name, row, distinguishingTerms(query, name)));
   if (!named) return false;
   const ctx = contextTerms(query, name);
   if (!ctx.length) return true;
@@ -510,8 +511,11 @@ export function personSourceOk(query: string, row: EntityRow, name = personSubje
   // author list's "Bernd Fischer" never reads as "bf".
   const tails = new Set(ctx.filter((t) => !need.includes(t)));
   const short = need.some((t) => t.length <= 4) ? initialisms(raw, tails) : new Set<string>();
+  // "Blue Flame" is the same workplace as "Blueflame".
+  const joined = new Set(seq.flatMap((w, i) => [w + (seq[i + 1] ?? ''), w + (seq[i + 1] ?? '') + (seq[i + 2] ?? '')]));
   const hit = (t: string) => body.has(t)
     || (t.length >= 5 && seq.some((w) => w.includes(t)))
+    || (t.length >= 6 && joined.has(t))
     || (t.length <= 4 && short.has(t))
     || mentionsOrg(t, seq);
   // "one" is a pointer. It only counts inside the company it belongs to ("Capital One").
@@ -520,6 +524,28 @@ export function personSourceOk(query: string, row: EntityRow, name = personSubje
   if (!cores.some(hit)) return false;
   if (!particles.length) return true;
   return particles.some((p) => cores.some((c) => new RegExp(`\\b${c}\\s+${p}\\b|\\b${p}\\s+${c}\\b`, 'i').test(raw)));
+}
+
+/**
+ * "Tim Kemp Blue Flame" looks like a longer name, but the words after it spell the workplace the ask names
+ * ("Blueflame"), so the row is that person at that place.
+ */
+function nameBeforeTerm(name: string, row: EntityRow, terms: readonly string[]): boolean {
+  const parts = tokens(name).filter((t) => t.length >= 2);
+  const long = terms.filter((t) => t.length >= 5);
+  if (parts.length < 2 || !long.length) return false;
+  const esc = parts.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+');
+  const re = new RegExp(`\\b${esc}\\s+((?:[A-Za-z][A-Za-z'’-]*\\s*){1,3})`, 'gi');
+  for (const text of [row.title ?? '', row.snippet ?? '']) {
+    for (const match of text.matchAll(re)) {
+      const words = (match[1] ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+      for (let n = 1; n <= words.length; n++) {
+        const joined = words.slice(0, n).join('').replace(/['’-]/g, '');
+        if (long.includes(joined)) return true;
+      }
+    }
+  }
+  return false;
 }
 
 /**
