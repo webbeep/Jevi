@@ -40,7 +40,8 @@ import type { EngineStatus, Freshness, ImageResult, SearchResponse, SearchResult
 import { rewriteQuery } from './ai';
 import { type DesignRequest, designParallel, designStream, gateNode } from './design';
 import { BRIEF_ROWS, briefSources, remapBrief, type SourceBrief } from './brief';
-import { factAnswer, hopQueries, nextHop, placeFactLead, unsupportedYear } from './hops';
+import { groundMembers } from './claims';
+import { cardFacts, factAnswer, hopQueries, nextHop, placeFactLead, unsupportedYear } from './hops';
 import { gapQuery, onTopicCount, rescueQuery, sourcesMiss } from './rescue';
 import { keepPictures, reviewCard, type Review } from './review';
 import { permitted } from './images';
@@ -400,8 +401,12 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     snippetCorpus,
     ...pages.map((page) => `${req.search.results[page.n - 1]?.title ?? ''} ${page.text}`),
   ].join('\n');
-  // Page text can separate a length from the thing it measures. The snippets already pair them.
-  const facts = factAnswer(req.query, factCorpus) ?? factAnswer(req.query, snippetCorpus);
+  // A ratio's two lengths sit next to their names in the snippets. Page text often
+  // separates them, so a ratio trusts the snippets first.
+  const ratio = /\bif\b[\s\S]+?\b(?:took place|were held|was held|happened|ran) on\b/i.test(req.query);
+  const facts = ratio
+    ? factAnswer(req.query, snippetCorpus) ?? factAnswer(req.query, factCorpus)
+    : factAnswer(req.query, factCorpus) ?? factAnswer(req.query, snippetCorpus);
   if (facts) console.log(JSON.stringify({ zo: 'facts', lead: facts.lead }));
   const designReq: DesignRequest = { ...req, pages, brief, facts, context: req.context?.slice(0, 4000), rowImages };
   const shown = new Map<number, CardNode>();
@@ -516,9 +521,15 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       send('node', { index: patch.index, node: patch.node });
     }
   };
+  const memberSources = () => req.search.results.map((row, i) => {
+    const page = pages.find((item) => item.n === i + 1);
+    return { text: `${row.title} ${row.snippet ?? ''} ${page?.text ?? ''} ${row.content ?? ''}` };
+  });
   const settleFacts = () => {
     const indexes = [...shown.keys()].sort((a, b) => a - b);
-    if (!facts) {
+    const nodes = indexes.map((index) => shown.get(index)!);
+    const grounded = facts ?? cardFacts(req.query, nodes);
+    if (!grounded) {
       for (const index of indexes) {
         const node = shown.get(index);
         if (!node || node.type !== 'hero' || !unsupportedYear(req.query, factCorpus, node.value)) continue;
@@ -529,10 +540,21 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       }
       return;
     }
-    const nodes = indexes.map((index) => shown.get(index)!);
-    const next = placeFactLead(nodes, facts);
+    const next = placeFactLead(nodes, grounded);
     if (!next) return;
     next.forEach((node, index) => {
+      shown.set(index, node);
+      send('node', { index, node });
+    });
+  };
+  const settleMembers = () => {
+    const indexes = [...shown.keys()].sort((a, b) => a - b);
+    const nodes = indexes.map((index) => shown.get(index)!);
+    const next = groundMembers(req.query, nodes, memberSources());
+    if (!next) return;
+    next.forEach((node, i) => {
+      const index = indexes[i]!;
+      if (node === nodes[i]) return;
       shown.set(index, node);
       send('node', { index, node });
     });
@@ -540,6 +562,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   if (arrived.ready && arrived.review) applyReview(send, designReq, shown, arrived.review, started);
   settleComparison();
   settleFacts();
+  settleMembers();
   publishReadings();
   send('done', { ...summary, pagesRead: pages.length, ms: Date.now() - started });
   if (pendingReview && !arrived.ready) {
@@ -547,6 +570,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     if (review) applyReview(send, designReq, shown, review, started);
     settleComparison();
     settleFacts();
+    settleMembers();
     publishReadings();
     mark(scope.ledger, 'reviewed');
   } else if (pendingReview) {

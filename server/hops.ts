@@ -14,6 +14,8 @@ export interface FactAnswer {
   label: string;
   /** Why that figure, in words the designer can cite from the sources. */
   note: string;
+  /** Numbers the lead was computed from. A patch must not overwrite them. */
+  keep?: string[];
 }
 
 const STOP = new Set(['a', 'an', 'the', 'of', 'in', 'on', 'at', 'to', 'for', 'from', 'with', 'and', 'or', 'when', 'that', 'this', 'was', 'were', 'got', 'did', 'does', 'after', 'before', 'exactly', 'originally', 'current', 'name', 'day', 'year', 'years']);
@@ -179,9 +181,16 @@ export function unsupportedYear(query: string, corpus: string, value: string): b
   return yearNear(corpus, verb) !== value;
 }
 
-function lengths(text: string): { n: number; unit: 'mi' | 'km'; at: number; raw: string }[] {
-  const out: { n: number; unit: 'mi' | 'km'; at: number; raw: string }[] = [];
-  const re = /(\d+(?:\.\d+)?)\s*(miles|mile|mi|km|kilometers|kilometres)\b/gi;
+interface LengthRow {
+  n: number;
+  unit: 'mi' | 'km';
+  at: number;
+  raw: string;
+}
+
+function lengths(text: string): LengthRow[] {
+  const out: LengthRow[] = [];
+  const re = /(\d+(?:\.\d+)?)\s*-?\s*(miles|mile|mi|km|kilometers|kilometres)\b/gi;
   for (const match of text.matchAll(re)) {
     const unit = /km|kilometer/i.test(match[2]!) ? 'km' : 'mi';
     out.push({ n: Number(match[1]), unit, at: match.index ?? 0, raw: match[0] });
@@ -189,19 +198,63 @@ function lengths(text: string): { n: number; unit: 'mi' | 'km'; at: number; raw:
   return out;
 }
 
-/** How far back the nearest whole-word mention sits. Infinity when the word never precedes the measurement. */
-function preceding(text: string, at: number, words: string[]): number {
-  const before = text.slice(0, at).toLowerCase();
-  let best = Infinity;
-  for (const word of words) {
-    const re = new RegExp(`\\b${word}\\b`, 'g');
-    for (const match of before.matchAll(re)) best = Math.min(best, at - (match.index ?? 0));
-  }
-  return best;
-}
-
 function miles(row: { n: number; unit: 'mi' | 'km' }): number {
   return row.unit === 'km' ? row.n / 1.60934 : row.n;
+}
+
+/** How many of these words sit in the same sentence as the measurement, and how close the nearest one is. */
+function sideScore(text: string, at: number, words: string[]): { hits: number; dist: number } {
+  const clause = clauseAt(text, at);
+  const from = text.lastIndexOf(clause, at);
+  const origin = from < 0 ? 0 : from;
+  let hits = 0;
+  let dist = Infinity;
+  for (const word of words) {
+    const found = [...clause.matchAll(new RegExp(`\\b${escapeReg(word)}\\b`, 'gi'))];
+    if (!found.length) continue;
+    hits += 1;
+    for (const match of found) dist = Math.min(dist, Math.abs(at - (origin + (match.index ?? 0))));
+  }
+  return { hits, dist };
+}
+
+/** Two writings of one distance (2.11 miles and 3.40 kilometres) are one length. */
+function collapseLengths(rows: LengthRow[]): LengthRow[] {
+  const out: LengthRow[] = [];
+  for (const row of rows) {
+    const span = miles(row);
+    const twin = out.find((kept) => Math.abs(miles(kept) - span) <= Math.max(0.05, miles(kept) * 0.04));
+    if (!twin) out.push(row);
+  }
+  return out;
+}
+
+function ratioAnswer(query: string, corpus: string): FactAnswer | undefined {
+  const placed = query.match(IF_ON);
+  if (!placed) return undefined;
+  const rows = lengths(corpus);
+  const eventWords = tokens(placed[1]!);
+  const placeWords = tokens(placed[2]!);
+  if (!eventWords.length || !placeWords.length || rows.length < 2) return undefined;
+  const ranked = (words: string[], other: string[]) => rows
+    .map((row) => ({ row, own: sideScore(corpus, row.at, words), other: sideScore(corpus, row.at, other) }))
+    .filter((item) => item.own.hits > 0 && (item.own.hits > item.other.hits || (item.own.hits === item.other.hits && item.own.dist < item.other.dist)))
+    .sort((a, b) => b.own.hits - a.own.hits || a.own.dist - b.own.dist);
+  const events = ranked(eventWords, placeWords);
+  const places = ranked(placeWords, eventWords);
+  const numer = collapseLengths(events.map((item) => item.row))[0];
+  const denom = collapseLengths(places.map((item) => item.row))[0];
+  if (!numer || !denom || miles(denom) <= 0) return undefined;
+  const quotient = miles(numer) / miles(denom);
+  if (!Number.isFinite(quotient) || quotient <= 0 || quotient > 1000) return undefined;
+  const tenth = /\bnearest tenth\b/i.test(query);
+  const lead = tenth ? (Math.round(quotient * 10) / 10).toFixed(1) : String(Math.round(quotient));
+  return {
+    lead,
+    label: 'Answer',
+    note: `${numer.raw} divided by ${denom.raw} is ${lead}. Lead with ${lead}, not with either length.`,
+    keep: [...events, ...places].map((item) => String(item.row.n)),
+  };
 }
 
 function centuryOf(year: number): string {
@@ -209,6 +262,45 @@ function centuryOf(year: number): string {
   const teen = n % 100 >= 11 && n % 100 <= 13;
   const suffix = teen ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] ?? 'th');
   return `the ${n}${suffix} century`;
+}
+
+const CENTURY_WORD = /\b(\d{1,2}(?:st|nd|rd|th)|sixteenth|seventeenth|eighteenth|nineteenth|twentieth|twenty-first)\s+century\b/gi;
+const NAMING_CLAUSE = /\b(?:chosen|named|called|coined|current name|name was|name dates|known as)\b/i;
+const ORIGIN_CLAUSE = /\b(?:harks? back|dates? back|originat\w*|originally|birthday|tradition)\b/i;
+
+function centuryLead(raw: string): string {
+  const map: Record<string, string> = {
+    sixteenth: '16th', seventeenth: '17th', eighteenth: '18th', nineteenth: '19th', twentieth: '20th', 'twenty-first': '21st',
+  };
+  const word = raw.toLowerCase();
+  return `the ${map[word] ?? word} century`;
+}
+
+function clauseAt(text: string, at: number): string {
+  let start = 0;
+  for (const mark of ['.', '\n', ';', '!', '?']) {
+    const found = text.lastIndexOf(mark, Math.max(0, at - 1));
+    if (found >= start) start = found + 1;
+  }
+  let end = text.length;
+  for (const mark of ['.', '\n', ';', '!', '?']) {
+    const found = text.indexOf(mark, at);
+    if (found !== -1 && found < end) end = found;
+  }
+  return text.slice(start, end);
+}
+
+/** The century in the same clause as the naming, not the century the custom began. */
+function namingCentury(corpus: string): string | undefined {
+  let mixed: string | undefined;
+  for (const match of corpus.matchAll(new RegExp(CENTURY_WORD.source, 'gi'))) {
+    const clause = clauseAt(corpus, match.index ?? 0);
+    if (!NAMING_CLAUSE.test(clause)) continue;
+    const lead = centuryLead(match[1]!);
+    if (!ORIGIN_CLAUSE.test(clause)) return lead;
+    mixed ??= lead;
+  }
+  return mixed;
 }
 
 /** Capitalized words that are ordinary English, not the proper name a page just introduced. */
@@ -337,9 +429,15 @@ export function nextHop(query: string, corpus: string, ctx: HopContext = {}): st
     }
   }
 
-  if (/\bcentury\b/i.test(query) && !/\b\d{1,2}(?:st|nd|rd|th)\s+century\b/i.test(corpus) && !yearNear(corpus, /\b(?:named|called|name|chosen|coined)\b/i)) {
-    const name = novelName(query, corpus);
-    if (name) offer(`${name} name origin century`);
+  if (/\bcentury\b/i.test(query)) {
+    const naming = /\b(?:name|named|called|chosen|coined)\b/i.test(query);
+    const found = naming
+      ? namingCentury(corpus) ?? yearNear(corpus, /\b(?:named|called|chosen|coined)\b/i)
+      : corpus.match(new RegExp(CENTURY_WORD.source, 'i'))?.[0];
+    if (!found) {
+      const name = novelName(query, corpus);
+      if (name) offer(naming ? `${name} current name chosen` : `${name} century`);
+    }
   }
 
   if (/\bcaptain\b/i.test(query) && !/\bcaptain\b/i.test(corpus)) {
@@ -380,30 +478,8 @@ export function factAnswer(query: string, corpus: string): FactAnswer | undefine
     }
   }
 
-  const placed = query.match(IF_ON);
-  if (placed) {
-    const rows = lengths(corpus);
-    const eventWords = tokens(placed[1]!);
-    const placeWords = tokens(placed[2]!);
-    // A length belongs to the thing named just before it. A wide window past the number
-    // pulls in the next sentence and assigns both lengths to both things.
-    const owns = (row: { at: number }, words: string[], other: string[]) => {
-      const near = preceding(corpus, row.at, words);
-      return near <= 160 && near < preceding(corpus, row.at, other);
-    };
-    const numer = rows.filter((row) => owns(row, eventWords, placeWords)).sort((a, b) => preceding(corpus, a.at, eventWords) - preceding(corpus, b.at, eventWords))[0];
-    const denom = rows.filter((row) => row !== numer && owns(row, placeWords, eventWords)).sort((a, b) => preceding(corpus, a.at, placeWords) - preceding(corpus, b.at, placeWords))[0];
-    if (numer && denom && miles(denom) > 0) {
-      const quotient = miles(numer) / miles(denom);
-      const tenth = /\bnearest tenth\b/i.test(query);
-      const lead = tenth ? (Math.round(quotient * 10) / 10).toFixed(1) : String(Math.round(quotient));
-      return {
-        lead,
-        label: 'Answer',
-        note: `${numer.raw} divided by ${denom.raw} is ${lead}. Lead with ${lead}, not with either length.`,
-      };
-    }
-  }
+  const ratio = ratioAnswer(query, corpus);
+  if (ratio) return ratio;
 
   if (SCORE.test(query) && NEWEST.test(query)) {
     const scores = seasonScores(corpus);
@@ -419,8 +495,19 @@ export function factAnswer(query: string, corpus: string): FactAnswer | undefine
   }
 
   if (/\bcentury\b/i.test(query)) {
-    const said = corpus.match(/\b(\d{1,2}(?:st|nd|rd|th)|nineteenth|eighteenth|seventeenth|twentieth)\s+century\b/i);
-    if (said) return { lead: `the ${said[1]!.toLowerCase()} century`.replace(/^the nineteenth/, 'the 19th').replace(/^the eighteenth/, 'the 18th').replace(/^the twentieth/, 'the 20th'), label: 'Century', note: `The sources name ${said[0]}. Lead with that century.` };
+    const naming = /\b(?:name|named|called|chosen|coined)\b/i.test(query);
+    if (naming) {
+      const said = namingCentury(corpus);
+      if (said) return { lead: said, label: 'Century', note: `The sources tie the name to ${said}. Lead with that century, not the century the custom began.` };
+      const year = yearNear(corpus, /\b(?:named|called|chosen|coined)\b/i);
+      if (year) {
+        const lead = centuryOf(Number(year));
+        return { lead, label: 'Century', note: `The name is tied to ${year}, which is ${lead}. Lead with the century.` };
+      }
+      return undefined;
+    }
+    const said = corpus.match(new RegExp(CENTURY_WORD.source, 'i'));
+    if (said?.[1]) return { lead: centuryLead(said[1]), label: 'Century', note: `The sources name ${said[0]}. Lead with that century.` };
     const year = yearNear(corpus, /\b(?:named|called|name|chosen|coined)\b/i);
     if (year) {
       const lead = centuryOf(Number(year));
@@ -429,6 +516,23 @@ export function factAnswer(query: string, corpus: string): FactAnswer | undefine
   }
 
   return undefined;
+}
+
+/** The same figure, read off the card when the card already states the inputs. */
+export function cardFacts(query: string, nodes: CardNode[]): FactAnswer | undefined {
+  return factAnswer(query, nodes.map(nodeText).join('\n'));
+}
+
+function hasLead(text: string, lead: string): boolean {
+  const escaped = escapeReg(lead.trim());
+  if (!escaped) return false;
+  return new RegExp(`(?<![\\d.])${escaped}(?![\\d.])`, 'i').test(text);
+}
+
+function keptNumber(value: string, raw: string): boolean {
+  const n = raw.match(/\d+(?:\.\d+)?/)?.[0];
+  if (!n) return false;
+  return new RegExp(`(?<![\\d.])${n.replace('.', '\\.')}(?![\\d.])`).test(value);
 }
 
 function nodeText(node: CardNode): string {
@@ -460,9 +564,10 @@ function nodeText(node: CardNode): string {
  * Undefined when the figure is already on the card.
  */
 export function placeFactLead(nodes: CardNode[], fact: FactAnswer): CardNode[] | undefined {
-  if (nodes.some((node) => nodeText(node).toLowerCase().includes(fact.lead.toLowerCase()))) return undefined;
+  if (nodes.some((node) => hasLead(nodeText(node), fact.lead))) return undefined;
+  const keep = fact.keep ?? [];
   for (let i = 0; i < nodes.length; i++) {
-    const next = patchFactLead(nodes[i]!, fact.lead);
+    const next = patchFactLead(nodes[i]!, fact.lead, keep);
     if (!next) continue;
     return nodes.map((node, at) => (at === i ? next : node));
   }
@@ -470,18 +575,28 @@ export function placeFactLead(nodes: CardNode[], fact: FactAnswer): CardNode[] |
 }
 
 /** The first answer-shaped number or century that is not already the grounded lead. */
-export function patchFactLead(node: CardNode, lead: string): CardNode | undefined {
-  if (nodeText(node).toLowerCase().includes(lead.toLowerCase())) return undefined;
+export function patchFactLead(node: CardNode, lead: string, keep: readonly string[] = []): CardNode | undefined {
+  if (hasLead(nodeText(node), lead)) return undefined;
   const year = /\b(?:1[6-9]|20)\d{2}\b/;
   const swapValue = (value: string | undefined): string | undefined => {
-    if (!value || !/\d/.test(value) || value.toLowerCase().includes(lead.toLowerCase())) return undefined;
+    if (!value || !/\d/.test(value) || hasLead(value, lead)) return undefined;
+    if (keep.length) {
+      let changed = false;
+      const next = value.replace(/\d+(?:\.\d+)?/g, (num) => {
+        if (keep.some((item) => keptNumber(num, item))) return num;
+        if (/^(?:1[6-9]|20)\d{2}$/.test(num)) return num;
+        changed = true;
+        return lead;
+      });
+      return changed ? next : undefined;
+    }
     if (year.test(value) && year.test(lead) === false && !lead.includes(value.match(year)?.[0] ?? '\0')) return undefined;
     return lead;
   };
   switch (node.type) {
     case 'hero':
     case 'stat': {
-      if (!/\d/.test(node.value)) return { ...node, value: lead };
+      if (!/\d/.test(node.value) && !keep.length) return { ...node, value: lead };
       const value = swapValue(node.value);
       return value ? { ...node, value } : undefined;
     }
@@ -493,7 +608,7 @@ export function patchFactLead(node: CardNode, lead: string): CardNode | undefine
       let changed = false;
       const items = node.items.map((item) => {
         const value = swapValue(item.value);
-        if (!value || changed) return item;
+        if (!value || (!keep.length && changed)) return item;
         changed = true;
         return { ...item, value };
       });
@@ -505,8 +620,8 @@ export function patchFactLead(node: CardNode, lead: string): CardNode | undefine
     case 'scroller': {
       let changed = false;
       const children = node.children.map((child) => {
-        if (changed) return child;
-        const next = patchFactLead(child, lead);
+        if (changed && !keep.length) return child;
+        const next = patchFactLead(child, lead, keep);
         if (!next) return child;
         changed = true;
         return next;

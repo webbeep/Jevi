@@ -654,6 +654,176 @@ function dropPriceless(node: CardNode, ceilings: readonly number[]): CardNode {
   }
 }
 
+const MEMBER = /\bwhich\b[\s\S]{0,160}\b(?:have|has|had|did|does|appeared|appear)\b/i;
+const WORK_STOP = new Set([
+  'there', 'their', 'about', 'which', 'would', 'could', 'other', 'every', 'first', 'after',
+  'before', 'video', 'music', 'videos', 'appeared', 'appear', 'appears', 'starred', 'friends',
+  'series', 'member', 'members', 'main', 'cast', 'wanna', 'gonna', 'something', 'someone',
+  'where', 'these', 'those', 'being', 'been', 'have', 'with', 'from', 'that', 'this', 'into',
+  'over', 'your', 'them', 'they', 'were', 'when', 'what',
+]);
+
+function properName(text: string): string | undefined {
+  return text.match(/\b[A-Z][a-zA-Z'’-]{2,}(?:\s+[A-Z][a-zA-Z'’-]{2,})+\b/)?.[0];
+}
+
+function workWords(text: string): string[] {
+  const words = text.replace(/[’']/g, '').split(/[^A-Za-z0-9]+/).map((word) => word.toLowerCase());
+  return [...new Set(words.filter((word) => word.length >= 5 && !WORK_STOP.has(word)))];
+}
+
+function appearanceClues(parts: string[], person: string): string[] {
+  const own = new Set(person.toLowerCase().split(/\s+/));
+  return parts.flatMap((part) => workWords(part)).filter((word) => !own.has(word));
+}
+
+function nearPerson(text: string, person: string, clues: readonly string[]): boolean {
+  const last = person.split(/\s+/).at(-1)?.replace(/[^A-Za-z'’-]/g, '');
+  if (!last || last.length < 3 || !clues.length) return false;
+  const re = new RegExp(`\\b${last.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
+  for (const match of text.matchAll(re)) {
+    const at = match.index ?? 0;
+    const window = text.slice(Math.max(0, at - 500), Math.min(text.length, at + last.length + 500)).toLowerCase();
+    if (clues.some((clue) => window.includes(clue))) return true;
+  }
+  return false;
+}
+
+/** The card names a work, this person is in the sources, and no source places them next to that work. */
+function crossedAttribution(sources: readonly { text: string }[], person: string, clues: readonly string[]): boolean {
+  if (!clues.length) return false;
+  if (sources.some((source) => nearPerson(source.text, person, clues))) return false;
+  const last = person.split(/\s+/).at(-1)?.replace(/[^A-Za-z'’-]/g, '') ?? '';
+  if (last.length < 3) return false;
+  const named = new RegExp(`\\b${last.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+  return sources.some((source) => named.test(source.text));
+}
+
+function affirmsAppearance(value?: string, extra?: string, active?: boolean): boolean {
+  const blob = `${value ?? ''} ${extra ?? ''}`.trim();
+  if (/\b(?:no|not|never|none)\b/i.test(blob) && !/\byes\b/i.test(blob)) return false;
+  if (active || /\byes\b/i.test(blob)) return true;
+  return workWords(blob).length > 0;
+}
+
+/**
+ * A "which of these people did this" yes stays only when a source places that person
+ * next to the work the card names. A video the sources describe without them is a no.
+ */
+export function groundMembers(query: string, nodes: CardNode[], sources: readonly { text: string }[]): CardNode[] | undefined {
+  if (!MEMBER.test(query) || sources.every((source) => source.text.trim().length < 20)) return undefined;
+  let changed = false;
+  const denySentence = (sentence: string): boolean => {
+    if (!/\b(?:appeared|appear(?:s|ed)?|starred|featured)\b/i.test(sentence)) return false;
+    const person = properName(sentence);
+    if (!person) return false;
+    const clues = appearanceClues([sentence], person);
+    return crossedAttribution(sources, person, clues);
+  };
+  const walk = (node: CardNode): CardNode => {
+    switch (node.type) {
+      case 'stack':
+      case 'grid':
+      case 'section':
+      case 'scroller':
+        return { ...node, children: node.children.map(walk) };
+      case 'tabs':
+        return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: tab.children.map(walk) })) };
+      case 'tile': {
+        const person = properName(node.label) ?? properName(node.value ?? '') ?? properName(node.sub ?? '');
+        if (!person || !affirmsAppearance(node.value, node.sub, node.active)) return node;
+        const clues = appearanceClues([node.sub ?? '', node.value ?? ''], person);
+        if (!crossedAttribution(sources, person, clues)) return node;
+        changed = true;
+        return { ...node, value: 'No', sub: undefined, active: false };
+      }
+      case 'keyvalue': {
+        const items = node.items.map((item) => {
+          const person = properName(item.label) ?? properName(item.value);
+          if (!person || !affirmsAppearance(item.value)) return item;
+          if (!crossedAttribution(sources, person, appearanceClues([item.value], person))) return item;
+          changed = true;
+          return { ...item, value: 'No' };
+        });
+        return { ...node, items };
+      }
+      case 'list': {
+        const items = node.items.filter((item) => {
+          const person = properName(item.text);
+          if (!person || !affirmsAppearance(item.text, item.meta)) return true;
+          if (!crossedAttribution(sources, person, appearanceClues([item.text, item.meta ?? ''], person))) return true;
+          changed = true;
+          return false;
+        });
+        return { ...node, items };
+      }
+      case 'table': {
+        const rows = node.rows.map((row) => {
+          const person = row.reduce<string | undefined>((found, cell) => found ?? properName(cell), undefined);
+          if (!person) return row;
+          const blob = row.join(' ');
+          if (!affirmsAppearance(blob)) return row;
+          if (!crossedAttribution(sources, person, appearanceClues(row, person))) return row;
+          changed = true;
+          return row.map((cell) => {
+            if (/\byes\b/i.test(cell)) return 'No';
+            if (properName(cell) === person) return cell;
+            return workWords(cell).length ? '' : cell;
+          });
+        });
+        return { ...node, rows };
+      }
+      case 'text':
+      case 'callout':
+      case 'quote':
+      case 'draft': {
+        const kept = node.text.split(/(?<=[.!?])\s+/).filter((sentence) => {
+          if (!denySentence(sentence)) return true;
+          changed = true;
+          return false;
+        });
+        const text = kept.join(' ').trim();
+        return text === node.text ? node : { ...node, text };
+      }
+      case 'heading':
+      case 'hero':
+      case 'stat':
+      case 'timeline':
+      case 'profile':
+      case 'steps':
+      case 'accordion':
+      case 'proscons':
+      case 'badges':
+      case 'actions':
+      case 'choices':
+      case 'links':
+      case 'citations':
+      case 'chart':
+      case 'pricing':
+      case 'scaler':
+      case 'slider':
+      case 'reveal':
+      case 'image':
+      case 'gallery':
+      case 'video':
+      case 'code':
+      case 'divider':
+      case 'progress':
+      case 'rating':
+      case 'diagram':
+      case 'ticker':
+      case 'slot':
+        return node;
+      default: {
+        const unreachable: never = node;
+        return unreachable;
+      }
+    }
+  };
+  const next = nodes.map(walk);
+  return changed ? next : undefined;
+}
+
 /** Move each number's citation onto a page that states it, then fill a missing product price from that page. */
 export function bindClaims(node: CardNode, sources: readonly ClaimSource[], query: string): CardNode {
   if (!sources.length) return node;

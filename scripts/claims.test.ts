@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { bindClaims, budgetAmounts, claimSources, priceFor, retargetCites, salesTax, shoppingAsk, type ClaimSource } from '../server/claims.ts';
+import { bindClaims, budgetAmounts, claimSources, groundMembers, priceFor, retargetCites, salesTax, shoppingAsk, type ClaimSource } from '../server/claims.ts';
 import type { CardNode } from '../shared/card.ts';
 
 const sources: ClaimSource[] = [
@@ -153,4 +153,32 @@ test('a table drops a number no page states', () => {
   const table: CardNode = { type: 'table', columns: ['Year', 'Estimate'], rows: [['2024', '2,900']] };
   const next = bindClaims(table, sources, 'How many wolves are in Minnesota?');
   assert.equal(next.type === 'table' ? next.rows[0]?.[1] : '', '');
+});
+
+test('a yes is removed when the named work never sits next to that person', () => {
+  const query = 'Of the 6 main cast members of the series Friends, which have appeared in music videos?';
+  const nodes: CardNode[] = [
+    { type: 'tile', label: 'Courteney Cox', value: 'Yes', sub: 'Dancing in the Dark' },
+    { type: 'tile', label: 'Jennifer Aniston', value: 'Yes', sub: 'I\'ll Be There for You' },
+    { type: 'tile', label: 'Matt LeBlanc', value: 'Yes', sub: 'Bon Jovi Miracle' },
+    { type: 'tile', label: 'Lisa Kudrow', value: 'Yes', sub: 'I (Wanna) Channing All Over Your Tatum' },
+  ];
+  const pages: ClaimSource[] = [
+    { n: 1, text: 'Courteney Cox appeared in the Bruce Springsteen music video Dancing in the Dark.' },
+    { n: 2, text: 'Jennifer Aniston appeared with the Rembrandts in the music video for I\'ll Be There for You.' },
+    { n: 3, text: 'Matt LeBlanc starred in the Jon Bon Jovi music video Miracle.' },
+    { n: 4, text: 'The music video I Wanna Channing All Over Your Tatum features Channing Tatum, Jamie Foxx and Matt Damon.' },
+    { n: 5, text: 'The Friends cast includes Jennifer Aniston, Courteney Cox, Lisa Kudrow, Matt LeBlanc, Matthew Perry and David Schwimmer.' },
+  ];
+  const next = groundMembers(query, nodes, pages);
+  const tiles = (next ?? []).filter((node) => node.type === 'tile');
+  const valueOf = (label: string) => {
+    const tile = tiles.find((node) => node.type === 'tile' && node.label === label);
+    return tile && tile.type === 'tile' ? tile.value : '';
+  };
+  assert.equal(valueOf('Courteney Cox'), 'Yes');
+  assert.equal(valueOf('Jennifer Aniston'), 'Yes');
+  assert.equal(valueOf('Matt LeBlanc'), 'Yes');
+  assert.equal(valueOf('Lisa Kudrow'), 'No');
+  assert.equal(groundMembers('Who is Michael Jordan?', nodes, pages), undefined);
 });

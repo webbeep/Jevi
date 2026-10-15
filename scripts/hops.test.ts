@@ -56,6 +56,28 @@ test('a mapped distance leads with the quotient, not either length', () => {
   const hops = hopQueries(WALLS);
   assert.match(hops.join(' | '), /Great North Run distance/);
   assert.match(hops.join(' | '), /York's Medieval Walls length/);
+  const sameLength = 'York city walls are 2.11 miles (3.40 kilometres) in the north of England. The Great North Run covers 13.1 miles.';
+  assert.equal(factAnswer(WALLS, sameLength)?.lead, '6.2');
+});
+
+test('a ratio card leads with the quotient of the lengths it already shows', () => {
+  const card = 'York walls length 2.11 mi. Great North Run distance 13.1 mi. York walls circuit 3.9';
+  const fact = factAnswer(WALLS, card);
+  assert.equal(fact?.lead, '6.2');
+  const kv: CardNode = {
+    type: 'keyvalue',
+    items: [
+      { label: 'York walls length', value: '2.11 mi' },
+      { label: 'Great North Run distance', value: '13.1 mi' },
+      { label: 'York walls circuit', value: '3.9' },
+    ],
+  };
+  const next = placeFactLead([kv], fact!);
+  const text = JSON.stringify(next);
+  assert.match(text, /6\.2/);
+  assert.match(text, /2\.11/);
+  assert.match(text, /13\.1/);
+  assert.doesNotMatch(text, /3\.9/);
 });
 
 test('a year offset searches the derived date once the anchor date is known', () => {
@@ -74,8 +96,13 @@ test('a birth year inside a longer question becomes the next search', () => {
 
 test('a century question searches the name the first pages introduced', () => {
   const next = nextHop(CENTURY, 'The Dutch equivalent is Prinsjesdag, held on the third Tuesday of September.', {});
-  assert.match(next ?? '', /Prinsjesdag name origin century/);
+  assert.match(next ?? '', /Prinsjesdag current name chosen/);
   assert.equal(factAnswer(CENTURY, 'The name Prinsjesdag was chosen in 1814.')?.lead, 'the 19th century');
+  const both = 'Prinsjesdag originally was a birthday in the 18th century. The current name was chosen in the 19th century.';
+  assert.equal(factAnswer(CENTURY, both)?.lead, 'the 19th century');
+  assert.equal(factAnswer(CENTURY, 'The tradition dates to the 18th century.'), undefined);
+  const again = nextHop(CENTURY, 'Prinsjesdag harks back to the 18th century.', {});
+  assert.match(again ?? '', /Prinsjesdag current name chosen/);
 });
 
 test('shopping, video, paper, lakes, a person, and an agency count are not fact hops', () => {
