@@ -4,7 +4,7 @@ import { readBrief, rejectedSources, remapBrief } from '../server/brief.ts';
 import { keepPictures, readReview } from '../server/review.ts';
 import { corpusOf, gateNode, type DesignRequest } from '../server/design.ts';
 import { Grounding } from '../server/ground.ts';
-import { tickerBody } from '../shared/tickerNotes.ts';
+import { findTicker, tickerBody } from '../shared/tickerNotes.ts';
 import type { CardNode } from '../shared/card.ts';
 
 describe('source brief', () => {
@@ -122,6 +122,13 @@ describe('saved ticker cards', () => {
   test('cards without a ticker are untouched', () => {
     const body = [{ type: 'callout', text: 'No chart is available for this.' }] as unknown as CardNode[];
     assert.equal(tickerBody(body), body);
+  });
+
+  test('a follow-up can find the chart nested on the card', () => {
+    const ticker = { type: 'ticker', symbol: 'AAPL', name: 'Apple', kind: 'stock', currency: 'USD', feed: 'Yahoo Finance', series: { range: '1D', points: [[1, 1], [2, 2]], base: 1, price: 2, at: '' } } as const;
+    const body = [{ type: 'stack', direction: 'col', gap: 'sm', children: [ticker, { type: 'text', text: 'Up on the day.' }] }] as unknown as CardNode[];
+    assert.equal(findTicker(body)?.type, 'ticker');
+    assert.equal(findTicker([{ type: 'text', text: 'No price.' }] as unknown as CardNode[]), undefined);
   });
 });
 

@@ -57,7 +57,7 @@ import { type LateExtras, normalizeUrl, searchWithLate } from './search';
 import type { WebHit } from './cascade';
 import { domainOf } from './util';
 import { choicesIn, distinctActions, subjectWords } from './chips';
-import { anchoredFollowup, asksToCompare, cryptographyHint, faithfulQuery, isWritingAsk, needsOwnSearch, personQuestion, quickPlan, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
+import { anchoredFollowup, asksToCompare, cryptographyHint, faithfulQuery, isWritingAsk, needsOwnSearch, ownQuestion, personQuestion, quickPlan, quoteFollowQuery, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
 import { calculationAnswer, isCalculationAsk } from './calculate';
 import { comparisonRepair, comparisonTitle } from './compareAnswer';
 import { withFinishedSentences } from './polish';
@@ -70,6 +70,7 @@ import { dropStrayDois, isPaperAsk, leadPreprints, scholarlyResults, withScholar
 import { videoResults, wantsVideo, withVideos } from './videoSearch';
 import { guessFreshness, preferFresh, staleComplaint, stricter } from './freshness';
 import { isQuoteRow, liveQuote, quoteRow, tickerNode } from './liveQuote';
+import { findTicker } from '../shared/tickerNotes';
 import { splitPeople } from './peopleSplit';
 import { personSteer, pronounFollow, roleFollow, threadPerson, topicOnly, withoutChosen } from './personSteer';
 import type { Send } from './sse';
@@ -394,7 +395,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   // Follow-ups (small answers and redesigns) stay coherent in one call; full search cards are designed region by region in parallel.
   // A live quote is one number told one way: regions designed in parallel each repeat the price and the chart.
   const quoteCard = isQuoteRow(req.search.results[0]);
-  const designer = req.followup || quoteCard ? designStream : designParallel;
+  const designer = req.followup || quoteCard || req.ticker ? designStream : designParallel;
   const rowImages = chat || quoteCard ? undefined : rowImagePlan(req, env, scope);
   const snippetCorpus = req.search.results.map((row) => `${row.title} ${row.snippet ?? ''}`).join('\n');
   const factCorpus = [
@@ -614,6 +615,7 @@ function applyReview(send: Send, req: DesignRequest, shown: Map<number, CardNode
   if (review.followups) send('followups', review.followups);
   let fixed = 0;
   for (const fix of review.fixes) {
+    if (shown.get(fix.index)?.type === 'ticker') continue;
     const gated = gateNode(fix.node, req);
     if (!gated) continue;
     const node = keepPictures(shown.get(fix.index), gated) as CardNode;
@@ -637,7 +639,7 @@ function applyReview(send: Send, req: DesignRequest, shown: Map<number, CardNode
  * inside the three-call cap (two rewrites leave no room for Wikipedia).
  * Rewritten follow-ups already say what they mean, so they skip the understanding step.
  */
-async function searchAndDesign(send: Send, env: Env, query: string, freshness: Freshness, context: string | undefined, started: number, scope: AskScope, rewritten = false, seedRows?: SearchResult[], steer?: { avoid: Set<string>; rejected: string }) {
+async function searchAndDesign(send: Send, env: Env, query: string, freshness: Freshness, context: string | undefined, started: number, scope: AskScope, rewritten = false, seedRows?: SearchResult[], steer?: { avoid: Set<string>; rejected: string }, keepTicker?: CardNode) {
   const located = queryWithPlace(query, scope.place);
   if (located !== query) {
     send('rewrite', { query: located });
@@ -1094,7 +1096,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   send('search', results);
   const boost = imageBoost(pattern, results, env, scope, boostQuery);
   const crypto = cryptographyHint(query, results.results);
-  await design(send, env, { query, pattern, depth: plan.depth, readPages: plan.readPages || deep || fromSeeds, search: results, context: [designContext, crypto].filter(Boolean).join('\n') || undefined, intent: u?.intent, deep, boost, entityHint, ticker: quote ? tickerNode(quote) : undefined, earlyBrief, website, allowRescue: !isPaperAsk(query), hopUrls }, started, scope, late);
+  await design(send, env, { query, pattern, depth: plan.depth, readPages: plan.readPages || deep || fromSeeds, search: results, context: [designContext, crypto].filter(Boolean).join('\n') || undefined, intent: u?.intent, deep, boost, entityHint, ticker: quote ? tickerNode(quote) : keepTicker, earlyBrief, website, allowRescue: !isPaperAsk(query), hopUrls }, started, scope, late);
 }
 
 /** The profile on the card, wherever the layout put it, links the person's own website. */
@@ -1312,6 +1314,29 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
     return;
   }
 
+  // A new question that does not point at the card is searched on its own. The previous
+  // subject stays out of the query and out of the conversation the search is written from.
+  if (req.intent !== 'adjust' && ownQuestion(req.question, covered)) {
+    const query = req.question.trim();
+    send('rewrite', { query });
+    await searchAndDesign(send, env, query, 'any', undefined, started, scope, false);
+    return;
+  }
+
+  const onScreen = from?.card ?? [...req.cards].reverse().find((card) => card.card)?.card;
+  const chart = findTicker(onScreen?.body ?? []);
+
+  // A price or stock ask still gets the live line chart, including when it is a follow-up
+  // that only names the attribute ("what's the price") of the instrument already on screen.
+  const quoted = req.intent !== 'adjust'
+    ? quoteFollowQuery(req.question, [from?.card?.title, from?.title, req.original].filter((part): part is string => !!part))
+    : undefined;
+  if (quoted) {
+    send('rewrite', { query: quoted });
+    await searchAndDesign(send, env, quoted, 'any', context, started, scope, true, undefined, undefined, chart);
+    return;
+  }
+
   // Classify and speculatively rewrite at the same time; the rewrite is only used if Jev says a new search is needed.
   const anchored = req.intent === 'adjust' ? undefined : anchoredFollowup(req.original, req.question);
   const rewritten = anchored || req.intent === 'adjust' || standsAlone(req.question)
@@ -1328,27 +1353,28 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
       const ref = req.ref ? { ...req.ref, ...(entity ? { entity } : {}) } : undefined;
       const query = faithfulQuery(req.question, withRef(await rewritten, ref));
       send('rewrite', { query });
-      await searchAndDesign(send, env, query, 'any', context, started, scope, true, req.ref ? req.search?.results : undefined);
+      await searchAndDesign(send, env, query, 'any', context, started, scope, true, req.ref ? req.search?.results : undefined, undefined, chart);
       return;
     }
     case 'refine': {
       // Adjustments always become a new card; the card they start from stays as it was.
       const base = (req.intent === 'adjust' ? from : req.cards.find((c) => c.id === plan.target)) ?? [...req.cards].reverse().find((c) => c.card);
+      const kept = findTicker(base?.card?.body ?? []) ?? chart;
       if (base?.card) {
         const pattern = base.pattern ?? plan.pattern;
         send('plan', { ...plan, mode, pattern });
         send('base', { id: base.id });
-        await design(send, env, { query: req.original, pattern, depth: plan.depth, readPages: false, search: req.search, followup: { mode: 'refine', question: req.question, baseCard: base.card }, context }, started, scope);
+        await design(send, env, { query: req.original, pattern, depth: plan.depth, readPages: false, search: req.search, followup: { mode: 'refine', question: req.question, baseCard: base.card }, context, ...(kept ? { ticker: kept } : {}) }, started, scope);
         return;
       }
       send('plan', { ...plan, mode: 'chat' });
-      await design(send, env, { query: req.original, pattern: plan.pattern, depth: plan.depth, readPages: false, search: req.search, followup: { mode: 'chat', question: req.question }, context }, started, scope);
+      await design(send, env, { query: req.original, pattern: plan.pattern, depth: plan.depth, readPages: false, search: req.search, followup: { mode: 'chat', question: req.question }, context, ...(chart ? { ticker: chart } : {}) }, started, scope);
       return;
     }
     case 'answer':
     case 'chat':
       send('plan', { ...plan, mode });
-      await design(send, env, { query: req.original, pattern: plan.pattern, depth: plan.depth, readPages: plan.readPages, search: req.search, followup: { mode, question: req.question }, context, think: mode === 'chat' && plan.think }, started, scope);
+      await design(send, env, { query: req.original, pattern: plan.pattern, depth: plan.depth, readPages: plan.readPages, search: req.search, followup: { mode, question: req.question }, context, think: mode === 'chat' && plan.think, ...(chart ? { ticker: chart } : {}) }, started, scope);
       return;
     default: {
       const unreachable: never = mode;

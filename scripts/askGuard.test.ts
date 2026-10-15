@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { anchoredFollowup, asksToCompare, cryptographyHint, faithfulQuery, isWritingAsk, needsOwnSearch, personQuestion, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from '../server/askGuard.ts';
+import { anchoredFollowup, asksToCompare, cryptographyHint, faithfulQuery, isWritingAsk, needsOwnSearch, ownQuestion, personQuestion, quoteFollowQuery, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from '../server/askGuard.ts';
 import { isPersonAsk } from '../server/entity.ts';
 import { planLayout } from '../server/plan.ts';
 import type { CardNode } from '../shared/card.ts';
@@ -66,6 +66,32 @@ test('a person follow-up is a search when the planner is unavailable', async () 
   assert.equal(person.pattern, 'profile');
   const chat = await planLayout('explain it like I am 10', {} as never, { original: 'how do mRNA vaccines work' });
   assert.equal(chat.mode, 'chat');
+  const next = await planLayout('What is photosynthesis?', {} as never, { original: 'how do mRNA vaccines work' });
+  assert.equal(next.mode, 'search');
+});
+
+test('an unrelated follow-up is its own question, and a related one keeps the subject', () => {
+  assert.equal(ownQuestion('What is photosynthesis?', 'how do mRNA vaccines work'), true);
+  assert.equal(ownQuestion('how many lakes are in Minnesota', 'who is Michael Jordan'), true);
+  assert.equal(ownQuestion('tesla stock price', 'how to make sourdough starter'), true);
+  assert.equal(ownQuestion('explain it like I am 10', 'how do mRNA vaccines work'), false);
+  assert.equal(ownQuestion('which one has better battery life?', 'iphone 17 vs pixel 10'), false);
+  assert.equal(ownQuestion('which is lightest for travel?', 'best budget noise cancelling headphones'), false);
+  assert.equal(ownQuestion('who scored the most?', 'NBA scores tonight'), false);
+  assert.equal(ownQuestion('what about Joe Lacob', 'who is Ed Chu'), false);
+  assert.equal(ownQuestion('can I use rye flour instead?', 'how to make sourdough starter'), false);
+  assert.equal(ownQuestion('How long does apple pie keep?', 'apple pie recipe'), false);
+  assert.equal(ownQuestion("what's the price", 'Tesla stock'), false);
+  assert.equal(ownQuestion('why is it moving today?', 'Btc Usd'), false);
+  assert.equal(ownQuestion('Not this', 'who is Ed Chu'), false);
+  assert.equal(ownQuestion('Draft the unblock email', 'It Takes Two'), false);
+});
+
+test('a price follow-up names the instrument already on screen', () => {
+  assert.equal(quoteFollowQuery('AAPL stock', ['how to make sourdough starter']), 'AAPL stock');
+  assert.equal(quoteFollowQuery("what's the price", ['Tesla', 'tesla stock']), 'tesla stock what\'s the price');
+  assert.equal(quoteFollowQuery('why is it moving today?', ['Btc Usd']), undefined);
+  assert.equal(quoteFollowQuery('how much does the battery weigh', ['iphone 17']), undefined);
 });
 
 test('a query carrying an address is never a person to disambiguate', () => {

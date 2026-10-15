@@ -24,8 +24,24 @@ export function withoutCharts(node: CardNode | undefined): CardNode | undefined 
   return node;
 }
 
-const hasTicker = (nodes: CardNode[]): boolean =>
-  nodes.some((n) => n.type === 'ticker' || ('children' in n && hasTicker(n.children)));
+/** The live price chart already on a card, including one nested in a layout. */
+export function findTicker(nodes: readonly CardNode[]): Extract<CardNode, { type: 'ticker' }> | undefined {
+  for (const node of nodes) {
+    if (node.type === 'ticker') return node;
+    if (node.type === 'tabs') {
+      for (const tab of node.tabs) {
+        const found = findTicker(tab.children);
+        if (found) return found;
+      }
+    } else if ('children' in node && Array.isArray(node.children)) {
+      const found = findTicker(node.children);
+      if (found) return found;
+    }
+  }
+  return undefined;
+}
+
+const hasTicker = (nodes: readonly CardNode[]): boolean => findTicker(nodes) !== undefined;
 
 /** A card body with the ticker kept and everything that contradicts it removed. */
 export function tickerBody(body: CardNode[]): CardNode[] {

@@ -1,6 +1,8 @@
 import { askFacet, personName } from '../shared/askAbout';
 import type { CardNode, FollowupMode, LayoutPlan } from '../shared/card';
+import { quoteAsk } from '../shared/quoteAsk';
 import { isBlockPage } from './blockPage';
+import { isCalculationAsk } from './calculate';
 import { repeatsCallout } from './chips';
 import { isPersonAsk, personSubject } from './entity';
 import { compareSides, heuristicPattern, patternById, skeletonCard } from './patterns';
@@ -32,6 +34,69 @@ export function isWritingAsk(question: string): boolean {
 export function standsAlone(question: string): boolean {
   const words = question.trim().split(/\s+/);
   return words.length >= 5 && !PRONOUN.test(question);
+}
+
+const ABOUT_SWAP = /^(?:what|how)\s+about\b/i;
+/** "which …" and "who scored …" ask about the set already on screen. "who is Ada Lovelace" does not. */
+const ELLIPTICAL = /^(?:which\b|who\b(?!\s+(?:is|are|was|were)\b))/i;
+/**
+ * Words that ask for an attribute of the subject already on screen. They are not a new subject
+ * ("what's the price", "how many calories"), so the follow-up keeps that subject.
+ */
+const ATTRIBUTE = new Set([
+  'price', 'prices', 'cost', 'costs', 'weight', 'weights', 'battery', 'batteries', 'calorie', 'calories',
+  'height', 'size', 'storage', 'speed', 'range', 'score', 'scores', 'stat', 'stats', 'news', 'schedule',
+  'highlight', 'highlights', 'stock', 'share', 'shares', 'chart', 'charts', 'quote', 'quotes', 'worth',
+  'trading', 'today', 'latest', 'current', 'live', 'much', 'many', 'long', 'best', 'better', 'more', 'most',
+  'less', 'least', 'can', 'could', 'would', 'should', 'does', 'did', 'have', 'has', 'will', 'just', 'also',
+  'tell', 'show', 'give', 'make', 'need', 'want', 'like', 'some', 'any', 'why', 'when', 'where', 'which',
+  'use', 'using', 'used', 'get', 'got', 'new', 'old', 'next', 'last', 'first', 'good',
+]);
+
+function stem(word: string): string {
+  if (word.length > 4 && word.endsWith('ing')) return word.slice(0, -3);
+  if (word.length > 4 && word.endsWith('ed')) return word.slice(0, -2);
+  if (word.length > 3 && word.endsWith('s') && !word.endsWith('ss')) return word.slice(0, -1);
+  return word;
+}
+
+function contentStems(text: string): string[] {
+  return text.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 3 && !FILLER.has(word)).map(stem);
+}
+
+/**
+ * A follow-up that names something the card does not, and does not point back at that card.
+ * It is searched as written. A related turn (a pronoun, "which", a shared word, or only an
+ * attribute such as price) keeps the subject already on screen.
+ */
+export function ownQuestion(question: string, covered: string): boolean {
+  const q = question.trim();
+  if (!q || isWritingAsk(q) || isCalculationAsk(q)) return false;
+  if (PRONOUN.test(q) || ABOUT_SWAP.test(q) || ELLIPTICAL.test(q) || /\b(?:instead|rather)\b/i.test(q)) return false;
+  const asked = contentStems(q);
+  const subject = new Set(contentStems(covered));
+  if (asked.some((word) => subject.has(word))) return false;
+  return asked.some((word) => !ATTRIBUTE.has(word) && !subject.has(word));
+}
+
+const PRICE_CUE = /\b(?:price|prices|quote|quotes|stock|shares?|chart|charts|trading|worth|how much)\b|\$[A-Za-z]{1,5}\b/i;
+
+/**
+ * A price or stock follow-up, searched with the subject already on screen when the question
+ * does not name the instrument itself. Undefined when this is not a market-price ask.
+ */
+export function quoteFollowQuery(question: string, subjects: readonly string[]): string | undefined {
+  const q = question.trim();
+  if (!q) return undefined;
+  if (quoteAsk(q)) return q;
+  if (!PRICE_CUE.test(q)) return undefined;
+  for (const subject of subjects) {
+    const head = subject.trim().split(/\s+/).slice(0, 10).join(' ');
+    if (!head) continue;
+    const combined = `${head} ${q}`.replace(/\s+/g, ' ').trim().slice(0, 120);
+    if (quoteAsk(combined)) return combined;
+  }
+  return undefined;
 }
 
 /**
