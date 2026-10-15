@@ -297,3 +297,22 @@ test('a shared theme credit is not a yes, and a follow-on sentence still credits
   assert.doesNotMatch(JSON.stringify(next), /All six appeared/);
   assert.doesNotMatch(JSON.stringify(rows), /1995/);
 });
+
+test('a roundup title does not take the credit away from the person in the sentence', () => {
+  const query = 'Of the 6 main cast members of the series Friends, which have appeared in music videos?';
+  const nodes: CardNode[] = ['Jennifer Aniston', 'Courteney Cox', 'Lisa Kudrow', 'Matt LeBlanc', 'Matthew Perry', 'David Schwimmer']
+    .map((label) => ({ type: 'tile' as const, label, value: 'No' }));
+  const pages: ClaimSource[] = [
+    { n: 1, title: '49 Famous Actors in Music Videos', text: 'Courteney Cox isn\'t the only Friends star to make this list, and to have been in a music video. Matt LeBlanc can be seen in one too.' },
+    { n: 2, title: 'List of Friends Cast Members', text: 'Main Cast · Jennifer Aniston is an actress. · Courteney Cox is an actress. · Lisa Kudrow is an actress.' },
+  ];
+  const next = groundMembers(query, nodes, pages) ?? nodes;
+  const valueOf = (label: string) => {
+    const tile = next.find((node) => node.type === 'tile' && node.label === label);
+    return tile && tile.type === 'tile' ? tile.value : '';
+  };
+  assert.equal(valueOf('Courteney Cox'), 'Yes');
+  assert.equal(valueOf('Matt LeBlanc'), 'Yes');
+  assert.equal(valueOf('Lisa Kudrow'), 'No');
+  assert.equal(valueOf('Jennifer Aniston'), 'No');
+});

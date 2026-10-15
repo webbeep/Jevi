@@ -523,7 +523,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   };
   const memberSources = () => req.search.results.map((row, i) => {
     const page = pages.find((item) => item.n === i + 1);
-    return { title: row.title, url: row.url, text: `${row.title} ${row.snippet ?? ''} ${page?.text ?? ''} ${row.content ?? ''}` };
+    return { title: row.title, url: row.url, text: `${row.snippet ?? ''} ${page?.text ?? ''} ${row.content ?? ''}` };
   });
   const settleFacts = () => {
     const indexes = [...shown.keys()].sort((a, b) => a - b);
