@@ -157,7 +157,9 @@ function stripNums(text: string, nums: readonly string[]): string {
 function keepsDerived(query: string, text: string, sources: readonly ClaimSource[]): boolean {
   if (!query || !text) return false;
   const answer = factAnswer(query, sources.map((source) => source.text).join('\n'));
-  return !!answer && text.toLowerCase().includes(answer.lead.toLowerCase());
+  if (!answer) return false;
+  const lower = text.toLowerCase();
+  return [answer.lead, ...(answer.accept ?? [])].some((value) => lower.includes(value.toLowerCase()));
 }
 
 /** Point each cited number at a page that contains it, and drop a number no cited page states. */

@@ -128,6 +128,16 @@ test('a ratio card leads with the quotient of the lengths it already shows', () 
   assert.equal(fromCard?.lead, '6.2');
   const answered = placeFactLead(shown, fromCard!);
   assert.equal(answered?.[0] && answered[0].type === 'hero' ? answered[0].value : '', '6.2');
+  const walk: CardNode[] = [
+    { type: 'tile', label: 'Walk time', value: '1.5–2 hours' },
+    { type: 'tile', label: 'Gates', value: '4 main bars' },
+    { type: 'keyvalue', items: [{ label: 'Great North Run', value: '13.1 miles' }, { label: 'York walls', value: '2.11 miles' }] },
+  ];
+  const walked = placeFactLead(walk, fromCard!);
+  assert.equal(walked?.[0]?.type, 'hero');
+  assert.equal(walked?.[0] && walked[0].type === 'hero' ? walked[0].value : '', '6.2');
+  assert.match(JSON.stringify(walked), /1\.5–2 hours/);
+  assert.match(JSON.stringify(walked), /4 main bars/);
 });
 
 test('a which-members question searches someone the pages have not credited', () => {
@@ -212,6 +222,22 @@ test('a wrong age on the card is replaced by the age the dates imply', () => {
   const next = patchFactLead(hero, '52');
   assert.equal(next && next.type === 'hero' ? next.value : '', '52');
   assert.equal(patchFactLead({ type: 'hero', value: '52', label: 'Age' }, '52'), undefined);
+});
+
+test('an age with only the event year is the two possible ages, and a wrong hero is replaced', () => {
+  const corpus = [
+    'Stephen Baldwin was born May 12, 1966 in Massapequa, New York.',
+    'Stephen Baldwin married Kennya Deodato in 1990.',
+    'Hailey Baldwin and Justin Bieber married in 2018 at a courthouse.',
+  ].join('\n');
+  const fact = factAnswer(AGE, corpus);
+  assert.equal(fact?.lead, '51 or 52');
+  assert.deepEqual(fact?.accept, ['51', '52']);
+  const wrong = placeFactLead([{ type: 'hero', value: '24', label: 'Age' }], fact!);
+  assert.equal(wrong?.[0] && wrong[0].type === 'hero' ? wrong[0].value : '', '51 or 52');
+  assert.equal(placeFactLead([{ type: 'hero', value: '52', label: 'Age' }], fact!), undefined);
+  assert.equal(factAnswer(AGE, 'Stephen Baldwin was born May 12, 1966. Stephen Baldwin married Kennya Deodato in 1990.'), undefined);
+  assert.equal(factAnswer(AGE, `${corpus}\nHailey Baldwin and Justin Bieber married on September 13, 2018.`)?.lead, '52');
 });
 
 test('a card that states the dates and not the age gains an age hero', () => {

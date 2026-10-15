@@ -17,6 +17,8 @@ export interface FactAnswer {
   note: string;
   /** Numbers the lead was computed from. A patch must not overwrite them. */
   keep?: string[];
+  /** Other values the sources also support. A card that already states one keeps it. */
+  accept?: string[];
 }
 
 const STOP = new Set(['a', 'an', 'the', 'of', 'in', 'on', 'at', 'to', 'for', 'from', 'with', 'and', 'or', 'when', 'that', 'this', 'was', 'were', 'got', 'did', 'does', 'after', 'before', 'exactly', 'originally', 'current', 'name', 'day', 'year', 'years']);
@@ -154,6 +156,30 @@ function eventDate(text: string, event: string, birth?: When): When | undefined 
     .filter((row) => row.score >= 2)
     .sort((a, b) => b.score - a.score || a.date.year - b.date.year || a.date.month - b.date.month);
   return scored[0]?.date;
+}
+
+/** The event's year when no page gives its full date. The year must sit beside the event's own words, not just the verb. */
+function eventYear(text: string, event: string, birth: When): number | undefined {
+  const verb = /\b(?:married|marry|wedding|marriage|opened|died|won)\b/i;
+  const words = tokens(event).filter((word) => !verb.test(word));
+  if (!words.length) return undefined;
+  let best: { year: number; score: number } | undefined;
+  for (const match of text.matchAll(YEAR)) {
+    const year = Number(match[1]);
+    if (year <= birth.year) continue;
+    const at = match.index ?? 0;
+    // Only the year's own sentence. The next sentence is often another couple's wedding.
+    const start = Math.max(0, at - 160);
+    const before = text.slice(start, at);
+    const cut = Math.max(before.search(/[.!?\n](?=[^.!?\n]*$)/), -1);
+    const after = text.slice(at).search(/[.!?\n]/);
+    const slice = text.slice(start + cut + 1, after < 0 ? undefined : at + after).toLowerCase();
+    if (!verb.test(slice)) continue;
+    const shared = words.filter((word) => slice.includes(word)).length;
+    if (shared < Math.min(2, words.length)) continue;
+    if (!best || shared > best.score) best = { year, score: shared };
+  }
+  return best?.year;
 }
 
 function showTitle(query: string): string {
@@ -599,6 +625,18 @@ export function factAnswer(query: string, corpus: string): FactAnswer | undefine
         };
       }
     }
+    const year = birth && !event ? eventYear(corpus, age[2]!, birth) : undefined;
+    if (birth && year) {
+      const most = year - birth.year;
+      if (most >= 1 && most < 120) {
+        return {
+          lead: `${most - 1} or ${most}`,
+          label: 'Age',
+          note: `${clean(age[1]!)} was born ${birth.raw}. The sources give only the year of the event, ${year}. Without its month and day the age is ${most - 1} or ${most}. Do not use anyone else's age.`,
+          accept: [String(most - 1), String(most)],
+        };
+      }
+    }
   }
 
   const ratio = ratioAnswer(query, corpus);
@@ -709,6 +747,8 @@ export function placeFactLead(nodes: CardNode[], fact: FactAnswer): CardNode[] |
     return changed ? next : undefined;
   }
   if (nodes.some((node) => hasLead(nodeText(node), fact.lead))) return undefined;
+  const accepted = fact.accept ?? [];
+  if (accepted.length && nodes.some((node) => node.type === 'hero' && accepted.some((value) => hasLead(node.value, value)))) return undefined;
   const keep = fact.keep ?? [];
   for (let i = 0; i < nodes.length; i++) {
     const next = patchFactLead(nodes[i]!, fact.lead, keep);
@@ -725,6 +765,8 @@ export function patchFactLead(node: CardNode, lead: string, keep: readonly strin
   const swapValue = (value: string | undefined): string | undefined => {
     if (!value || !/\d/.test(value) || hasLead(value, lead)) return undefined;
     if (keep.length) {
+      // Only a bare figure is the card's answer. A range or a figure inside a phrase measures something else.
+      if (!/^\s*\d+(?:\.\d+)?\s*(?:\[\d+\]\s*)*$/.test(value)) return undefined;
       let changed = false;
       // Citations like [6] are source numbers. Replacing one hides the quotient inside a bracket.
       const next = value.replace(/\[(\d+)\]|(\d+(?:\.\d+)?)(\s*-?\s*(?:miles|mile|mi|km|kilometers|kilometres|feet|foot|ft|meters|metres|m|hours|hour|minutes|mins)\b|[kK]\b)?/gi, (full, cite: string | undefined, num: string | undefined, unit: string | undefined) => {
