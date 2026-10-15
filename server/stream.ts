@@ -214,6 +214,10 @@ function applyRelevance(query: string, response: SearchResponse, ledger: CallLed
  */
 function applyPickGate(query: string, response: SearchResponse): SearchResponse {
   if (!isPersonAsk(query) || !distinguishingTerms(query).length || nameIsTopic(query, response.results)) return response;
+  // A given name plus a workplace is not one person yet. The full-name gate would drop
+  // every row, and the ask could never choose between the people the sources name.
+  const name = personSubject(query);
+  if (name && !/\s/.test(name)) return response;
   const kept = response.results.filter((row) => personSourceOk(query, row));
   if (kept.length === response.results.length) return response;
   console.log(JSON.stringify({ zo: 'entity', pickGate: true, kept: kept.length, dropped: response.results.length - kept.length }));
@@ -1338,9 +1342,10 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
     return;
   }
 
-  // A long question is searched as written. The previous card stays in the conversation,
-  // and the words they typed are the search — not a stub cut to fit a shorter check.
-  if (req.intent !== 'adjust' && standsAlone(req.question) && req.question.trim().length > QUOTE_MAX) {
+  // A long question is searched as written, even when it points back with "that" or "it".
+  // The previous card stays in the conversation. The words they typed are the search,
+  // not a stub cut to fit a shorter check, and not an answer drawn only from the old pages.
+  if (req.intent !== 'adjust' && req.question.trim().length > QUOTE_MAX) {
     await searchAndDesign(send, env, req.question.trim(), 'any', context, started, scope, false, undefined, undefined, chart);
     return;
   }
