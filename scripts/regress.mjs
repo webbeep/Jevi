@@ -204,8 +204,13 @@ const frames = framesFile ? JSON.parse(readFileSync(framesFile, 'utf8')) : [];
 for (const f of frames) {
   CASES.push({ name: `FRAMES ${f.i}`, frames: true, run: async () => {
     const r = await stream({ kind: 'search', query: f.q, freshness: 'any' });
-    const lead = (r.card.body ?? []).slice(0, 3).map((n) => n.value ?? n.text ?? n.name ?? '').filter(Boolean).join(' / ');
-    return { r, ok: null, detail: `lead: ${lead.slice(0, 220)} || gold: ${f.gold}` };
+    const flat = [];
+    const walk = (n) => { if (!n || typeof n !== 'object') return; if (Array.isArray(n)) return n.forEach(walk); flat.push(n); Object.values(n).forEach(walk); };
+    walk(r.card.body);
+    const hero = flat.find((n) => n.type === 'hero');
+    const marks = flat.filter((n) => n.type === 'table' || n.type === 'keyvalue' || n.type === 'list' || n.type === 'tile').map((n) => JSON.stringify(n.rows ?? n.items ?? [n.label, n.value, n.sub]).replace(/"(type|icon|source|active)":("[^"]*"|\d+|true|false),?/g, '')).join(' ');
+    const lead = [hero && `${hero.value} ${hero.label ?? ''}`, flat.find((n) => n.type === 'text')?.text, marks].filter(Boolean).join(' / ');
+    return { r, ok: null, detail: `lead: ${lead.slice(0, 600)} || gold: ${f.gold}` };
   } });
 }
 
