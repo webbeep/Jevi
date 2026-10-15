@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { alignFactProse, factAnswer, hopQueries, nextHop, patchFactLead, placeFactLead, unsupportedYear } from '../server/hops.ts';
+import { alignFactProse, cardFacts, factAnswer, hopQueries, nextHop, patchFactLead, placeFactLead, unsupportedYear } from '../server/hops.ts';
 import { bindClaims, type ClaimSource } from '../server/claims.ts';
 import type { CardNode } from '../shared/card.ts';
 
@@ -109,6 +109,25 @@ test('a ratio card leads with the quotient of the lengths it already shows', () 
   assert.match(mixedText, /21K/);
   assert.match(mixedText, /13 ft/);
   assert.doesNotMatch(mixedText, /6\.6/);
+  const slider: CardNode = {
+    type: 'slider',
+    label: 'Wall circuit length',
+    prompt: 'How many circuits of York\'s medieval walls equal the Great North Run?',
+    min: 2,
+    max: 5,
+    value: 3.4,
+    step: 0.1,
+    unit: 'km',
+  };
+  const shown: CardNode[] = [
+    { type: 'hero', value: '3.5', unit: 'laps', label: 'Circuits' },
+    { type: 'keyvalue', items: [{ label: 'Great North Run distance', value: '13.1 miles' }] },
+    slider,
+  ];
+  const fromCard = cardFacts(WALLS, shown);
+  assert.equal(fromCard?.lead, '6.2');
+  const answered = placeFactLead(shown, fromCard!);
+  assert.equal(answered?.[0] && answered[0].type === 'hero' ? answered[0].value : '', '6.2');
 });
 
 test('a which-members question searches someone the pages have not credited', () => {

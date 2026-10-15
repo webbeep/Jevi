@@ -210,7 +210,8 @@ function sideScore(text: string, at: number, words: string[]): { hits: number; d
   let hits = 0;
   let dist = Infinity;
   for (const word of words) {
-    const found = [...clause.matchAll(new RegExp(`\\b${escapeReg(word)}\\b`, 'gi'))];
+    const stem = word.endsWith('s') && word.length > 4 ? word.slice(0, -1) : word;
+    const found = [...clause.matchAll(new RegExp(`\\b(?:${escapeReg(word)}|${escapeReg(stem)})\\b`, 'gi'))];
     if (!found.length) continue;
     hits += 1;
     for (const match of found) dist = Math.min(dist, Math.abs(at - (origin + (match.index ?? 0))));
@@ -574,6 +575,8 @@ function nodeText(node: CardNode): string {
       return node.text;
     case 'keyvalue':
       return node.items.map((item) => `${item.label} ${item.value}`).join(' ');
+    case 'slider':
+      return `${node.label} ${node.value} ${node.unit ?? ''}`;
     case 'stack':
     case 'grid':
     case 'section':
