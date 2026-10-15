@@ -307,4 +307,34 @@ describe('search fallback', { concurrency: 1 }, () => {
       clearDeadEngines();
     }
   });
+
+  test('a today ask whose literal rows are old pages waits for the dated rewrite', async () => {
+    clearDeadEngines();
+    const orig = globalThis.fetch;
+    const now = new Date().toISOString();
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('google.serper.dev/search')) {
+        const asked = JSON.parse(String(init?.body)) as { q?: string };
+        if (asked.q === 'top news headlines today') {
+          await new Promise((resolve) => setTimeout(resolve, 1100));
+          const organic = [1, 2, 3, 4].map((i) => ({ title: `Top news headlines today ${i}`, link: `https://fresh${i}.example/`, snippet: 'Today news headlines.', date: now }));
+          return Response.json({ organic });
+        }
+        const organic = [1, 2, 3, 4, 5].map((i) => ({ title: `News TLDR today archive ${i}`, link: `https://old${i}.example/`, snippet: 'News tldr today newsletter.', date: 'Sep 4, 2026' }));
+        return Response.json({ organic });
+      }
+      return Response.json({});
+    };
+    try {
+      const allow = { prepare() { return { bind() { return { async first() { return { count: 1 }; } }; } }; } };
+      const env = { SEARCH_ORDER: 'serper', SERPER_API_KEY: 's', DB: allow } as Env;
+      const later = new Promise<{ more: string[]; freshness: 'day' }>((resolve) => setTimeout(() => resolve({ more: ['top news headlines today'], freshness: 'day' }), 200));
+      const out = await cascadeWeb({ q: 'news tldr today', later, freshness: 'day', count: 8 }, env, newLedger());
+      assert.ok(out.more.some((m) => m.hits.some((h) => h.url.startsWith('https://fresh'))));
+    } finally {
+      globalThis.fetch = orig;
+      clearDeadEngines();
+    }
+  });
 });

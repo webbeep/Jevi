@@ -53,6 +53,14 @@ interface Query {
 
 /** Gated literal hits that make the ask answerable without waiting on a slow intent read. */
 const LITERAL_OK = 4;
+/** A today ask's literal search is good only with this many rows dated within the last day and a half. */
+const TODAY_OK = 3;
+const DAY_SPAN_MS = 36 * 3600_000;
+
+function withinDay(date: string | undefined, now: number): boolean {
+  const at = date ? Date.parse(date) : Number.NaN;
+  return at >= now - DAY_SPAN_MS && at <= now + 86400_000;
+}
 /** Below this many clearly on-topic rows, a fallback engine's answer gets a second opinion from the next engine. */
 const SECOND_OPINION_MIN = 3;
 /** A thin list is an honest answer; a long one with few on-topic rows is the engine matching anything. */
@@ -450,7 +458,14 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUnt
     : Promise.resolve({ extras: plannedExtras(q), fresh: q.freshness });
   let extras: string[] = q.later ? [] : plannedExtras(q);
   const cascadeStarted = Date.now();
-  const literalGood = (r: Settled) => r.ok && gateResults(q.q, r.value.hits.filter((h) => h.url && h.title)).kept.length >= LITERAL_OK;
+  const literalGood = (r: Settled) => {
+    if (!r.ok) return false;
+    const kept = gateResults(q.q, r.value.hits.filter((h) => h.url && h.title)).kept;
+    if (kept.length < LITERAL_OK) return false;
+    // A today ask whose literal rows are mostly older pages ("news tldr today" finds a newsletter and encyclopedia
+    // articles) is thin: the dated rewrites are the ones that carry today's stories.
+    return q.freshness !== 'day' || kept.filter((row) => withinDay(row.date, cascadeStarted)).length >= TODAY_OK;
+  };
   /**
    * Rewrites for a step whose literal call is already running. A thin or failed literal search waits for
    * them (they are the recall path for niche or badly typed asks); a good one waits only briefly.
