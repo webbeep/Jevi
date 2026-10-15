@@ -12,6 +12,19 @@ const AUTHORITY = [
   'reuters.com', 'apnews.com', 'bbc.com', 'bbc.co.uk', 'nytimes.com', 'theguardian.com', 'washingtonpost.com',
 ];
 
+/** Newsrooms whose front pages carry the day's stories. A news ask leads with them. */
+const NEWSROOM = [
+  'reuters.com', 'apnews.com', 'bbc.com', 'bbc.co.uk', 'nytimes.com', 'theguardian.com', 'washingtonpost.com',
+  'npr.org', 'cnn.com', 'nbcnews.com', 'cbsnews.com', 'abcnews.go.com', 'aljazeera.com', 'euronews.com', 'wsj.com',
+  'bloomberg.com', 'ft.com', 'usatoday.com', 'latimes.com', 'axios.com', 'politico.com', 'news.yahoo.com',
+  'foxnews.com', 'pbs.org', 'theatlantic.com', 'economist.com', 'news.sky.com', 'dw.com', 'france24.com',
+];
+const NEWS_ASK = /\b(?:news|headlines?|breaking)\b/i;
+
+export function isNewsroom(domain: string): boolean {
+  return matchesHost(domain, NEWSROOM);
+}
+
 const PRESS = [
   'cnet.com', 'techradar.com', 'theverge.com', 'tomsguide.com', 'gsmarena.com', 'phonearena.com',
   'androidauthority.com', 'androidcentral.com', 'pcmag.com', 'mashable.com', 'wired.com', 'arstechnica.com',
@@ -302,6 +315,9 @@ export function preferSources<T extends RankedHit>(query: string, rows: readonly
     if (preprint) pool.sort((a, b) => rank(a) - rank(b) || byLead(a, b) || a.index - b.index);
     else if (pool.some((item) => rank(item) === 0)) pool.sort((a, b) => byLead(a, b) || rank(a) - rank(b) || a.index - b.index);
     else pool.sort((a, b) => byLead(a, b) || Number(a.tier === 3) - Number(b.tier === 3) || a.index - b.index);
+  } else if (NEWS_ASK.test(query) && !shoppingAsk(query)) {
+    const desk = (item: (typeof pool)[number]) => Number(!isNewsroom(item.row.domain || hostOf(item.row.url)));
+    pool.sort((a, b) => byLead(a, b) || desk(a) - desk(b) || Number(a.tier === 3) - Number(b.tier === 3) || a.index - b.index);
   } else {
     pool.sort((a, b) => byLead(a, b) || (promote ? a.tier - b.tier : Number(a.tier === 3) - Number(b.tier === 3)) || a.index - b.index);
   }

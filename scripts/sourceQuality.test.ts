@@ -206,3 +206,17 @@ test('a Spanish sentence and a settled disagreement leave the card, and a repeat
   assert.equal(out[3]?.type === 'table' ? out[3].rows.length : 0, 2);
   assert.deepEqual(out[4]?.type === 'steps' ? out[4].items.map((step) => step.title) : [], ['1. Instructions', '2. Cells read them', '3. The body remembers']);
 });
+
+test('a news ask leads with newsrooms, not a newsletter or an encyclopedia', () => {
+  const row = (domain: string, title: string) => ({ url: `https://${domain}/x`, title, domain, snippet: '' });
+  const rows = [
+    row('tldr.tech', 'TLDR Newsletter'),
+    row('en.wikipedia.org', 'Portal:Current events'),
+    row('youtube.com', 'Top headlines this morning'),
+    row('apnews.com', 'AP News: Top stories today'),
+    row('euronews.com', 'Latest news bulletin'),
+  ];
+  const ranked = preferSources('news tldr today', rows).map((r) => r.domain);
+  assert.deepEqual(ranked.slice(0, 2), ['apnews.com', 'euronews.com']);
+  assert.deepEqual(preferSources('apple pie recipe', rows).map((r) => r.domain), rows.map((r) => r.domain));
+});
