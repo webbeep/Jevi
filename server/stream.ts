@@ -41,7 +41,7 @@ import { rewriteQuery } from './ai';
 import { type DesignRequest, designParallel, designStream, gateNode } from './design';
 import { BRIEF_ROWS, briefSources, remapBrief, type SourceBrief } from './brief';
 import { groundMembers } from './claims';
-import { alignFactProse, cardFacts, factAnswer, hopQueries, nextHop, placeFactLead, unsupportedYear } from './hops';
+import { alignFactProse, cardFacts, factAnswer, hopQueries, leadMemberRows, nextHop, placeFactLead, unsupportedYear } from './hops';
 import { gapQuery, onTopicCount, rescueQuery, sourcesMiss } from './rescue';
 import { keepPictures, reviewCard, type Review } from './review';
 import { permitted } from './images';
@@ -309,7 +309,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     const merged = [...carry, ...gated.results];
     const hopped = merged.filter((row) => want.has(row.url));
     const rest = merged.filter((row) => !want.has(row.url));
-    req = { ...req, search: { ...gated, results: [...hopped, ...rest] } };
+    req = { ...req, search: { ...gated, results: leadMemberRows(req.query, [...hopped, ...rest], [...want]) } };
   }
   // Cards already on screen point into this search's image list by index, so only a new search may reorder it.
   const newSearch = !req.followup;
@@ -733,6 +733,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   const hopUrls: string[] = [];
   if (!paper && results.results.length) {
     // A parallel hop that the time cut dropped is still missing, so it can be asked again here.
+    results = { ...results, results: leadMemberRows(query, results.results) };
     const asked: string[] = [];
     let left = 2;
     while (left > 0 && Date.now() - started < 5200) {
@@ -753,7 +754,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
       // Pages that supplied the missing fact lead, so the card is read from them.
       for (const row of add) hopUrls.push(row.url);
       // The new pages lead so they are the ones read. A later rescue must not throw them away.
-      results = { ...results, results: [...add, ...results.results] };
+      results = { ...results, results: leadMemberRows(query, [...add, ...results.results], add.map((row) => row.url)) };
       send('peek', add.slice(0, PEEK_ROWS).map(({ title, url, domain, date }) => ({ title, url, domain, date })));
       send('search', results);
       console.log(JSON.stringify({ zo: 'hop', alt, added: add.length, domains: add.map((row) => row.domain), lead: afterLead ?? beforeLead }));
@@ -1089,7 +1090,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
       }
     }
   }
-  results = { ...results, results: leadPreprints(query, results.results) };
+  results = { ...results, results: leadMemberRows(query, leadPreprints(query, results.results), hopUrls) };
   send('search', results);
   const boost = imageBoost(pattern, results, env, scope, boostQuery);
   const crypto = cryptographyHint(query, results.results);

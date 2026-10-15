@@ -726,15 +726,28 @@ function workOf(query: string): string | undefined {
   return query.match(/\b(?:series|show|film|movie|play|band|team)\s+([A-Z][\w'’.-]+(?:\s+[A-Z][\w'’.-]+)*)/)?.[1];
 }
 
+function previousSentence(text: string, at: number): string {
+  const before = text.slice(0, Math.max(0, at));
+  const end = Math.max(before.lastIndexOf('.'), before.lastIndexOf('!'), before.lastIndexOf('?'), before.lastIndexOf('\n'));
+  if (end <= 0) return '';
+  return sentenceAt(before, Math.max(0, end - 1));
+}
+
+function topicalText(text: string, act: string | undefined, clues: readonly string[]): boolean {
+  const lower = text.toLowerCase();
+  return (act ? lower.includes(act) : false) || clues.some((clue) => clue.length >= 5 && lower.includes(clue));
+}
+
 /** The verb in this sentence is about this person, and the sentence is not a group or theme credit. */
-function attributesAct(sentence: string, person: string, act: string | undefined, clues: readonly string[]): boolean {
+function attributesAct(sentence: string, person: string, act: string | undefined, clues: readonly string[], prior = ''): boolean {
   const last = lastOf(person);
   if (last.length < 3) return false;
-  const lower = sentence.toLowerCase();
-  const topical = (act ? lower.includes(act) : false) || clues.some((clue) => clue.length >= 5 && lower.includes(clue));
-  if (!topical) return false;
+  const own = topicalText(sentence, act, clues);
+  const carried = !own && topicalText(prior, act, clues);
+  if (!own && !carried) return false;
   if (/\btheme\s+(?:song|video)\b/i.test(sentence)) return false;
   if (/\b(?:the\s+)?(?:main\s+|entire\s+|whole\s+)?cast\b/i.test(sentence) && !new RegExp(`\\b${escapeName(last)}\\s+(?:appeared|appears|starred|featured|was|is)\\b`, 'i').test(sentence)) return false;
+  if (carried && peopleIn(sentence).length >= 3) return false;
   const verb = 'appeared|appears|appear|starred|stars|featured|features|starring|seen|been';
   for (const match of sentence.matchAll(new RegExp(`\\b(?:${verb})\\b`, 'gi'))) {
     const before = sentence.slice(Math.max(0, (match.index ?? 0) - 140), match.index ?? 0);
@@ -767,8 +780,9 @@ function individualCredit(
     const text = `${source.title ?? ''}. ${source.text}`;
     const re = new RegExp(`\\b${escapeName(last)}\\b`, 'gi');
     for (const match of text.matchAll(re)) {
-      const sentence = sentenceAt(text, match.index ?? 0);
-      if (!attributesAct(sentence, person, act, clues)) continue;
+      const at = match.index ?? 0;
+      const sentence = sentenceAt(text, at);
+      if (!attributesAct(sentence, person, act, clues, previousSentence(text, at))) continue;
       const extra = new Set(peopleIn(sentence).map((name) => lastOf(name).toLowerCase()).filter((name) => name && name !== last.toLowerCase()));
       for (const name of others) {
         if (new RegExp(`\\b${escapeName(name)}\\b`, 'i').test(sentence)) extra.add(name.toLowerCase());
@@ -913,6 +927,20 @@ function placeCredits(nodes: CardNode[], missing: readonly string[], credited: b
   return placed ? cleaned : [...cleaned, { type: 'grid', cols: gridCols(tiles.length), children: tiles }];
 }
 
+function sharedKeys(rows: readonly string[][], pred: (cell: string) => boolean): Set<string> {
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    const seen = new Set<string>();
+    for (const cell of row) {
+      const key = cell.trim().toLowerCase();
+      if (!key || !pred(cell) || seen.has(key)) continue;
+      seen.add(key);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+  }
+  return new Set([...counts].filter(([, count]) => count >= 3).map(([key]) => key));
+}
+
 /**
  * A "which of these people did this" yes stays only when a source credits that person
  * on their own. A group credit does not mark every named person yes, and a person the
@@ -983,12 +1011,25 @@ export function groundMembers(query: string, nodes: CardNode[], sources: readonl
         return { ...node, items };
       }
       case 'table': {
+        const shared = sharedKeys(node.rows, (cell) => cell.trim().length >= 8 && !/^\d{4}$/.test(cell.trim()) && !/^(?:yes|no)$/i.test(cell.trim()));
+        const sharedYears = shared.size ? sharedKeys(node.rows, (cell) => /^\d{4}$/.test(cell.trim())) : new Set<string>();
         const rows = node.rows.map((row) => {
           const person = row.reduce<string | undefined>((found, cell) => found ?? properName(cell), undefined);
           if (!person) return row;
+          const own = !unsupported(person, appearanceClues(row, person));
+          if (shared.size) {
+            const next = row.map((cell) => {
+              const key = cell.trim().toLowerCase();
+              if (shared.has(key)) return own ? 'Yes' : 'No';
+              if (sharedYears.has(key)) return '';
+              return cell;
+            });
+            if (next.some((cell, index) => cell !== row[index])) changed = true;
+            return next;
+          }
           const blob = row.join(' ');
           if (!affirmsAppearance(blob)) return row;
-          if (!unsupported(person, appearanceClues(row, person))) return row;
+          if (own) return row;
           changed = true;
           return row.map((cell) => {
             if (/\byes\b/i.test(cell)) return 'No';
@@ -998,11 +1039,28 @@ export function groundMembers(query: string, nodes: CardNode[], sources: readonl
         });
         return { ...node, rows };
       }
+      case 'hero': {
+        const blob = `${node.value} ${node.caption ?? ''} ${node.label}`;
+        const group = /\b(?:all|every|each|entire|whole)\b/i.test(blob) || /\b\d+\s*of\s*\d+\b/.test(blob);
+        if (!group) return node;
+        const yes = credited.filter(inGroup);
+        const value = yes.length ? String(yes.length) : 'None';
+        const caption = yes.length ? yes.join(', ') : 'No source credits one of them on their own.';
+        if (value === node.value && caption === node.caption) return node;
+        changed = true;
+        return { ...node, value, caption };
+      }
       case 'text':
       case 'callout':
       case 'quote':
       case 'draft': {
+        const groupClaim = (sentence: string) => /\b(?:all|every|each|entire|whole)\b/i.test(sentence) && /\b(?:appeared|appear|starred|featured|cast)\b/i.test(sentence);
+        const yesCount = credited.filter(inGroup).length;
         const kept = node.text.split(/(?<=[.!?])\s+/).filter((sentence) => {
+          if (groupClaim(sentence) && yesCount < Math.max(members.length, 1)) {
+            changed = true;
+            return false;
+          }
           if (!denySentence(sentence)) return true;
           changed = true;
           return false;
@@ -1011,7 +1069,6 @@ export function groundMembers(query: string, nodes: CardNode[], sources: readonl
         return text === node.text ? node : { ...node, text };
       }
       case 'heading':
-      case 'hero':
       case 'stat':
       case 'timeline':
       case 'profile':

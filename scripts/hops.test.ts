@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { alignFactProse, cardFacts, factAnswer, hopQueries, nextHop, patchFactLead, placeFactLead, unsupportedYear } from '../server/hops.ts';
+import { alignFactProse, cardFacts, factAnswer, hopQueries, leadMemberRows, nextHop, patchFactLead, placeFactLead, unsupportedYear } from '../server/hops.ts';
 import { bindClaims, type ClaimSource } from '../server/claims.ts';
 import type { CardNode } from '../shared/card.ts';
 
@@ -132,11 +132,20 @@ test('a ratio card leads with the quotient of the lengths it already shows', () 
 
 test('a which-members question searches someone the pages have not credited', () => {
   const query = 'Of the 6 main cast members of the series Friends, which have appeared in music videos?';
+  assert.deepEqual(hopQueries(query), ['Friends music video appearances']);
   const corpus = 'Main cast: Jennifer Aniston, Courteney Cox, Lisa Kudrow, Matt LeBlanc. Courteney Cox appeared in a music video.';
   const next = nextHop(query, corpus, {});
   assert.match(next ?? '', /Jennifer Aniston/);
   assert.match(next ?? '', /music video appearance/);
   assert.doesNotMatch(next ?? '', /Courteney Cox/);
+  const theme = 'The Friends theme song music video has appearances by Jennifer Aniston, Courteney Cox, Lisa Kudrow and Matt LeBlanc.';
+  const again = nextHop(query, theme, {});
+  assert.match(again ?? '', /music video appearance/);
+  const rows = leadMemberRows(query, [
+    { title: 'Music video', url: 'https://en.wikipedia.org/wiki/Music_video', snippet: 'A music video is a video.' },
+    { title: 'Friends cast', url: 'https://example.com/friends', snippet: 'Main cast of the series Friends.' },
+  ]);
+  assert.match(rows[0]?.title ?? '', /Friends/);
 });
 
 test('a year offset searches the derived date once the anchor date is known', () => {

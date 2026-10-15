@@ -254,3 +254,46 @@ test('the person next to the verb is credited, and a theme-song list is not', ()
   const bandTile = dropped.find((node) => node.type === 'tile' && node.label === 'The Rembrandts');
   assert.equal(bandTile && bandTile.type === 'tile' ? bandTile.value : '', 'No');
 });
+
+test('a shared theme credit is not a yes, and a follow-on sentence still credits that person', () => {
+  const query = 'Of the 6 main cast members of the series Friends, which have appeared in music videos?';
+  const nodes: CardNode[] = [
+    { type: 'hero', value: '6 of 6', label: 'Friends main cast in music videos', caption: 'All six appeared in the theme video' },
+    {
+      type: 'table',
+      columns: ['Cast member', 'Music video', 'Year'],
+      rows: [
+        ['Jennifer Aniston', 'I\'ll Be There for You (The Rembrandts)', '1995'],
+        ['Courteney Cox', 'I\'ll Be There for You (The Rembrandts)', '1995'],
+        ['Lisa Kudrow', 'I\'ll Be There for You (The Rembrandts)', '1995'],
+        ['Matt LeBlanc', 'I\'ll Be There for You (The Rembrandts)', '1995'],
+        ['Matthew Perry', 'I\'ll Be There for You (The Rembrandts)', '1995'],
+        ['David Schwimmer', 'I\'ll Be There for You (The Rembrandts)', '1995'],
+      ],
+    },
+    { type: 'text', text: 'All six appeared in the theme video.' },
+  ];
+  const pages: ClaimSource[] = [
+    { n: 1, text: 'Courteney Cox isn\'t the only Friends star to make this list, and to have been in a music video. Matt LeBlanc can be seen in one too.' },
+    { n: 2, text: 'Jennifer Aniston appeared in Melissa Etheridge\'s music video.' },
+    { n: 3, text: 'The Friends theme song music video has appearances by Jennifer Aniston, Courteney Cox, Lisa Kudrow, Matt LeBlanc, Matthew Perry and David Schwimmer.' },
+    { n: 4, text: 'Main cast: Jennifer Aniston, Courteney Cox, Lisa Kudrow, Matt LeBlanc, Matthew Perry and David Schwimmer.' },
+  ];
+  const next = groundMembers(query, nodes, pages) ?? nodes;
+  const hero = next.find((node) => node.type === 'hero');
+  assert.equal(hero && hero.type === 'hero' ? hero.value : '', '3');
+  assert.match(hero && hero.type === 'hero' ? hero.caption ?? '' : '', /Aniston/);
+  assert.match(hero && hero.type === 'hero' ? hero.caption ?? '' : '', /Cox/);
+  assert.match(hero && hero.type === 'hero' ? hero.caption ?? '' : '', /LeBlanc/);
+  const table = next.find((node) => node.type === 'table');
+  const rows = table && table.type === 'table' ? table.rows : [];
+  const cell = (name: string) => rows.find((row) => row[0] === name)?.[1] ?? '';
+  assert.equal(cell('Jennifer Aniston'), 'Yes');
+  assert.equal(cell('Courteney Cox'), 'Yes');
+  assert.equal(cell('Matt LeBlanc'), 'Yes');
+  assert.equal(cell('Lisa Kudrow'), 'No');
+  assert.equal(cell('Matthew Perry'), 'No');
+  assert.equal(cell('David Schwimmer'), 'No');
+  assert.doesNotMatch(JSON.stringify(next), /All six appeared/);
+  assert.doesNotMatch(JSON.stringify(rows), /1995/);
+});

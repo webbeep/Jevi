@@ -351,7 +351,84 @@ export function hopQueries(query: string): string[] {
     const title = showTitle(query);
     return title ? [`${title} rotten tomatoes tomatometer`] : [];
   }
+  const act = memberAct(query);
+  const work = memberWork(query);
+  if (act && work && MEMBER_ASK.test(query)) return [`${work} ${act} appearances`];
   return [];
+}
+
+const MEMBER_ASK = /\bwhich\b[\s\S]{0,180}\b(?:have|has|had|did|does|appeared|appear)\b/i;
+
+function memberWork(query: string): string | undefined {
+  return query.match(/\b(?:series|show|film|movie|play|band|team)\s+([A-Z][\w'’.-]+(?:\s+[A-Z][\w'’.-]+)*)/)?.[1];
+}
+
+function memberAct(query: string): string | undefined {
+  const match = query.match(/\b(?:appeared|appear|starred|featured)\s+in\s+(?:an?\s+|the\s+)?([a-z][a-z\s]{2,40}?)(?:\?|$)/i);
+  const phrase = match?.[1]?.trim().toLowerCase().replace(/s$/, '');
+  return phrase && phrase.length >= 5 ? phrase : undefined;
+}
+
+function sentenceAround(text: string, at: number): string {
+  let start = 0;
+  for (const mark of ['.', '\n', '!', '?']) {
+    const found = text.lastIndexOf(mark, Math.max(0, at - 1));
+    if (found >= start) start = found + 1;
+  }
+  let end = text.length;
+  for (const mark of ['.', '\n', '!', '?']) {
+    const found = text.indexOf(mark, at);
+    if (found !== -1 && found < end) end = found;
+  }
+  return text.slice(start, end);
+}
+
+function priorSentence(text: string, at: number): string {
+  const before = text.slice(0, Math.max(0, at));
+  const end = Math.max(before.lastIndexOf('.'), before.lastIndexOf('!'), before.lastIndexOf('?'), before.lastIndexOf('\n'));
+  if (end <= 0) return '';
+  return sentenceAround(before, Math.max(0, end - 1));
+}
+
+/** A theme list or a cast list does not count. The verb has to be about this person. */
+function individualInCorpus(corpus: string, name: string, act: string): boolean {
+  const surname = name.split(/\s+/).at(-1) ?? name;
+  if (surname.length < 3) return false;
+  const verb = /\b(?:appeared|appears|appear|starred|stars|featured|features|starring|seen|been)\b/i;
+  for (const match of corpus.matchAll(new RegExp(`\\b${escapeReg(surname)}\\b`, 'gi'))) {
+    const at = match.index ?? 0;
+    const sentence = sentenceAround(corpus, at);
+    if (/\btheme\s+(?:song|video)\b/i.test(sentence)) continue;
+    if (/\b(?:the\s+)?(?:main\s+|entire\s+|whole\s+)?cast\b/i.test(sentence) && !new RegExp(`\\b${escapeReg(surname)}\\s+(?:appeared|appears|starred|featured|was|is)\\b`, 'i').test(sentence)) continue;
+    const names = sentence.match(/\b[A-Z][a-zA-Z'’-]{2,}(?:\s+[A-Z][a-zA-Z'’-]{2,})+\b/g) ?? [];
+    if (names.length >= 3) continue;
+    const prior = priorSentence(corpus, at).toLowerCase();
+    if (!sentence.toLowerCase().includes(act) && !prior.includes(act)) continue;
+    const verbAt = sentence.search(verb);
+    if (verbAt < 0) continue;
+    const nearest = (sentence.slice(0, verbAt).match(/\b[A-Z][a-zA-Z'’-]{2,}(?:\s+[A-Z][a-zA-Z'’-]{2,})+\b/g) ?? []).at(-1);
+    if (nearest && nearest.toLowerCase().endsWith(surname.toLowerCase())) return true;
+  }
+  return false;
+}
+
+/**
+ * Pages about the named work lead, and a hop page stays in front.
+ * A page that only matches the activity does not get read ahead of the work.
+ */
+export function leadMemberRows<T extends { title?: string; snippet?: string; url?: string }>(
+  query: string,
+  rows: readonly T[],
+  pinned: readonly string[] = [],
+): T[] {
+  const work = memberWork(query);
+  if (!work || !MEMBER_ASK.test(query)) return [...rows];
+  const pin = new Set(pinned);
+  const needle = work.toLowerCase();
+  const about = (row: T) => `${row.title ?? ''} ${row.snippet ?? ''} ${row.url ?? ''}`.toLowerCase().includes(needle);
+  const pinnedRows = rows.filter((row) => row.url && pin.has(row.url));
+  const rest = rows.filter((row) => !(row.url && pin.has(row.url)));
+  return [...pinnedRows, ...rest.filter(about), ...rest.filter((row) => !about(row))];
 }
 
 export interface HopContext {
@@ -443,8 +520,7 @@ export function nextHop(query: string, corpus: string, ctx: HopContext = {}): st
       const names = [...new Set([...corpus.matchAll(/\b[A-Z][a-zA-Z'’-]{2,}(?:\s+[A-Z][a-zA-Z'’-]{2,})+\b/g)].map((match) => match[0]))]
         .filter((name) => !query.toLowerCase().includes(name.toLowerCase()))
         .filter((name) => name.split(/\s+/).every((part) => !skip.has(part.toLowerCase())));
-      const surname = (name: string) => name.split(/\s+/).at(-1) ?? name;
-      const credited = (name: string) => new RegExp(`\\b${escapeReg(surname(name))}\\b[^.]{0,120}\\b(?:appeared|appears|starred|featured|seen)\\b`, 'i').test(corpus);
+      const credited = (name: string) => individualInCorpus(corpus, name, act);
       const roster = names.filter((name) => {
         const at = corpus.indexOf(name);
         return /\b(?:cast|starring|members)\b/i.test(corpus.slice(Math.max(0, at - 90), at + name.length + 90));
