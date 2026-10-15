@@ -5,6 +5,7 @@ import type { ImageResult, SearchResult } from '../shared/types.ts';
 import { PictureResolver } from '../server/pictures.ts';
 import { properName, targetFor } from '../server/imageGate.ts';
 import { personFacts, profileFallback } from '../server/profileFallback.ts';
+import { priorEntity, resolveEntity } from '../server/entity.ts';
 import type { Env } from '../server/util.ts';
 
 const pic = (title: string, thumb: string, url = thumb): ImageResult => ({ url, thumb, title, source: new URL(url).hostname, license: 'source' });
@@ -110,4 +111,17 @@ test('person facts read a prior employer and skip pages about someone else', () 
   assert.equal(f.company?.value, 'Acme Robotics');
   assert.equal(f.prior?.value, 'Globex Corporation');
   assert.equal(f.education, undefined);
+});
+
+test('a picked choice is final: the chosen person resolves to one card, not another picker', () => {
+  const at = (title: string, url: string, snippet: string) => ({ title, url, snippet });
+  const rows = [
+    at('Michael B. Jordan', 'https://en.wikipedia.org/wiki/Michael_B._Jordan', 'Michael Bakari Jordan (born February 9, 1987) is an American actor, producer, and director.'),
+    at('Michael B. Jordan', 'https://www.imdb.com/name/nm0430107/', 'Michael B. Jordan was born in Santa Ana, California. He is an actor and director, known for Creed and Black Panther.'),
+    at('Films starring Michael B. Jordan', 'https://letterboxd.com/actor/michael-b-jordan/', 'Films starring Michael B. Jordan: Sinners, Creed III, Black Panther.'),
+    at('Michael B Jordan - LinkedIn', 'https://www.linkedin.com/in/michaelbjordan', 'Michael B Jordan. Sales associate at Home Depot. Atlanta.'),
+  ];
+  const prior = priorEntity('Chosen person: Michael B. Jordan — American actor');
+  const decision = resolveEntity('Michael B. Jordan', rows, { pattern: 'profile', prior });
+  assert.equal(decision.kind, 'single');
 });

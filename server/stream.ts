@@ -21,6 +21,7 @@ import {
   knowledgeRow,
   middleInitialPerson,
   nameIsTopic,
+  hasFullPersonName,
   personSourceOk,
   personSubject,
   commaDetailQuery,
@@ -903,8 +904,9 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
       // A person + detail only takes rows about that very person, never a namesake's that shares the name.
       const person = isPersonAsk(query) ? personSubject(query) : '';
       const term = (person || entityQuery(query) || query).toLowerCase();
+      // A picked choice's own rows name that person in full even when they word the detail differently.
       const cited = person && distinguishingTerms(query).length
-        ? seedRows.filter((row) => personSourceOk(query, row))
+        ? seedRows.filter((row) => personSourceOk(query, row) || (person.includes(' ') && hasFullPersonName(person, row)))
         : seedRows.filter((row) => `${row.title} ${row.snippet}`.toLowerCase().includes(term));
       if (cited.length) {
         results = { ...results, results: cited, knowledge: undefined };
@@ -961,7 +963,8 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   const earlyPattern = heuristicPattern(query);
   // Bare person ask: the exact article and, when the SERP lacks one, the disambiguation page.
   // Both are keyless, so the same name resolves the same way when backup engines change.
-  if (!live && isPersonAsk(query, earlyPattern) && !contextTerms(query).length && !priorEntity(context) && !nameIsTopic(query, results.results)) {
+  const chosenName = priorEntity(context)?.name;
+  if (!live && isPersonAsk(query, earlyPattern) && !contextTerms(query).length && (!chosenName || chosenName === personSubject(query)) && !nameIsTopic(query, results.results)) {
     const name = personSubject(query);
     if (name) {
       const needArticle = !results.results.some((r) => {
@@ -1255,9 +1258,12 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
     // A Which-one? pick is already the person to search. Any other search button is a short label
     // for this card ("apple varieties" on an apple pie card), so the search keeps that subject.
     const query = person ? picked : cardSearchQuery(picked, askedQuestions(req.context)[0] ?? req.original);
+    // The pick is final: it locks the person so the same name never offers another picker.
+    const label = person ? pickSeeds(picked, req.search?.results ?? []).label : '';
+    const chosen = person && personSubject(picked) ? `Chosen person: ${personSubject(picked)}${label ? ` — ${label}` : ''}` : '';
     send('rewrite', { query });
     // EN4 part 8: the rows that produced these choices come along, so the pick never comes back empty.
-    await searchAndDesign(send, env, query, 'any', pickContext, started, scope, true, req.search?.results);
+    await searchAndDesign(send, env, query, 'any', [chosen, pickContext].filter(Boolean).join('\n') || undefined, started, scope, true, req.search?.results);
     return;
   }
 
