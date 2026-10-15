@@ -395,11 +395,13 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   const quoteCard = isQuoteRow(req.search.results[0]);
   const designer = req.followup || quoteCard ? designStream : designParallel;
   const rowImages = chat || quoteCard ? undefined : rowImagePlan(req, env, scope);
+  const snippetCorpus = req.search.results.map((row) => `${row.title} ${row.snippet ?? ''}`).join('\n');
   const factCorpus = [
-    ...req.search.results.map((row) => `${row.title} ${row.snippet ?? ''}`),
+    snippetCorpus,
     ...pages.map((page) => `${req.search.results[page.n - 1]?.title ?? ''} ${page.text}`),
   ].join('\n');
-  const facts = factAnswer(req.query, factCorpus);
+  // Page text can separate a length from the thing it measures. The snippets already pair them.
+  const facts = factAnswer(req.query, factCorpus) ?? factAnswer(req.query, snippetCorpus);
   if (facts) console.log(JSON.stringify({ zo: 'facts', lead: facts.lead }));
   const designReq: DesignRequest = { ...req, pages, brief, facts, context: req.context?.slice(0, 4000), rowImages };
   const shown = new Map<number, CardNode>();
