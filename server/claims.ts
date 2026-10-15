@@ -786,7 +786,7 @@ function rosterNames(sources: readonly { text: string; title?: string; url?: str
     const text = `${source.title ?? ''}\n${source.text}`;
     if (work && !text.toLowerCase().includes(work.toLowerCase())) continue;
     for (const mark of text.matchAll(/\b(?:main cast|cast members|starring)\b/gi)) {
-      const window = text.slice(mark.index ?? 0, (mark.index ?? 0) + 800);
+      const window = sentenceAt(text, mark.index ?? 0);
       const names = [...new Set(peopleIn(window))];
       if (names.length < 3) continue;
       names.forEach((name) => found.add(name));
@@ -922,7 +922,10 @@ export function groundMembers(query: string, nodes: CardNode[], sources: readonl
   if (!MEMBER.test(query) || sources.every((source) => source.text.trim().length < 20)) return undefined;
   const group = memberNames(nodes);
   const act = actPhrase(query);
-  const credited = creditedPeople(query, sources, group);
+  const roster = rosterNames(sources, workOf(query));
+  const members = roster.length >= 3 ? roster : group;
+  const inGroup = (person: string): boolean => !members.length || members.some((name) => samePerson(name, person));
+  const credited = creditedPeople(query, sources, group).filter(inGroup);
   let changed = false;
   const unsupported = (person: string, clues: string[]): boolean => !individualCredit(sources, person, group, clues, act);
   const creditedPerson = (person: string): boolean => credited.some((name) => samePerson(name, person));
@@ -944,7 +947,11 @@ export function groundMembers(query: string, nodes: CardNode[], sources: readonl
       case 'tile': {
         const person = properName(node.label) ?? properName(node.value ?? '') ?? properName(node.sub ?? '');
         if (!person) return node;
-        if (!affirmsAppearance(node.value, node.sub, node.active) && (creditedPerson(person) || individualCredit(sources, person, group, [], act))) {
+        if (affirmsAppearance(node.value, node.sub, node.active) && members.length >= 3 && !inGroup(person)) {
+          changed = true;
+          return { ...node, value: 'No', sub: undefined, active: false };
+        }
+        if (!affirmsAppearance(node.value, node.sub, node.active) && inGroup(person) && (creditedPerson(person) || individualCredit(sources, person, group, [], act))) {
           changed = true;
           const sub = node.sub && /\b(?:not named|no source|not in)\b/i.test(node.sub) ? undefined : node.sub;
           return { ...node, value: 'Yes', sub, active: true };

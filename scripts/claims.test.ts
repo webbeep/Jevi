@@ -245,4 +245,12 @@ test('the person next to the verb is credited, and a theme-song list is not', ()
   assert.equal(valueOf('Jennifer Aniston'), 'Yes');
   assert.equal(valueOf('Lisa Kudrow'), 'No');
   assert.equal(valueOf('Joey Tribbiani'), 'No');
+  const band: CardNode[] = [{ type: 'tile', label: 'The Rembrandts', value: 'Yes', sub: 'I\'ll Be There for You' }];
+  const withCast: ClaimSource[] = [
+    ...pages,
+    { n: 5, text: 'Friends main cast: Jennifer Aniston, Courteney Cox, Lisa Kudrow, Matt LeBlanc, Matthew Perry and David Schwimmer. The Rembrandts appeared in the music video with them.' },
+  ];
+  const dropped = groundMembers(query, band, withCast) ?? band;
+  const bandTile = dropped.find((node) => node.type === 'tile' && node.label === 'The Rembrandts');
+  assert.equal(bandTile && bandTile.type === 'tile' ? bandTile.value : '', 'No');
 });
