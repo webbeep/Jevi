@@ -33,7 +33,7 @@ import {
   resolveEntity,
 } from './entity';
 import { fetchWikiArticle, fetchWikiDisambiguation, fetchWikiLeadImage } from './wikiSearch';
-import { type EntityHint, mentionsAny } from './imageGate';
+import { type EntityHint, mentionsAny, namesPerson } from './imageGate';
 import type { RowImagePlan } from './pictures';
 import type { AnswerCard, CardNode, FollowupContext, FollowupIntent, LayoutPlan } from '../shared/card';
 import { type AskRef, cardSearchQuery, plainFollowup, refContext, topicOf, usefulFollowups, withRef } from '../shared/askAbout';
@@ -455,7 +455,9 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     layout: (regions) => send('layout', regions),
     head: (h) => {
       const question = questionOf();
-      const title = designReq.pattern === 'compare' ? comparisonTitle(question, h.title) : h.title;
+      const person = designReq.pattern === 'profile' ? designReq.person?.name : undefined;
+      // A card about one chosen person is titled with their name, not the first name and workplace that were asked.
+      const title = designReq.pattern === 'compare' ? comparisonTitle(question, h.title) : person && !namesPerson(h.title, person) ? person : h.title;
       head = title === h.title ? h : { ...h, title };
       publishReadings();
     },
