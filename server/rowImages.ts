@@ -22,6 +22,8 @@ export interface RowImageDeps {
   ogMax?: number;
   /** t444 hook (Backend patch-entity): disambiguated name/aliases/domains for an entity. */
   hintFor?: (entity: string) => EntityHint | undefined;
+  /** The one person the card is about: every picture must be them. */
+  person?: string;
   /** t444: every filled picture reports the page it came from, so the client can show its tap-to-source credit. */
   onCredit?: (credit: ImageCredit) => void;
 }
@@ -147,7 +149,7 @@ function pick(target: PicTarget, images: ImageResult[], used: Set<string>): Imag
 
 /** Fills blank tiles and media rows across the card's nodes. Returns the patched nodes (same order) and the calls spent. */
 export async function fillRowImages(nodes: CardNode[], deps: RowImageDeps, used: Set<string> = new Set()): Promise<{ nodes: CardNode[]; changed: boolean[]; imageCalls: number; og: number }> {
-  const ctx: GateContext = { corpus: corpusOf(deps.results), hintFor: deps.hintFor };
+  const ctx: GateContext = { corpus: corpusOf(deps.results), hintFor: deps.hintFor, person: deps.person };
   const perNode = nodes.map((n) => {
     const s: Slot[] = [];
     slotsOf(n, s, ctx);

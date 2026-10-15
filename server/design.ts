@@ -17,7 +17,8 @@ import { asksLocalConditions } from './readings';
 import { sanitizeCard, sanitizeNodes, type PriceSource } from './sanitize';
 import { clip, type Env } from './util';
 import { VerdictSession } from './verdict';
-import { accepts, targetFor } from './imageGate';
+import { accepts, mentionsAny, targetFor } from './imageGate';
+import { profileFallback, type ProfilePerson } from './profileFallback';
 import { personSubject } from './entity';
 import { isVideoUrl, wantsVideo } from './videoSearch';
 import { guessFreshness, stricter } from './freshness';
@@ -113,6 +114,8 @@ export interface DesignRequest {
   intent?: string;
   /** T442: fill pictures on tiles and media rows the designer left blank. */
   rowImages?: RowImagePlan;
+  /** The one person a profile card is about. */
+  person?: ProfilePerson;
   /** Which sources answer the goal as of today, judged before designing. */
   brief?: SourceBrief;
   /** A figure the sources already imply (an age, a quotient, the newest score, a year, a century). */
@@ -652,6 +655,15 @@ function extractive(req: DesignRequest, on: DesignEvents): DesignSummary {
     compared.forEach((node, i) => emitNode(node, i));
     return { engine: 'extractive', removed: 0 };
   }
+  // A chosen person gets the same profile layout as any person card, never a snippet and a photo collage.
+  if (patternId === 'profile' && req.person) {
+    const body = profileFallback(req.person, search.results, search.images, req.rowImages?.hintFor);
+    const profile = body[0]?.type === 'profile' ? body[0] : undefined;
+    on.head({ title: req.person.name, subtitle: profile?.subtitle || patternById(patternId).label });
+    const emitNode = bindVerdict(req, on.node);
+    body.forEach((node, i) => emitNode(node, i));
+    return { engine: 'extractive', removed: 0 };
+  }
   const cands = candidates(search);
   const stats = extractStats(cands, 4);
   const timeline = extractTimeline(cands);
@@ -681,7 +693,8 @@ function extractive(req: DesignRequest, on: DesignEvents): DesignSummary {
   if (cands[0]) body.push({ type: 'text', text: cands[0].text, size: 'lg' });
   if (stats.length >= 2) body.push({ type: 'grid', cols: 2, children: stats.map((s) => ({ type: 'stat', label: clip(s.label, 60), value: s.value })) });
   if (timeline.length >= 3) body.push({ type: 'timeline', items: timeline.map((t) => ({ when: t.when, title: t.text })) });
-  if (search.images.length >= 3 && ['visual', 'profile', 'spotlight'].includes(patternId)) body.push({ type: 'gallery', refs: [0, 1, 2, 3, 4, 5].filter((i) => i < search.images.length) });
+  const shown = search.images.map((img, i) => (mentionsAny(subject || query, img) ? i : -1)).filter((i) => i >= 0).slice(0, 6);
+  if (shown.length >= 3 && ['visual', 'profile', 'spotlight'].includes(patternId)) body.push({ type: 'gallery', refs: shown });
   if (cands.length > 1) body.push({ type: 'section', title: 'Key points', icon: 'pin', children: [{ type: 'list', style: 'check', items: cands.slice(1, 6).map((c) => ({ text: c.text, meta: c.domain })) }] });
   const refs = [1, 2, 3, 4].filter((i) => i <= search.results.length);
   if (refs.length) body.push({ type: 'citations', refs });

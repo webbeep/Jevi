@@ -133,6 +133,8 @@ interface DesignArgs {
   boost?: Promise<ImageResult[]>;
   /** T444: disambiguated person/org for the T443 image gate (never loosens it). */
   entityHint?: (entity: string) => EntityHint | undefined;
+  /** The one person a profile card is about: its pictures and its snippet-only fallback are about them alone. */
+  person?: { name: string; role?: string; org?: string };
   /** A price card's lead: the live price and chart, built from the quote feed. */
   ticker?: CardNode;
   /** The source check, started on the literal search's rows while the rewrites were still searching. */
@@ -173,6 +175,7 @@ function rowImagePlan(req: DesignArgs, env: Env, scope: AskScope): RowImagePlan 
     onFilled: ({ filled, og }) => { if (filled || og) scope.ledger.rowPics = { filled, og }; },
     // T444: the chosen entity plugs into the existing T443 image gate; never a separate filter.
     hintFor: req.entityHint,
+    person: req.person?.name,
   };
 }
 
@@ -1044,6 +1047,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   let boostQuery = query;
   let pattern = plan.pattern;
   let website: number | undefined;
+  let person: DesignArgs['person'];
   if (decision.kind === 'single') {
     scope.ledger.entity = { kind: 'single', id: decision.entity.id, dropped: decision.dropped.length };
     console.log(JSON.stringify({ zo: 'entity', kind: 'single', id: decision.entity.id, kept: decision.kept.length, dropped: decision.dropped.length }));
@@ -1074,6 +1078,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
       pattern = 'profile';
       send('plan', { ...plan, pattern, skeleton: skeletonCard(query, pattern) });
     }
+    if (pattern === 'profile') person = { name: decision.entity.name, role: decision.entity.role, org: decision.entity.org };
     // The kept Wikipedia article's own lead image (keyless, 0 Serper). It still goes through the image gate:
     // title/source carry the article title + snippet, so the chosen person's name/org must be on it.
     const wikiRow = results.results.find((r) => /^https:\/\/en\.wikipedia\.org\/wiki\//i.test(r.url) && !isDisambiguationPage(r));
@@ -1101,7 +1106,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   send('search', results);
   const boost = imageBoost(pattern, results, env, scope, boostQuery);
   const crypto = cryptographyHint(query, results.results);
-  await design(send, env, { query, pattern, depth: plan.depth, readPages: plan.readPages || deep || fromSeeds, search: results, context: [designContext, crypto].filter(Boolean).join('\n') || undefined, intent: u?.intent, deep, boost, entityHint, ticker: quote ? tickerNode(quote) : keepTicker, earlyBrief, website, allowRescue: !isPaperAsk(query), hopUrls }, started, scope, late);
+  await design(send, env, { query, pattern, depth: plan.depth, readPages: plan.readPages || deep || fromSeeds, search: results, context: [designContext, crypto].filter(Boolean).join('\n') || undefined, intent: u?.intent, deep, boost, entityHint, person, ticker: quote ? tickerNode(quote) : keepTicker, earlyBrief, website, allowRescue: !isPaperAsk(query), hopUrls }, started, scope, late);
 }
 
 /** The profile on the card, wherever the layout put it, links the person's own website. */

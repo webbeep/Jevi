@@ -90,6 +90,21 @@ export interface GateContext {
   /** Search result titles + snippets. A one-word label only counts as a name if it never appears lowercase here. */
   corpus?: string;
   hintFor?: (entity: string) => EntityHint | undefined;
+  /** The one person the card is about. Every picture on it must be that person: no logos, team graphics or namesakes. */
+  person?: string;
+}
+
+/** On a one-person card, only a slot that names that person may take a picture. */
+function forPerson(target: PicTarget, ctx?: GateContext): PicTarget {
+  if (!ctx?.person || target.kind === 'none') return target;
+  return target.kind === 'named' && namesPerson(target.entity, ctx.person) ? target : NONE;
+}
+
+/** The label is the person: it carries their surname (or their only name token). */
+export function namesPerson(label: string, person: string): boolean {
+  const own = nameTokens(person);
+  const surname = own[own.length - 1];
+  return !!surname && tokens(label).includes(surname);
 }
 
 const STOP = new Set(['the', 'a', 'an', 'of', 'and', 'for', 'in', 'at', 'on', 'to', 'de', 'la', 'le', 'du', 'von', 'van', 'inc', 'llc', 'ltd', 'co', 'corp', 'company', 'group', 'official', 'jr', 'sr', 'ii', 'iii', 'vs']);
@@ -148,6 +163,9 @@ const NONE: PicTarget = { kind: 'none', entity: '' };
  */
 export function properName(entity: string, corpus?: string): boolean {
   if (!nameLike(entity)) return false;
+  // "Also at", "Based in": a label that ends on a joining word is a phrase, not a name.
+  const last = entity.trim().split(/\s+/).pop()!.toLowerCase();
+  if (entity.trim().includes(' ') && STOP.has(last)) return false;
   const sig = nameTokens(entity);
   if (sig.length !== 1 || entity.trim().split(/\s+/).length > 1) return sig.length > 0;
   if (!corpus) return false;
@@ -171,7 +189,7 @@ export function withHint(target: PicTarget, ctx?: GateContext): PicTarget {
 
 /** A named target for a row/profile entity, or none when it isn't a real name. */
 export function namedTarget(entity: string, ctx?: GateContext): PicTarget {
-  return properName(entity, ctx?.corpus) ? withHint({ kind: 'named', entity }, ctx) : NONE;
+  return properName(entity, ctx?.corpus) ? forPerson(withHint({ kind: 'named', entity }, ctx), ctx) : NONE;
 }
 
 
@@ -185,6 +203,10 @@ export function isEventOrCategory(label: string): boolean {
 
 /** What a tile, stat or row may show, from its label/value/imageQuery. */
 export function targetFor(label: string, value?: string, imageQuery?: string, ctx?: GateContext): PicTarget {
+  return forPerson(slotTarget(label, value, imageQuery, ctx), ctx);
+}
+
+function slotTarget(label: string, value?: string, imageQuery?: string, ctx?: GateContext): PicTarget {
   const l = label.trim().replace(/[:：]$/, '');
   if (ATTR.test(l) || factTileLabel(l) || isEventOrCategory(l)) return NONE;
   if (ORG.test(l)) return value && value.trim() ? withHint({ kind: 'org', entity: value.trim() }, ctx) : NONE;

@@ -2,7 +2,7 @@ import type { CardNode, ImageCredit } from '../shared/card';
 import { fileWords, fitsEntity, isComposite, namesSibling, rankForEntity, splitEntities } from '../shared/imagematch';
 import type { ImageResult } from '../shared/types';
 import { findImages } from './images';
-import { type GateContext, type PicTarget, accepts, mentions, mentionsAny, nameLike, namedTarget, targetFor, withHint } from './imageGate';
+import { type GateContext, type PicTarget, accepts, mentions, mentionsAny, nameLike, namedTarget, namesPerson, targetFor, withHint } from './imageGate';
 import { corpusOf, fillRowImages, hasBlankPictures, rowEntity, type RowImageDeps } from './rowImages';
 import type { Env } from './util';
 
@@ -72,7 +72,7 @@ export class PictureResolver {
     this.find = find;
     this.rows = rows;
     this.subject = query ?? '';
-    this.ctx = { corpus: corpusOf(rows?.results ?? []), hintFor: rows?.hintFor };
+    this.ctx = { corpus: corpusOf(rows?.results ?? []), hintFor: rows?.hintFor, person: rows?.person };
     for (const name of splitEntities(query ?? '')) this.note(name);
   }
 
@@ -161,7 +161,13 @@ export class PictureResolver {
   }
 
   private profileTarget(name: string): PicTarget {
+    if (this.ctx.person && !namesPerson(name, this.ctx.person)) return { kind: 'none', entity: '' };
     return withHint({ kind: 'named', entity: name }, this.ctx);
+  }
+
+  /** Card-level pictures: on a one-person card that person's photo, else anything that mentions the subject. */
+  private cardPicture(img: ImageResult, about = this.subject): boolean {
+    return this.ctx.person ? accepts(this.profileTarget(this.ctx.person), img) : mentionsAny(about, img);
   }
 
   private vet(node: CardNode): CardNode {
@@ -183,13 +189,14 @@ export class PictureResolver {
         };
       case 'gallery': {
         // T443: card-level pictures must mention the card subject.
-        const refs = node.refs.filter((r) => { const img = this.pool[r]; return !!img && mentionsAny(this.subject, img); });
+        const refs = node.refs.filter((r) => { const img = this.pool[r]; return !!img && this.cardPicture(img); });
         return { ...node, refs };
       }
       case 'image': {
         if (node.ref === undefined) return node;
         const img = this.pool[node.ref];
-        return img && mentionsAny(node.caption ? `${this.subject} ${node.caption}` : this.subject, img) ? node : { ...node, ref: undefined, query: node.query ?? node.caption };
+        if (img && this.cardPicture(img, node.caption ? `${this.subject} ${node.caption}` : this.subject)) return node;
+        return { ...node, ref: undefined, query: this.ctx.person ? undefined : node.query ?? node.caption };
       }
       case 'stack':
       case 'grid':
@@ -221,7 +228,7 @@ export class PictureResolver {
 
   private async one(query: string, allowGeneric = false, target?: PicTarget): Promise<Pic | undefined> {
     // T443 gate: named items need their name in the picture; free-form images need the subject's main token.
-    const gate = (img: ImageResult) => (target ? accepts(target, img) : mentions(query, img));
+    const gate = (img: ImageResult) => (target ? accepts(target, img) : this.ctx.person ? this.cardPicture(img) : mentions(query, img));
     const pooledRaw = this.fromPool(query);
     const pooled = pooledRaw && gate(pooledRaw) ? pooledRaw : this.pool.find((p) => p.thumb && !this.used.has(p.thumb) && !isComposite(p) && gate(p));
     if (pooled) return this.take(pooled);
@@ -234,7 +241,7 @@ export class PictureResolver {
   private async many(query: string, n: number): Promise<Pic[]> {
     if (this.lookupsLeft-- <= 0) return [];
     const found = await this.find(query, this.env, n, true);
-    return found.filter((img) => !this.used.has(img.thumb) && !isComposite(img) && mentions(query, img)).map((img) => this.take(img));
+    return found.filter((img) => !this.used.has(img.thumb) && !isComposite(img) && (this.ctx.person ? this.cardPicture(img) : mentions(query, img))).map((img) => this.take(img));
   }
 
   private static needs(node: CardNode): boolean {
