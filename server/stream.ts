@@ -65,7 +65,7 @@ import { comparisonRepair, comparisonTitle } from './compareAnswer';
 import { withFinishedSentences } from './polish';
 import { queryWithPlace, readerPlace, settleReadings } from './readings';
 import { isKeepOnly, keptBody } from './refine';
-import { finishQuality, hasOfficialHit, hostTier, officialProbe, preferSources } from './sourceQuality';
+import { finishQuality, hasOfficialHit, hostTier, officialProbe, preferSources, sinkFormatWords } from './sourceQuality';
 import { isOwnSite, orcidSite, pickOwnSite, probeOwnSite, RESEARCH_ASK, withOwnSite } from './ownSite';
 import { quoteAsk } from '../shared/quoteAsk';
 import { dropStrayDois, isPaperAsk, leadPreprints, scholarlyResults, withScholarly } from './scholarly';
@@ -746,6 +746,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   // "AI news today" must not lead with last week's launch: past-window rows drop once enough current ones remain.
   const span = freshness !== 'any' ? freshness : stricter(guessFreshness(query), u?.freshness === 'day' || u?.freshness === 'week' ? u.freshness : 'any');
   results = { ...results, results: preferFresh(results.results, span) };
+  if (heuristicPattern(query) === 'briefing') results = { ...results, results: sinkFormatWords(query, u?.queries ?? [], results.results) };
   const scholar = await scholarly;
   if (scholar.length) results = { ...results, results: withScholarly(scholar, results.results) };
   results = { ...results, results: leadPreprints(query, results.results) };

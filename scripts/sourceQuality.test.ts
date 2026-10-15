@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { CardNode } from '../shared/card.ts';
-import { finishQuality, hasOfficialHit, hostTier, latinQuery, officialProbe, preferSources } from '../server/sourceQuality.ts';
+import { finishQuality, hasOfficialHit, hostTier, latinQuery, officialProbe, preferSources, sinkFormatWords } from '../server/sourceQuality.ts';
 
 const hit = (domain: string, title: string, snippet = title) => ({ url: `https://${domain}/x`, domain, title, snippet });
 
@@ -219,4 +219,13 @@ test('a news ask leads with newsrooms, not a newsletter or an encyclopedia', () 
   const ranked = preferSources('news tldr today', rows).map((r) => r.domain);
   assert.deepEqual(ranked.slice(0, 2), ['apnews.com', 'euronews.com']);
   assert.deepEqual(preferSources('apple pie recipe', rows).map((r) => r.domain), rows.map((r) => r.domain));
+});
+
+test('a word the rewrites left out sinks the rows named after it', () => {
+  const row = (domain: string, title: string) => ({ url: `https://${domain}/x`, title, domain, snippet: '' });
+  const rows = [row('tldr.tech', 'TLDR Newsletter'), row('thecorenews.substack.com', 'The Core: Apple; TLDR, Oct. 15'), row('nytimes.com', 'Top news today'), row('euronews.com', 'Latest news bulletin')];
+  const rewrites = ['top news headlines October 15 2026', "today's top stories October 15 2026"];
+  assert.deepEqual(sinkFormatWords('news tldr today', rewrites, rows).map((r) => r.domain), ['nytimes.com', 'euronews.com', 'tldr.tech', 'thecorenews.substack.com']);
+  assert.deepEqual(sinkFormatWords('nba scores tonight', ['NBA scores October 15 2026'], rows).map((r) => r.domain), rows.map((r) => r.domain));
+  assert.deepEqual(sinkFormatWords('news tldr today', [], rows), rows);
 });

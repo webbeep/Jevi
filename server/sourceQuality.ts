@@ -25,6 +25,22 @@ export function isNewsroom(domain: string): boolean {
   return matchesHost(domain, NEWSROOM);
 }
 
+const WHEN_WORDS = new Set(['today', 'tonight', 'yesterday', 'latest', 'now', 'current', 'live', 'week', 'this', 'recent', 'breaking', 'the', 'and', 'what', 'whats']);
+const askWords = (text: string) => text.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 3);
+
+/**
+ * A word the rewrites left out says how to answer, not what to find ("news tldr today" wants a summary,
+ * not tldr.tech). Rows that carry it in their name follow the others. Nothing is dropped.
+ */
+export function sinkFormatWords<T extends RankedHit>(query: string, rewrites: readonly string[], rows: readonly T[]): T[] {
+  if (!rewrites.length) return [...rows];
+  const kept = new Set(rewrites.flatMap(askWords));
+  const format = askWords(query).filter((word) => !kept.has(word) && !/^\d+$/.test(word) && !WHEN_WORDS.has(word));
+  if (!format.length) return [...rows];
+  const branded = (row: T) => format.some((word) => `${row.domain} ${row.title}`.toLowerCase().includes(word));
+  return [...rows.filter((row) => !branded(row)), ...rows.filter(branded)];
+}
+
 const PRESS = [
   'cnet.com', 'techradar.com', 'theverge.com', 'tomsguide.com', 'gsmarena.com', 'phonearena.com',
   'androidauthority.com', 'androidcentral.com', 'pcmag.com', 'mashable.com', 'wired.com', 'arstechnica.com',
