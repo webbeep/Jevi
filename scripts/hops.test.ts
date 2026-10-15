@@ -78,6 +78,20 @@ test('a ratio card leads with the quotient of the lengths it already shows', () 
   assert.match(text, /2\.11/);
   assert.match(text, /13\.1/);
   assert.doesNotMatch(text, /3\.9/);
+  const cited: CardNode = {
+    type: 'keyvalue',
+    items: [
+      { label: 'York walls circuit', value: '3.4 km (2 miles) [2]' },
+      { label: 'Race distance', value: '13.1 miles [6]' },
+    ],
+  };
+  const citedFact = factAnswer(WALLS, "York's medieval walls are 3.4 km (2.11 miles). The Great North Run is a 13.1 mile route.");
+  assert.equal(citedFact?.lead, '6.2');
+  const led = placeFactLead([cited], citedFact!);
+  assert.equal(led?.[0]?.type, 'hero');
+  assert.equal(led?.[0] && led[0].type === 'hero' ? led[0].value : '', '6.2');
+  assert.match(JSON.stringify(led?.[1]), /\[6\]/);
+  assert.doesNotMatch(JSON.stringify(led), /\[6\.2\]/);
 });
 
 test('a year offset searches the derived date once the anchor date is known', () => {

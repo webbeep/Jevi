@@ -523,7 +523,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   };
   const memberSources = () => req.search.results.map((row, i) => {
     const page = pages.find((item) => item.n === i + 1);
-    return { text: `${row.title} ${row.snippet ?? ''} ${page?.text ?? ''} ${row.content ?? ''}` };
+    return { title: row.title, url: row.url, text: `${row.title} ${row.snippet ?? ''} ${page?.text ?? ''} ${row.content ?? ''}` };
   });
   const settleFacts = () => {
     const indexes = [...shown.keys()].sort((a, b) => a - b);
@@ -542,10 +542,24 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     }
     const next = placeFactLead(nodes, grounded);
     if (!next) return;
-    next.forEach((node, index) => {
-      shown.set(index, node);
-      send('node', { index, node });
-    });
+    if (next.length === nodes.length) {
+      next.forEach((node, i) => {
+        const index = indexes[i]!;
+        if (node === nodes[i]) return;
+        shown.set(index, node);
+        send('node', { index, node });
+      });
+      return;
+    }
+    const hero = next[0]!;
+    if (indexes[0] === 0 && shown.has(0)) {
+      const free = Math.max(...indexes) + 1;
+      const displaced = shown.get(0)!;
+      shown.set(free, displaced);
+      send('node', { index: free, node: displaced });
+    }
+    shown.set(0, hero);
+    send('node', { index: 0, node: hero });
   };
   const settleMembers = () => {
     const indexes = [...shown.keys()].sort((a, b) => a - b);

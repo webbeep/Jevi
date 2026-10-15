@@ -677,26 +677,84 @@ function appearanceClues(parts: string[], person: string): string[] {
   return parts.flatMap((part) => workWords(part)).filter((word) => !own.has(word));
 }
 
-function nearPerson(text: string, person: string, clues: readonly string[]): boolean {
-  const last = person.split(/\s+/).at(-1)?.replace(/[^A-Za-z'’-]/g, '');
-  if (!last || last.length < 3 || !clues.length) return false;
-  const re = new RegExp(`\\b${last.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
-  for (const match of text.matchAll(re)) {
-    const at = match.index ?? 0;
-    const window = text.slice(Math.max(0, at - 500), Math.min(text.length, at + last.length + 500)).toLowerCase();
-    if (clues.some((clue) => window.includes(clue))) return true;
-  }
-  return false;
+function escapeName(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/** The card names a work, this person is in the sources, and no source places them next to that work. */
-function crossedAttribution(sources: readonly { text: string }[], person: string, clues: readonly string[]): boolean {
-  if (!clues.length) return false;
-  if (sources.some((source) => nearPerson(source.text, person, clues))) return false;
+function actPhrase(query: string): string | undefined {
+  const match = query.match(/\b(?:appeared|appear|starred|featured)\s+in\s+(?:an?\s+|the\s+)?([a-z][a-z\s]{2,40}?)(?:\?|$)/i);
+  const phrase = match?.[1]?.trim().toLowerCase().replace(/s$/, '');
+  return phrase && phrase.length >= 5 ? phrase : undefined;
+}
+
+function aboutPerson(source: { text: string; title?: string; url?: string }, person: string): boolean {
+  const hay = `${source.title ?? ''} ${source.url ?? ''}`.toLowerCase();
+  if (!hay.trim()) return false;
+  if (hay.includes(person.toLowerCase())) return true;
+  const slug = person.toLowerCase().replace(/[^a-z0-9]+/g, '');
+  return slug.length >= 8 && hay.replace(/[^a-z0-9]+/g, '').includes(slug);
+}
+
+/** A page about this person, or a passage that names them and not the rest of the group. */
+function individualCredit(
+  sources: readonly { text: string; title?: string; url?: string }[],
+  person: string,
+  group: readonly string[],
+  clues: readonly string[],
+  act?: string,
+): boolean {
+  const needles = [...clues, ...(act ? [act] : [])];
+  if (!needles.length) return true;
   const last = person.split(/\s+/).at(-1)?.replace(/[^A-Za-z'’-]/g, '') ?? '';
-  if (last.length < 3) return false;
-  const named = new RegExp(`\\b${last.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-  return sources.some((source) => named.test(source.text));
+  if (last.length < 3) return true;
+  const others = group
+    .filter((name) => name.toLowerCase() !== person.toLowerCase())
+    .map((name) => name.split(/\s+/).at(-1)?.replace(/[^A-Za-z'’-]/g, '') ?? '')
+    .filter((name) => name.length >= 3);
+  return sources.some((source) => {
+    if (aboutPerson(source, person)) return needles.some((needle) => source.text.toLowerCase().includes(needle));
+    const re = new RegExp(`\\b${escapeName(last)}\\b`, 'gi');
+    for (const match of source.text.matchAll(re)) {
+      const at = match.index ?? 0;
+      const window = source.text.slice(Math.max(0, at - 320), Math.min(source.text.length, at + last.length + 320));
+      const lower = window.toLowerCase();
+      if (!needles.some((needle) => lower.includes(needle))) continue;
+      const crowd = others.filter((name) => new RegExp(`\\b${escapeName(name)}\\b`, 'i').test(window)).length;
+      if (crowd < 2) return true;
+    }
+    return false;
+  });
+}
+
+function memberNames(nodes: readonly CardNode[]): string[] {
+  const found: string[] = [];
+  const walk = (node: CardNode): void => {
+    if (node.type === 'tile') {
+      const name = properName(node.label) ?? properName(`${node.value ?? ''} ${node.sub ?? ''}`);
+      if (name) found.push(name);
+    } else if (node.type === 'list') {
+      for (const item of node.items) {
+        const name = properName(item.text);
+        if (name) found.push(name);
+      }
+    } else if (node.type === 'keyvalue') {
+      for (const item of node.items) {
+        const name = properName(item.label);
+        if (name) found.push(name);
+      }
+    } else if (node.type === 'table') {
+      for (const row of node.rows) {
+        const name = row.reduce<string | undefined>((hit, cell) => hit ?? properName(cell), undefined);
+        if (name) found.push(name);
+      }
+    } else if (node.type === 'stack' || node.type === 'grid' || node.type === 'section' || node.type === 'scroller') {
+      node.children.forEach(walk);
+    } else if (node.type === 'tabs') {
+      node.tabs.forEach((tab) => tab.children.forEach(walk));
+    }
+  };
+  nodes.forEach(walk);
+  return [...new Set(found)];
 }
 
 function affirmsAppearance(value?: string, extra?: string, active?: boolean): boolean {
@@ -710,15 +768,17 @@ function affirmsAppearance(value?: string, extra?: string, active?: boolean): bo
  * A "which of these people did this" yes stays only when a source places that person
  * next to the work the card names. A video the sources describe without them is a no.
  */
-export function groundMembers(query: string, nodes: CardNode[], sources: readonly { text: string }[]): CardNode[] | undefined {
+export function groundMembers(query: string, nodes: CardNode[], sources: readonly { text: string; title?: string; url?: string }[]): CardNode[] | undefined {
   if (!MEMBER.test(query) || sources.every((source) => source.text.trim().length < 20)) return undefined;
+  const group = memberNames(nodes);
+  const act = actPhrase(query);
   let changed = false;
+  const unsupported = (person: string, clues: string[]): boolean => !individualCredit(sources, person, group, clues, act);
   const denySentence = (sentence: string): boolean => {
     if (!/\b(?:appeared|appear(?:s|ed)?|starred|featured)\b/i.test(sentence)) return false;
     const person = properName(sentence);
     if (!person) return false;
-    const clues = appearanceClues([sentence], person);
-    return crossedAttribution(sources, person, clues);
+    return unsupported(person, appearanceClues([sentence], person));
   };
   const walk = (node: CardNode): CardNode => {
     switch (node.type) {
@@ -733,7 +793,7 @@ export function groundMembers(query: string, nodes: CardNode[], sources: readonl
         const person = properName(node.label) ?? properName(node.value ?? '') ?? properName(node.sub ?? '');
         if (!person || !affirmsAppearance(node.value, node.sub, node.active)) return node;
         const clues = appearanceClues([node.sub ?? '', node.value ?? ''], person);
-        if (!crossedAttribution(sources, person, clues)) return node;
+        if (!unsupported(person, clues)) return node;
         changed = true;
         return { ...node, value: 'No', sub: undefined, active: false };
       }
@@ -741,7 +801,7 @@ export function groundMembers(query: string, nodes: CardNode[], sources: readonl
         const items = node.items.map((item) => {
           const person = properName(item.label) ?? properName(item.value);
           if (!person || !affirmsAppearance(item.value)) return item;
-          if (!crossedAttribution(sources, person, appearanceClues([item.value], person))) return item;
+          if (!unsupported(person, appearanceClues([item.value], person))) return item;
           changed = true;
           return { ...item, value: 'No' };
         });
@@ -751,7 +811,7 @@ export function groundMembers(query: string, nodes: CardNode[], sources: readonl
         const items = node.items.filter((item) => {
           const person = properName(item.text);
           if (!person || !affirmsAppearance(item.text, item.meta)) return true;
-          if (!crossedAttribution(sources, person, appearanceClues([item.text, item.meta ?? ''], person))) return true;
+          if (!unsupported(person, appearanceClues([item.text, item.meta ?? ''], person))) return true;
           changed = true;
           return false;
         });
@@ -763,7 +823,7 @@ export function groundMembers(query: string, nodes: CardNode[], sources: readonl
           if (!person) return row;
           const blob = row.join(' ');
           if (!affirmsAppearance(blob)) return row;
-          if (!crossedAttribution(sources, person, appearanceClues(row, person))) return row;
+          if (!unsupported(person, appearanceClues(row, person))) return row;
           changed = true;
           return row.map((cell) => {
             if (/\byes\b/i.test(cell)) return 'No';

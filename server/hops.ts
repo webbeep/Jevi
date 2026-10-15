@@ -429,6 +429,15 @@ export function nextHop(query: string, corpus: string, ctx: HopContext = {}): st
     }
   }
 
+  if (/\bwhich\b/i.test(query) && /\b(?:appeared|appear|have|has)\b/i.test(query)) {
+    const act = query.match(/\b(?:appeared|appear)\s+in\s+(?:an?\s+|the\s+)?([a-z][a-z\s]{2,30}?)(?:\?|$)/i)?.[1]?.trim().replace(/s$/, '');
+    if (act && act.length >= 5) {
+      const names = [...new Set([...corpus.matchAll(/\b[A-Z][a-zA-Z'’-]{2,}(?:\s+[A-Z][a-zA-Z'’-]{2,})+\b/g)].map((match) => match[0]))]
+        .filter((name) => !query.toLowerCase().includes(name.toLowerCase()));
+      if (names.length >= 3) offer(`${names.slice(0, 4).join(' ')} ${act}`);
+    }
+  }
+
   if (/\bcentury\b/i.test(query)) {
     const naming = /\b(?:name|named|called|chosen|coined)\b/i.test(query);
     const found = naming
@@ -582,9 +591,11 @@ export function patchFactLead(node: CardNode, lead: string, keep: readonly strin
     if (!value || !/\d/.test(value) || hasLead(value, lead)) return undefined;
     if (keep.length) {
       let changed = false;
-      const next = value.replace(/\d+(?:\.\d+)?/g, (num) => {
-        if (keep.some((item) => keptNumber(num, item))) return num;
-        if (/^(?:1[6-9]|20)\d{2}$/.test(num)) return num;
+      // Citations like [6] are source numbers. Replacing one hides the quotient inside a bracket.
+      const next = value.replace(/\[(\d+)\]|(\d+(?:\.\d+)?)(\s*-?\s*(?:miles|mile|mi|km|kilometers|kilometres)\b)?/gi, (full, cite: string | undefined, num: string | undefined, unit: string | undefined) => {
+        if (cite || unit || !num) return full;
+        if (keep.some((item) => keptNumber(num, item))) return full;
+        if (/^(?:1[6-9]|20)\d{2}$/.test(num)) return full;
         changed = true;
         return lead;
       });
