@@ -41,7 +41,7 @@ import { rewriteQuery } from './ai';
 import { type DesignRequest, designParallel, designStream, gateNode } from './design';
 import { BRIEF_ROWS, briefSources, remapBrief, type SourceBrief } from './brief';
 import { groundMembers } from './claims';
-import { cardFacts, factAnswer, hopQueries, nextHop, placeFactLead, unsupportedYear } from './hops';
+import { alignFactProse, cardFacts, factAnswer, hopQueries, nextHop, placeFactLead, unsupportedYear } from './hops';
 import { gapQuery, onTopicCount, rescueQuery, sourcesMiss } from './rescue';
 import { keepPictures, reviewCard, type Review } from './review';
 import { permitted } from './images';
@@ -540,8 +540,9 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       }
       return;
     }
-    const next = placeFactLead(nodes, grounded);
-    if (!next) return;
+    const led = placeFactLead(nodes, grounded) ?? nodes;
+    const next = alignFactProse(led, grounded) ?? led;
+    if (next === nodes) return;
     if (next.length === nodes.length) {
       next.forEach((node, i) => {
         const index = indexes[i]!;
@@ -552,12 +553,20 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       return;
     }
     const hero = next[0]!;
+    const rest = next.slice(1);
     if (indexes[0] === 0 && shown.has(0)) {
       const free = Math.max(...indexes) + 1;
-      const displaced = shown.get(0)!;
+      const displaced = rest[0] ?? shown.get(0)!;
       shown.set(free, displaced);
       send('node', { index: free, node: displaced });
     }
+    rest.forEach((node, i) => {
+      if (i === 0 && indexes[0] === 0 && shown.has(0)) return;
+      const index = indexes[i];
+      if (index === undefined || node === nodes[i]) return;
+      shown.set(index, node);
+      send('node', { index, node });
+    });
     shown.set(0, hero);
     send('node', { index: 0, node: hero });
   };
@@ -566,8 +575,15 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     const nodes = indexes.map((index) => shown.get(index)!);
     const next = groundMembers(req.query, nodes, memberSources());
     if (!next) return;
+    let extra = Math.max(...indexes, -1);
     next.forEach((node, i) => {
-      const index = indexes[i]!;
+      const index = indexes[i];
+      if (index === undefined) {
+        extra += 1;
+        shown.set(extra, node);
+        send('node', { index: extra, node });
+        return;
+      }
       if (node === nodes[i]) return;
       shown.set(index, node);
       send('node', { index, node });

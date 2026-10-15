@@ -182,3 +182,40 @@ test('a yes is removed when the named work never sits next to that person', () =
   assert.equal(valueOf('Lisa Kudrow'), 'No');
   assert.equal(groundMembers('Who is Michael Jordan?', nodes, pages), undefined);
 });
+
+test('a century ordinal stays when the page states the year and not those digits', () => {
+  const query = 'In what century was the current name of this day chosen?';
+  const pages: ClaimSource[] = [
+    { n: 1, text: 'The name dates back to the 18th century. The current name was chosen in 1814.' },
+  ];
+  const text = retargetCites('The current name was chosen in the 19th century [1].', pages, query);
+  assert.match(text, /19th century/);
+  const kv: CardNode = { type: 'keyvalue', items: [{ label: 'Name chosen', value: '19th century' }] };
+  const next = bindClaims(kv, pages, query);
+  assert.match(JSON.stringify(next), /19th century/);
+});
+
+test('an abstaining cast card names only the people a source credits alone', () => {
+  const query = 'Of the 6 main cast members of the series Friends, which have appeared in music videos?';
+  const nodes: CardNode[] = [
+    { type: 'text', text: 'The sources provided don\'t name any of the six main Friends cast members appearing in a music video, so this can\'t be answered from them.' },
+  ];
+  const pages: ClaimSource[] = [
+    { n: 1, title: 'These Are The Music Videos Jennifer Aniston Appeared In', text: 'Jennifer Aniston appeared in Melissa Etheridge\'s music video. Friends cast notes.' },
+    { n: 2, title: 'Courteney Cox music video', text: 'Friends star Courteney Cox appeared in Bruce Springsteen\'s music video for Dancing in the Dark.' },
+    { n: 3, title: 'Famous actors in music videos', text: 'Courteney Cox is not the only Friends star in a music video. Matt LeBlanc can be seen in a music video from before Friends.' },
+    { n: 4, title: 'Friends cast', text: 'Main cast: Jennifer Aniston, Courteney Cox, Lisa Kudrow, Matt LeBlanc, Matthew Perry and David Schwimmer.' },
+    { n: 5, title: 'Theme video', text: 'The music video features the Friends main cast: Jennifer Aniston, Courteney Cox, Lisa Kudrow, Matt LeBlanc, Matthew Perry and David Schwimmer.' },
+  ];
+  const next = groundMembers(query, nodes, pages) ?? [];
+  const blob = JSON.stringify(next);
+  assert.match(blob, /Jennifer Aniston/);
+  assert.match(blob, /Courteney Cox/);
+  assert.match(blob, /Matt LeBlanc/);
+  assert.doesNotMatch(blob, /Lisa Kudrow/);
+  assert.doesNotMatch(blob, /Bruce Springsteen/);
+  assert.doesNotMatch(blob, /can.t be answered/);
+  const tiles = next.flatMap((node) => node.type === 'grid' ? node.children : node.type === 'stack' ? node.children.flatMap((child) => child.type === 'grid' ? child.children : []) : []);
+  const yes = tiles.filter((node) => node.type === 'tile' && node.value === 'Yes').map((node) => node.type === 'tile' ? node.label : '');
+  assert.deepEqual(yes.filter((name) => /Kudrow|Springsteen|Perry|Schwimmer|Etheridge/.test(name)), []);
+});

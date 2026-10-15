@@ -572,7 +572,26 @@ function nodeText(node: CardNode): string {
  * A wrong hero number is replaced. A card that never states the figure gains a hero.
  * Undefined when the figure is already on the card.
  */
+function centuryLeadValue(lead: string): boolean {
+  return /^the \d{1,2}(?:st|nd|rd|th) century$/i.test(lead.trim());
+}
+
+/** The hero names a different century than the one the naming sources support. */
+function heroCenturyConflicts(nodes: readonly CardNode[], fact: FactAnswer): boolean {
+  if (!centuryLeadValue(fact.lead)) return false;
+  return nodes.some((node) => node.type === 'hero' && /\bcentury\b/i.test(node.value) && !hasLead(node.value, fact.lead));
+}
+
 export function placeFactLead(nodes: CardNode[], fact: FactAnswer): CardNode[] | undefined {
+  if (heroCenturyConflicts(nodes, fact)) {
+    let changed = false;
+    const next = nodes.map((node) => {
+      if (node.type !== 'hero' || !/\bcentury\b/i.test(node.value) || hasLead(node.value, fact.lead)) return node;
+      changed = true;
+      return { ...node, value: fact.lead, label: fact.label || node.label };
+    });
+    return changed ? next : undefined;
+  }
   if (nodes.some((node) => hasLead(nodeText(node), fact.lead))) return undefined;
   const keep = fact.keep ?? [];
   for (let i = 0; i < nodes.length; i++) {
@@ -642,4 +661,119 @@ export function patchFactLead(node: CardNode, lead: string, keep: readonly strin
     default:
       return undefined;
   }
+}
+
+const CENTURY_PHRASE = /\b(?:the\s+)?(?:\d{1,2}(?:st|nd|rd|th)|(?<![\d])(?:st|nd|rd|th))\s+century\b/gi;
+
+/** A blank "th century", or a naming clause's century, becomes the century the sources support. */
+function rewriteCentury(text: string, lead: string, forceNaming = false): string {
+  return text.replace(new RegExp(CENTURY_PHRASE.source, 'gi'), (full: string, offset: number) => {
+    if (/^(?:the\s+)?(?:st|nd|rd|th)\s+century$/i.test(full)) return lead;
+    const clause = forceNaming ? text : clauseAt(text, offset);
+    const naming = forceNaming || NAMING_CLAUSE.test(clause);
+    const origin = ORIGIN_CLAUSE.test(clause);
+    if (!naming || origin) return full;
+    const core = full.toLowerCase().replace(/^the\s+/, '');
+    const want = lead.toLowerCase().replace(/^the\s+/, '');
+    return core === want ? full : lead;
+  });
+}
+
+/**
+ * The naming century is written out in the card.
+ * A blank ordinal is filled. The century the custom began stays in an origin clause.
+ */
+export function alignFactProse(nodes: CardNode[], fact: FactAnswer): CardNode[] | undefined {
+  if (!centuryLeadValue(fact.lead)) return undefined;
+  let changed = false;
+  const lead = fact.lead;
+  const walk = (node: CardNode): CardNode => {
+    switch (node.type) {
+      case 'stack':
+      case 'grid':
+      case 'section':
+      case 'scroller':
+        return { ...node, children: node.children.map(walk) };
+      case 'tabs':
+        return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: tab.children.map(walk) })) };
+      case 'text':
+      case 'callout':
+      case 'quote':
+      case 'draft':
+      case 'heading': {
+        const text = rewriteCentury(node.text, lead);
+        if (text === node.text) return node;
+        changed = true;
+        return { ...node, text };
+      }
+      case 'hero': {
+        if (!node.caption) return node;
+        const caption = rewriteCentury(node.caption, lead);
+        if (caption === node.caption) return node;
+        changed = true;
+        return { ...node, caption };
+      }
+      case 'stat':
+        return node;
+      case 'keyvalue': {
+        const items = node.items.map((item) => {
+          const value = rewriteCentury(item.value, lead, NAMING_CLAUSE.test(item.label));
+          if (value === item.value) return item;
+          changed = true;
+          return { ...item, value };
+        });
+        return { ...node, items };
+      }
+      case 'tile': {
+        const naming = NAMING_CLAUSE.test(node.label);
+        const value = node.value ? rewriteCentury(node.value, lead, naming) : node.value;
+        const sub = node.sub ? rewriteCentury(node.sub, lead, naming) : node.sub;
+        if (value === node.value && sub === node.sub) return node;
+        changed = true;
+        return { ...node, value, sub };
+      }
+      case 'list': {
+        const items = node.items.map((item) => {
+          const text = rewriteCentury(item.text, lead);
+          if (text === item.text) return item;
+          changed = true;
+          return { ...item, text };
+        });
+        return { ...node, items };
+      }
+      case 'timeline':
+      case 'profile':
+      case 'steps':
+      case 'accordion':
+      case 'proscons':
+      case 'badges':
+      case 'actions':
+      case 'choices':
+      case 'links':
+      case 'citations':
+      case 'chart':
+      case 'pricing':
+      case 'scaler':
+      case 'slider':
+      case 'reveal':
+      case 'image':
+      case 'gallery':
+      case 'video':
+      case 'code':
+      case 'divider':
+      case 'progress':
+      case 'rating':
+      case 'diagram':
+      case 'ticker':
+      case 'slot':
+      case 'table':
+        return node;
+      default: {
+        const unreachable: never = node;
+        return unreachable;
+      }
+    }
+  };
+  const next = nodes.map(walk);
+  return changed ? next : undefined;
 }

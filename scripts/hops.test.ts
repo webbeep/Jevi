@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { factAnswer, hopQueries, nextHop, patchFactLead, placeFactLead, unsupportedYear } from '../server/hops.ts';
+import { alignFactProse, factAnswer, hopQueries, nextHop, patchFactLead, placeFactLead, unsupportedYear } from '../server/hops.ts';
 import { bindClaims, type ClaimSource } from '../server/claims.ts';
 import type { CardNode } from '../shared/card.ts';
 
@@ -117,6 +117,20 @@ test('a century question searches the name the first pages introduced', () => {
   assert.equal(factAnswer(CENTURY, 'The tradition dates to the 18th century.'), undefined);
   const again = nextHop(CENTURY, 'Prinsjesdag harks back to the 18th century.', {});
   assert.match(again ?? '', /Prinsjesdag current name chosen/);
+  const card: CardNode[] = [
+    { type: 'hero', value: 'the 18th century', label: 'Century' },
+    { type: 'text', text: 'The current name was chosen in the th century. The name dates back to the 18th century.' },
+    { type: 'keyvalue', items: [{ label: 'Name chosen', value: 'Th century' }] },
+  ];
+  const led = placeFactLead(card, { lead: 'the 19th century', label: 'Century', note: '' });
+  assert.equal(led?.[0] && led[0].type === 'hero' ? led[0].value : '', 'the 19th century');
+  const aligned = alignFactProse(led ?? card, { lead: 'the 19th century', label: 'Century', note: '' });
+  const body = aligned?.map((node) => JSON.stringify(node)).join('\n') ?? '';
+  assert.match(body, /chosen in the 19th century/);
+  assert.match(body, /dates back to the 18th century/);
+  assert.match(body, /Name chosen/);
+  assert.match(body, /the 19th century/);
+  assert.doesNotMatch(body, /\bth century/i);
 });
 
 test('shopping, video, paper, lakes, a person, and an agency count are not fact hops', () => {
