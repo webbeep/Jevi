@@ -800,10 +800,17 @@ function rosterNames(sources: readonly { text: string; title?: string; url?: str
     const text = `${source.title ?? ''}\n${source.text}`;
     if (work && !text.toLowerCase().includes(work.toLowerCase())) continue;
     for (const mark of text.matchAll(/\b(?:main cast|cast members|starring)\b/gi)) {
-      const window = sentenceAt(text, mark.index ?? 0);
-      const names = [...new Set(peopleIn(window))];
-      if (names.length < 3) continue;
-      names.forEach((name) => found.add(name));
+      const names: string[] = [];
+      const chunks = text.slice(mark.index ?? 0, (mark.index ?? 0) + 900).split(/(?<=[.!?·|])\s+/);
+      for (const chunk of chunks) {
+        if (names.length && /\b(?:appeared|appears|starred|featured|seen|been|theme)\b/i.test(chunk)) break;
+        const people = peopleIn(chunk);
+        if (!people.length && names.length) break;
+        people.forEach((name) => names.push(name));
+      }
+      const unique = [...new Set(names)];
+      if (unique.length < 3) continue;
+      unique.forEach((name) => found.add(name));
     }
   }
   return [...found];
@@ -1042,7 +1049,7 @@ export function groundMembers(query: string, nodes: CardNode[], sources: readonl
       case 'hero': {
         const blob = `${node.value} ${node.caption ?? ''} ${node.label}`;
         const group = /\b(?:all|every|each|entire|whole)\b/i.test(blob) || /\b\d+\s*of\s*\d+\b/.test(blob);
-        if (!group) return node;
+        if (!group || members.length < 3) return node;
         const yes = credited.filter(inGroup);
         const value = yes.length ? String(yes.length) : 'None';
         const caption = yes.length ? yes.join(', ') : 'No source credits one of them on their own.';

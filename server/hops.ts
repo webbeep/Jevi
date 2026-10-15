@@ -428,7 +428,13 @@ export function leadMemberRows<T extends { title?: string; snippet?: string; url
   const about = (row: T) => `${row.title ?? ''} ${row.snippet ?? ''} ${row.url ?? ''}`.toLowerCase().includes(needle);
   const pinnedRows = rows.filter((row) => row.url && pin.has(row.url));
   const rest = rows.filter((row) => !(row.url && pin.has(row.url)));
-  return [...pinnedRows, ...rest.filter(about), ...rest.filter((row) => !about(row))];
+  // The named work is read first. A follow-up that missed the work does not bury those pages.
+  return [
+    ...pinnedRows.filter(about),
+    ...rest.filter(about),
+    ...pinnedRows.filter((row) => !about(row)),
+    ...rest.filter((row) => !about(row)),
+  ];
 }
 
 export interface HopContext {
@@ -516,10 +522,15 @@ export function nextHop(query: string, corpus: string, ctx: HopContext = {}): st
   if (/\bwhich\b/i.test(query) && /\b(?:appeared|appear|have|has)\b/i.test(query)) {
     const act = query.match(/\b(?:appeared|appear)\s+in\s+(?:an?\s+|the\s+)?([a-z][a-z\s]{2,30}?)(?:\?|$)/i)?.[1]?.trim().replace(/s$/, '');
     if (act && act.length >= 5) {
-      const skip = new Set(['main', 'cast', 'music', 'video', 'north', 'south', 'east', 'west', 'new', 'york', 'great']);
-      const names = [...new Set([...corpus.matchAll(/\b[A-Z][a-zA-Z'’-]{2,}(?:\s+[A-Z][a-zA-Z'’-]{2,})+\b/g)].map((match) => match[0]))]
+      const skip = new Set(['main', 'cast', 'music', 'video', 'north', 'south', 'east', 'west', 'new', 'york', 'great', 'the', 'theme', 'from', 'there', 'late', 'show', 'members', 'member', 'famous', 'actors', 'actor', 'iconic', 'these', 'stars', 'star', 'another', 'when', 'complete', 'song', 'list', 'fandom', 'central', 'miss', 'may', 'mtv', 'vault', 'full', 'crew', 'official', 'friends', 'rembrandts']);
+      const personLike = (name: string) => {
+        const parts = name.replace(/\s+/g, ' ').trim().split(' ');
+        if (parts.length < 2 || parts.length > 3) return false;
+        return parts.every((part) => part.length >= 3 && part !== part.toUpperCase() && /^[A-Z]/.test(part) && !skip.has(part.toLowerCase()));
+      };
+      const names = [...new Set([...corpus.matchAll(/\b[A-Z][a-zA-Z'’-]{2,}(?:\s+[A-Z][a-zA-Z'’-]{2,})+\b/g)].map((match) => match[0].replace(/\s+/g, ' ')))]
         .filter((name) => !query.toLowerCase().includes(name.toLowerCase()))
-        .filter((name) => name.split(/\s+/).every((part) => !skip.has(part.toLowerCase())));
+        .filter(personLike);
       const credited = (name: string) => individualInCorpus(corpus, name, act);
       const roster = names.filter((name) => {
         const at = corpus.indexOf(name);

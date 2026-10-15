@@ -144,8 +144,12 @@ test('a which-members question searches someone the pages have not credited', ()
   const rows = leadMemberRows(query, [
     { title: 'Music video', url: 'https://en.wikipedia.org/wiki/Music_video', snippet: 'A music video is a video.' },
     { title: 'Friends cast', url: 'https://example.com/friends', snippet: 'Main cast of the series Friends.' },
-  ]);
+  ], ['https://en.wikipedia.org/wiki/Music_video']);
   assert.match(rows[0]?.title ?? '', /Friends/);
+  const themeOnly = 'The Friends theme song music video has appearances by Jennifer Aniston, Courteney Cox, Lisa Kudrow and Matt LeBlanc.';
+  const who = nextHop(query, themeOnly, {});
+  assert.match(who ?? '', /Jennifer Aniston/);
+  assert.doesNotMatch(who ?? '', /The Friends/);
 });
 
 test('a year offset searches the derived date once the anchor date is known', () => {
