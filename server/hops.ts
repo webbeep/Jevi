@@ -420,6 +420,10 @@ export function hasMemberWork(query: string, rows: readonly { title?: string; sn
   return rows.some((row) => `${row.title ?? ''} ${row.snippet ?? ''} ${row.url ?? ''}`.toLowerCase().includes(needle));
 }
 
+/**
+ * Pages about the named work lead.
+ * A follow-up that missed the work does not get read ahead of those pages.
+ */
 export function leadMemberRows<T extends { title?: string; snippet?: string; url?: string }>(
   query: string,
   rows: readonly T[],
