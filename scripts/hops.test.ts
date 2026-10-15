@@ -92,6 +92,32 @@ test('a ratio card leads with the quotient of the lengths it already shows', () 
   assert.equal(led?.[0] && led[0].type === 'hero' ? led[0].value : '', '6.2');
   assert.match(JSON.stringify(led?.[1]), /\[6\]/);
   assert.doesNotMatch(JSON.stringify(led), /\[6\.2\]/);
+  const rounded = "The Great North Run is 13.1 miles (21K). York's medieval walls are 3.4 km (2 miles). The wall is 13 ft (4 m) high.";
+  assert.equal(factAnswer(WALLS, rounded)?.lead, '6.2');
+  const mixed: CardNode = {
+    type: 'keyvalue',
+    items: [
+      { label: 'Great North Run', value: '13.1 miles (21K)' },
+      { label: 'Wall height', value: '13 ft (4 m)' },
+      { label: 'York walls circuit', value: '3.4 km (2 miles)' },
+    ],
+  };
+  const kept = placeFactLead([mixed], factAnswer(WALLS, rounded)!);
+  const mixedText = JSON.stringify(kept);
+  assert.equal(kept?.[0]?.type, 'hero');
+  assert.match(mixedText, /6\.2/);
+  assert.match(mixedText, /21K/);
+  assert.match(mixedText, /13 ft/);
+  assert.doesNotMatch(mixedText, /6\.6/);
+});
+
+test('a which-members question searches someone the pages have not credited', () => {
+  const query = 'Of the 6 main cast members of the series Friends, which have appeared in music videos?';
+  const corpus = 'Main cast: Jennifer Aniston, Courteney Cox, Lisa Kudrow, Matt LeBlanc. Courteney Cox appeared in a music video.';
+  const next = nextHop(query, corpus, {});
+  assert.match(next ?? '', /Jennifer Aniston/);
+  assert.match(next ?? '', /music video/);
+  assert.doesNotMatch(next ?? '', /Courteney Cox/);
 });
 
 test('a year offset searches the derived date once the anchor date is known', () => {

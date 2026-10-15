@@ -218,13 +218,19 @@ function sideScore(text: string, at: number, words: string[]): { hits: number; d
   return { hits, dist };
 }
 
-/** Two writings of one distance (2.11 miles and 3.40 kilometres) are one length. */
+function lengthPrecision(row: LengthRow): number {
+  const decimals = row.raw.match(/\.(\d+)/)?.[1]?.length ?? 0;
+  return decimals + (row.unit === 'mi' ? 0.1 : 0);
+}
+
+/** Two writings of one distance (2 miles and 3.4 kilometres, or 2.11 miles and 3.40 kilometres) are one length. The more precise writing is kept. */
 function collapseLengths(rows: LengthRow[]): LengthRow[] {
   const out: LengthRow[] = [];
   for (const row of rows) {
     const span = miles(row);
-    const twin = out.find((kept) => Math.abs(miles(kept) - span) <= Math.max(0.05, miles(kept) * 0.04));
-    if (!twin) out.push(row);
+    const twinAt = out.findIndex((kept) => Math.abs(miles(kept) - span) <= Math.max(0.15, miles(kept) * 0.08));
+    if (twinAt < 0) out.push(row);
+    else if (lengthPrecision(row) > lengthPrecision(out[twinAt]!)) out[twinAt] = row;
   }
   return out;
 }
@@ -432,9 +438,20 @@ export function nextHop(query: string, corpus: string, ctx: HopContext = {}): st
   if (/\bwhich\b/i.test(query) && /\b(?:appeared|appear|have|has)\b/i.test(query)) {
     const act = query.match(/\b(?:appeared|appear)\s+in\s+(?:an?\s+|the\s+)?([a-z][a-z\s]{2,30}?)(?:\?|$)/i)?.[1]?.trim().replace(/s$/, '');
     if (act && act.length >= 5) {
+      const skip = new Set(['main', 'cast', 'music', 'video', 'north', 'south', 'east', 'west', 'new', 'york', 'great']);
       const names = [...new Set([...corpus.matchAll(/\b[A-Z][a-zA-Z'’-]{2,}(?:\s+[A-Z][a-zA-Z'’-]{2,})+\b/g)].map((match) => match[0]))]
-        .filter((name) => !query.toLowerCase().includes(name.toLowerCase()));
-      if (names.length >= 3) offer(`${names.slice(0, 4).join(' ')} ${act}`);
+        .filter((name) => !query.toLowerCase().includes(name.toLowerCase()))
+        .filter((name) => name.split(/\s+/).every((part) => !skip.has(part.toLowerCase())));
+      const surname = (name: string) => name.split(/\s+/).at(-1) ?? name;
+      const credited = (name: string) => new RegExp(`\\b${escapeReg(surname(name))}\\b[^.]{0,120}\\b(?:appeared|appears|starred|featured|seen)\\b`, 'i').test(corpus);
+      const roster = names.filter((name) => {
+        const at = corpus.indexOf(name);
+        return /\b(?:cast|starring|members)\b/i.test(corpus.slice(Math.max(0, at - 90), at + name.length + 90));
+      });
+      const pool = roster.length >= 3 ? roster : names;
+      const pending = pool.filter((name) => !credited(name));
+      if (pending.length) offer(`${pending.slice(0, 3).join(' ')} ${act}`);
+      else if (names.length >= 3 && !names.some(credited)) offer(`${names.slice(0, 4).join(' ')} ${act}`);
     }
   }
 
@@ -611,7 +628,7 @@ export function patchFactLead(node: CardNode, lead: string, keep: readonly strin
     if (keep.length) {
       let changed = false;
       // Citations like [6] are source numbers. Replacing one hides the quotient inside a bracket.
-      const next = value.replace(/\[(\d+)\]|(\d+(?:\.\d+)?)(\s*-?\s*(?:miles|mile|mi|km|kilometers|kilometres)\b)?/gi, (full, cite: string | undefined, num: string | undefined, unit: string | undefined) => {
+      const next = value.replace(/\[(\d+)\]|(\d+(?:\.\d+)?)(\s*-?\s*(?:miles|mile|mi|km|kilometers|kilometres|feet|foot|ft|meters|metres|m|hours|hour|minutes|mins)\b|[kK]\b)?/gi, (full, cite: string | undefined, num: string | undefined, unit: string | undefined) => {
         if (cite || unit || !num) return full;
         if (keep.some((item) => keptNumber(num, item))) return full;
         if (/^(?:1[6-9]|20)\d{2}$/.test(num)) return full;

@@ -938,7 +938,7 @@ export function groundMembers(query: string, nodes: CardNode[], sources: readonl
       case 'tile': {
         const person = properName(node.label) ?? properName(node.value ?? '') ?? properName(node.sub ?? '');
         if (!person) return node;
-        if (!affirmsAppearance(node.value, node.sub, node.active) && creditedPerson(person)) {
+        if (!affirmsAppearance(node.value, node.sub, node.active) && (creditedPerson(person) || individualCredit(sources, person, group, [], act))) {
           changed = true;
           const sub = node.sub && /\b(?:not named|no source|not in)\b/i.test(node.sub) ? undefined : node.sub;
           return { ...node, value: 'Yes', sub, active: true };
