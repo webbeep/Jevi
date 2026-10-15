@@ -33,8 +33,7 @@ test('the age is the subject’s age at the earliest sourced event date', () => 
 test('a what-year question looks past the host that never states the year', () => {
   const corpus = 'Yohji Yamamoto was born in 1943. His mother opened a dressmaking shop in Kabukicho.';
   const next = nextHop(YEAR, corpus, { hosts: ['en.wikipedia.org'] });
-  assert.match(next ?? '', /sell her dressmaking shop year/i);
-  assert.match(next ?? '', /-site:en\.wikipedia\.org/);
+  assert.match(next ?? '', /sold her dressmaking shop year/i);
   assert.equal(factAnswer(YEAR, 'She sold the dressmaking shop in 1972 to fund the launch.')?.lead, '1972');
 });
 
@@ -43,6 +42,9 @@ test('the newest season with a score wins', () => {
   assert.equal(factAnswer(SCORE, corpus)?.lead, '85%');
   const missing = nextHop(SCORE, 'The show has 2 seasons and no critic score is printed.', {});
   assert.match(missing ?? '', /season 2 tomatometer/i);
+  const ahead = nextHop(SCORE, 'Season 1 Tomatometer 84%.', {});
+  assert.match(ahead ?? '', /season 2 tomatometer/i);
+  assert.equal(nextHop(SCORE, 'Season 1 Tomatometer 84%. Season 2 Tomatometer 85%.', { asked: [ahead ?? ''] }), undefined);
 });
 
 test('a mapped distance leads with the quotient, not either length', () => {

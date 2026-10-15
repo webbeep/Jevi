@@ -37,17 +37,17 @@ const IF_ON = /\bif (.+?) (?:took place|were held|was held|happened|ran) on (.+?
 const WHAT_YEAR = /^what year did (.+?)\??$/i;
 const SCORE = /\b(?:tomatometer|rotten tomatoes|metacritic)\b/i;
 const NEWEST = /\b(?:most recent|latest|current|this season)\b/i;
-const VERBS: { ask: RegExp; near: RegExp }[] = [
-  { ask: /\bsell\b/i, near: /\b(?:sell|sold|sale|selling)\b/i },
-  { ask: /\b(?:found|founded)\b/i, near: /\b(?:found|founded|founding)\b/i },
-  { ask: /\bopen(?:ed)?\b/i, near: /\b(?:open|opened|opening)\b/i },
-  { ask: /\b(?:die|died)\b/i, near: /\b(?:die|died|death)\b/i },
-  { ask: /\b(?:win|won)\b/i, near: /\b(?:win|won|winning)\b/i },
-  { ask: /\b(?:leave|left)\b/i, near: /\b(?:leave|left)\b/i },
-  { ask: /\b(?:marry|married)\b/i, near: /\b(?:marry|married|marriage|wedding)\b/i },
-  { ask: /\b(?:publish|published)\b/i, near: /\b(?:publish|published)\b/i },
-  { ask: /\b(?:release|released)\b/i, near: /\b(?:release|released)\b/i },
-  { ask: /\bborn\b/i, near: /\bborn\b/i },
+const VERBS: { ask: RegExp; near: RegExp; past: string }[] = [
+  { ask: /\bsell\b/i, near: /\b(?:sell|sold|sale|selling)\b/i, past: 'sold' },
+  { ask: /\b(?:found|founded)\b/i, near: /\b(?:found|founded|founding)\b/i, past: 'founded' },
+  { ask: /\bopen(?:ed)?\b/i, near: /\b(?:open|opened|opening)\b/i, past: 'opened' },
+  { ask: /\b(?:die|died)\b/i, near: /\b(?:die|died|death)\b/i, past: 'died' },
+  { ask: /\b(?:win|won)\b/i, near: /\b(?:win|won|winning)\b/i, past: 'won' },
+  { ask: /\b(?:leave|left)\b/i, near: /\b(?:leave|left)\b/i, past: 'left' },
+  { ask: /\b(?:marry|married)\b/i, near: /\b(?:marry|married|marriage|wedding)\b/i, past: 'married' },
+  { ask: /\b(?:publish|published)\b/i, near: /\b(?:publish|published)\b/i, past: 'published' },
+  { ask: /\b(?:release|released)\b/i, near: /\b(?:release|released)\b/i, past: 'released' },
+  { ask: /\bborn\b/i, near: /\bborn\b/i, past: 'born' },
 ];
 
 const clean = (s: string) => s.replace(/[?.]+$/g, '').replace(/\s+/g, ' ').trim();
@@ -102,6 +102,12 @@ function yearNear(text: string, re: RegExp): string | undefined {
 
 function eventVerb(query: string): RegExp | undefined {
   return VERBS.find((verb) => verb.ask.test(query))?.near;
+}
+
+/** Pages say "sold", not "what year did she sell". The follow-up search uses that past tense. */
+function pastClause(clause: string): string {
+  const verb = VERBS.find((item) => item.ask.test(clause));
+  return clean(verb ? clause.replace(verb.ask, verb.past) : clause);
 }
 
 function escapeReg(text: string): string {
@@ -261,22 +267,24 @@ export function nextHop(query: string, corpus: string, ctx: HopContext = {}): st
   const yearAsk = query.match(WHAT_YEAR);
   if (yearAsk) {
     const verb = eventVerb(yearAsk[1]!);
-    if (verb && !yearNear(corpus, verb)) {
-      const host = (ctx.hosts ?? []).find((item) => item && !/rotten|youtube/i.test(item));
-      const site = host ? ` -site:${host.replace(/^www\./, '')}` : '';
-      offer(`${clean(yearAsk[1]!)} year${site}`);
-    }
+    if (verb && !yearNear(corpus, verb)) offer(`${pastClause(yearAsk[1]!)} year`);
   }
 
   if (SCORE.test(query) && NEWEST.test(query)) {
     const title = showTitle(query);
-    if (title && !seasonScores(corpus).length) {
-      const seasons = [
+    if (title) {
+      const scores = seasonScores(corpus);
+      const mentioned = [
         ...corpus.matchAll(/\bseason\s+(\d+)\b/gi),
         ...corpus.matchAll(/\b(\d+)\s+seasons?\b/gi),
-      ].map((match) => Number(match[1]));
-      const newest = seasons.length ? Math.max(...seasons) : undefined;
-      offer(newest ? `${title} season ${newest} tomatometer score` : `${title} latest season tomatometer score`);
+      ].map((match) => Number(match[1])).filter((n) => n > 0 && n < 40);
+      const scoredMax = scores.reduce((max, row) => Math.max(max, row.season), 0);
+      const mentionedMax = mentioned.reduce((max, n) => Math.max(max, n), 0);
+      const lookedAhead = (ctx.asked ?? []).some((item) => /season\s+\d+\s+tomatometer/i.test(item));
+      const target = mentionedMax > scoredMax ? mentionedMax : !lookedAhead && scoredMax > 0 ? scoredMax + 1 : mentionedMax;
+      if (!scores.length || target > scoredMax) {
+        offer(target ? `${title} season ${target} tomatometer score` : `${title} latest season tomatometer score`);
+      }
     }
   }
 
