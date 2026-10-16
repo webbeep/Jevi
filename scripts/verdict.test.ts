@@ -179,6 +179,11 @@ test('a benefit line inside an accordion under a no verdict is dropped', () => {
   if (node.type !== 'accordion') return;
   assert.equal(node.items.length, 2);
   assert.doesNotMatch(node.items[0]?.text ?? '', /may help/);
+  const acted = session.offer({
+    type: 'accordion',
+    items: [{ title: 'Mechanism', text: 'A cup may act as a sedative by slowing the evening heart rate.' }],
+  }, 3).node;
+  assert.doesNotMatch(JSON.stringify(acted), /may act/);
   assert.match(node.items[0]?.text ?? '', /do not show/);
   const row = session.offer({
     type: 'keyvalue',

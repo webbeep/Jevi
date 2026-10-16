@@ -97,6 +97,15 @@ test('a nearby sentence on the page is not the quote when the answering sentence
   assert.doesNotMatch(next, /Local estimates/);
 });
 
+test('a quote is the sentence, not the page title or a table run together', () => {
+  const titled = 'FastStats: Sleep in Adults\nThe recommended amount of sleep for adults is at least 7 hours each day.';
+  const table = 'Age Group Sleep Adult 18-60 years 7 or more hours 1 Adult 61-64 years 7-9 hours 2 Adult 65 years 7-8 hours 3';
+  const next = finishQuotedText('quote the page on how much sleep adults need', 'The writeup runs the age bands together and never quotes the daily recommendation.', [page(titled), page(table, 2)]);
+  assert.match(next, /at least 7 hours each day/);
+  assert.doesNotMatch(next, /FastStats/);
+  assert.doesNotMatch(next, /Age Group/);
+});
+
 test('a quotation the page does not contain is not shown', () => {
   const source = 'The recommended amount of sleep for adults is at least 7 hours each day.';
   const smashed = 'The page states: "About Sleep Adult 65 years and older 7-8 hours1."';

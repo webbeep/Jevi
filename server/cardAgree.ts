@@ -22,7 +22,7 @@ const OPEN_ID = /\b(?:10\.\d{4,9}\/[^\s,;)>\]]+|PMC\d{5,}|arxiv:\s*\d{4}\.\d{4,5
 const CLINIC = /\b(?:mayo clinic|webmd|healthline|cleveland clinic|medical news today|verywell)\b/i;
 const PAPERISH = /\b(?:papers?|studies|study|peer[- ]reviewed|journal|preprints?)\b/i;
 
-const BENEFIT = /\b(?:(?:may|might|can|could)\s+(?:help|reduce|prevent|protect|lower|improve)|(?:linked to|associated with)\s+(?:a )?(?:lower|reduced|decreased))\b/i;
+const BENEFIT = /\b(?:(?:may|might|can|could)\s+(?:help|reduce|prevent|protect|lower|improve|act|decrease)|(?:linked to|associated with)\s+(?:a )?(?:lower|reduced|decreased))\b/i;
 const NEGATED = /\b(?:no|not|n't|never|without|lacks?|lacking|does not|do not)\b/i;
 
 const WHERE_ROLE = /\bwhere (?:does|do|did|is|are)\b[\s\S]{0,80}\b(?:teach|teaches|teaching|work|works|working|study|studies|professor|faculty|employed|practice)\b/i;
@@ -53,7 +53,8 @@ function sentencesOf(text: string): string[] {
     return `\uE000${shields.length - 1}\uE001`;
   });
   return joinSpacedDecimals(shielded)
-    .split(SENTENCE_BREAK)
+    .split(/\n+/)
+    .flatMap((part) => part.split(SENTENCE_BREAK))
     .map((sentence) => sentence.replace(/\uE000(\d+)\uE001/g, (_, index) => shields[Number(index)] ?? '').trim())
     .filter((sentence) => sentence.length >= 20 && /[a-z]/i.test(sentence));
 }
@@ -61,6 +62,12 @@ function sentencesOf(text: string): string[] {
 function overlap(text: string, words: readonly string[]): number {
   const low = text.toLowerCase();
   return words.filter((word) => low.includes(word)).length;
+}
+
+/** A table run together, or a word jammed onto a digit, is not a sentence to quote. */
+function quotableSentence(text: string): boolean {
+  if (/[a-z]\d/i.test(text)) return false;
+  return (text.match(/\d+(?:\.\d+)?/g) ?? []).length < 5;
 }
 
 function loose(text: string): string {
@@ -75,6 +82,7 @@ export function answeringSentence(query: string, text: string): string | undefin
   const asksNumber = /\b(?:how many|how much|count|number|figure|total)\b/i.test(query);
   let best: { sentence: string; score: number } | undefined;
   for (const sentence of sentencesOf(text)) {
+    if (!quotableSentence(sentence)) continue;
     const hit = overlap(sentence, words);
     if (hit < Math.min(need, words.length)) continue;
     const score = hit + (asksNumber && /\d/.test(sentence) ? 1 : 0);
@@ -122,6 +130,7 @@ function proseEnough(text: string): boolean {
 }
 
 function answerScore(query: string, text: string, words: readonly string[]): number {
+  if (!quotableSentence(text)) return -1;
   const asksNumber = /\b(?:how many|how much|count|number|figure|total)\b/i.test(query);
   return overlap(text, words) + (asksNumber && /\d/.test(text) ? 1 : 0);
 }
