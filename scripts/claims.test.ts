@@ -115,6 +115,16 @@ test('a price above the stated budget is not shown on a pick', () => {
   const dangling: CardNode = { type: 'list', items: [{ text: 'JBL Live 780NC', meta: 'Best under $200' }] };
   const cleared = bindClaims(dangling, catalog, 'Wireless Noise Cancelling Headphones Under $150');
   assert.equal(cleared.type === 'list' ? cleared.items[0]?.meta : 'kept', undefined);
+  const hero: CardNode = {
+    type: 'hero',
+    value: 'JBL Live 778NC',
+    label: 'Top pick under $150',
+    caption: "Best noise cancelling headphones under $200 we've tested",
+  };
+  const headed = bindClaims(hero, catalog, 'Wireless Noise Cancelling Headphones Under $150');
+  assert.match(headed.type === 'hero' ? headed.caption ?? '' : '', /Best noise cancelling headphones we've tested/);
+  assert.equal(headed.type === 'hero' ? headed.label : '', 'Top pick under $150');
+  assert.doesNotMatch(headed.type === 'hero' ? `${headed.caption} ${headed.value}` : '', /\$200/);
 });
 
 test('a budget ceiling is not the product price', () => {

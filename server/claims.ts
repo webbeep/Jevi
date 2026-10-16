@@ -787,10 +787,16 @@ function rankPriced<T>(items: readonly T[], ceilings: readonly number[], pricedT
   return scored.filter((row) => row.priced).sort((a, b) => a.index - b.index).map((row) => row.item);
 }
 
-/** A dollar amount above the ask's ceiling is not a price for that pick. */
+/** A dollar amount above the ask's ceiling is not a price for that pick. "under $200" leaves with the amount. */
 function stripOverBudget(text: string, ceilings: readonly number[]): string {
   const cap = Math.min(...ceilings);
-  return text.replace(new RegExp(MONEY.source, 'g'), (raw) => (moneyValue(raw) > cap ? '' : raw))
+  const money = MONEY.source;
+  return text
+    .replace(new RegExp(`\\b(?:under|below|less than|cheaper than|up to|at most)\\s+${money}`, 'gi'), (raw) => {
+      const amount = raw.match(new RegExp(money, 'i'))?.[0];
+      return amount && moneyValue(amount) > cap ? '' : raw;
+    })
+    .replace(new RegExp(money, 'g'), (raw) => (moneyValue(raw) > cap ? '' : raw))
     .replace(/\s{2,}/g, ' ')
     .replace(/\s+([,.;:])/g, '$1')
     .replace(/^[\s,·-]+|[\s,·-]+$/g, '')
@@ -834,7 +840,9 @@ function keepBudgetPrices(node: CardNode, ceilings: readonly number[]): CardNode
     }
     case 'hero': {
       const value = insideCeiling(node.value, ceilings) ?? node.value;
-      return value === node.value ? node : { ...node, value };
+      const label = node.label === undefined ? undefined : stripOverBudget(node.label, ceilings);
+      const caption = node.caption === undefined ? undefined : stripOverBudget(node.caption, ceilings);
+      return value === node.value && label === node.label && caption === node.caption ? node : { ...node, value, label, caption };
     }
     case 'stack':
     case 'grid':
