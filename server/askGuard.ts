@@ -124,11 +124,28 @@ export function screenSubject(title: string | undefined, original: string): stri
 export function cardFollowQuery(question: string, subject: string, covered: string): string | undefined {
   const q = question.trim();
   if (!pointsAtCard(q, covered)) return undefined;
-  const body = q.replace(/^explain\b[:\s-]*/i, '').replace(/^["“]+|["”]+$/g, '').replace(/\s+/g, ' ').trim();
+  const body = q.replace(/^(?:explain|go deeper on)\b[:\s-]*/i, '').replace(/^["“]+|["”]+$/g, '').replace(/\s+/g, ' ').trim();
   const words = body || q;
   const name = subject.trim();
   if (!name || words.toLowerCase().includes(name.toLowerCase())) return words;
   return `${name} ${words}`.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * The search for a follow-up that points at the card already on screen.
+ * An explanation of a sentence on that card is searched as those words plus the subject.
+ * A price rewrite is used only when it still names that subject, so a false company
+ * ("Explain shares fell" read as a company named Explain) cannot drop the one on screen.
+ * Undefined when the follow-up is its own question.
+ */
+export function followSearchQuery(question: string, subject: string, covered: string, subjects: readonly string[]): string | undefined {
+  if (!pointsAtCard(question, covered)) return undefined;
+  const pointed = cardFollowQuery(question, subject, covered);
+  if (/^(?:explain|go deeper on)\b/i.test(question.trim()) && pointed) return pointed;
+  const named = quoteFollowQuery(question, subjects);
+  const name = subject.trim().toLowerCase();
+  if (named && (!name || named.toLowerCase().includes(name))) return named;
+  return pointed ?? named;
 }
 
 const PRICE_CUE = /\b(?:price|prices|quote|quotes|stock|shares?|chart|charts|trading|worth|how much)\b|\$[A-Za-z]{1,5}\b/i;

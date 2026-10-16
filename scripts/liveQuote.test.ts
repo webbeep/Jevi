@@ -55,7 +55,10 @@ describe('quoteAsk', () => {
       'who is Ed Chu',
       'Jaylen Brown injuries',
       'time',
+      'Explain Shares fell 9.2% in morning trading, hitting a session low of $214.30 after the opening auction.',
     ]) assert.equal(quoteAsk(q), undefined, q);
+    assert.equal(symbolOf('Apple shares fell after the event'), 'lookup:Apple');
+    assert.equal(symbolOf('Explain Apple shares fell after the event'), 'lookup:Apple');
   });
 
   test('price asks are cached as live', () => {

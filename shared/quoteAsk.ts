@@ -63,6 +63,8 @@ const NOT_A_COMPANY = new Set([
   'best', 'top', 'penny', 'cheap', 'growth', 'dividend', 'value', 'tech', 'ai', 'meme', 'blue', 'chip', 'buy', 'sell',
   'which', 'what', 'why', 'how', 'is', 'are', 'was', 'the', 'a', 'an', 'my', 'did', 'does', 'do', 'should', 'i', 'to', 'of',
   'for', 'in', 'on', 'today', 'now', 'price', 'prices', 'current', 'latest', 'stock', 'stocks', 'share', 'shares', 'market',
+  // An instruction in front of "shares" is not the company ("Explain shares fell" is not a company named Explain).
+  'explain', 'explaining', 'explained', 'describe', 'describing', 'summarize', 'summarise', 'elaborate', 'expand', 'discuss', 'clarify', 'interpret', 'define', 'deeper',
   'us', 'news', 'up', 'down', 'falling', 'rising', 'dropping', 'going', 'so', 'much', 'many', 'buying', 'selling', 'trading',
 ]);
 

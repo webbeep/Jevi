@@ -62,7 +62,7 @@ import { type LateExtras, normalizeUrl, searchWithLate } from './search';
 import type { WebHit } from './cascade';
 import { domainOf } from './util';
 import { choicesIn, distinctActions, subjectWords } from './chips';
-import { anchoredFollowup, asksToCompare, cardFollowQuery, cryptographyHint, faithfulQuery, isWritingAsk, needsOwnSearch, ownQuestion, personQuestion, pointsAtCard, quickPlan, quoteFollowQuery, screenSubject, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
+import { anchoredFollowup, asksToCompare, cryptographyHint, faithfulQuery, followSearchQuery, isWritingAsk, needsOwnSearch, ownQuestion, personQuestion, quickPlan, quoteFollowQuery, screenSubject, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
 import { calculationAnswer, isCalculationAsk } from './calculate';
 import { comparisonRepair, comparisonTitle } from './compareAnswer';
 import { withFinishedSentences } from './polish';
@@ -1414,14 +1414,16 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
 
   // A follow-up that points at the card is a new search for its own words, and that search
   // keeps the subject already on screen. "Explain this move" searches the company, not the bare sentence.
-  if (req.intent !== 'adjust' && pointsAtCard(req.question, cardText)) {
-    const named = quoteFollowQuery(req.question, [subject, onScreen?.title, req.original].filter((part): part is string => !!part));
-    const query = named ?? cardFollowQuery(req.question, subject, cardText) ?? req.question.trim();
+  // A quote check that reads "Explain shares fell" as a company named Explain does not get to drop that subject.
+  const searched = req.intent !== 'adjust'
+    ? followSearchQuery(req.question, subject, cardText, [subject, onScreen?.title, req.original].filter((part): part is string => !!part))
+    : undefined;
+  if (searched) {
     const lock = subject
       ? `This follow-up is about ${subject}, the subject already on screen. Answer about that subject. Do not say no source identifies it.`
       : '';
-    send('rewrite', { query });
-    await searchAndDesign(send, env, query, 'any', [lock, context].filter(Boolean).join('\n') || undefined, started, scope, true, undefined, undefined, chart);
+    send('rewrite', { query: searched });
+    await searchAndDesign(send, env, searched, 'any', [lock, context].filter(Boolean).join('\n') || undefined, started, scope, true, undefined, undefined, chart);
     return;
   }
 

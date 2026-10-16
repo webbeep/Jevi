@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { anchoredFollowup, asksToCompare, cardFollowQuery, cryptographyHint, faithfulQuery, isWritingAsk, needsOwnSearch, ownQuestion, personQuestion, pointsAtCard, quoteFollowQuery, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from '../server/askGuard.ts';
+import { anchoredFollowup, asksToCompare, cardFollowQuery, cryptographyHint, faithfulQuery, followSearchQuery, isWritingAsk, needsOwnSearch, ownQuestion, personQuestion, pointsAtCard, quoteFollowQuery, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from '../server/askGuard.ts';
 import { isPersonAsk } from '../server/entity.ts';
 import { planLayout } from '../server/plan.ts';
 import type { CardNode } from '../shared/card.ts';
@@ -99,6 +99,19 @@ test('a follow-up that points at the card keeps that subject, and an unrelated o
   assert.equal(cardFollowQuery('What is photosynthesis?', 'Moderna', card), undefined);
   assert.equal(ownQuestion('What is photosynthesis?', card), true);
   assert.equal(pointsAtCard('Draft the unblock email', card), false);
+});
+
+test('explaining a sentence on the card searches that subject, not a company named Explain', () => {
+  const sentence = 'Shares fell 9.2% in morning trading, hitting a session low of $214.30 after the opening auction.';
+  const card = `Moderna\n${sentence}`;
+  const cleaned = `Explain ${sentence}`;
+  const quoted = `Explain "${sentence}"`;
+  const subjects = ['Moderna'];
+  assert.match(followSearchQuery(cleaned, 'Moderna', card, subjects) ?? '', /^Moderna Shares fell 9\.2%/);
+  assert.match(followSearchQuery(quoted, 'Moderna', card, subjects) ?? '', /^Moderna Shares fell 9\.2%/);
+  assert.equal(followSearchQuery('explain this move', 'Moderna', 'Moderna', subjects), 'Moderna this move');
+  assert.equal(followSearchQuery('What is photosynthesis?', 'Moderna', card, subjects), undefined);
+  assert.equal(followSearchQuery("what's its price", 'Tesla', 'Tesla stock', ['Tesla', 'tesla stock']), "tesla stock what's its price");
 });
 
 test('a price follow-up names the instrument already on screen', () => {
