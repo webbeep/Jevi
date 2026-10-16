@@ -119,6 +119,18 @@ test('a clear no stays no, and weak evidence stays weak', () => {
   });
   const hardened = weakSession.offer({ type: 'hero', value: 'No', label: 'Focus' }, 0).node;
   assert.equal(hardened.type === 'hero' ? hardened.value : '', 'Limited evidence');
+  const solidNo = new VerdictSession({
+    query: 'Does red wine help heart health?',
+    results: [hit({ title: 'Heart', url: 'https://www.heart.org/wine', domain: 'heart.org', snippet: 'Cardiologists do not recommend red wine for heart health.' })],
+  });
+  const softened = solidNo.offer({ type: 'hero', value: 'No solid evidence', label: 'Heart' }, 0).node;
+  assert.equal(softened.type === 'hero' ? softened.value : '', 'No');
+  const solidOnly = new VerdictSession({
+    query: 'Does the supplement improve focus?',
+    results: [hit({ title: 'Review', url: 'https://agency.example/review', domain: 'agency.example', snippet: 'There is no solid evidence the supplement improves focus.' })],
+  });
+  const kept = solidOnly.offer({ type: 'hero', value: 'No', label: 'Focus' }, 0).node;
+  assert.equal(kept.type === 'hero' ? kept.value : '', 'No solid evidence');
 });
 
 test('a consistent No tile is left alone', () => {

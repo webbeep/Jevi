@@ -131,6 +131,18 @@ test('a spaced decimal inside a quotation stays one number', () => {
   assert.match(cut, /"$/);
 });
 
+test('a quotation cut at the point keeps the decimal the hero already states', () => {
+  const hero: CardNode = {
+    type: 'hero',
+    value: '1.5°C',
+    label: 'Best estimate',
+    caption: '"Continued greenhouse gas emissions will lead to increasing global warming, with the best estimate of reaching 1.',
+  };
+  const next = bindClaims(hero, [{ n: 1, text: 'The page discusses warming in general terms.' }], 'quote the report');
+  const caption = next.type === 'hero' ? next.caption ?? '' : '';
+  assert.match(caption, /reaching 1\.5°C"/);
+});
+
 test('a budgeted product ask is shopping, and a tax ask is not', () => {
   assert.equal(shoppingAsk('Help me find an HDMI switch for 3 devices to one 4K TV under $40; only real product models'), true);
   assert.equal(shoppingAsk('If I buy a $90 pair of sneakers in a store in New York, NY, do I pay sales tax?'), false);

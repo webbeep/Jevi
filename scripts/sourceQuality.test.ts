@@ -56,6 +56,20 @@ test('a public page outranks a training page on the same site', () => {
   assert.ok(out.findIndex((row) => row.url === primary.url) < out.findIndex((row) => row.url === training.url));
 });
 
+test('an unpriced product hero does not lead a card that has a priced pick', () => {
+  const nodes = finishQuality('Help me find an HDMI switch under $40', [
+    { type: 'hero', value: 'Kinivo 550BN', label: 'Top pick' },
+    { type: 'list', style: 'bullet', items: [{ text: 'Fosmon 3-Port', meta: '$13.99' }] },
+  ]);
+  assert.equal(nodes[0], undefined);
+  assert.equal(nodes[1]?.type, 'list');
+  const kept = finishQuality('How do HDMI switches work', [
+    { type: 'hero', value: 'Kinivo 550BN', label: 'Top pick' },
+    { type: 'list', style: 'bullet', items: [{ text: 'Fosmon 3-Port', meta: '$13.99' }] },
+  ]);
+  assert.equal(kept[0]?.type, 'hero');
+});
+
 test('a priced product page leads an unpriced one on a shopping ask', () => {
   const priced = { url: 'https://shop.example/switch', domain: 'shop.example', title: 'Acme HDMI switch', snippet: '3 ports, $18.99' };
   const bare = { url: 'https://blog.example/roundup', domain: 'blog.example', title: 'HDMI switch roundup', snippet: 'Several switches, prices vary' };

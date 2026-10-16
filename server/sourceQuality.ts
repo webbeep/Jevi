@@ -645,7 +645,19 @@ function alignVerdicts(nodes: readonly (CardNode | undefined)[]): (CardNode | un
 }
 
 /** Language, repeated rows, and a disagreement the card has already settled. Holes stay holes. */
+/** On a shopping card, a product hero with no price does not lead once another pick states one. */
+function dropUnpricedProductLead(query: string, nodes: readonly (CardNode | undefined)[]): (CardNode | undefined)[] {
+  if (!shoppingAsk(query)) return [...nodes];
+  const priced = nodes.some((node) => !!node && /\$\s?\d/.test(JSON.stringify(node)));
+  if (!priced) return [...nodes];
+  return nodes.map((node) => {
+    if (!node || node.type !== 'hero') return node;
+    if (/\$\s?\d/.test(`${node.value} ${node.caption ?? ''} ${node.label}`)) return node;
+    return undefined;
+  });
+}
+
 export function finishQuality(query: string, nodes: readonly (CardNode | undefined)[]): (CardNode | undefined)[] {
   const cleaned = nodes.map((node) => (node ? cleanNode(query, node) : node));
-  return alignVerdicts(withoutSettledDisputes(cleaned));
+  return alignVerdicts(withoutSettledDisputes(dropUnpricedProductLead(query, cleaned)));
 }

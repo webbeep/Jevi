@@ -21,8 +21,8 @@ const MUTUAL = /\b(both|each other|one another|each speeds|speeds the other|spee
 const HARD_NEG = /\b(don't|doesn't|do not|does not|never|didn't|did not)\b/i;
 /** A finding stated as no, not a hedge. "Weak evidence" is not one of these. */
 const CLEAR_NO = /\b(?:evidence does not support|does not support|do not support|does not recommend|do not recommend|recommend against|no benefit|no effect|not associated with|was not associated|is not associated|found no|does not help|do not help|does not improve|did not improve|does not reduce|did not reduce)\b/i;
-const WEAK_EVIDENCE = /\b((?:very low|low-quality|insufficient|inconclusive|uncertain|limited|weak)\s+evidence)\b/i;
-const HEDGE_VALUE = /\b(?:weak|limited|insufficient|inconclusive|uncertain)\s+evidence\b/i;
+const WEAK_EVIDENCE = /\b((?:very low|low-quality|insufficient|inconclusive|uncertain|limited|weak)\s+evidence|no\s+(?:solid|strong|clear|good|real|direct)\s+evidence)\b/i;
+const HEDGE_VALUE = /\b(?:(?:weak|limited|insufficient|inconclusive|uncertain)\s+evidence|no\s+(?:solid|strong|clear|good|real|direct)\s+evidence)\b/i;
 
 const STOP = new Set('a an the and or of to in for on with by is are was were be this that it as at from what when how does did do if they their would could about into over than then not but any has have had its'.split(' '));
 

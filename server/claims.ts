@@ -230,6 +230,25 @@ function repairCutQuote(text: string, sources: readonly ClaimSource[]): string {
   return text;
 }
 
+/** The hero already states 1.5°C. A quotation on that same node that stopped at "1." keeps the rest of that number. */
+function completeCutDecimal(text: string, hints: readonly (string | undefined)[]): string {
+  const openAt = Math.max(text.lastIndexOf('"'), text.lastIndexOf('“'), text.lastIndexOf('«'));
+  if (openAt < 0) return text;
+  const opener = text[openAt]!;
+  const closer = opener === '“' ? '”' : opener === '«' ? '»' : '"';
+  const inside = text.slice(openAt + 1);
+  if (inside.includes(closer)) return text;
+  const cut = inside.match(/(\d+)\.?\s*$/);
+  if (!cut?.[1]) return text;
+  for (const hint of hints) {
+    if (!hint || hint.length > 80) continue;
+    const found = hint.match(new RegExp(`(${cut[1]}\\.\\d+)(\\s?°[CF]|\\s?%)?`));
+    if (!found) continue;
+    return `${text.slice(0, text.length - cut[0].length)}${found[1]}${found[2] ?? ''}${closer}`;
+  }
+  return text;
+}
+
 /** Point each cited number at a page that contains it, and drop a number no cited page states. */
 export function retargetCites(text: string, sources: readonly ClaimSource[], query = ''): string {
   const joined = repairCutQuote(joinSpacedDecimals(text), sources);
@@ -385,7 +404,7 @@ function retargetNode(node: CardNode, sources: readonly ClaimSource[], query = '
       return text === node.text ? node : { ...node, text };
     }
     case 'hero': {
-      const caption = node.caption ? retargetCites(node.caption, sources, query) : node.caption;
+      const caption = node.caption ? completeCutDecimal(retargetCites(node.caption, sources, query), [node.value, node.label]) : node.caption;
       const nums = significant(node.value);
       const page = citeValue(node.value, sources, undefined);
       if (!page && keepsDerived(query, node.value, sources)) {
