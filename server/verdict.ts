@@ -19,6 +19,10 @@ const ORG = /\b(AHA|American Heart Association|WHO|World Health Organization|CDC
 const OFFICIAL_HOST = /(^|\.)(who\.int|cdc\.gov|nih\.gov|fda\.gov|hhs\.gov|heart\.org|medlineplus\.gov|health\.gov|dietaryguidelines\.gov|usda\.gov)$/i;
 const MUTUAL = /\b(both|each other|one another|each speeds|speeds the other|speed each)\b/i;
 const HARD_NEG = /\b(don't|doesn't|do not|does not|never|didn't|did not)\b/i;
+/** A finding stated as no, not a hedge. "Weak evidence" is not one of these. */
+const CLEAR_NO = /\b(?:evidence does not support|does not support|do not support|does not recommend|do not recommend|recommend against|no benefit|no effect|not associated with|was not associated|is not associated|found no|does not help|do not help|does not improve|did not improve|does not reduce|did not reduce)\b/i;
+const WEAK_EVIDENCE = /\b((?:very low|low-quality|insufficient|inconclusive|uncertain|limited|weak)\s+evidence)\b/i;
+const HEDGE_VALUE = /\b(?:weak|limited|insufficient|inconclusive|uncertain)\s+evidence\b/i;
 
 const STOP = new Set('a an the and or of to in for on with by is are was were be this that it as at from what when how does did do if they their would could about into over than then not but any has have had its'.split(' '));
 
@@ -87,6 +91,11 @@ interface Flags {
   officialNeg: boolean;
   absence: boolean;
   explicitDenial: boolean;
+  /** A source states a clear negative, and does not call the evidence weak. */
+  clearNo: boolean;
+  /** A source calls the evidence weak, limited, or inconclusive. */
+  sourceWeak: boolean;
+  weakLabel: string;
   queryWords: Set<string>;
 }
 
@@ -95,6 +104,9 @@ function scan(hits: { domain: string; text: string }[], query: string): Flags {
   let officialNeg = false;
   let absence = false;
   let explicitDenial = false;
+  let clearNo = false;
+  let sourceWeak = false;
+  let weakLabel = 'Weak evidence';
   for (const hit of hits) {
     if (EXPLICIT.test(hit.text)) explicitDenial = true;
     const host = OFFICIAL_HOST.test(hit.domain);
@@ -102,9 +114,17 @@ function scan(hits: { domain: string; text: string }[], query: string): Flags {
       const overlap = shared(words(s), queryWords);
       if (!absence && ABSENCE.test(s) && overlap >= 2) absence = true;
       if (!officialNeg && DISCOURAGE.test(s) && overlap >= 2 && (host || ORG.test(s) || /\bguidelines?\b/i.test(s))) officialNeg = true;
+      if (overlap < 2) continue;
+      const weak = s.match(WEAK_EVIDENCE);
+      if (weak) {
+        sourceWeak = true;
+        weakLabel = `${weak[1]![0]!.toUpperCase()}${weak[1]!.slice(1)}`;
+        continue;
+      }
+      if (CLEAR_NO.test(s)) clearNo = true;
     }
   }
-  return { officialNeg, absence, explicitDenial, queryWords };
+  return { officialNeg, absence, explicitDenial, clearNo, sourceWeak, weakLabel, queryWords };
 }
 
 function clip(s: string, max: number): string {
@@ -150,7 +170,11 @@ function paint(node: Face, value: string, tone: 'warning' | 'negative' | 'positi
 }
 
 function fixFace(node: Face, flags: Flags, body: string): CardNode {
+  const value = (node.value ?? '').trim();
+  // A verdict keeps the strength the sources state. "Weak evidence" does not replace a no, and a no does not replace weak evidence.
+  if (flags.clearNo && !flags.sourceWeak && value.length <= 40 && HEDGE_VALUE.test(value)) return paint(node, 'No', 'negative');
   const pol = polarity(node.value);
+  if (flags.sourceWeak && !flags.clearNo && !flags.absence && /^(?:yes|no|true|false)$/i.test(value)) return paint(node, flags.weakLabel, 'warning');
   if (pol === 'none') return node;
   const own = `${node.type === 'hero' ? node.caption ?? '' : node.sub ?? ''}`;
   const absenceHere = flags.absence || (ABSENCE.test(own) && shared(words(own), flags.queryWords) >= 1);
@@ -185,7 +209,7 @@ function mapNode(node: CardNode, flags: Flags, body: string): CardNode | undefin
       .filter((t) => t.children.length);
     return tabs.length ? { ...node, tabs } : undefined;
   }
-  if ((node.type === 'hero' || node.type === 'tile') && polarity(node.value) !== 'none') return fixFace(node, flags, body);
+  if (node.type === 'hero' || node.type === 'tile') return fixFace(node, flags, body);
   if (node.type === 'text' && flags.officialNeg && yesLead(node.text)) return undefined;
   return node;
 }

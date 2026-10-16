@@ -119,6 +119,37 @@ test('an exempt price does not keep a tax dollar from another line', () => {
   assert.match(body, /8\.875%/);
 });
 
+test('a number inside a quotation stays when another figure is dropped', () => {
+  const page = claimSources(
+    [{ title: 'Report', snippet: '', domain: 'agency.example' }],
+    [{ n: 1, text: 'The summary mentions risk. It gives no percent.' }],
+  );
+  const text = retargetCites('The report says "risks rise 1.5 degrees by mid-century" and also claims 99 percent [1].', page, 'quote the official report');
+  assert.match(text, /1\.5/);
+  assert.match(text, /"/);
+  assert.doesNotMatch(text, /99/);
+});
+
+test('an unpriced pick does not stay ahead of a priced one', () => {
+  const catalog: ClaimSource[] = [
+    { n: 1, text: 'The Acme Switch is listed at $18.99.' },
+    { n: 2, text: 'The generic splitter page describes the product and gives no price.' },
+  ];
+  const grid: CardNode = {
+    type: 'grid',
+    cols: 2,
+    children: [
+      { type: 'tile', label: 'Generic splitter', value: 'No price' },
+      { type: 'tile', label: 'Acme Switch', value: '3 port' },
+    ],
+  };
+  const next = bindClaims(grid, catalog, 'best hdmi switch under $40');
+  const tiles = next.type === 'grid' ? next.children.filter((child) => child.type === 'tile') : [];
+  assert.equal(tiles.length, 1);
+  assert.equal(tiles[0]?.type === 'tile' ? tiles[0].label : '', 'Acme Switch');
+  assert.match(tiles[0]?.type === 'tile' ? `${tiles[0].value ?? ''} ${tiles[0].sub ?? ''}` : '', /\$18\.99/);
+});
+
 test('a number the person stated stays, and a stripped year does not leave a broken article', () => {
   const page = claimSources(
     [{ title: 'Bottled water', snippet: '', domain: 'pnas.org' }],

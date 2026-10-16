@@ -106,6 +106,21 @@ test('P11: no proof stays No evidence, not a hard No or never', () => {
   assert.equal(/never|didn't|disproven|\bfalse\b/i.test(node.type === 'hero' ? `${node.value} ${node.label}` : ''), false);
 });
 
+test('a clear no stays no, and weak evidence stays weak', () => {
+  const noSession = new VerdictSession({
+    query: 'Does the supplement improve focus?',
+    results: [hit({ title: 'Review', url: 'https://agency.example/review', domain: 'agency.example', snippet: 'Evidence does not support using the supplement to improve focus.' })],
+  });
+  const hedged = noSession.offer({ type: 'hero', value: 'Weak evidence', label: 'Focus' }, 0).node;
+  assert.equal(hedged.type === 'hero' ? hedged.value : '', 'No');
+  const weakSession = new VerdictSession({
+    query: 'Does the supplement improve focus?',
+    results: [hit({ title: 'Review', url: 'https://agency.example/review', domain: 'agency.example', snippet: 'There is limited evidence that the supplement improves focus.' })],
+  });
+  const hardened = weakSession.offer({ type: 'hero', value: 'No', label: 'Focus' }, 0).node;
+  assert.equal(hardened.type === 'hero' ? hardened.value : '', 'Limited evidence');
+});
+
 test('a consistent No tile is left alone', () => {
   const lead: CardNode = { type: 'hero', value: 'No', label: 'The store is closed today', caption: 'The owner posted that the shop is shut on Mondays.' };
   const session = new VerdictSession({

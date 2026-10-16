@@ -152,8 +152,23 @@ function bareNumber(num: string): string {
   return shownNumber(num).source.replace(/^\\\$\?\\s\*/, '').replace(/\\s\?%?\??$/, '');
 }
 
+/** A quotation is the source's words. Mask it so a missing number outside it is not pulled out of the quote. */
+function maskQuotes(text: string): { text: string; quotes: string[] } {
+  const quotes: string[] = [];
+  const masked = text.replace(/"[^"]*"|“[^”]*”|«[^»]*»/g, (quote) => {
+    quotes.push(quote);
+    return `\uE000${quotes.length - 1}\uE001`;
+  });
+  return { text: masked, quotes };
+}
+
+function unmaskQuotes(text: string, quotes: readonly string[]): string {
+  return text.replace(/\uE000(\d+)\uE001/g, (_, index) => quotes[Number(index)] ?? '');
+}
+
 function stripNums(text: string, nums: readonly string[]): string {
-  let out = text;
+  const masked = maskQuotes(text);
+  let out = masked.text;
   for (const num of nums) {
     const bare = bareNumber(num);
     // "A 2024 imaging" loses the year and must not stay "A imaging". Only the article that sat on that number goes.
@@ -161,6 +176,7 @@ function stripNums(text: string, nums: readonly string[]): string {
     out = out.replace(new RegExp(`\\bAn\\s+${bare}\\s+(?=[bcdfghjklmnpqrstvwxyz])`, 'gi'), '');
     out = out.replace(shownNumber(num), ' ');
   }
+  out = unmaskQuotes(out, masked.quotes);
   out = out.replace(/\s{2,}/g, ' ').replace(/\s+([,.;:)])/g, '$1').replace(/\(\s*\)/g, '').trim();
   return withoutEmptySlots(out);
 }
@@ -181,7 +197,8 @@ export function retargetCites(text: string, sources: readonly ClaimSource[], que
   const parts = text.split(SENTENCE_BREAK);
   return parts.flatMap((sentence) => {
     const asked = new Set(numberTokens(query));
-    const nums = significant(sentence).filter((num) => !asked.has(num));
+    // A number inside a quotation stays, even when the rest of the sentence loses a figure the page does not state.
+    const nums = significant(maskQuotes(sentence).text).filter((num) => !asked.has(num));
     if (!nums.length) return [sentence];
     const cites = [...sentence.matchAll(/\[(\d+)\]/g)].map((match) => Number(match[1]));
     if (cites.length && cites.every((n) => covers(byNumber(sources, n), nums))) return [withoutEmptySlots(sentence)];
@@ -676,21 +693,45 @@ function applyTax(node: CardNode, query: string, pick: TaxPick): CardNode {
   }
 }
 
+/** An unpriced pick drops once any pick has a price. Priced picks keep their order. */
+function rankPriced<T>(items: readonly T[], ceilings: readonly number[], pricedText: (item: T) => string): T[] {
+  const scored = items.map((item, index) => ({ item, index, priced: hasPrice(pricedText(item), ceilings) }));
+  if (!scored.some((row) => row.priced)) return items.map((item) => item);
+  return scored.filter((row) => row.priced).sort((a, b) => a.index - b.index).map((row) => row.item);
+}
+
 /** A priced list drops a pick that still has no price. A list with no prices at all stays, so a miss does not empty the card. */
-function dropPriceless(node: CardNode, ceilings: readonly number[]): CardNode {
+function dropPriceless(node: CardNode, ceilings: readonly number[], query: string): CardNode {
   switch (node.type) {
     case 'list': {
-      const priced = node.items.filter((item) => hasPrice(item.meta, ceilings) || hasPrice(item.text, ceilings));
-      if (!priced.length || priced.length === node.items.length) return node;
-      return { ...node, items: priced };
+      const items = rankPriced(node.items, ceilings, (item) => `${item.meta ?? ''} ${item.text}`);
+      return items.length === node.items.length && items.every((item, index) => item === node.items[index]) ? node : { ...node, items };
     }
     case 'stack':
     case 'grid':
     case 'section':
-    case 'scroller':
-      return { ...node, children: node.children.map((child) => dropPriceless(child, ceilings)) };
+    case 'scroller': {
+      const children = node.children.map((child) => dropPriceless(child, ceilings, query));
+      const tiles = children.filter((child): child is Extract<CardNode, { type: 'tile' }> => child.type === 'tile');
+      if (tiles.length < 2) {
+        return children.every((child, index) => child === node.children[index]) ? node : { ...node, children };
+      }
+      const ranked = rankPriced(tiles, ceilings, (tile) => `${tile.value ?? ''} ${tile.sub ?? ''} ${tile.label}`);
+      let placed = false;
+      const next: CardNode[] = [];
+      for (const child of children) {
+        if (child.type !== 'tile') {
+          next.push(child);
+          continue;
+        }
+        if (placed) continue;
+        placed = true;
+        next.push(...ranked);
+      }
+      return next.length === node.children.length && next.every((child, index) => child === node.children[index]) ? node : { ...node, children: next };
+    }
     case 'tabs':
-      return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: tab.children.map((child) => dropPriceless(child, ceilings)) })) };
+      return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: tab.children.map((child) => dropPriceless(child, ceilings, query)) })) };
     case 'text':
     case 'callout':
     case 'quote':
@@ -1270,5 +1311,5 @@ export function bindClaims(node: CardNode, sources: readonly ClaimSource[], quer
   const lined = TAX_ASK.test(query) ? repairTaxNode(taxed, query, sources) : taxed;
   if (!shoppingAsk(query)) return lined;
   const ceilings = budgetAmounts(query);
-  return dropPriceless(fillPrices(lined, sources, ceilings), ceilings);
+  return dropPriceless(fillPrices(lined, sources, ceilings), ceilings, query);
 }

@@ -48,6 +48,21 @@ test('a Chinese score page drops once an official English scoreboard is in the l
   assert.ok(out.some((row) => row.domain === 'www.nba.com'));
 });
 
+test('a public page outranks a training page on the same site', () => {
+  const primary = { url: 'https://www.example.gov/rest/about', domain: 'www.example.gov', title: 'About rest', snippet: 'The public guideline.' };
+  const training = { url: 'https://www.example.gov/niosh/work-hour-training-for-nurses/longhours/mod2/08.html', domain: 'www.example.gov', title: 'Rest training module', snippet: 'A course page.' };
+  const out = preferSources('What does the agency recommend for rest? Quote the public page', [training, primary, hit('www.nytimes.com', 'Rest feature')]);
+  assert.equal(out[0]?.url, primary.url);
+  assert.ok(out.findIndex((row) => row.url === primary.url) < out.findIndex((row) => row.url === training.url));
+});
+
+test('a priced product page leads an unpriced one on a shopping ask', () => {
+  const priced = { url: 'https://shop.example/switch', domain: 'shop.example', title: 'Acme HDMI switch', snippet: '3 ports, $18.99' };
+  const bare = { url: 'https://blog.example/roundup', domain: 'blog.example', title: 'HDMI switch roundup', snippet: 'Several switches, prices vary' };
+  const out = preferSources('best hdmi switch under $40', [bare, priced, hit('www.nytimes.com', 'Cable news')]);
+  assert.equal(out[0]?.url, priced.url);
+});
+
 test('a shopping ask keeps a forum post that can carry the product photo', () => {
   const rows = [
     hit('www.runnersworld.com', 'Best running shoes for beginners'),

@@ -266,6 +266,37 @@ export function hasOfficialHit(query: string, rows: readonly { domain?: string; 
   return true;
 }
 
+/** Registrable site, so a training URL on a subdomain is the same site as the public guideline. */
+function siteOf(domain: string): string {
+  const host = domainOf(domain);
+  const parts = host.split('.').filter(Boolean);
+  if (parts.length <= 2) return host;
+  const last = parts.at(-1)!;
+  const second = parts.at(-2)!;
+  if (last.length === 2 && (second === 'co' || second === 'ac' || second === 'gov' || second === 'org' || second === 'com' || second === 'net')) {
+    return parts.slice(-3).join('.');
+  }
+  return parts.slice(-2).join('.');
+}
+
+/**
+ * A training, course, module, or lesson page. On the same site the public page ranks ahead of it.
+ * A path token ("work-hour-training", "/mod2/") counts, not a title that merely says "course of".
+ */
+function secondaryPage(url: string, title: string): boolean {
+  let path = '';
+  try {
+    path = decodeURIComponent(new URL(url).pathname).toLowerCase();
+  } catch {
+    path = '';
+  }
+  if (/(?:^|[/-])(?:trainings?|courses?|modules?|lessons?|webinars?|workshops?|curricul\w*|continuing-education|handouts?|slide-?decks?|ceus?)(?:[/-]|$)/.test(path)) return true;
+  if (/(?:^|[/-])mod\d+(?:[/-]|$)/.test(path)) return true;
+  return /\b(?:training course|training module|online course|continuing education|webinar|lesson \d+|module \d+)\b/i.test(title);
+}
+
+const STICKER = /\$\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?/;
+
 /** 0 when the question names this host (IPCC → ipcc.ch), the place's own site, or a named journal. */
 function officialLead(domain: string, orgs: readonly string[], places: readonly string[], journals: readonly string[]): number {
   const host = domainOf(domain);
@@ -312,6 +343,13 @@ export function preferSources<T extends RankedHit>(query: string, rows: readonly
   const byLead = (a: (typeof pool)[number], b: (typeof pool)[number]) => {
     const lead = leadOf(a) - leadOf(b);
     if (lead) return lead;
+    const hostA = siteOf(a.row.domain || hostOf(a.row.url));
+    const hostB = siteOf(b.row.domain || hostOf(b.row.url));
+    // The public page of an authority outranks its own training or course page, before a newer module year can win.
+    if (hostA && hostA === hostB) {
+      const secondary = Number(secondaryPage(a.row.url, a.row.title)) - Number(secondaryPage(b.row.url, b.row.title));
+      if (secondary) return secondary;
+    }
     if (leadOf(a) === 0) {
       const ay = yearOf(a.row);
       const by = yearOf(b.row);
@@ -322,6 +360,13 @@ export function preferSources<T extends RankedHit>(query: string, rows: readonly
       if (!ay && stale(by)) return -1;
     }
     return 0;
+  };
+  const askTokens = new Set(askWords(query).filter((word) => word.length >= 3 && !WHEN_WORDS.has(word)));
+  const priceRank = (item: (typeof pool)[number]) => {
+    const text = `${item.row.title} ${item.row.snippet ?? ''}`;
+    if (!STICKER.test(text)) return 0;
+    const words = text.toLowerCase().split(/[^a-z0-9]+/);
+    return words.some((word) => askTokens.has(word)) ? 1 : 0;
   };
   if (paper || official) {
     const preprint = isPreprintAsk(query);
@@ -341,6 +386,9 @@ export function preferSources<T extends RankedHit>(query: string, rows: readonly
   } else if (NEWS_ASK.test(query) && !shoppingAsk(query)) {
     const desk = (item: (typeof pool)[number]) => Number(!isNewsroom(item.row.domain || hostOf(item.row.url)));
     pool.sort((a, b) => byLead(a, b) || desk(a) - desk(b) || Number(a.tier === 3) - Number(b.tier === 3) || a.index - b.index);
+  } else if (shoppingAsk(query)) {
+    // A priced row that matches the ask leads. An unpriced row stays, behind it.
+    pool.sort((a, b) => byLead(a, b) || priceRank(b) - priceRank(a) || Number(a.tier === 3) - Number(b.tier === 3) || a.index - b.index);
   } else {
     pool.sort((a, b) => byLead(a, b) || (promote ? a.tier - b.tier : Number(a.tier === 3) - Number(b.tier === 3)) || a.index - b.index);
   }
