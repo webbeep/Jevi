@@ -231,6 +231,7 @@ describe('runway', { concurrency: 1 }, () => {
       const wikiCall = net.calls.find((c) => c.url.includes('srlimit=5'));
       const wikiHeaders = wikiCall?.init?.headers as Record<string, string>;
       assert.equal(wikiHeaders['User-Agent'], WIKI_UA);
+      assert.equal(WIKI_UA.includes('ask@zo.fyi'), true);
       assert.ok(searchCalls(parsed) <= SEARCH_CALL_CAP);
       assert.ok(parsed.pages.jina >= 1);
       // Jina 402 trips the shared skip and the page goes straight to direct fetch (no keyless try).

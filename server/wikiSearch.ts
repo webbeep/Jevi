@@ -2,7 +2,7 @@ import { stripHtml } from '../shared/text';
 import { clip, fetchJsonCapped } from './util';
 
 /** Wikimedia asks for a contact in the User-Agent. This is the search step only. */
-export const WIKI_UA = 'ZO/1.0 (antigravity0309.2@gmail.com)';
+export const WIKI_UA = 'ZO/1.0 (ask@zo.fyi)';
 
 /** Bytes of JSON the search step will parse. A real 5-hit reply is about 2 KB. */
 export const WIKI_BODY_CAP = 32_768;
