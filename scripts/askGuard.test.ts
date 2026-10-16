@@ -4,6 +4,7 @@ import { anchoredFollowup, asksToCompare, cardFollowQuery, cryptographyHint, fai
 import { isPersonAsk } from '../server/entity.ts';
 import { planLayout } from '../server/plan.ts';
 import type { CardNode } from '../shared/card.ts';
+import { followupLabel } from '../shared/followupLabel.ts';
 
 test('a which-one follow-up stays on the comparison already on screen', () => {
   assert.equal(anchoredFollowup('iphone 17 vs pixel 10', 'which one has better battery life?'), 'iphone 17 vs pixel 10 battery life');
@@ -148,4 +149,9 @@ test('"crypto" beside cryptography papers means the field', () => {
   const rows = [{ title: 'Proofs of Work for Fiat–Shamir', snippet: 'cryptography, New York University', url: 'https://eprint.iacr.org/2026/2326' }];
   assert.match(cryptographyHint('latest on Jessica Chen nyu crypto', rows) ?? '', /cryptography/);
   assert.equal(cryptographyHint('bitcoin price today', rows), undefined);
+});
+
+test('a follow-up label stays the words that were typed', () => {
+  assert.equal(followupLabel('what does this company make', 'Moderna Stock Price what does this company make'), 'what does this company make');
+  assert.equal(followupLabel('What is photosynthesis?', 'What is photosynthesis?'), 'What is photosynthesis?');
 });

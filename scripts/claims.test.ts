@@ -83,6 +83,25 @@ test('shopping picks take a price from the page that names them', () => {
   assert.equal(items[0]?.meta, '$699');
 });
 
+test('a price above the stated budget is not shown on a pick', () => {
+  const catalog: ClaimSource[] = [
+    { n: 1, text: 'Best headphones under $200. The Edifier ES850NB supports LDAC.' },
+    { n: 2, text: 'Sony WH-CH720N is $88. Edifier ES850NB is $119.99.' },
+  ];
+  const list: CardNode = {
+    type: 'list',
+    style: 'check',
+    items: [
+      { text: 'Sony WH-CH720N', meta: '$88' },
+      { text: 'Codec support for hi-res: LDAC on the Edifier ES850NB', meta: '$200' },
+    ],
+  };
+  const next = bindClaims(list, catalog, 'Wireless Noise Cancelling Headphones Under $150');
+  const items = next.type === 'list' ? next.items : [];
+  assert.equal(items.some((item) => /\$200/.test(`${item.meta ?? ''} ${item.text}`)), false);
+  assert.equal(items.some((item) => item.meta === '$88'), true);
+});
+
 test('a budget ceiling is not the product price', () => {
   assert.deepEqual(budgetAmounts('Best laptop under $800'), [800]);
   const catalog: ClaimSource[] = [
@@ -90,7 +109,9 @@ test('a budget ceiling is not the product price', () => {
   ];
   const list: CardNode = { type: 'list', style: 'number', items: [{ text: 'Dell XPS 13', meta: 'Under $800' }] };
   const next = bindClaims(list, catalog, 'Best laptop under $800');
-  assert.equal(next.type === 'list' ? next.items[0]?.meta : '', '$999.99');
+  const meta = next.type === 'list' ? next.items[0]?.meta ?? '' : '';
+  assert.notEqual(meta, '$999.99');
+  assert.doesNotMatch(meta, /999/);
 });
 
 test('a city sales tax uses the combined rate once the item clears the exemption', () => {

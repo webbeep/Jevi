@@ -1324,6 +1324,41 @@ test('a page that prints the reversed words as a name stays that person', () => 
   assert.ok(!decision.kept.includes(1));
 });
 
+test('a workplace before a given name is a person even without who is', () => {
+  assert.equal(personSubject('Northwind ai Sam'), 'Sam');
+  assert.equal(isPersonAsk('Northwind ai Sam'), true);
+  assert.deepEqual(workplaceQueries('Northwind ai Sam'), ['Sam at Northwind ai', 'Samuel at Northwind ai']);
+  assert.equal(personSubject('Northwind AI'), 'Northwind AI');
+  assert.equal(workplaceQueries('Northwind AI').length, 0);
+  assert.equal(personSubject('Sam Cook'), 'Sam Cook');
+});
+
+test('a given name the sources do not print asks which person the sources do name', () => {
+  const rows = [
+    row('Jordan Hale - COO at Northwind AI', 'Jordan Hale is COO at Northwind AI.', 'https://www.linkedin.com/in/jordan-hale'),
+    row('Northwind AI leadership', 'Mina Patel is CEO. Jordan Hale is COO.', 'https://northwind.example/about'),
+  ];
+  const decision = resolveEntity('Sam at Northwind AI', rows);
+  assert.equal(decision.kind, 'choices');
+  if (decision.kind !== 'choices') return;
+  const names = decision.choices.map((choice) => choice.name.toLowerCase());
+  assert.ok(names.some((name) => name.includes('jordan hale')));
+  assert.ok(names.some((name) => name.includes('mina patel')));
+});
+
+test('one full name keeps every page that names that person', () => {
+  const rows = [
+    row('Samuel Ortiz - Northwind AI', 'Samuel Ortiz is a software engineer at Northwind AI.', 'https://www.linkedin.com/in/samuel-ortiz'),
+    row('Northwind AI news', 'Samuel Ortiz at Northwind AI spoke about the product.', 'https://news.example/samuel-ortiz'),
+    row('Northwind AI leadership', 'Mina Patel is CEO. Jordan Hale is COO.', 'https://northwind.example/about'),
+  ];
+  const decision = resolveEntity('Sam at Northwind AI', rows);
+  assert.equal(decision.kind, 'single');
+  if (decision.kind !== 'single') return;
+  assert.equal(decision.entity.name, 'Samuel Ortiz');
+  assert.deepEqual(decision.kept, [0, 1]);
+});
+
 test('a picked person whose page spells the workplace as two words still has that page', () => {
   const q = 'Tim Kemp Blueflame Services Director';
   const row = { title: 'Tim Kemp Blue Flame - --Plumbing,Heating and Electrical', url: 'https://uk.linkedin.com/in/tim-kemp', snippet: '' };

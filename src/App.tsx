@@ -258,7 +258,11 @@ export default function App() {
   const last = [...turns].reverse().find((t) => t.result);
   const related = last?.result ? usefulFollowups(last.result.followups, last.result.card.title, last.question) : [];
   const busy = turns.some((t) => t.filling);
-  const title = root?.result?.card.title ?? root?.question ?? '';
+  const [queryDraft, setQueryDraft] = useState(root?.question ?? '');
+  const editingQuery = useRef(false);
+  useEffect(() => {
+    if (!editingQuery.current) setQueryDraft(root?.question ?? '');
+  }, [root?.question]);
   const library = useMemo(() => buildLibrary(turns), [turns]);
   const [sheet, setSheet] = useState<{ open: boolean; scope?: number }>({ open: false });
   const scopeTurn = turns.find((t) => t.id === sheet.scope);
@@ -279,7 +283,7 @@ export default function App() {
     setChat((n) => n + 1);
   };
 
-  const startSearch = (q: string) => {
+  const startSearch = (q: string, refresh = false) => {
     const query = q.trim();
     if (!query) return;
     openGen.current += 1;
@@ -291,7 +295,7 @@ export default function App() {
     setHistRev((n) => n + 1);
     typeahead.close();
     history.pushState(null, '', `/a/${answerSlug(query)}?${new URLSearchParams({ q: query })}`);
-    session.search(query, { reset: true });
+    session.search(query, { reset: true, refresh });
   };
   startSearchRef.current = startSearch;
 
@@ -644,12 +648,32 @@ export default function App() {
           </>
         ) : (
           <>
-            <header className="sticky top-0 z-30 border-b bg-background/75 backdrop-blur-xl backdrop-saturate-150">
+            <header className="sticky top-0 z-30 border-b bg-background">
               <div className={cn(SHELL, 'flex min-h-14 items-center gap-2 py-2 sm:gap-3')}>
                 <button onClick={newChat} className="shrink-0 rounded-full" aria-label="Home">
                   <LogoMark className="size-7" />
                 </button>
-                <h1 className="line-clamp-2 min-w-0 flex-1 text-pretty text-[15px] font-medium leading-snug tracking-[-0.01em] [overflow-wrap:anywhere]">{title}</h1>
+                <form
+                  className="flex min-w-0 flex-1 items-center gap-1"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const next = queryDraft.trim();
+                    if (next) startSearch(next, true);
+                  }}
+                >
+                  <Input
+                    value={queryDraft}
+                    onChange={(e) => setQueryDraft(e.target.value)}
+                    onFocus={() => { editingQuery.current = true; }}
+                    onBlur={() => { editingQuery.current = false; }}
+                    aria-label="Edit search"
+                    enterKeyHint="send"
+                    className="h-10 min-w-0 flex-1 rounded-xl border-input bg-card px-3 text-[15px] font-medium shadow-none focus-visible:ring-0 md:text-[15px]"
+                  />
+                  <Button type="submit" size="icon" className="size-9 shrink-0 rounded-xl" disabled={!queryDraft.trim()} aria-label="Resend">
+                    <ArrowUp className="size-4" />
+                  </Button>
+                </form>
                 {library.length > 0 && (
                   <Button variant="ghost" size="sm" className="h-8 shrink-0 gap-2 rounded-lg px-2 text-muted-foreground hover:text-foreground lg:hidden" onClick={() => openSources()} aria-label="Sources">
                     <FaviconStack domains={library.slice(0, 3).map((e) => e.result.domain)} />

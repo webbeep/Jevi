@@ -17,6 +17,7 @@ import {
   entityHintFor,
   formalNameQueries,
   workplaceQueries,
+  nameWithWorkplace,
   isDisambiguationPage,
   isPersonAsk,
   personCardTitle,
@@ -484,7 +485,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   const publishReadings = () => {
     const indexes = [...shown.keys()].sort((a, b) => a - b);
     const settled = settleReadings(indexes.map((index) => shown.get(index)), head, questionOf());
-    const quality = finishQuality(questionOf(), settled.nodes);
+    const quality = finishQuality(questionOf(), settled.nodes, head?.subtitle ?? '');
     if (head) {
       if (settled.head) head = { ...head, title: settled.head.title, subtitle: settled.head.subtitle };
       const key = JSON.stringify(head);
@@ -1099,6 +1100,17 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   const decision: EntityDecision = live ? { kind: 'skip' } : resolveEntity(query, results.results, { pattern: earlyPattern, prior });
   // Heuristic choices go out immediately. A model pass here waited out a stuck call
   // before the person could tap, which is the slow picker.
+  // A given name plus a workplace that no source names is not the company's card,
+  // and it is not another employee's roles. The question stays the words they typed.
+  if (!steer && decision.kind === 'skip' && !prior && nameWithWorkplace(query)) {
+    noteSpelling(send, query, results.results);
+    scope.ledger.entity = { kind: 'skip' };
+    send('search', results);
+    send('head', { title: query.trim(), icon: 'user' });
+    send('node', { index: 0, node: { type: 'text', text: 'No source names that person.', size: 'lg' } });
+    send('done', { engine: 'extractive', removed: 0, pagesRead: 0, ms: Date.now() - started });
+    return;
+  }
   if (!steer && decision.kind === 'choices') {
     noteSpelling(send, query, results.results);
     scope.ledger.entity = { kind: 'choices', choices: decision.choices.length };

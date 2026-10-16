@@ -223,7 +223,11 @@ export async function fillRowImages(nodes: CardNode[], deps: RowImageDeps, used:
   //    Orgs: a result on the org's own site (its picture or og:image), else nothing.
   for (const s of live) {
     if (s.profile) {
-      const fromRows = personPortrait(s.entity, deps.results);
+      const pages = deps.results.map((row) => {
+        const pooled = row.image || deps.pool.find((img) => img.url === row.url)?.thumb;
+        return pooled && pooled !== row.image ? { ...row, image: pooled } : row;
+      });
+      const fromRows = personPortrait(s.entity, pages);
       const portrait = fromRows ?? personPortrait(s.entity, deps.pool.map((img) => ({ title: img.title, url: img.url, image: img.thumb })));
       if (portrait && !used.has(portrait.src)) {
         take(s, portrait.src, { url: portrait.url });

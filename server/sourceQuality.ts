@@ -781,7 +781,194 @@ function dropUnpricedProductLead(query: string, nodes: readonly (CardNode | unde
   });
 }
 
-export function finishQuality(query: string, nodes: readonly (CardNode | undefined)[]): (CardNode | undefined)[] {
+function contentWords(sentence: string): string[] {
+  return sentence.toLowerCase().replace(/\[[0-9]+\]/g, ' ').replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter((word) => word.length > 2);
+}
+
+/** How many words in a row the two sentences share. */
+function sharedRun(left: string[], right: string[]): number {
+  let best = 0;
+  for (let i = 0; i < left.length; i++) {
+    for (let j = 0; j < right.length; j++) {
+      let n = 0;
+      while (i + n < left.length && j + n < right.length && left[i + n] === right[j + n]) n += 1;
+      if (n > best) best = n;
+    }
+  }
+  return best;
+}
+
+const REPEAT_RUN = 8;
+
+function remember(text: string, shown: string[][]) {
+  for (const part of text.split(/(?<=[.!?])\s+/)) {
+    const words = contentWords(part);
+    if (words.length >= REPEAT_RUN) shown.push(words);
+  }
+}
+
+/** Drop a sentence whose long clause is already on the card. The first copy stays. */
+function onceText(text: string, shown: string[][]): string {
+  const kept = text.split(/(?<=[.!?])\s+/).filter((part) => {
+    const words = contentWords(part);
+    if (words.length < REPEAT_RUN) return true;
+    if (shown.some((prior) => sharedRun(words, prior) >= REPEAT_RUN)) return false;
+    shown.push(words);
+    return true;
+  });
+  return kept.join(' ').replace(/\s+/g, ' ').trim();
+}
+
+function sayOnceNode(node: CardNode, shown: string[][]): CardNode | undefined {
+  switch (node.type) {
+    case 'text':
+    case 'callout':
+    case 'quote':
+    case 'draft':
+    case 'heading': {
+      const text = onceText(node.text, shown);
+      if (!text) return undefined;
+      return text === node.text ? node : { ...node, text };
+    }
+    case 'hero': {
+      const caption = node.caption ? onceText(node.caption, shown) : node.caption;
+      return caption === node.caption ? node : { ...node, caption: caption || undefined };
+    }
+    case 'stack':
+    case 'grid':
+    case 'section':
+    case 'scroller': {
+      const children = node.children.flatMap((child) => {
+        const next = sayOnceNode(child, shown);
+        return next ? [next] : [];
+      });
+      return children.length ? { ...node, children } : undefined;
+    }
+    case 'tabs':
+      return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: tab.children.flatMap((child) => {
+        const next = sayOnceNode(child, shown);
+        return next ? [next] : [];
+      }) })) };
+    case 'tile':
+    case 'stat':
+    case 'keyvalue':
+    case 'timeline':
+    case 'profile':
+    case 'table':
+    case 'list':
+    case 'steps':
+    case 'accordion':
+    case 'proscons':
+    case 'badges':
+    case 'actions':
+    case 'choices':
+    case 'links':
+    case 'citations':
+    case 'chart':
+    case 'pricing':
+    case 'scaler':
+    case 'slider':
+    case 'reveal':
+    case 'image':
+    case 'gallery':
+    case 'video':
+    case 'code':
+    case 'divider':
+    case 'progress':
+    case 'rating':
+    case 'diagram':
+    case 'ticker':
+    case 'slot':
+      return node;
+    default: {
+      const unreachable: never = node;
+      return unreachable;
+    }
+  }
+}
+
+/** The same long clause is said once, including a line the subtitle already used. */
+export function sayOnce(nodes: readonly (CardNode | undefined)[], lead = ''): (CardNode | undefined)[] {
+  const shown: string[][] = [];
+  if (lead.trim()) remember(lead, shown);
+  return nodes.map((node) => (node ? sayOnceNode(node, shown) : node));
+}
+
+const UNNAMED_PERSON = /\bno (?:source|page)s?\s+(?:that\s+)?names?\b|\b(?:does not|doesn't|do not)\s+name\s+(?:a\s+|the\s+)?(?:person|anyone)\b/i;
+
+function dropRoleNode(node: CardNode): CardNode | undefined {
+  switch (node.type) {
+    case 'tile':
+    case 'stat':
+    case 'profile':
+      return undefined;
+    case 'stack':
+    case 'grid':
+    case 'section':
+    case 'scroller': {
+      const children = node.children.flatMap((child) => {
+        const next = dropRoleNode(child);
+        return next ? [next] : [];
+      });
+      return children.length ? { ...node, children } : undefined;
+    }
+    case 'tabs':
+      return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: tab.children.flatMap((child) => {
+        const next = dropRoleNode(child);
+        return next ? [next] : [];
+      }) })) };
+    case 'text':
+    case 'callout':
+    case 'quote':
+    case 'draft':
+    case 'heading':
+    case 'hero':
+    case 'keyvalue':
+    case 'timeline':
+    case 'table':
+    case 'list':
+    case 'steps':
+    case 'accordion':
+    case 'proscons':
+    case 'badges':
+    case 'actions':
+    case 'choices':
+    case 'links':
+    case 'citations':
+    case 'chart':
+    case 'pricing':
+    case 'scaler':
+    case 'slider':
+    case 'reveal':
+    case 'image':
+    case 'gallery':
+    case 'video':
+    case 'code':
+    case 'divider':
+    case 'progress':
+    case 'rating':
+    case 'diagram':
+    case 'ticker':
+    case 'slot':
+      return node;
+    default: {
+      const unreachable: never = node;
+      return unreachable;
+    }
+  }
+}
+
+/**
+ * A paragraph that says the sources do not name the person cannot sit beside
+ * another person's role, credential, or portrait.
+ */
+function dropUnnamedFacts(nodes: readonly (CardNode | undefined)[]): (CardNode | undefined)[] {
+  if (!nodes.some((node) => node && UNNAMED_PERSON.test(JSON.stringify(node)))) return [...nodes];
+  return nodes.map((node) => (node ? dropRoleNode(node) : node));
+}
+
+export function finishQuality(query: string, nodes: readonly (CardNode | undefined)[], lead = ''): (CardNode | undefined)[] {
   const cleaned = nodes.map((node) => (node ? cleanNode(query, node) : node));
-  return restoreCutDecimals(alignVerdicts(withoutSettledDisputes(dropSpecMissLead(query, dropUnpricedProductLead(query, cleaned)))));
+  const settled = restoreCutDecimals(alignVerdicts(withoutSettledDisputes(dropSpecMissLead(query, dropUnpricedProductLead(query, cleaned)))));
+  return dropUnnamedFacts(sayOnce(settled, lead));
 }
