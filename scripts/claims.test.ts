@@ -100,6 +100,21 @@ test('a price above the stated budget is not shown on a pick', () => {
   const items = next.type === 'list' ? next.items : [];
   assert.equal(items.some((item) => /\$200/.test(`${item.meta ?? ''} ${item.text}`)), false);
   assert.equal(items.some((item) => item.meta === '$88'), true);
+  const chips: CardNode = {
+    type: 'choices',
+    label: 'Budget',
+    options: [
+      { label: 'Under $100', prompt: 'under $100', selected: false },
+      { label: 'Under $150', prompt: 'under $150', selected: true },
+      { label: 'Under $200', prompt: 'under $200', selected: false },
+    ],
+  };
+  const kept = bindClaims(chips, catalog, 'Wireless Noise Cancelling Headphones Under $150');
+  const labels = kept.type === 'choices' ? kept.options.map((option) => option.label) : [];
+  assert.deepEqual(labels, ['Under $100', 'Under $150']);
+  const dangling: CardNode = { type: 'list', items: [{ text: 'JBL Live 780NC', meta: 'Best under $200' }] };
+  const cleared = bindClaims(dangling, catalog, 'Wireless Noise Cancelling Headphones Under $150');
+  assert.equal(cleared.type === 'list' ? cleared.items[0]?.meta : 'kept', undefined);
 });
 
 test('a budget ceiling is not the product price', () => {

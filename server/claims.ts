@@ -788,14 +788,27 @@ function rankPriced<T>(items: readonly T[], ceilings: readonly number[], pricedT
 }
 
 /** A dollar amount above the ask's ceiling is not a price for that pick. */
-function insideCeiling(text: string | undefined, ceilings: readonly number[]): string | undefined {
-  if (!text || !ceilings.length) return text;
+function stripOverBudget(text: string, ceilings: readonly number[]): string {
   const cap = Math.min(...ceilings);
-  const next = text.replace(new RegExp(MONEY.source, 'g'), (raw) => (moneyValue(raw) > cap ? '' : raw))
+  return text.replace(new RegExp(MONEY.source, 'g'), (raw) => (moneyValue(raw) > cap ? '' : raw))
     .replace(/\s{2,}/g, ' ')
+    .replace(/\s+([,.;:])/g, '$1')
     .replace(/^[\s,·-]+|[\s,·-]+$/g, '')
     .trim();
-  return next || undefined;
+}
+
+/** A chip above the ceiling is cleared. A label that was only that price is dropped. */
+function insideCeiling(text: string | undefined, ceilings: readonly number[]): string | undefined {
+  if (!text || !ceilings.length) return text;
+  const next = stripOverBudget(text, ceilings);
+  if (!next || (next !== text.trim() && !/\d/.test(next))) return undefined;
+  return next;
+}
+
+/** A budget control above the ask's ceiling ("Under $200" on an under-$150 ask) is not offered. */
+function overBudget(text: string, ceilings: readonly number[]): boolean {
+  const cap = Math.min(...ceilings);
+  return [...text.matchAll(new RegExp(MONEY.source, 'g'))].some((match) => moneyValue(match[0]) > cap);
 }
 
 /** Prices on a pick stay inside the budget the question stated. A higher chip is cleared. */
@@ -805,7 +818,8 @@ function keepBudgetPrices(node: CardNode, ceilings: readonly number[]): CardNode
     case 'list': {
       const items = node.items.map((item) => {
         const meta = insideCeiling(item.meta, ceilings);
-        return meta === item.meta ? item : { ...item, meta };
+        const text = stripOverBudget(item.text, ceilings);
+        return meta === item.meta && text === item.text ? item : { ...item, meta, text };
       });
       return items.every((item, index) => item === node.items[index]) ? node : { ...node, items };
     }
@@ -833,7 +847,14 @@ function keepBudgetPrices(node: CardNode, ceilings: readonly number[]): CardNode
     case 'callout':
     case 'quote':
     case 'draft':
-    case 'heading':
+    case 'heading': {
+      const text = 'text' in node && typeof node.text === 'string' ? stripOverBudget(node.text, ceilings) : undefined;
+      return text === undefined || text === node.text ? node : { ...node, text };
+    }
+    case 'choices': {
+      const options = node.options.filter((option) => !overBudget(option.label, ceilings));
+      return options.length === node.options.length ? node : { ...node, options };
+    }
     case 'keyvalue':
     case 'timeline':
     case 'profile':
@@ -843,7 +864,6 @@ function keepBudgetPrices(node: CardNode, ceilings: readonly number[]): CardNode
     case 'proscons':
     case 'badges':
     case 'actions':
-    case 'choices':
     case 'links':
     case 'citations':
     case 'chart':

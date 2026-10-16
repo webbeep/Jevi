@@ -34,6 +34,15 @@ test('generational suffixes are dropped when another word remains', () => {
   assert.equal(initials('Martin Luther King, Jr.'), 'MK');
 });
 
+test('a credential is not a second initial', () => {
+  assert.equal(initials('Scott Eberle, M.D.'), 'SE');
+  assert.equal(initials('Scott Eberle MD'), 'SE');
+  assert.equal(initials('Dr. Scott Eberle, M.D.'), 'SE');
+  assert.equal(initials('Ada Lovelace, Ph.D.'), 'AL');
+  assert.equal(initials('Jane Roe, D.D.S.'), 'JR');
+  assert.equal(initials('Nguyen Do'), 'ND');
+});
+
 test('the initial is the first letter or digit of a word', () => {
   assert.equal(initials('Jean-Luc Picard'), 'JP');
   assert.equal(initials('"David" Kim'), 'DK');
