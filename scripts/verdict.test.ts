@@ -188,6 +188,13 @@ test('a benefit line inside an accordion under a no verdict is dropped', () => {
   assert.equal(shown.type, 'list');
   if (shown.type !== 'list') return;
   assert.doesNotMatch(shown.items[0]?.text ?? '', /protective effect/);
+  const oxide = session.offer({ type: 'text', text: 'A drink may act as an antioxidant by raising plasma NO. The trials do not show that effect.' }, 5).node;
+  assert.equal(oxide.type, 'text');
+  if (oxide.type !== 'text') return;
+  assert.doesNotMatch(oxide.text, /may act/);
+  const hero = session.offer({ type: 'hero', value: 'No solid evidence', label: 'Sleep', caption: 'A cup may act as a sedative.' }, 6).node;
+  assert.equal(hero.type === 'hero' ? hero.caption : 'kept', undefined);
+  assert.match(oxide.text, /do not show/);
   assert.match(shown.items[0]?.text ?? '', /do not show/);
   assert.match(node.items[0]?.text ?? '', /do not show/);
   const row = session.offer({

@@ -23,7 +23,12 @@ const CLINIC = /\b(?:mayo clinic|webmd|healthline|cleveland clinic|medical news 
 const PAPERISH = /\b(?:papers?|studies|study|peer[- ]reviewed|journal|preprints?)\b/i;
 
 const BENEFIT = /\b(?:(?:may|might|can|could)\s+(?:help|reduce|prevent|protect|lower|improve|act|decrease)|(?:linked to|associated with)\s+(?:a )?(?:lower|reduced|decreased)|protective effect|shown to (?:help|protect|reduce|improve))\b/i;
-const NEGATED = /\b(?:no|not|n't|never|without|lacks?|lacking|does not|do not)\b/i;
+const NEGATED = /\b(?:not|n't|never|without|lacks?|lacking|does not|do not)\b/i;
+
+/** "no" and "No" negate a claim. All-caps "NO" is a name, not a negation. */
+function negated(sentence: string): boolean {
+  return NEGATED.test(sentence) || /\b(?!NO\b)[Nn]o\b/.test(sentence);
+}
 
 const WHERE_ROLE = /\bwhere (?:does|do|did|is|are)\b[\s\S]{0,80}\b(?:teach|teaches|teaching|work|works|working|study|studies|professor|faculty|employed|practice)\b/i;
 const INSTITUTION = /\b([A-Z][A-Za-z'’.-]*(?:\s+[A-Z][A-Za-z'’.-]*){0,5}\s+(?:University|College|Institute))\b/;
@@ -292,11 +297,11 @@ export function restoreKeptPapers(
 
 /** A line that asserts a benefit the verdict has already rejected. */
 export function fightsVerdict(text: string): boolean {
-  return text.split(SENTENCE_BREAK).some((sentence) => BENEFIT.test(sentence) && !NEGATED.test(sentence));
+  return text.split(SENTENCE_BREAK).some((sentence) => BENEFIT.test(sentence) && !negated(sentence));
 }
 
 export function withoutFighting(text: string): string {
-  return text.split(SENTENCE_BREAK).filter((sentence) => !(BENEFIT.test(sentence) && !NEGATED.test(sentence))).join(' ').trim();
+  return text.split(SENTENCE_BREAK).filter((sentence) => !(BENEFIT.test(sentence) && !negated(sentence))).join(' ').trim();
 }
 
 /** The headline answers the new question: where someone works is the institution, and a what-if price is the tax on that price. */

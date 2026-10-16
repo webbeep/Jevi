@@ -227,7 +227,13 @@ function mapNode(node: CardNode, flags: Flags, body: string, negative: boolean):
       .filter((t) => t.children.length);
     return tabs.length ? { ...node, tabs } : undefined;
   }
-  if (node.type === 'hero' || node.type === 'tile') return fixFace(node, flags, body);
+  if (node.type === 'hero' || node.type === 'tile') {
+    const face = fixFace(node, flags, body);
+    if (!negative || face?.type !== 'hero' || !face.caption) return face;
+    const caption = withoutFighting(face.caption);
+    if (caption === face.caption) return face;
+    return { ...face, caption: caption || undefined };
+  }
   if (node.type === 'text' && flags.officialNeg && yesLead(node.text)) return undefined;
   if ((node.type === 'text' || node.type === 'quote' || node.type === 'callout') && negative) {
     const text = withoutFighting(node.text);
