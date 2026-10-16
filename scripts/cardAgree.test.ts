@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { CardNode } from '../shared/card.ts';
-import { answerTitle, finishQuotedText, restoreKeptPapers } from '../server/cardAgree.ts';
+import { answerTitle, finishQuotedText, keepAnswerBody, restoreKeptPapers } from '../server/cardAgree.ts';
 import { bindClaims, type ClaimSource } from '../server/claims.ts';
 import { finishQuality } from '../server/sourceQuality.ts';
 
@@ -145,6 +145,17 @@ test('a follow-up title answers where someone teaches and what a price would cos
   assert.equal(answerTitle('Where does she teach?', 'Jennifer Doudna', card), 'UC Berkeley');
   assert.equal(answerTitle('What if they cost $80?', 'Sneakers', 'The purchase is taxable. Tax $6.40 at the combined rate.'), 'Tax $6.40');
   assert.equal(answerTitle('Who is Ada Lovelace?', 'Ada Lovelace', 'She teaches at Northshore University.'), 'Ada Lovelace');
+});
+
+test('a where-they-teach follow-up keeps a body that names the school', () => {
+  const source = 'She teaches molecular biology at Northshore University and leads a lab there.';
+  const out = keepAnswerBody('Where does she teach?', [{ type: 'stack', children: [] }], source);
+  assert.equal(out[0]?.type, 'text');
+  const body = out[0]?.type === 'text' ? out[0].text : '';
+  assert.match(body, /Northshore University/);
+  assert.equal(answerTitle('Where does she teach?', 'Mara Chen', body), 'Northshore University');
+  const filled = keepAnswerBody('Where does she teach?', [{ type: 'hero', value: 'Northshore University', label: 'School' }], source);
+  assert.equal(filled[0]?.type, 'hero');
 });
 
 test('a shopping count matches the rows, the headline price matches the row, and an over-budget pick does not lead', () => {

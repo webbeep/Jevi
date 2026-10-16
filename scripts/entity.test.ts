@@ -10,6 +10,8 @@ import {
   priorEntity,
   publicChoices,
   resolveEntity,
+  mixedIdentities,
+  samePersonChoices,
   givenWithPlace,
   workplaceQueries,
   disambiguationEntries,
@@ -237,14 +239,15 @@ describe('T444 entity disambiguation', () => {
     assert.ok(!h.context!.includes('founder'), 'role word is not enough when an org exists');
     const actor: Entity = { id: 'david-kim-actor', name: 'David Kim', role: 'Actor', terms: ['actor'] };
     assert.deepEqual(entityHintFor(actor, 'David Kim Actor')('David Kim')!.context, ['actor']);
-    assert.equal(entityHintFor(c2, 'Who is David Kim')('David Kim')!.requireContext, undefined);
-    assert.equal(entityHintFor(c2, 'David Kim')('David Kim')!.requireContext, undefined);
+    assert.equal(entityHintFor(c2, 'Who is David Kim')('David Kim')!.requireContext, true);
+    assert.equal(entityHintFor(c2, 'David Kim')('David Kim')!.requireContext, true);
   });
 
   test('t451: entityHintFor marks the hint strict only when the ask names the org', () => {
     const entity: Entity = { id: 'ray-lee-ceo-raycon', name: 'Ray Lee', role: 'CEO', org: 'Raycon', terms: ['ceo', 'raycon'] };
     assert.equal(entityHintFor(entity, 'Raycon CEO')('Ray Lee')!.strict, true);
     assert.equal(entityHintFor(entity, 'Who is Ray Lee')('Ray Lee')!.strict, undefined);
+    assert.equal(entityHintFor(entity, 'Who is Ray Lee')('Ray Lee')!.requireContext, true);
     assert.deepEqual(entityHintFor(entity, 'Who is Ray Lee')('Ray Lee')!.context, ['Raycon']);
   });
 
@@ -338,6 +341,60 @@ test('SPD-C1: a capitalised topic inside a longer question is not a person ask',
   assert.equal(isPersonAsk('Taylor Swift latest album'), true);
   assert.equal(isPersonAsk('Barack Obama'), true);
   assert.equal(isPersonAsk('Who is Jensen Huang'), true);
+});
+
+test('a name shared by different careers asks which person', () => {
+  const rows = [
+    row('Scott Eberle', 'Multiple people share this name.', 'https://example.com/names'),
+    row('Scott Eberle, MD', 'Scott Eberle is a hospice physician.', 'https://example.com/hospice'),
+    row('Scott Eberle, author', 'Scott Eberle is the author of The Soul\'s Red Thread.', 'https://example.com/author'),
+    row('Scott Eberle, attorney', 'Scott Eberle is an attorney in Illinois.', 'https://example.com/law'),
+  ];
+  assert.equal(personSubject('Scott eberle'), 'Scott Eberle');
+  assert.equal(isPersonAsk('Scott eberle'), true);
+  assert.equal(personSubject('Apple watch'), 'Apple');
+  assert.equal(isPersonAsk('Apple watch'), false);
+  assert.equal(personSubject('Blueflame ai'), 'Blueflame');
+  assert.equal(mixedIdentities('Scott Eberle', rows), true);
+  const d = resolveEntity('Scott eberle', rows);
+  assert.equal(d.kind, 'choices');
+  if (d.kind !== 'choices') return;
+  assert.ok(d.choices.length >= 2);
+  const descriptors = d.choices.map((c) => c.descriptor.toLowerCase());
+  assert.ok(descriptors.some((d) => /physician|author|attorney/.test(d)), descriptors.join(' | '));
+});
+
+test('a question after a full name is not part of the name', () => {
+  assert.equal(personSubject('Mara Chen Where does she teach'), 'Mara Chen');
+  assert.equal(isPersonAsk('Mara Chen Where does she teach'), false);
+  assert.equal(personSubject('Who is Jennifer Where'), 'Jennifer Where');
+  assert.equal(isPersonAsk('Who is Jennifer Where'), true);
+});
+
+test('two identical choices are one person, and two careers stay a picker', () => {
+  const rows = [
+    row('Mara Chen', 'Mara Chen is a scientist at the Future Institute.', 'https://example.com/science'),
+    row('Mara Chen', 'Mara Chen is a professor at the University of Lakes.', 'https://example.edu/chen'),
+  ];
+  assert.equal(samePersonChoices([
+    { name: 'Mara Chen', descriptor: 'Scientist at Future Institute', query: 'Mara Chen scientist', id: 'a', seeds: [0] },
+    { name: 'Mara Chen', descriptor: 'Scientist at Future Institute', query: 'Mara Chen scientist', id: 'b', seeds: [0] },
+  ], rows), true);
+  assert.equal(samePersonChoices([
+    { name: 'Mara Chen', descriptor: 'Scientist at Future Institute', query: 'Mara Chen scientist', id: 'a', seeds: [0] },
+    { name: 'Mara Chen', descriptor: 'Professor at University of Lakes', query: 'Mara Chen professor', id: 'b', seeds: [1] },
+  ], rows), false);
+});
+
+test('two identical choices are one person even when a page says the name is shared', () => {
+  const rows = [
+    row('Mara Chen', 'Multiple people share this name.', 'https://example.com/names'),
+    row('Mara Chen', 'Mara Chen is a scientist at the Future Institute.', 'https://example.com/science'),
+  ];
+  assert.equal(samePersonChoices([
+    { name: 'Mara Chen', descriptor: 'Scientist at Future Institute', query: 'Mara Chen scientist', id: 'a', seeds: [1] },
+    { name: 'Mara Chen', descriptor: 'Scientist at Future Institute', query: 'Mara Chen scientist', id: 'b', seeds: [1] },
+  ], rows), true);
 });
 
 test('Wikipedia disambiguation page seeds choices (live: Who is Ray Lee / David Kim)', () => {
@@ -1257,6 +1314,22 @@ test('a workplace before the given name is the same ask as the given name at tha
   assert.deepEqual(gated.kept.map((kept) => kept.title), ['Timothy Estrada - BlueFlame AI']);
 });
 
+test('a workplace before the given name asks when the sources name two people there', () => {
+  const rows = [
+    row('Timothy Estrada - BlueFlame AI', 'As a Software Engineer at Eco-Enterprise… · Experience: BlueFlame AI', 'https://www.linkedin.com/in/tim-estrada'),
+    row('Tim Kiely - COO - BlueFlame AI | LinkedIn', 'Tim Kiely is COO at BlueFlame AI.', 'https://www.linkedin.com/in/tim-kiely'),
+    row('BlueFlame AI', 'BlueFlame AI builds an agent for finance teams.', 'https://blueflame.ai/'),
+  ];
+  for (const q of ['Blueflame ai Tim', 'Who is Blueflame Tim', 'Tim at Blueflame AI']) {
+    const decision = resolveEntity(q, rows, { pattern: 'profile' });
+    assert.equal(decision.kind, 'choices', q);
+    if (decision.kind !== 'choices') continue;
+    const names = decision.choices.map((choice) => choice.name.toLowerCase());
+    assert.ok(names.some((name) => name.includes('timothy estrada')), q);
+    assert.ok(names.some((name) => name.includes('tim kiely')), q);
+  }
+});
+
 test('a workplace-first ask with two people at that place is a picker', () => {
   const rows = [
     row('Tim Lee - Software Engineer at BlueFlame AI | LinkedIn', 'Tim Lee is a software engineer at BlueFlame AI.', 'https://www.linkedin.com/in/timlee'),
@@ -1322,6 +1395,41 @@ test('a page that prints the reversed words as a name stays that person', () => 
   if (decision.kind !== 'single') return;
   assert.match(decision.entity.name, /Blueflame Tim/);
   assert.ok(!decision.kept.includes(1));
+});
+
+test('a workplace before a given name is a person even without who is', () => {
+  assert.equal(personSubject('Northwind ai Sam'), 'Sam');
+  assert.equal(isPersonAsk('Northwind ai Sam'), true);
+  assert.deepEqual(workplaceQueries('Northwind ai Sam'), ['Sam at Northwind ai', 'Samuel at Northwind ai']);
+  assert.equal(personSubject('Northwind AI'), 'Northwind AI');
+  assert.equal(workplaceQueries('Northwind AI').length, 0);
+  assert.equal(personSubject('Sam Cook'), 'Sam Cook');
+});
+
+test('a given name the sources do not print asks which person the sources do name', () => {
+  const rows = [
+    row('Jordan Hale - COO at Northwind AI', 'Jordan Hale is COO at Northwind AI.', 'https://www.linkedin.com/in/jordan-hale'),
+    row('Northwind AI leadership', 'Mina Patel is CEO. Jordan Hale is COO.', 'https://northwind.example/about'),
+  ];
+  const decision = resolveEntity('Sam at Northwind AI', rows);
+  assert.equal(decision.kind, 'choices');
+  if (decision.kind !== 'choices') return;
+  const names = decision.choices.map((choice) => choice.name.toLowerCase());
+  assert.ok(names.some((name) => name.includes('jordan hale')));
+  assert.ok(names.some((name) => name.includes('mina patel')));
+});
+
+test('one full name keeps every page that names that person', () => {
+  const rows = [
+    row('Samuel Ortiz - Northwind AI', 'Samuel Ortiz is a software engineer at Northwind AI.', 'https://www.linkedin.com/in/samuel-ortiz'),
+    row('Northwind AI news', 'Samuel Ortiz at Northwind AI spoke about the product.', 'https://news.example/samuel-ortiz'),
+    row('Northwind AI leadership', 'Mina Patel is CEO. Jordan Hale is COO.', 'https://northwind.example/about'),
+  ];
+  const decision = resolveEntity('Sam at Northwind AI', rows);
+  assert.equal(decision.kind, 'single');
+  if (decision.kind !== 'single') return;
+  assert.equal(decision.entity.name, 'Samuel Ortiz');
+  assert.deepEqual(decision.kept, [0, 1]);
 });
 
 test('a picked person whose page spells the workplace as two words still has that page', () => {

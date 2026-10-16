@@ -293,6 +293,36 @@ test('a Spanish sentence and a settled disagreement leave the card, and a repeat
   assert.deepEqual(out[4]?.type === 'steps' ? out[4].items.map((step) => step.title) : [], ['1. Instructions', '2. Cells read them', '3. The body remembers']);
 });
 
+test('a long clause is said once', () => {
+  const line = 'A network built solely on attention mechanisms, dispensing with recurrence and convolutions entirely.';
+  const nodes: CardNode[] = [
+    { type: 'hero', value: 'Transformer', caption: line },
+    { type: 'text', text: `The paper proposed the Transformer, a network architecture ${line}` },
+    { type: 'text', text: `The Transformer is ${line.charAt(0).toLowerCase()}${line.slice(1)} Self-attention has been used for reading.` },
+  ];
+  const out = finishQuality('what did the paper find', nodes);
+  const texts = out.flatMap((node) => {
+    if (!node) return [];
+    if (node.type === 'text') return [node.text];
+    if (node.type === 'hero') return [node.caption ?? ''];
+    return [];
+  }).join(' ');
+  const hits = texts.toLowerCase().split('dispensing with recurrence').length - 1;
+  assert.equal(hits, 1);
+  assert.match(texts, /Self-attention has been used/);
+});
+
+test('a card that says the person is not named drops another person\'s roles', () => {
+  const nodes: CardNode[] = [
+    { type: 'text', text: 'No source names that person.' },
+    { type: 'tile', label: 'Role', value: 'COO' },
+    { type: 'stat', label: 'Credential', value: 'CFA' },
+  ];
+  const out = finishQuality('who is the person', nodes).filter(Boolean);
+  assert.equal(out.length, 1);
+  assert.equal(out[0]?.type, 'text');
+});
+
 test('a verdict names a model the table compares, and a clinic blurb is not a paper', () => {
   const nodes: CardNode[] = [
     { type: 'table', columns: ['Factor', 'Levoit LVAC-300', 'Dyson V11'], rows: [['Price', '$350', '$584']] },

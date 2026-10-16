@@ -1,6 +1,6 @@
 import type { CardNode } from '../shared/card';
 import type { ImageResult, SearchResult } from '../shared/types';
-import { type EntityHint, accepts, personPortrait, tokens, withHint } from './imageGate';
+import { type EntityHint, accepts, personPortrait, portraitMarks, tokens, withHint } from './imageGate';
 
 export interface ProfilePerson {
   name: string;
@@ -100,10 +100,11 @@ export function profileFallback(person: ProfilePerson, rows: SearchResult[], ima
   const f = personFacts(person, rows);
   const target = withHint({ kind: 'named', entity: person.name }, { hintFor });
   const imageRef = images.findIndex((img) => accepts(target, img));
+  const marks = portraitMarks(person.role, person.org);
   const portrait = imageRef >= 0 ? undefined : personPortrait(person.name, [
-    ...rows.map((row) => ({ title: row.title, url: row.url, image: row.image })),
-    ...images.map((img) => ({ title: img.title, url: img.url, image: img.thumb })),
-  ]);
+    ...rows.map((row) => ({ title: row.title, url: row.url, snippet: row.snippet, image: row.image })),
+    ...images.map((img) => ({ title: img.title, url: img.url, source: img.source, image: img.thumb })),
+  ], marks);
   const roleLine = [f.role?.value, f.company?.value ?? f.role?.sub].filter(Boolean).join(' · ');
   const facts = [
     f.role && { label: 'Role', value: f.role.value },

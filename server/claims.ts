@@ -47,7 +47,10 @@ function priced(text: string, ceilings: readonly number[]): string | undefined {
     if (!raw) continue;
     const value = moneyValue(raw);
     const lead = match[0].slice(0, match[0].toLowerCase().indexOf('$'));
-    if (BUDGET.test(lead) && ceilings.includes(value)) continue;
+    // "under $200" is a ceiling, not what the product costs, even when the ask's ceiling is different.
+    if (BUDGET.test(lead)) continue;
+    const cap = ceilings.length ? Math.min(...ceilings) : undefined;
+    if (cap !== undefined && value > cap) continue;
     return raw.replace(/\s/g, '');
   }
   return undefined;
@@ -797,6 +800,116 @@ function rankPriced<T>(items: readonly T[], ceilings: readonly number[], pricedT
   return scored.filter((row) => row.priced).sort((a, b) => a.index - b.index).map((row) => row.item);
 }
 
+/** A dollar amount above the ask's ceiling is not a price for that pick. "under $200" leaves with the amount. */
+function stripOverBudget(text: string, ceilings: readonly number[]): string {
+  const cap = Math.min(...ceilings);
+  const money = MONEY.source;
+  return text
+    .replace(new RegExp(`\\b(?:under|below|less than|cheaper than|up to|at most)\\s+${money}`, 'gi'), (raw) => {
+      const amount = raw.match(new RegExp(money, 'i'))?.[0];
+      return amount && moneyValue(amount) > cap ? '' : raw;
+    })
+    .replace(new RegExp(money, 'g'), (raw) => (moneyValue(raw) > cap ? '' : raw))
+    .replace(/\s{2,}/g, ' ')
+    .replace(/\s+([,.;:])/g, '$1')
+    .replace(/^[\s,·-]+|[\s,·-]+$/g, '')
+    .trim();
+}
+
+/** A chip above the ceiling is cleared. A label that was only that price is dropped. */
+function insideCeiling(text: string | undefined, ceilings: readonly number[]): string | undefined {
+  if (!text || !ceilings.length) return text;
+  const next = stripOverBudget(text, ceilings);
+  if (!next || (next !== text.trim() && !/\d/.test(next))) return undefined;
+  return next;
+}
+
+/** A budget control above the ask's ceiling ("Under $200" on an under-$150 ask) is not offered. */
+function overBudget(text: string, ceilings: readonly number[]): boolean {
+  const cap = Math.min(...ceilings);
+  return [...text.matchAll(new RegExp(MONEY.source, 'g'))].some((match) => moneyValue(match[0]) > cap);
+}
+
+/** Prices on a pick stay inside the budget the question stated. A higher chip is cleared. */
+function keepBudgetPrices(node: CardNode, ceilings: readonly number[]): CardNode {
+  if (!ceilings.length) return node;
+  switch (node.type) {
+    case 'list': {
+      const items = node.items.map((item) => {
+        const meta = insideCeiling(item.meta, ceilings);
+        const text = stripOverBudget(item.text, ceilings);
+        return meta === item.meta && text === item.text ? item : { ...item, meta, text };
+      });
+      return items.every((item, index) => item === node.items[index]) ? node : { ...node, items };
+    }
+    case 'tile': {
+      const value = insideCeiling(node.value, ceilings);
+      const sub = insideCeiling(node.sub, ceilings);
+      return value === node.value && sub === node.sub ? node : { ...node, value, sub };
+    }
+    case 'stat': {
+      const value = insideCeiling(node.value, ceilings) ?? '';
+      return value === node.value ? node : { ...node, value };
+    }
+    case 'hero': {
+      const value = insideCeiling(node.value, ceilings) ?? node.value;
+      const label = node.label === undefined ? undefined : stripOverBudget(node.label, ceilings);
+      const caption = node.caption === undefined ? undefined : stripOverBudget(node.caption, ceilings);
+      return value === node.value && label === node.label && caption === node.caption ? node : { ...node, value, label, caption };
+    }
+    case 'stack':
+    case 'grid':
+    case 'section':
+    case 'scroller':
+      return { ...node, children: node.children.map((child) => keepBudgetPrices(child, ceilings)) };
+    case 'tabs':
+      return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: tab.children.map((child) => keepBudgetPrices(child, ceilings)) })) };
+    case 'text':
+    case 'callout':
+    case 'quote':
+    case 'draft':
+    case 'heading': {
+      const text = 'text' in node && typeof node.text === 'string' ? stripOverBudget(node.text, ceilings) : undefined;
+      return text === undefined || text === node.text ? node : { ...node, text };
+    }
+    case 'choices': {
+      const options = node.options.filter((option) => !overBudget(option.label, ceilings));
+      return options.length === node.options.length ? node : { ...node, options };
+    }
+    case 'keyvalue':
+    case 'timeline':
+    case 'profile':
+    case 'table':
+    case 'steps':
+    case 'accordion':
+    case 'proscons':
+    case 'badges':
+    case 'actions':
+    case 'links':
+    case 'citations':
+    case 'chart':
+    case 'pricing':
+    case 'scaler':
+    case 'slider':
+    case 'reveal':
+    case 'image':
+    case 'gallery':
+    case 'video':
+    case 'code':
+    case 'divider':
+    case 'progress':
+    case 'rating':
+    case 'diagram':
+    case 'ticker':
+    case 'slot':
+      return node;
+    default: {
+      const unreachable: never = node;
+      return unreachable;
+    }
+  }
+}
+
 /** A priced list drops a pick that still has no price. A list with no prices at all stays, so a miss does not empty the card. */
 function dropPriceless(node: CardNode, ceilings: readonly number[], query: string): CardNode {
   switch (node.type) {
@@ -1408,5 +1521,5 @@ export function bindClaims(node: CardNode, sources: readonly ClaimSource[], quer
   const lined = TAX_ASK.test(query) ? repairTaxNode(taxed, query, sources) : taxed;
   if (!shoppingAsk(query)) return lined;
   const ceilings = budgetAmounts(query);
-  return dropPriceless(fillPrices(lined, sources, ceilings), ceilings, query);
+  return dropPriceless(keepBudgetPrices(fillPrices(lined, sources, ceilings), ceilings), ceilings, query);
 }

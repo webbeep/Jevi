@@ -156,6 +156,15 @@ export function moreQueries(literal: string, extras: string[]): string[] {
   return out;
 }
 
+/**
+ * How many extra searches this ask may run, at most two.
+ * A workplace plus a given name searches both forms ("Tim at X" and "Timothy at X").
+ * One of those is not enough: the other person never reaches the picker.
+ */
+export function extraSearchRoom(route: 'quick' | 'deep', hops: number, workplace = 0): number {
+  return Math.min(2, Math.max(route === 'deep' ? 2 : 1, Math.min(hops, 2), Math.min(workplace, 2)));
+}
+
 /** One line per ask. No keys, headers, query text, or URLs. `served` is the engine name only. */
 export function logAsk(ledger: CallLedger, served?: string): void {
   console.log(JSON.stringify({

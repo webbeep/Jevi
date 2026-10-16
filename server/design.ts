@@ -305,7 +305,7 @@ function taskBlock(req: DesignRequest): string {
     briefRules(req),
     followupRules(req.followup, req.search.query).trim().replace(/^/, '- '),
     req.search.results.length && nameWithWorkplace(asked)
-      ? '- This ask is one person at a workplace. Answer with that person\'s profile, titled with their name. Do not answer with the company\'s leadership roster or executive team.'
+      ? '- This ask is one person at a workplace. If the sources name that person, title the card with their name and use only their roles, portrait, and pages. If the sources do not name that person, say so in one sentence. Do not retitle the question, and do not use another person\'s role, photo, or bio.'
       : '',
     req.search.results.length ? '' : nameWithWorkplace(asked)
       ? '- No page names a person by that given name at that workplace. Say that no matching person was found. Do not guess a job, a handle, or a public role.'

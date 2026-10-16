@@ -308,6 +308,53 @@ export function withoutFighting(text: string): string {
   return text.split(SENTENCE_BREAK).filter((sentence) => !(BENEFIT.test(sentence) && !negated(sentence))).join(' ').trim();
 }
 
+function proseOf(nodes: readonly (CardNode | undefined)[]): string {
+  return nodes.map((node) => (node ? JSON.stringify(node) : '')).join(' ');
+}
+
+/** A stack with no words is an empty body. A value, a caption, or a sentence is not. */
+function hasProse(nodes: readonly (CardNode | undefined)[]): boolean {
+  const words = proseOf(nodes).replace(/"(?:type|tone|size|style|icon|id|url|href|src)"\s*:\s*"[^"]*"/g, ' ').match(/[A-Za-z]{3,}/g) ?? [];
+  return words.length >= 3;
+}
+
+/** A sentence from the sources that names the institution, or the institution itself. */
+function placeSentence(sourceText: string): string {
+  const school = sourceText.match(INSTITUTION)?.[1]?.trim();
+  if (!school) return '';
+  const sentence = sentencesOf(sourceText).find((line) => line.toLowerCase().includes(school.toLowerCase()));
+  if (sentence) return sentence.replace(/\s+/g, ' ').trim();
+  return school;
+}
+
+/** The first source sentence that names the person the question asks about. */
+function bioSentence(question: string, sourceText: string): string {
+  const name = question.replace(/^(?:who\s+is|who\s+was|who's)\s+/i, '').replace(/[?.!]+$/g, '').trim();
+  const surname = name.split(/\s+/).filter((word) => /^[A-Z]/.test(word)).at(-1)?.toLowerCase();
+  if (!surname) return '';
+  return sentencesOf(sourceText).find((line) => line.toLowerCase().includes(surname))?.replace(/\s+/g, ' ').trim() ?? '';
+}
+
+/**
+ * A where-they-work follow-up and a who-is ask keep a body. An empty stack is not an answer.
+ * The sentence is one the sources already wrote.
+ */
+export function keepAnswerBody(question: string, nodes: readonly (CardNode | undefined)[], sourceText: string): (CardNode | undefined)[] {
+  if (hasProse(nodes)) return [...nodes];
+  const where = WHERE_ROLE.test(question);
+  const who = /^(?:who\s+is|who\s+was|who's)\b/i.test(question.trim());
+  const sentence = where ? placeSentence(sourceText) : who ? bioSentence(question, sourceText) : '';
+  if (!sentence) return [...nodes];
+  const text: CardNode = { type: 'text', text: sentence, size: 'lg' };
+  if (!nodes.length) return [text];
+  let placed = false;
+  return nodes.map((node) => {
+    if (placed || hasProse([node])) return node;
+    placed = true;
+    return text;
+  });
+}
+
 /** The headline answers the new question: where someone works is the institution, and a what-if price is the tax on that price. */
 export function answerTitle(question: string, proposed: string, cardText: string): string {
   if (WHERE_ROLE.test(question)) {

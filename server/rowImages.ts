@@ -2,7 +2,7 @@ import type { CardNode, ImageCredit } from '../shared/card';
 import { isComposite } from '../shared/imagematch';
 import { shoppingAsk } from './claims';
 import { isStockArt } from './images';
-import { type EntityHint, type GateContext, type PicTarget, accepts, hostNames, nameLike, namedPictureOk, namedTarget, namesPerson, pageNames, pagePortraitOk, personPage, personPortrait, portraitSrcOk, targetFor } from './imageGate';
+import { type EntityHint, type GateContext, type PicTarget, accepts, contextMarks, hostNames, nameLike, namedPictureOk, namedTarget, namesPerson, pageNames, pagePortraitOk, personPage, personPortrait, portraitMatches, portraitSrcOk, profilePortraitMarks, targetFor } from './imageGate';
 import type { ImageResult, SearchResult } from '../shared/types';
 
 /**
@@ -46,6 +46,8 @@ interface Slot {
   /** A person profile: the cited page to read a portrait from when the result has none yet. */
   pageUrl?: string;
   profile?: boolean;
+  /** Company or role words the portrait's page has to carry. */
+  marks?: string[];
   src?: string;
 }
 
@@ -120,7 +122,8 @@ function slotsOf(node: CardNode, out: Slot[], ctx?: GateContext, query?: string)
       if (node.imageSrc || node.imageRef !== undefined || node.imageQuery) return;
       if (ctx?.person && !namesPerson(node.name, ctx.person)) return;
       const target = namedTarget(node.name, ctx);
-      out.push({ entity: node.name, target: target.kind === 'none' ? { kind: 'named', entity: node.name } : target, ogOk: true, profile: true });
+      const marks = [...new Set([...profilePortraitMarks(node), ...contextMarks(target.hint?.context)])];
+      out.push({ entity: node.name, target: target.kind === 'none' ? { kind: 'named', entity: node.name } : target, ogOk: true, profile: true, marks });
       return;
     }
     case 'list':
@@ -223,13 +226,17 @@ export async function fillRowImages(nodes: CardNode[], deps: RowImageDeps, used:
   //    Orgs: a result on the org's own site (its picture or og:image), else nothing.
   for (const s of live) {
     if (s.profile) {
-      const fromRows = personPortrait(s.entity, deps.results);
-      const portrait = fromRows ?? personPortrait(s.entity, deps.pool.map((img) => ({ title: img.title, url: img.url, image: img.thumb })));
+      const pages = deps.results.map((row) => {
+        const pooled = row.image || deps.pool.find((img) => img.url === row.url)?.thumb;
+        return pooled && pooled !== row.image ? { ...row, image: pooled } : row;
+      });
+      const fromRows = personPortrait(s.entity, pages, s.marks);
+      const portrait = fromRows ?? personPortrait(s.entity, deps.pool.map((img) => ({ title: img.title, url: img.url, source: img.source, image: img.thumb })), s.marks);
       if (portrait && !used.has(portrait.src)) {
         take(s, portrait.src, { url: portrait.url });
         continue;
       }
-      const page = deps.results.find((row) => personPage(s.entity, row));
+      const page = deps.results.find((row) => personPage(s.entity, row) && (!s.marks?.length || portraitMatches(s.marks, row)));
       if (page) s.pageUrl = page.url;
     }
     const own = s.source ? deps.results[s.source - 1] : undefined;
@@ -249,7 +256,7 @@ export async function fillRowImages(nodes: CardNode[], deps: RowImageDeps, used:
       }
     }
     const pooled = pick(s.target, deps.pool, used);
-    if (pooled) take(s, pooled.thumb, credit(pooled));
+    if (pooled && (!s.marks?.length || portraitMatches(s.marks, pooled))) take(s, pooled.thumb, credit(pooled));
   }
 
   // 2. At most one picture search for the card, matched to rows by name.
@@ -260,18 +267,21 @@ export async function fillRowImages(nodes: CardNode[], deps: RowImageDeps, used:
     for (const s of live) {
       if (s.src) continue;
       const hit = pick(s.target, found, used);
-      if (hit) take(s, hit.thumb, credit(hit));
+      if (hit && (!s.marks?.length || portraitMatches(s.marks, hit))) take(s, hit.thumb, credit(hit));
     }
   }
 
   // 2b. Free per-name lookups (Wikipedia first) for name-like rows still blank, at most 6, ~2s.
   if (deps.lookup) {
     const want = live.filter((s) => !s.src && s.target.kind === 'named').slice(0, 6);
-    const found = await Promise.all(want.map((s) => Promise.race([deps.lookup!(s.entity).catch(() => [] as ImageResult[]), new Promise<ImageResult[]>((r) => setTimeout(() => r([]), 2000))])));
+    const found = await Promise.all(want.map((s) => {
+      const query = s.profile && s.marks?.length ? `${s.entity} ${s.marks.join(' ')}` : s.entity;
+      return Promise.race([deps.lookup!(query).catch(() => [] as ImageResult[]), new Promise<ImageResult[]>((r) => setTimeout(() => r([]), 2000))]);
+    }));
     want.forEach((s, i) => {
       if (s.src) return;
       const hit = pick(s.target, found[i], used);
-      if (hit) take(s, hit.thumb, credit(hit));
+      if (hit && (!s.marks?.length || portraitMatches(s.marks, hit))) take(s, hit.thumb, credit(hit));
     });
   }
 

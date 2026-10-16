@@ -6,6 +6,7 @@ import { readChoices } from '../shared/choices';
 import { cardDigest } from '../shared/digest';
 import { MAX_AUTO_RECONNECTS, OFFLINE_MESSAGE, friendlyError, isConnectionError, reconnectDelay } from '../shared/offline';
 import { billingFromSources, settleCardPrices } from '../shared/pricing';
+import { followupLabel } from '../shared/followupLabel';
 import { emptyDoneState } from '../shared/sse-parse';
 import { isBlankLayout, liveBody } from '../shared/liveBody';
 import type { NoSourcesNotice, SearchResponse, SearchResult } from '../shared/types';
@@ -244,7 +245,13 @@ export function useSession() {
           });
         case 'rewrite':
           if (e.data.spelling) return update(route, { spelling: e.data.query });
-          return update(route, { kind: 'search', question: e.data.query, searchId: route, mode: undefined });
+          // The search may add the subject already on screen. The label stays the words they typed.
+          return update(route, (t) => ({
+            kind: 'search',
+            searchId: route,
+            mode: undefined,
+            question: followupLabel(t.question, e.data.query),
+          }));
         case 'intent':
           return update(route, { intent: e.data });
         case 'search':
@@ -469,7 +476,7 @@ export function useSession() {
   }, [commit]);
   restoreRef.current = restore;
 
-  const search = useCallback((query: string, opts: { reset: boolean }) => {
+  const search = useCallback((query: string, opts: { reset: boolean; refresh?: boolean }) => {
     const q = query.trim();
     if (!q) return;
     if (opts.reset) {
@@ -490,7 +497,7 @@ export function useSession() {
     }
     const id = add({ kind: 'search', question: q, filling: true });
     if (!opts.reset) scrollToTurn(id);
-    void runSearchTurn(id, q);
+    void runSearchTurn(id, q, opts.refresh ? { refresh: true } : undefined);
   }, [add, clear, runSearchTurn]);
 
   /**

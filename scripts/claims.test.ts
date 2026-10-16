@@ -83,6 +83,50 @@ test('shopping picks take a price from the page that names them', () => {
   assert.equal(items[0]?.meta, '$699');
 });
 
+test('a price above the stated budget is not shown on a pick', () => {
+  const catalog: ClaimSource[] = [
+    { n: 1, text: 'Best headphones under $200. The Edifier ES850NB supports LDAC.' },
+    { n: 2, text: 'Sony WH-CH720N is $88. Edifier ES850NB is $119.99.' },
+  ];
+  const list: CardNode = {
+    type: 'list',
+    style: 'check',
+    items: [
+      { text: 'Sony WH-CH720N', meta: '$88' },
+      { text: 'Codec support for hi-res: LDAC on the Edifier ES850NB', meta: '$200' },
+    ],
+  };
+  const next = bindClaims(list, catalog, 'Wireless Noise Cancelling Headphones Under $150');
+  const items = next.type === 'list' ? next.items : [];
+  assert.equal(items.some((item) => /\$200/.test(`${item.meta ?? ''} ${item.text}`)), false);
+  assert.equal(items.some((item) => item.meta === '$88'), true);
+  const chips: CardNode = {
+    type: 'choices',
+    label: 'Budget',
+    options: [
+      { label: 'Under $100', prompt: 'under $100', selected: false },
+      { label: 'Under $150', prompt: 'under $150', selected: true },
+      { label: 'Under $200', prompt: 'under $200', selected: false },
+    ],
+  };
+  const kept = bindClaims(chips, catalog, 'Wireless Noise Cancelling Headphones Under $150');
+  const labels = kept.type === 'choices' ? kept.options.map((option) => option.label) : [];
+  assert.deepEqual(labels, ['Under $100', 'Under $150']);
+  const dangling: CardNode = { type: 'list', items: [{ text: 'JBL Live 780NC', meta: 'Best under $200' }] };
+  const cleared = bindClaims(dangling, catalog, 'Wireless Noise Cancelling Headphones Under $150');
+  assert.equal(cleared.type === 'list' ? cleared.items[0]?.meta : 'kept', undefined);
+  const hero: CardNode = {
+    type: 'hero',
+    value: 'JBL Live 778NC',
+    label: 'Top pick under $150',
+    caption: "Best noise cancelling headphones under $200 we've tested",
+  };
+  const headed = bindClaims(hero, catalog, 'Wireless Noise Cancelling Headphones Under $150');
+  assert.match(headed.type === 'hero' ? headed.caption ?? '' : '', /Best noise cancelling headphones we've tested/);
+  assert.equal(headed.type === 'hero' ? headed.label : '', 'Top pick under $150');
+  assert.doesNotMatch(headed.type === 'hero' ? `${headed.caption} ${headed.value}` : '', /\$200/);
+});
+
 test('a budget ceiling is not the product price', () => {
   assert.deepEqual(budgetAmounts('Best laptop under $800'), [800]);
   const catalog: ClaimSource[] = [
@@ -90,7 +134,9 @@ test('a budget ceiling is not the product price', () => {
   ];
   const list: CardNode = { type: 'list', style: 'number', items: [{ text: 'Dell XPS 13', meta: 'Under $800' }] };
   const next = bindClaims(list, catalog, 'Best laptop under $800');
-  assert.equal(next.type === 'list' ? next.items[0]?.meta : '', '$999.99');
+  const meta = next.type === 'list' ? next.items[0]?.meta ?? '' : '';
+  assert.notEqual(meta, '$999.99');
+  assert.doesNotMatch(meta, /999/);
 });
 
 test('a city sales tax uses the combined rate once the item clears the exemption', () => {

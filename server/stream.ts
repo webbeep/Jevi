@@ -17,6 +17,7 @@ import {
   entityHintFor,
   formalNameQueries,
   workplaceQueries,
+  nameWithWorkplace,
   isDisambiguationPage,
   isPersonAsk,
   personCardTitle,
@@ -34,9 +35,11 @@ import {
   priorEntity,
   publicChoices,
   resolveEntity,
+  mixedIdentities,
+  samePersonChoices,
 } from './entity';
 import { fetchWikiArticle, fetchWikiDisambiguation, fetchWikiLeadImage } from './wikiSearch';
-import { type EntityHint, mentionsAny } from './imageGate';
+import { type EntityHint, mentionsAny, personPage, portraitMarks, portraitMatches, portraitSearchQuery, portraitWorkplace } from './imageGate';
 import type { RowImagePlan } from './pictures';
 import type { AnswerCard, CardNode, FollowupContext, FollowupIntent, LayoutPlan } from '../shared/card';
 import { type AskRef, cardSearchQuery, plainFollowup, refContext, topicOf, usefulFollowups, withRef } from '../shared/askAbout';
@@ -46,7 +49,7 @@ import { rewriteQuery } from './ai';
 import { type DesignRequest, designParallel, designStream, gateNode } from './design';
 import { BRIEF_ROWS, briefSources, remapBrief, type SourceBrief } from './brief';
 import { claimSources, groundMembers } from './claims';
-import { answerTitle, restoreKeptPapers } from './cardAgree';
+import { answerTitle, keepAnswerBody, restoreKeptPapers } from './cardAgree';
 import { abstainComputed, alignFactProse, cardFacts, factAnswer, hasMemberWork, hopQueries, leadMemberRows, nextHop, placeFactLead, unsupportedYear } from './hops';
 import { gapQuery, onTopicCount, rescueQuery, sourcesMiss } from './rescue';
 import { keepPictures, reviewCard, type Review } from './review';
@@ -56,7 +59,7 @@ import { collectPages, ogImageOf } from './pages';
 import { MADE_PATTERNS, compareSideQueries, heuristicPattern, skeletonCard } from './patterns';
 import { planLayout } from './plan';
 import type { AskScope, CallLedger } from './budget';
-import { SEARCH_CALL_CAP, logAsk, mark, moreQueries, newLedger, queriesForAsk, searchCalls } from './budget';
+import { SEARCH_CALL_CAP, extraSearchRoom, logAsk, mark, moreQueries, newLedger, queriesForAsk, searchCalls } from './budget';
 import { gateResults } from './relevanceGate';
 import { entityQuery, plainQuotes, relaxQuery, tickerQueries } from './queryClean';
 import { type LateExtras, normalizeUrl, searchWithLate } from './search';
@@ -187,9 +190,11 @@ function rowImagePlan(req: DesignArgs, env: Env, scope: AskScope): RowImagePlan 
 /** Card types that show pictures. Only these may spend the extra Serper /images call. */
 const PICTURE_PATTERNS = new Set(['visual', 'profile', 'spotlight', 'ranked', 'briefing']);
 
-function imageBoost(pattern: string, search: SearchResponse, env: Env, scope: AskScope, query: string): Promise<ImageResult[]> | undefined {
+function imageBoost(pattern: string, search: SearchResponse, env: Env, scope: AskScope, query: string, again = false): Promise<ImageResult[]> | undefined {
   if (!PICTURE_PATTERNS.has(pattern) || scope.ledger.force) return undefined;
-  if (search.images.some((i) => i.license === 'source') || !search.results.length) return undefined;
+  if (!search.results.length) return undefined;
+  // A resolved person gets a new portrait search. Pictures already on the original results are not that search.
+  if (!again && search.images.some((i) => i.license === 'source')) return undefined;
   // Only when Serper served this search. Cap reached (or Serper skipped/dead): no /images call and no other image provider; og:image or nothing.
   if (!search.engines.some((e) => e.name === 'serper' && e.ok)) return undefined;
   // T443: card-level pictures must mention the subject; a wrong picture is worse than none.
@@ -485,7 +490,12 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   const publishReadings = () => {
     const indexes = [...shown.keys()].sort((a, b) => a - b);
     const settled = settleReadings(indexes.map((index) => shown.get(index)), head, questionOf());
-    const quality = restoreKeptPapers(questionOf(), finishQuality(questionOf(), settled.nodes), designReq.followup?.baseCard?.body, claimSources(designReq.search.results, designReq.pages));
+    const recovered = [
+      ...settled.nodes.map((node) => (node ? JSON.stringify(node) : '')),
+      ...designReq.pages.map((page) => page.text),
+      ...designReq.search.results.map((row) => `${row.title ?? ''} ${row.snippet ?? ''}`),
+    ].join('\n');
+    const quality = keepAnswerBody(questionOf(), restoreKeptPapers(questionOf(), finishQuality(questionOf(), settled.nodes, head?.subtitle ?? ''), designReq.followup?.baseCard?.body, claimSources(designReq.search.results, designReq.pages)), recovered);
     if (head) {
       if (settled.head) head = { ...head, title: settled.head.title, subtitle: settled.head.subtitle };
       const title = answerTitle(questionOf(), head.title, quality.map((node) => (node ? JSON.stringify(node) : '')).join('\n'));
@@ -760,9 +770,13 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   scope.ledger.route = route;
   // Fact hops take the rewrite slots first. A two-fact question spends both, even on the quick route.
   const hopList = paper ? [] : hopQueries(query);
+  // Both forms of a workplace ask ("Tim at X", "Timothy at X") have to run, or a second person
+  // who only shows up under one of them never reaches the picker.
+  const places = workplaceQueries(query);
+  const extraWait = hopList.length || places.length ? 1800 : undefined;
   const withHops = (extras: string[]) => {
-    const room = Math.max(route === 'deep' ? 2 : 1, Math.min(hopList.length, 2));
-    return moreQueries(query, [...hopList, ...extras]).slice(0, room);
+    const room = extraSearchRoom(route, hopList.length, places.length);
+    return moreQueries(query, [...hopList, ...places, ...extras]).slice(0, room);
   };
   const deep = route === 'deep';
   let found: Awaited<ReturnType<typeof searchWithLate>>;
@@ -786,7 +800,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
       return { more: withHops([...sides, ...instant, ...extraQueries(query, x)]), freshness: freshness === 'any' ? x?.freshness ?? literalFresh : freshness };
     });
     // A price ask is answered by the live quote; the rewrites only add the news around it.
-    found = await searchWithLate({ q: queriesForAsk(query, []), more: withHops([...sides, ...instant]), later, freshness: literalFresh, count: 20, waitExtras: deep && !paper, extrasCutMs: quoteAsk(query) ? QUOTE_EXTRAS_MS : hopList.length ? 1500 : undefined, onLiteral }, env, scope);
+    found = await searchWithLate({ q: queriesForAsk(query, []), more: withHops([...sides, ...instant]), later, freshness: literalFresh, count: 20, waitExtras: deep && !paper, extrasCutMs: quoteAsk(query) ? QUOTE_EXTRAS_MS : extraWait, onLiteral }, env, scope);
     mark(scope.ledger, 'found');
     u = await understood;
   } else {
@@ -794,7 +808,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     // Literal question first. Planner rewrites are the later calls, still inside the cap.
     const q = queriesForAsk(query, instant);
     const more = withHops([...sides, ...instant]);
-    found = await searchWithLate({ q, more, freshness: freshness === 'any' ? guessFreshness(query) : freshness, count: 20, extrasCutMs: hopList.length ? 1500 : undefined, onLiteral }, env, scope);
+    found = await searchWithLate({ q, more, freshness: freshness === 'any' ? guessFreshness(query) : freshness, count: 20, extrasCutMs: extraWait, onLiteral }, env, scope);
   }
   let results = applyPickGate(query, applyRelevance(query, { ...found.response, query }, scope.ledger));
   // "AI news today" must not lead with last week's launch: past-window rows drop once enough current ones remain.
@@ -1102,6 +1116,17 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   const decision: EntityDecision = live ? { kind: 'skip' } : resolveEntity(query, results.results, { pattern: earlyPattern, prior });
   // Heuristic choices go out immediately. A model pass here waited out a stuck call
   // before the person could tap, which is the slow picker.
+  // A given name plus a workplace that no source names is not the company's card,
+  // and it is not another employee's roles. The question stays the words they typed.
+  if (!steer && decision.kind === 'skip' && !prior && nameWithWorkplace(query)) {
+    noteSpelling(send, query, results.results);
+    scope.ledger.entity = { kind: 'skip' };
+    send('search', results);
+    send('head', { title: query.trim(), icon: 'user' });
+    send('node', { index: 0, node: { type: 'text', text: 'No source names that person.', size: 'lg' } });
+    send('done', { engine: 'extractive', removed: 0, pagesRead: 0, ms: Date.now() - started });
+    return;
+  }
   if (!steer && decision.kind === 'choices') {
     noteSpelling(send, query, results.results);
     scope.ledger.entity = { kind: 'choices', choices: decision.choices.length };
@@ -1112,21 +1137,24 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   const plan = await planned;
   // A bare "who is" for someone without an encyclopedia page, whose namesakes the heuristic dropped:
   // the model may still see several people worth offering ("who is Ed Chu" → oncologist, EPA official, CEO).
-  const unsure = !steer && decision.kind === 'single' && !prior && decision.dropped.length >= 2 && WHO_ASK.test(query) && !distinguishingTerms(query).length
-    && !results.knowledge && !decision.kept.some((i) => /\.wikipedia\.org\//i.test(results.results[i]?.url ?? ''));
+  const mixed = !steer && decision.kind === 'single' && !prior && !distinguishingTerms(query).length && mixedIdentities(decision.entity.name, results.results);
+  const unsure = mixed || (!steer && decision.kind === 'single' && !prior && decision.dropped.length >= 2 && WHO_ASK.test(query) && !distinguishingTerms(query).length
+    && !results.knowledge && !decision.kept.some((i) => /\.wikipedia\.org\//i.test(results.results[i]?.url ?? '')));
   const split = rejectedSplit ?? (unsure ? await splitPeople(decision.entity.name, results.results, env) : undefined);
-  if (split) console.log(JSON.stringify({ zo: 'entity', kind: 'choices', choices: split.length, by: 'model-over-single' }));
-  if (split) {
-    scope.ledger.entity = { kind: 'choices', choices: split.length };
+  const distinct = split && (steer || !samePersonChoices(split, results.results)) ? split : undefined;
+  if (distinct) console.log(JSON.stringify({ zo: 'entity', kind: 'choices', choices: distinct.length, by: 'model-over-single' }));
+  if (distinct) {
+    scope.ledger.entity = { kind: 'choices', choices: distinct.length };
     send('search', results);
     // Choices ride on the done event (FE readChoices() in shared/choices.ts); never cached.
-    send('done', { engine: 'extractive', removed: 0, pagesRead: 0, ms: Date.now() - started, choices: publicChoices(split) });
+    send('done', { engine: 'extractive', removed: 0, pagesRead: 0, ms: Date.now() - started, choices: publicChoices(distinct) });
     return;
   }
   noteSpelling(send, query, results.results);
   let designContext = context;
   let entityHint: ((entity: string) => EntityHint | undefined) | undefined;
   let boostQuery = query;
+  let portraitAgain = false;
   let pattern = plan.pattern;
   let website: number | undefined;
   let person: DesignArgs['person'];
@@ -1153,7 +1181,19 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     }
     entityHint = entityHintFor(decision.entity, query);
     // Name + the asker's own context ("Ray Lee BlueFlame AI") pulls that person's photos, not a namesake's.
-    boostQuery = contextTerms(query).length ? query : decision.entity.name;
+    const askedPlace = contextTerms(query, decision.entity.name);
+    const workplace = portraitWorkplace(decision.entity.org, decision.entity.role, askedPlace);
+    const marks = portraitMarks(decision.entity.role, workplace);
+    portraitAgain = marks.length > 0;
+    if (portraitAgain) {
+      results = {
+        ...results,
+        images: results.images.filter((img) => personPage(decision.entity.name, img) && portraitMatches(marks, img)),
+      };
+    }
+    boostQuery = portraitAgain
+      ? portraitSearchQuery(decision.entity.name, decision.entity.org, decision.entity.role, askedPlace)
+      : (contextTerms(query).length ? query : decision.entity.name);
     // Person singles must be profile cards so image boost + row pictures run (Lead GATE: David Kim / BlueFlame had 0 imgs on answer pattern),
     // unless the ask is about something of theirs ("Jaylen Brown injuries"): that keeps the planned layout.
     if (pattern !== 'profile' && !askTopic(query, decision.entity.name)) {
@@ -1188,7 +1228,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   const official = foldReadyOfficial(query, results, officialEarly);
   if (official !== results) results = official;
   send('search', results);
-  const boost = imageBoost(pattern, results, env, scope, boostQuery);
+  const boost = imageBoost(pattern, results, env, scope, boostQuery, portraitAgain);
   const crypto = cryptographyHint(query, results.results);
   await design(send, env, { query, pattern, depth: plan.depth, readPages: plan.readPages || deep || fromSeeds, search: results, context: [designContext, crypto].filter(Boolean).join('\n') || undefined, intent: u?.intent, deep, boost, entityHint, person, ticker: quote ? tickerNode(quote) : keepTicker, earlyBrief, website, allowRescue: !isPaperAsk(query), hopUrls }, started, scope, late);
 }
@@ -1387,7 +1427,8 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
     const lock = cue
       ? `This question is about ${named} (${cue}), the person already on screen. A different ${named} is the wrong person.`
       : `This question is about ${named}, the person already on screen.`;
-    await searchAndDesign(send, env, pronoun, 'any', [lock, context].filter(Boolean).join('\n'), started, scope, true);
+    const chosen = `Chosen person: ${named}`;
+    await searchAndDesign(send, env, pronoun, 'any', [chosen, lock, context].filter(Boolean).join('\n'), started, scope, true);
     return;
   }
 
