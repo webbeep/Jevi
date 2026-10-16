@@ -2,7 +2,7 @@ import type { CardNode } from '../shared/card';
 import { SENTENCE_BREAK, joinSpacedDecimals } from '../shared/text';
 import { factAnswer } from './hops';
 import { numberTokens } from './ground';
-import { withoutEmptySlots } from './polish';
+import { completeCutDecimal, withoutEmptySlots } from './polish';
 
 /** One search result, numbered the way the card cites it, with the text the card was allowed to use. */
 export interface ClaimSource {
@@ -226,25 +226,6 @@ function repairCutQuote(text: string, sources: readonly ClaimSource[]): string {
     const tail = `${found[1]}${found[2] ?? ''}`.trim();
     const prefix = text.slice(0, openAt + 1 + cut[1].length);
     return `${prefix}${tail}${closer}`;
-  }
-  return text;
-}
-
-/** The hero already states 1.5°C. A quotation on that same node that stopped at "1." keeps the rest of that number. */
-function completeCutDecimal(text: string, hints: readonly (string | undefined)[]): string {
-  const openAt = Math.max(text.lastIndexOf('"'), text.lastIndexOf('“'), text.lastIndexOf('«'));
-  if (openAt < 0) return text;
-  const opener = text[openAt]!;
-  const closer = opener === '“' ? '”' : opener === '«' ? '»' : '"';
-  const inside = text.slice(openAt + 1);
-  if (inside.includes(closer)) return text;
-  const cut = inside.match(/(\d+)\.?\s*$/);
-  if (!cut?.[1]) return text;
-  for (const hint of hints) {
-    if (!hint || hint.length > 80) continue;
-    const found = hint.match(new RegExp(`(${cut[1]}\\.\\d+)(\\s?°[CF]|\\s?%)?`));
-    if (!found) continue;
-    return `${text.slice(0, text.length - cut[0].length)}${found[1]}${found[2] ?? ''}${closer}`;
   }
   return text;
 }

@@ -157,6 +157,9 @@ test('a source that says constructor does not throw', () => {
 test('stray markdown is stripped from card text', () => {
   assert.equal(stripMarkup('**bold** still here'), 'bold still here');
   assert.equal(stripMarkup('**But the benefit is not universal."'), 'But the benefit is not universal.');
+  assert.equal(stripMarkup('He said "hello there friend.'), 'He said hello there friend.');
+  const cut = '"Continued greenhouse gas emissions will lead to increasing global warming, with the best estimate of reaching 1.';
+  assert.equal(stripMarkup(cut), cut);
   assert.equal(stripMarkup('# Heading\nkeep'), 'Heading\nkeep');
   assert.equal(stripMarkup('use __em__ please'), 'use em please');
   const [node] = sanitizeNodes([{ type: 'text', text: '**But the benefit is not universal." [4]' }], 0);

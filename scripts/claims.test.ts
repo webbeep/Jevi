@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { bindClaims, budgetAmounts, claimSources, groundMembers, priceFor, retargetCites, salesTax, shoppingAsk, type ClaimSource } from '../server/claims.ts';
-import { Grounding } from '../server/ground.ts';
+import { Grounding, groundNodes } from '../server/ground.ts';
+import { sanitizeNodes } from '../server/sanitize.ts';
+import { finishQuality } from '../server/sourceQuality.ts';
 import type { CardNode } from '../shared/card.ts';
 
 const sources: ClaimSource[] = [
@@ -141,6 +143,25 @@ test('a quotation cut at the point keeps the decimal the hero already states', (
   const next = bindClaims(hero, [{ n: 1, text: 'The page discusses warming in general terms.' }], 'quote the report');
   const caption = next.type === 'hero' ? next.caption ?? '' : '';
   assert.match(caption, /reaching 1\.5°C"/);
+});
+
+test('a cut quotation is repaired before the quote mark is removed', () => {
+  const caption = '"Continued greenhouse gas emissions will lead to increasing global warming, with the best estimate of reaching 1.';
+  const [node] = sanitizeNodes([{ type: 'hero', value: '1.5°C', label: 'Best estimate', caption }], 0);
+  assert.equal(node?.type, 'hero');
+  if (node?.type !== 'hero') return;
+  assert.match(node.caption ?? '', /reaching 1\.5°C"/);
+  const corpus = 'reaching 1.5°C in the near term';
+  const [grounded] = groundNodes([node], new Grounding(corpus));
+  assert.match(grounded?.type === 'hero' ? grounded.caption ?? '' : '', /reaching 1\.5°C/);
+  const [finished] = finishQuality('quote the official report', [grounded]);
+  assert.match(finished?.type === 'hero' ? finished.caption ?? '' : '', /reaching 1\.5°C"/);
+});
+
+test('a chapter label is not rewritten into the hero number', () => {
+  const caption = 'The notes for this section say see chapter 1.';
+  const [node] = sanitizeNodes([{ type: 'hero', value: '1.5°C', label: 'Best estimate', caption }], 0);
+  assert.equal(node?.type === 'hero' ? node.caption : '', caption);
 });
 
 test('a budgeted product ask is shopping, and a tax ask is not', () => {

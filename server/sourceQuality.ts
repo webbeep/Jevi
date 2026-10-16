@@ -3,7 +3,9 @@
  * Deterministic: no network and no model call. A list is never emptied.
  */
 import type { CardNode } from '../shared/card';
+import { joinSpacedDecimals } from '../shared/text';
 import { shoppingAsk } from './claims';
+import { restoreCutDecimals } from './polish';
 import { isPaperAsk, isPreprintAsk, leadPreprints } from './scholarly';
 
 const AUTHORITY = [
@@ -398,7 +400,7 @@ export function preferSources<T extends RankedHit>(query: string, rows: readonly
 
 function keepSentences(query: string, text: string): string {
   if (!latinQuery(query)) return text;
-  const parts = text.split(/(?<=[.!?])\s+/);
+  const parts = joinSpacedDecimals(text).split(/(?<=[.!?])\s+(?!\d)/);
   const kept = parts.filter((part) => part.trim() && !foreignText(part));
   return kept.join(' ').replace(/\s+/g, ' ').trim();
 }
@@ -659,5 +661,5 @@ function dropUnpricedProductLead(query: string, nodes: readonly (CardNode | unde
 
 export function finishQuality(query: string, nodes: readonly (CardNode | undefined)[]): (CardNode | undefined)[] {
   const cleaned = nodes.map((node) => (node ? cleanNode(query, node) : node));
-  return alignVerdicts(withoutSettledDisputes(dropUnpricedProductLead(query, cleaned)));
+  return restoreCutDecimals(alignVerdicts(withoutSettledDisputes(dropUnpricedProductLead(query, cleaned))));
 }

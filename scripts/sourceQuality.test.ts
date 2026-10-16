@@ -56,6 +56,21 @@ test('a public page outranks a training page on the same site', () => {
   assert.ok(out.findIndex((row) => row.url === primary.url) < out.findIndex((row) => row.url === training.url));
 });
 
+test('a spaced decimal stays one sentence when foreign sentences are dropped', () => {
+  const quote = '"Continued greenhouse gas emissions will lead to increasing global warming, with the best estimate of reaching 1. 5°C in the near term in considered scenarios."';
+  const [node] = finishQuality('quote the official report', [{ type: 'text', text: quote }]);
+  assert.equal(node?.type, 'text');
+  if (node?.type !== 'text') return;
+  assert.match(node.text, /reaching 1\.5°C/);
+  assert.doesNotMatch(node.text, /reaching 1\.\s/);
+});
+
+test('a quotation cut at the point keeps the decimal stated on the same card', () => {
+  const caption = '"Continued greenhouse gas emissions will lead to increasing global warming, with the best estimate of reaching 1.';
+  const [node] = finishQuality('quote the official report', [{ type: 'hero', value: '1.5°C', label: 'Best estimate', caption }]);
+  assert.match(node?.type === 'hero' ? node.caption ?? '' : '', /reaching 1\.5°C"/);
+});
+
 test('an unpriced product hero does not lead a card that has a priced pick', () => {
   const nodes = finishQuality('Help me find an HDMI switch under $40', [
     { type: 'hero', value: 'Kinivo 550BN', label: 'Top pick' },

@@ -2,6 +2,7 @@ import { actionQuery } from '../shared/askAbout';
 import { readDiagram } from '../shared/diagram';
 import { withoutRepeatedLead, type AnswerCard, type CardNode, type Tone } from '../shared/card';
 import { inferSeats, priceAsOf, sameSource, type BillingBasis, type Price, type PricePeriod, type PriceUnit } from '../shared/pricing';
+import { completeCutDecimal } from './polish';
 
 const TONES: Tone[] = ['default', 'muted', 'primary', 'positive', 'negative', 'warning'];
 const MAX_DEPTH = 5;
@@ -15,7 +16,10 @@ export function stripMarkup(s: string): string {
   const quotes = t.match(/"/g);
   if (quotes && quotes.length % 2 === 1) {
     const i = t.lastIndexOf('"');
-    t = `${t.slice(0, i)}${t.slice(i + 1)}`;
+    const after = t.slice(i + 1);
+    // A long quotation that stops on the whole part of a decimal ("reaching 1.") is not a stray mark.
+    const cutQuote = after.length >= 40 && /\d\.\s*$/.test(after);
+    if (!cutQuote) t = `${t.slice(0, i)}${t.slice(i + 1)}`;
   }
   t = t.replace(/[ \t]+\n/g, '\n').trim();
   return t;
@@ -110,7 +114,10 @@ function sanitizeNode(raw: unknown, imageCount: number, depth: number, ctx?: { s
       return { type };
     case 'hero': {
       const value = str(n.value, 120);
-      return value ? { type, value, unit: str(n.unit, 20), label: str(n.label, 80), caption: str(n.caption, 200), icon: icon(n.icon), tone: tone(n.tone) } : undefined;
+      const label = str(n.label, 80);
+      // Repair before markup cleanup. An unmatched quote is removed, and the decimal it was holding goes with the signal.
+      const caption = typeof n.caption === 'string' ? str(completeCutDecimal(n.caption, [value, label]), 200) : undefined;
+      return value ? { type, value, unit: str(n.unit, 20), label, caption, icon: icon(n.icon), tone: tone(n.tone) } : undefined;
     }
     case 'heading': {
       const text = str(n.text, 160);

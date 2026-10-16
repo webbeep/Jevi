@@ -91,6 +91,171 @@ export function completeSentences(text: string): string {
   return body.length >= 40 ? body : '';
 }
 
+const CUT_LABEL = /\b(?:chapter|section|page|step|item|figure|table|note|version|part|vol)\.?\s+\d+\.?\s*$/i;
+
+/**
+ * A quotation that stops on the whole part of a decimal keeps the decimal already stated beside it.
+ * The same repair applies when the quote mark was already removed and the sentence is left ending at that integer.
+ */
+export function completeCutDecimal(text: string, hints: readonly (string | undefined)[]): string {
+  const openAt = Math.max(text.lastIndexOf('"'), text.lastIndexOf('“'), text.lastIndexOf('«'));
+  const opener = openAt >= 0 ? text[openAt]! : '';
+  const closer = opener === '“' ? '”' : opener === '«' ? '»' : '"';
+  const inside = openAt >= 0 ? text.slice(openAt + 1) : text;
+  const closedAt = openAt >= 0 ? inside.lastIndexOf(closer) : -1;
+  const body = closedAt >= 0 ? inside.slice(0, closedAt) : inside;
+  const end = closedAt >= 0 ? inside.slice(closedAt) : '';
+  if (body.length < 40) return text;
+  if (CUT_LABEL.test(body)) return text;
+  const cut = body.match(/(\d+)\.?\s*$/);
+  if (!cut?.[1]) return text;
+  if (new RegExp(`(?:^|\\D)${cut[1]}\\.\\d`).test(body)) return text;
+  for (const hint of hints) {
+    if (!hint || hint.length > 80) continue;
+    const found = hint.match(new RegExp(`(${cut[1]}\\.\\d+)(\\s?°[CF]|\\s?%)?`));
+    if (!found?.[1]) continue;
+    const prefix = text.slice(0, (openAt >= 0 ? openAt + 1 : 0) + (body.length - cut[0].length));
+    const quoteClose = openAt < 0 ? '' : end || closer;
+    return `${prefix}${found[1]}${found[2] ?? ''}${quoteClose}`;
+  }
+  return text;
+}
+
+function hintedNumbers(node: CardNode | undefined, hints: string[]): void {
+  if (!node) return;
+  switch (node.type) {
+    case 'hero':
+      hints.push(node.value);
+      if (node.label) hints.push(node.label);
+      break;
+    case 'stat':
+      hints.push(node.value);
+      break;
+    case 'tile':
+      if (node.value) hints.push(node.value);
+      break;
+    case 'stack':
+    case 'grid':
+    case 'section':
+    case 'scroller':
+      node.children.forEach((child) => hintedNumbers(child, hints));
+      break;
+    case 'tabs':
+      node.tabs.forEach((tab) => tab.children.forEach((child) => hintedNumbers(child, hints)));
+      break;
+    case 'text':
+    case 'callout':
+    case 'quote':
+    case 'draft':
+    case 'heading':
+    case 'keyvalue':
+    case 'list':
+    case 'chart':
+    case 'progress':
+    case 'rating':
+    case 'table':
+    case 'timeline':
+    case 'steps':
+    case 'diagram':
+    case 'proscons':
+    case 'badges':
+    case 'actions':
+    case 'choices':
+    case 'slider':
+    case 'scaler':
+    case 'pricing':
+    case 'accordion':
+    case 'reveal':
+    case 'image':
+    case 'gallery':
+    case 'video':
+    case 'code':
+    case 'divider':
+    case 'citations':
+    case 'links':
+    case 'profile':
+    case 'ticker':
+    case 'slot':
+      break;
+    default: {
+      const unreachable: never = node;
+      return unreachable;
+    }
+  }
+}
+
+function withCutDecimals(node: CardNode, hints: readonly string[]): CardNode {
+  const fix = (text: string) => completeCutDecimal(text, hints);
+  switch (node.type) {
+    case 'hero': {
+      const caption = node.caption ? fix(node.caption) : node.caption;
+      return caption === node.caption ? node : { ...node, caption };
+    }
+    case 'text':
+    case 'callout':
+    case 'quote':
+    case 'draft':
+    case 'heading': {
+      const text = fix(node.text);
+      return text === node.text ? node : { ...node, text };
+    }
+    case 'stack':
+    case 'grid':
+    case 'section':
+    case 'scroller': {
+      const children = node.children.map((child) => withCutDecimals(child, hints));
+      return children.every((child, i) => child === node.children[i]) ? node : { ...node, children };
+    }
+    case 'tabs': {
+      const tabs = node.tabs.map((tab) => ({ ...tab, children: tab.children.map((child) => withCutDecimals(child, hints)) }));
+      return tabs.every((tab, i) => tab.children.every((child, j) => child === node.tabs[i]?.children[j])) ? node : { ...node, tabs };
+    }
+    case 'stat':
+    case 'tile':
+    case 'keyvalue':
+    case 'list':
+    case 'chart':
+    case 'progress':
+    case 'rating':
+    case 'table':
+    case 'timeline':
+    case 'steps':
+    case 'diagram':
+    case 'proscons':
+    case 'badges':
+    case 'actions':
+    case 'choices':
+    case 'slider':
+    case 'scaler':
+    case 'pricing':
+    case 'accordion':
+    case 'reveal':
+    case 'image':
+    case 'gallery':
+    case 'video':
+    case 'code':
+    case 'divider':
+    case 'citations':
+    case 'links':
+    case 'profile':
+    case 'ticker':
+    case 'slot':
+      return node;
+    default: {
+      const unreachable: never = node;
+      return unreachable;
+    }
+  }
+}
+
+/** A quotation on the card keeps a decimal some other part of the same card already states. */
+export function restoreCutDecimals(nodes: readonly (CardNode | undefined)[]): (CardNode | undefined)[] {
+  const hints: string[] = [];
+  nodes.forEach((node) => hintedNumbers(node, hints));
+  if (!hints.length) return [...nodes];
+  return nodes.map((node) => (node ? withCutDecimals(node, hints) : node));
+}
+
 function trimToSentences(text: string, max: number): string {
   const clean = completeSentences(text);
   if (!clean || clean.length <= max) return clean;
@@ -175,7 +340,11 @@ export class Polisher {
       }
       case 'hero': {
         if (emptyFigure(node.value)) return undefined;
-        return { ...node, caption: node.caption && (this.fresh(trimToSentences(withoutEmptySlots(node.caption), 160)) || undefined) };
+        const hints = [node.value, node.label];
+        const started = node.caption ? completeCutDecimal(node.caption, hints) : node.caption;
+        const trimmed = started ? this.fresh(trimToSentences(withoutEmptySlots(started), 160)) || undefined : started;
+        const caption = trimmed ? completeCutDecimal(trimmed, hints) : trimmed;
+        return { ...node, caption };
       }
       case 'stat':
         return emptyFigure(node.value) ? undefined : node;
