@@ -103,8 +103,37 @@ function writeAnswerCache(query: string, turns: Turn[]) {
   }
 }
 
+const SHARE_PATH = /^\/a\/([a-z0-9-]{4,80})\/?$/;
+
+function shareSlugFrom(path: string): string | undefined {
+  return path.match(SHARE_PATH)?.[1]?.toLowerCase();
+}
+
+interface SharePayload {
+  query: string;
+  card: AnswerCard;
+  results?: HistorySource[];
+  followups?: string[];
+}
+
+/** The published card. This request is not an ask. */
+async function loadShare(slug: string): Promise<SharePayload | undefined> {
+  const res = await fetch(`/api/share/${slug}`, { credentials: 'same-origin', headers: { accept: 'application/json' } });
+  if (!res.ok) return undefined;
+  const data = (await res.json()) as SharePayload;
+  if (!data || typeof data.query !== 'string' || !data.card || typeof data.card.title !== 'string' || !Array.isArray(data.card.body) || data.card.body.length === 0) return undefined;
+  return data;
+}
+
+async function loadShareSoon(slug: string): Promise<SharePayload | undefined> {
+  const first = await loadShare(slug);
+  if (first) return first;
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  return loadShare(slug);
+}
+
 /** A history card plus the sources its video and citations point at. */
-function turnFromHistory(query: string, card: AnswerCard, sources: HistorySource[] | undefined): Turn {
+function turnFromHistory(query: string, card: AnswerCard, sources: HistorySource[] | undefined, followups?: string[]): Turn {
   const results = (sources ?? []).map((r) => ({
     title: r.title,
     url: r.url,
@@ -120,7 +149,7 @@ function turnFromHistory(query: string, card: AnswerCard, sources: HistorySource
     question: query,
     searchId: 1,
     ...(results.length ? { search: { query, freshness: 'any' as const, results, images: [], discussions: [], engines: [] } } : {}),
-    result: { card, followups: [], engine: 'composed', pagesRead: 0, removed: 0, ms: 0 },
+    result: { card, followups: followups ?? [], engine: 'composed', pagesRead: 0, removed: 0, ms: 0 },
     variants: {},
     version: 1,
     filling: false,
@@ -185,7 +214,8 @@ export default function App() {
   const [input, setInput] = useState(initial.get('q') ?? '');
   const [chat, setChat] = useState(0);
   const mainRef = useRef<HTMLDivElement>(null);
-  const home = turns.length === 0;
+  const [sharePending, setSharePending] = useState(() => Boolean(shareSlugFrom(location.pathname)));
+  const home = turns.length === 0 && !sharePending;
   const startSearchRef = useRef<(q: string) => void>(() => undefined);
   const openHistoryRef = useRef<(q: string) => void>(() => undefined);
   const openGen = useRef(0);
@@ -253,6 +283,7 @@ export default function App() {
     const query = q.trim();
     if (!query) return;
     openGen.current += 1;
+    setSharePending(false);
     shown.current = query;
     savePending(localStorage, query);
     recordAsk(localStorage, query);
@@ -325,6 +356,7 @@ export default function App() {
 
   const newChat = () => {
     openGen.current += 1;
+    setSharePending(false);
     session.clear();
     resetUi();
     setInput('');
@@ -390,13 +422,43 @@ export default function App() {
     } catch {
       /* private mode */
     }
+    const openShare = (slug: string, q: string) => {
+      const gen = ++openGen.current;
+      const cached = q ? readAnswerCache(q) : undefined;
+      if (cached?.length) {
+        shown.current = cached[0]?.question || q;
+        session.restore(cached);
+        setSharePending(false);
+        return;
+      }
+      setSharePending(true);
+      void loadShareSoon(slug)
+        .then((share) => {
+          if (gen !== openGen.current) return;
+          setSharePending(false);
+          if (!share) return;
+          shown.current = share.query;
+          session.restore([turnFromHistory(share.query, share.card, share.results, share.followups)]);
+        })
+        .catch(() => {
+          if (gen !== openGen.current) return;
+          setSharePending(false);
+        });
+    };
     const openQuery = (q: string) => {
+      const slug = shareSlugFrom(location.pathname);
+      if (slug) {
+        openShare(slug, q);
+        return;
+      }
       // Degraded snapshots are removed by loadSnapshot, so a miss here is a normal search (one regenerate).
       const cached = readAnswerCache(q);
       if (cached) session.restore(cached);
       else session.search(q, { reset: true });
     };
-    if (!skipInitialQuery()) {
+    const slug = shareSlugFrom(location.pathname);
+    if (slug) openShare(slug, initial.get('q') ?? '');
+    else if (!skipInitialQuery()) {
       const q = initial.get('q');
       if (q) openQuery(q);
       else {
@@ -438,8 +500,13 @@ export default function App() {
       if (next === shown.current) return;
       shown.current = next;
       resetUi();
-      if (next) openQuery(next);
-      else session.clear();
+      const backSlug = shareSlugFrom(location.pathname);
+      if (backSlug) openShare(backSlug, next);
+      else if (next) openQuery(next);
+      else {
+        setSharePending(false);
+        session.clear();
+      }
     };
     window.addEventListener('popstate', onPop);
     return () => {
@@ -599,6 +666,21 @@ export default function App() {
 
             <div className={cn(SHELL, GRID, 'relative pb-[50vh] pt-5 sm:pt-8')}>
               <main ref={mainRef} className="min-w-0 space-y-8 sm:space-y-10">
+                {sharePending && turns.length === 0 && (
+                  <AnswerCardView
+                    card={{ title: '', body: LOADING }}
+                    version="share"
+                    filling
+                    streaming={false}
+                    alternatives={[]}
+                    onPattern={() => undefined}
+                    simple={false}
+                    onSimple={() => undefined}
+                    onRegenerate={() => undefined}
+                    onRetry={() => undefined}
+                    provisional
+                  />
+                )}
                 {turns.map((t, i) => <TurnView key={t.id} turn={t} first={i === 0} search={session.searchOf(t)?.search} actions={session} onSources={openSources} threadBusy={threadBusy} pendingItem={queued?.item} onQueue={setQueued} />)}
 
                 {related.length > 0 && !busy && (

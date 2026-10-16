@@ -1,4 +1,8 @@
 import { fnv1a, normalizeAnswerQuery } from './answerKey';
+import type { AnswerCard, CardNode, ImageCredit, Tone } from './card';
+import { packHistorySources, type HistorySource } from './historyCard';
+import { liveBody } from './liveBody';
+import { settleCardPrices } from './pricing';
 
 /** A public path for one finished answer. The same question always maps to the same path. */
 export function answerSlug(query: string): string {
@@ -18,6 +22,15 @@ export interface PublicAnswer {
   description: string;
   body: string;
 }
+
+/** The card a recipient opens, plus the sources its pictures and citations point at. */
+export interface ShareCard {
+  card: AnswerCard;
+  results: HistorySource[];
+  followups: string[];
+}
+
+const TONES = new Set<Tone>(['default', 'muted', 'primary', 'positive', 'negative', 'warning']);
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!);
 
@@ -50,15 +63,37 @@ function pushText(node: unknown, out: string[]): void {
   if (Array.isArray(row.facts)) for (const fact of row.facts) pushText(fact, out);
 }
 
-/** Read a finished SSE stream into the fields a crawler should see. Undefined when there is no card. */
-export function publicAnswerFromFrames(query: string, frames: readonly string[]): PublicAnswer | undefined {
+interface ReadAnswer {
+  title: string;
+  subtitle: string;
+  icon?: string;
+  accent?: Tone;
+  nodes: (CardNode | undefined)[];
+  credits: ImageCredit[];
+  followups: string[];
+  results: HistorySource[];
+  parts: string[];
+  skip: boolean;
+}
+
+function isCardNode(value: unknown): value is CardNode {
+  return !!value && typeof value === 'object' && typeof (value as { type?: unknown }).type === 'string';
+}
+
+/** One pass over a finished stream: crawler text, and the card the app restores. */
+function readAnswer(query: string, frames: readonly string[]): ReadAnswer {
   let title = '';
   let subtitle = '';
+  let icon: string | undefined;
+  let accent: Tone | undefined;
+  const nodes: (CardNode | undefined)[] = [];
+  const credits: ImageCredit[] = [];
+  let followups: string[] = [];
+  let results: HistorySource[] = [];
   const parts: string[] = [];
   let degraded = false;
   let choices = false;
   let extractive = false;
-  let nodes = 0;
   for (const frame of frames) {
     const event = frame.match(/^event: (\w+)/)?.[1];
     const data = frame.match(/^data: (.*)$/m)?.[1];
@@ -69,13 +104,37 @@ export function publicAnswerFromFrames(query: string, frames: readonly string[])
     } catch {
       continue;
     }
-    const row = parsed as { title?: string; subtitle?: string; node?: unknown; engine?: string; degraded?: boolean; choices?: unknown };
+    const row = parsed as {
+      title?: string;
+      subtitle?: string;
+      icon?: string;
+      accent?: string;
+      index?: number;
+      node?: unknown;
+      engine?: string;
+      degraded?: boolean;
+      choices?: unknown;
+      results?: unknown;
+      src?: string;
+      link?: string;
+      credit?: string;
+      license?: ImageCredit['license'];
+    };
     if (event === 'head') {
       title = row.title?.trim() || title;
       subtitle = row.subtitle?.trim() || subtitle;
-    } else if (event === 'node' && row.node) {
-      nodes += 1;
+      if (typeof row.icon === 'string' && row.icon) icon = row.icon;
+      if (row.accent && TONES.has(row.accent as Tone)) accent = row.accent as Tone;
+    } else if (event === 'node' && isCardNode(row.node)) {
+      const index = typeof row.index === 'number' && row.index >= 0 ? Math.floor(row.index) : nodes.length;
+      nodes[index] = row.node;
       pushText(row.node, parts);
+    } else if (event === 'search' && Array.isArray(row.results)) {
+      results = packHistorySources(row.results as { title?: string; url?: string; snippet?: string; domain?: string; image?: string; date?: string }[]);
+    } else if (event === 'credit' && typeof row.src === 'string' && typeof row.link === 'string' && typeof row.credit === 'string' && row.license) {
+      credits.push({ src: row.src, link: row.link, credit: row.credit, license: row.license });
+    } else if (event === 'followups' && Array.isArray(parsed)) {
+      followups = parsed.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).slice(0, 8);
     } else if (event === 'done') {
       if (row.engine === 'extractive' || row.degraded) extractive = true;
       if (Array.isArray(row.choices)) choices = true;
@@ -83,16 +142,78 @@ export function publicAnswerFromFrames(query: string, frames: readonly string[])
       degraded = true;
     }
   }
-  if (!nodes || degraded || choices || extractive) return undefined;
-  const heading = title || query.trim();
-  const body = [subtitle, ...parts].map((s) => s.replace(/\s+/g, ' ').trim()).filter(Boolean).join('\n');
+  return {
+    title,
+    subtitle,
+    icon,
+    accent,
+    nodes,
+    credits,
+    followups,
+    results,
+    parts,
+    skip: !nodes.some(Boolean) || degraded || choices || extractive,
+  };
+}
+
+/** Read a finished SSE stream into the fields a crawler should see. Undefined when there is no card. */
+export function publicAnswerFromFrames(query: string, frames: readonly string[]): PublicAnswer | undefined {
+  const read = readAnswer(query, frames);
+  if (read.skip) return undefined;
+  const heading = read.title || query.trim();
+  const body = [read.subtitle, ...read.parts].map((s) => s.replace(/\s+/g, ' ').trim()).filter(Boolean).join('\n');
   if (!heading || !body) return undefined;
   return {
     slug: answerSlug(query),
     query: query.trim(),
     title: clip(heading, 70),
-    description: clip(subtitle || body, 160),
+    description: clip(read.subtitle || body, 160),
     body: body.slice(0, 8000),
+  };
+}
+
+/** The same finished stream, as the card the app shows. Undefined when the answer is not published. */
+export function shareCardFromFrames(query: string, frames: readonly string[]): ShareCard | undefined {
+  const read = readAnswer(query, frames);
+  if (read.skip) return undefined;
+  const body = liveBody({ nodes: settleCardPrices(read.nodes, query), regions: [] }, false);
+  if (!body.length) return undefined;
+  return {
+    card: {
+      title: read.title || query.trim(),
+      ...(read.subtitle ? { subtitle: read.subtitle } : {}),
+      ...(read.icon ? { icon: read.icon } : {}),
+      ...(read.accent ? { accent: read.accent } : {}),
+      body,
+      ...(read.credits.length ? { credits: read.credits } : {}),
+    },
+    results: read.results,
+    followups: read.followups,
+  };
+}
+
+export interface ShareView {
+  query: string;
+  card: AnswerCard;
+  results: HistorySource[];
+  followups: string[];
+}
+
+/** A stored card when the answer has one, otherwise the published text inside a card. */
+export function shareView(page: PublicAnswer, share: ShareCard | undefined): ShareView {
+  if (share && share.card.body.length > 0) {
+    return { query: page.query, card: share.card, results: share.results, followups: share.followups };
+  }
+  const lines = page.body.split('\n').map((line) => line.trim()).filter(Boolean);
+  return {
+    query: page.query,
+    card: {
+      title: page.title,
+      ...(page.description ? { subtitle: page.description } : {}),
+      body: lines.map((text) => ({ type: 'text', text })),
+    },
+    results: [],
+    followups: [],
   };
 }
 
@@ -100,14 +221,13 @@ export function publicAnswerFromFrames(query: string, frames: readonly string[])
 export function renderAnswerHtml(page: PublicAnswer, origin: string): string {
   const url = `${origin}/a/${page.slug}`;
   const image = `${origin}/og/${page.slug}.png`;
-  const ask = `${origin}/?${new URLSearchParams({ q: page.query })}`;
   const paragraphs = page.body.split('\n').map((line) => `    <p>${esc(line)}</p>`).join('\n');
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${esc(page.title)} — ZO</title>
+  <title>zo</title>
   <meta name="description" content="${esc(page.description)}" />
   <link rel="canonical" href="${esc(url)}" />
   <meta name="robots" content="index, follow" />
@@ -133,11 +253,9 @@ export function renderAnswerHtml(page: PublicAnswer, origin: string): string {
 </head>
 <body>
   <main>
-    <p class="ask"><a href="${esc(origin)}/">ZO</a> — Good search should be free.</p>
     <h1>${esc(page.title)}</h1>
-    <p class="ask">Asked: ${esc(page.query)}</p>
+    <p class="ask">${esc(page.query)}</p>
 ${paragraphs}
-    <p class="ask"><a href="${esc(ask)}">Open this in ZO</a></p>
   </main>
 </body>
 </html>`;
