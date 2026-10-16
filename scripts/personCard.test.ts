@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import type { CardNode } from '../shared/card.ts';
 import type { ImageResult, SearchResult } from '../shared/types.ts';
 import { PictureResolver } from '../server/pictures.ts';
-import { accepts, namesakeLabel, personPortrait, properName, targetFor } from '../server/imageGate.ts';
+import { accepts, namesakeLabel, personPortrait, portraitMatches, properName, targetFor } from '../server/imageGate.ts';
 import { fillRowImages } from '../server/rowImages.ts';
 import { personFacts, profileFallback } from '../server/profileFallback.ts';
 import { priorEntity, resolveEntity } from '../server/entity.ts';
@@ -70,9 +70,17 @@ test('tiles on a one-person card keep their icons instead of a company logo or a
 
 test('the profile photo on a one-person card is still that person', () => {
   const shown: CardNode[] = [];
-  personResolver(shown).emit({ type: 'profile', name: 'Timothy Estrada', imageRef: 0 }, 0, (n) => shown.push(n));
+  personResolver(shown).emit({ type: 'profile', name: 'Timothy Estrada', subtitle: 'Software Engineer at BlueFlame AI', imageRef: 0 }, 0, (n) => shown.push(n));
   const profile = shown[0];
-  assert.equal(profile?.type === 'profile' ? profile.imageRef : -1, 0);
+  // The original headshot's page does not name BlueFlame, so it is not this person's portrait.
+  assert.equal(profile?.type === 'profile' ? profile.imageRef : -1, undefined);
+  assert.match(profile?.type === 'profile' ? profile.imageQuery ?? '' : '', /Timothy Estrada/);
+  assert.match(profile?.type === 'profile' ? profile.imageQuery ?? '' : '', /BlueFlame/i);
+  const kept: CardNode[] = [];
+  const linkedin = pic('Timothy Estrada - Software Engineer - BlueFlame AI | LinkedIn', 'https://media.licdn.com/tim-estrada.jpg', 'https://www.linkedin.com/in/tim-estrada');
+  new PictureResolver({} as Env, [linkedin], () => undefined, 'Timothy Estrada', async () => [], { results: rows, hintFor: hint, person: 'Timothy Estrada' })
+    .emit({ type: 'profile', name: 'Timothy Estrada', subtitle: 'Software Engineer at BlueFlame AI', imageRef: 0 }, 0, (n) => kept.push(n));
+  assert.equal(kept[0]?.type === 'profile' ? kept[0].imageRef : -1, 0);
 });
 
 test('a snippet-only person card is the standard profile with a third-person summary', () => {
@@ -95,6 +103,21 @@ test('a snippet-only person card is the standard profile with a third-person sum
     assert.match(text.text, /New Jersey Institute of Technology/);
   }
   assert.ok(!body.some((n) => n.type === 'gallery' || n.type === 'section'));
+});
+
+test('a resolved person does not take a namesake portrait from the original results', () => {
+  const psych = 'https://psychology.example/scott.jpg';
+  const job = 'https://media.licdn.com/dms/image/scott.jpg';
+  assert.equal(portraitMatches(['blueflame'], { title: 'Scott Eberle', url: 'https://psychology.example/scott-eberle', thumb: psych, snippet: 'Psychologist and author.' }), false);
+  assert.equal(personPortrait('Scott Eberle', [
+    { title: 'Scott Eberle', url: 'https://psychology.example/scott-eberle', snippet: 'Psychologist and author.', image: psych },
+  ], ['blueflame']), undefined);
+  const shown = personPortrait('Scott Eberle', [
+    { title: 'Scott Eberle', url: 'https://psychology.example/scott-eberle', snippet: 'Psychologist and author.', image: psych },
+    { title: 'Scott Eberle - Senior Software Engineer - BlueFlame AI', url: 'https://www.linkedin.com/in/scott-eberle', snippet: 'Senior Software Engineer at BlueFlame AI', image: job },
+  ], ['blueflame']);
+  assert.equal(shown?.src, job);
+  assert.equal(shown?.url, 'https://www.linkedin.com/in/scott-eberle');
 });
 
 test('a cited page portrait is the profile photo, including a LinkedIn one', () => {

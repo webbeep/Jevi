@@ -359,14 +359,45 @@ export function portraitSrcOk(src: string): boolean {
  * The portrait on a page that is about this person. Logos, team graphics, and other
  * people's photos are left out. Undefined when the page has no usable portrait.
  */
+const ROLE_GENERIC = new Set(['senior', 'lead', 'staff', 'principal', 'chief', 'head', 'manager', 'director', 'associate', 'assistant', 'vice', 'officer', 'current', 'former']);
+
+/** Company words, or the role words when the card names no company. These say which person the portrait is. */
+export function portraitMarks(role?: string, org?: string): string[] {
+  const orgToks = tokens(org ?? '').filter((t) => t.length >= 3 && !STOP.has(t) && !ORG_GENERIC.has(t));
+  const roleToks = tokens(role ?? '').filter((t) => t.length >= 4 && !STOP.has(t) && !ROLE_GENERIC.has(t) && !ORG_GENERIC.has(t));
+  return [...new Set(orgToks.length ? orgToks : roleToks)];
+}
+
+/** The company or role written on a profile, used to keep another namesake's photo off it. */
+export function profilePortraitMarks(node: { subtitle?: string; facts?: { label: string; value: string }[] }): string[] {
+  const company = node.facts?.find((f) => /company|employer|organi[sz]ation/i.test(f.label))?.value;
+  const role = node.facts?.find((f) => /^(role|title|position|occupation)$/i.test(f.label))?.value;
+  const at = !company && node.subtitle ? /\bat\s+(.+)$/i.exec(node.subtitle) : undefined;
+  return portraitMarks(role || (at ? undefined : node.subtitle), company || at?.[1]);
+}
+
+/** Hint context words that tell this person from a namesake. */
+export function contextMarks(context?: string[]): string[] {
+  return [...new Set((context ?? []).flatMap((c) => tokens(c)).filter((t) => t.length >= 3 && !STOP.has(t) && !ORG_GENERIC.has(t)))];
+}
+
+/** The picture's page carries a word of the resolved company or role. */
+export function portraitMatches(marks: readonly string[], img: { title?: string; url?: string; thumb?: string; source?: string; snippet?: string }): boolean {
+  if (!marks.length) return true;
+  const words = tokens(`${img.title ?? ''} ${img.snippet ?? ''} ${img.url ?? ''} ${img.thumb ?? ''} ${img.source ?? ''}`);
+  return marks.some((mark) => words.includes(mark) || (mark.length >= 5 && words.some((word) => word.includes(mark))));
+}
+
 export function personPortrait(
   person: string,
-  pages: readonly { title?: string; url: string; image?: string }[],
+  pages: readonly { title?: string; url: string; image?: string; snippet?: string; source?: string }[],
+  marks: readonly string[] = [],
 ): { src: string; url: string } | undefined {
   const hits = pages.flatMap((page) => {
     const src = page.image;
     if (!src || !portraitSrcOk(src) || isComposite({ title: page.title ?? '', thumb: src })) return [];
     if (!personPage(person, page)) return [];
+    if (marks.length && !portraitMatches(marks, { ...page, thumb: src })) return [];
     return [{ src, url: page.url, rank: slugHasName(person, page.url) ? 1 : 0 }];
   });
   hits.sort((a, b) => b.rank - a.rank);

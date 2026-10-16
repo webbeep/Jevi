@@ -3,7 +3,7 @@ import { claimsFigure, showsFigure } from '../shared/figure';
 import { fileWords, fitsEntity, isComposite, namesSibling, rankForEntity, splitEntities } from '../shared/imagematch';
 import type { ImageResult } from '../shared/types';
 import { findImages } from './images';
-import { type GateContext, type PicTarget, accepts, mentions, mentionsAny, nameLike, namedTarget, namesPerson, targetFor, withHint } from './imageGate';
+import { type GateContext, type PicTarget, accepts, contextMarks, mentions, mentionsAny, nameLike, namedTarget, namesPerson, personPage, portraitMatches, profilePortraitMarks, targetFor, withHint } from './imageGate';
 import { corpusOf, fillRowImages, hasBlankPictures, rowEntity, type RowImageDeps } from './rowImages';
 import type { Env } from './util';
 
@@ -166,6 +166,26 @@ export class PictureResolver {
     return withHint({ kind: 'named', entity: name }, this.ctx);
   }
 
+  /**
+   * A profile photo has to be a page about the resolved person. A picture from the
+   * original results whose page is someone else is dropped, and the portrait is searched again.
+   */
+  private vetProfile(node: Extract<CardNode, { type: 'profile' }>): CardNode {
+    const target = this.profileTarget(node.name);
+    const placed = this.place(node.name, node.imageRef, node.imageQuery, target);
+    const marks = [...new Set([...profilePortraitMarks(node), ...contextMarks(target.hint?.context)])];
+    if (!marks.length) return { ...node, ...placed };
+    const img = placed.imageSrc
+      ? this.pool.find((p) => p.thumb === placed.imageSrc)
+      : placed.imageRef !== undefined ? this.pool[placed.imageRef] : undefined;
+    if (img && portraitMatches(marks, img) && personPage(node.name, img)) return { ...node, ...placed };
+    const company = node.facts?.find((f) => /company|employer|organi[sz]ation/i.test(f.label))?.value;
+    const role = node.facts?.find((f) => /^(role|title|position|occupation)$/i.test(f.label))?.value;
+    const at = !company && node.subtitle ? /\bat\s+(.+)$/i.exec(node.subtitle) : undefined;
+    const query = [node.name, company || at?.[1] || role || target.hint?.context?.[0]].filter(Boolean).join(' ');
+    return { ...node, imageRef: undefined, imageSrc: undefined, imageQuery: query };
+  }
+
   /** Card-level pictures: on a one-person card that person's photo, else anything that mentions the subject. */
   private cardPicture(img: ImageResult, about = this.subject): boolean {
     return this.ctx.person ? accepts(this.profileTarget(this.ctx.person), img) : mentionsAny(about, img);
@@ -176,7 +196,7 @@ export class PictureResolver {
       case 'tile':
         return { ...node, ...this.place(node.label, node.imageRef, node.imageQuery, this.tileTarget(node)) };
       case 'profile':
-        return { ...node, ...this.place(node.name, node.imageRef, node.imageQuery, this.profileTarget(node.name)) };
+        return this.vetProfile(node);
       case 'stat': {
         // A designer-supplied stat picture must pass the gate on its own URL; attribute stats never keep one.
         if (!node.image) return node;

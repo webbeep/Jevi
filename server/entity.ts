@@ -2118,6 +2118,13 @@ export function resolveEntity(
     }
   }
 
+  // A bare name whose sources describe different careers is several people. Ask which one
+  // before any of those careers share a card.
+  if (bare && !opts?.prior) {
+    const careers = careerChoices(name, rows);
+    if (careers) return { kind: 'choices', choices: careers };
+  }
+
   // Single: the top-ranked cluster for a bare ask (else the biggest), weak rows attached to it.
   const lead = famous ? ranked.find((r) => r.cluster.some((i) => exactWikiArticle(rows[i]!, name))) ?? rivals[0] : rivals[0];
   const pool = bare && lead ? [lead.cluster] : merged;
@@ -2131,6 +2138,49 @@ export function resolveEntity(
     kept: [...win],
     dropped: rows.map((_, i) => i).filter((i) => !kept.has(i)),
   };
+}
+
+const SHARED_NAME = /\b(?:multiple|several|many|different) people\b|\bshare(?:s|d)? (?:this|the same) name\b|\b(?:people|persons) (?:named|called|with (?:this|the) name)\b/i;
+
+/**
+ * The sources name more than one person: a page says so, or the pages give them
+ * different careers and no single encyclopedia article is the person.
+ */
+export function mixedIdentities(name: string, rows: EntityRow[]): boolean {
+  if (!name || rows.length < 2) return false;
+  const text = (row: EntityRow) => `${row.title ?? ''} ${row.snippet ?? ''}`;
+  if (rows.some((row) => SHARED_NAME.test(text(row)))) return true;
+  if (rows.some((row) => exactWikiArticle(row, name))) return false;
+  const cores = new Set<string>();
+  for (const row of rows) {
+    if (isDisambiguationPage(row)) continue;
+    const sig = extractSignals(row, name);
+    if (!sig.hasName) continue;
+    for (const core of sig.roleCores) cores.add(core);
+  }
+  return cores.size >= 2;
+}
+
+/** One choice per career when the same bare name belongs to more than one person. */
+function careerChoices(name: string, rows: EntityRow[]): EntityChoice[] | undefined {
+  if (!mixedIdentities(name, rows)) return undefined;
+  const groups = new Map<string, number[]>();
+  rows.forEach((row, i) => {
+    if (isDisambiguationPage(row)) return;
+    const sig = extractSignals(row, name);
+    if (!sig.hasName || !sig.roleCores.length) return;
+    const core = sig.roleCores[0]!;
+    const list = groups.get(core) ?? [];
+    list.push(i);
+    groups.set(core, list);
+  });
+  if (groups.size < 2) return undefined;
+  const choices = [...groups.values()]
+    .sort((a, b) => b.length - a.length || a[0]! - b[0]!)
+    .slice(0, 3)
+    .map((cluster) => toChoice(name, cluster, rows))
+    .filter(offerChoice);
+  return choices.length >= 2 ? choices : undefined;
 }
 
 /** The ask's words after the person name ("Ray Lee BlueFlame AI" → "BlueFlame AI"). */
@@ -2379,7 +2429,10 @@ export function entityHintFor(entity: Entity, query = ''): (label: string) => En
     if ((surname && lt.includes(surname)) || (key && lt.includes(key))) {
       // Person: their photo must also name the chosen org (or come from its domains), never a namesake's.
       if (needCtx.length) return { name: entity.name, aliases: entity.aliases, domains: entity.domains, context: needCtx, strict: true, requireContext: true };
-      return { name: entity.name, aliases: entity.aliases, domains: entity.domains, ...(org ? { context: [org], ...(strict ? { strict: true } : {}) } : {}) };
+      // The card settled on this person. A portrait has to name their company or role, not only the shared name.
+      const resolved = org ? [org] : entity.role ? [entity.role] : [];
+      if (resolved.length) return { name: entity.name, aliases: entity.aliases, domains: entity.domains, context: resolved, ...(strict ? { strict: true } : {}), requireContext: true };
+      return { name: entity.name, aliases: entity.aliases, domains: entity.domains };
     }
     return undefined;
   };

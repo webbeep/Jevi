@@ -35,9 +35,10 @@ import {
   priorEntity,
   publicChoices,
   resolveEntity,
+  mixedIdentities,
 } from './entity';
 import { fetchWikiArticle, fetchWikiDisambiguation, fetchWikiLeadImage } from './wikiSearch';
-import { type EntityHint, mentionsAny } from './imageGate';
+import { type EntityHint, mentionsAny, personPage, portraitMarks, portraitMatches } from './imageGate';
 import type { RowImagePlan } from './pictures';
 import type { AnswerCard, CardNode, FollowupContext, FollowupIntent, LayoutPlan } from '../shared/card';
 import { type AskRef, cardSearchQuery, plainFollowup, refContext, topicOf, usefulFollowups, withRef } from '../shared/askAbout';
@@ -187,9 +188,11 @@ function rowImagePlan(req: DesignArgs, env: Env, scope: AskScope): RowImagePlan 
 /** Card types that show pictures. Only these may spend the extra Serper /images call. */
 const PICTURE_PATTERNS = new Set(['visual', 'profile', 'spotlight', 'ranked', 'briefing']);
 
-function imageBoost(pattern: string, search: SearchResponse, env: Env, scope: AskScope, query: string): Promise<ImageResult[]> | undefined {
+function imageBoost(pattern: string, search: SearchResponse, env: Env, scope: AskScope, query: string, again = false): Promise<ImageResult[]> | undefined {
   if (!PICTURE_PATTERNS.has(pattern) || scope.ledger.force) return undefined;
-  if (search.images.some((i) => i.license === 'source') || !search.results.length) return undefined;
+  if (!search.results.length) return undefined;
+  // A resolved person gets a new portrait search. Pictures already on the original results are not that search.
+  if (!again && search.images.some((i) => i.license === 'source')) return undefined;
   // Only when Serper served this search. Cap reached (or Serper skipped/dead): no /images call and no other image provider; og:image or nothing.
   if (!search.engines.some((e) => e.name === 'serper' && e.ok)) return undefined;
   // T443: card-level pictures must mention the subject; a wrong picture is worse than none.
@@ -1121,8 +1124,9 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   const plan = await planned;
   // A bare "who is" for someone without an encyclopedia page, whose namesakes the heuristic dropped:
   // the model may still see several people worth offering ("who is Ed Chu" → oncologist, EPA official, CEO).
-  const unsure = !steer && decision.kind === 'single' && !prior && decision.dropped.length >= 2 && WHO_ASK.test(query) && !distinguishingTerms(query).length
-    && !results.knowledge && !decision.kept.some((i) => /\.wikipedia\.org\//i.test(results.results[i]?.url ?? ''));
+  const mixed = !steer && decision.kind === 'single' && !prior && !distinguishingTerms(query).length && mixedIdentities(decision.entity.name, results.results);
+  const unsure = mixed || (!steer && decision.kind === 'single' && !prior && decision.dropped.length >= 2 && WHO_ASK.test(query) && !distinguishingTerms(query).length
+    && !results.knowledge && !decision.kept.some((i) => /\.wikipedia\.org\//i.test(results.results[i]?.url ?? '')));
   const split = rejectedSplit ?? (unsure ? await splitPeople(decision.entity.name, results.results, env) : undefined);
   if (split) console.log(JSON.stringify({ zo: 'entity', kind: 'choices', choices: split.length, by: 'model-over-single' }));
   if (split) {
@@ -1136,6 +1140,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   let designContext = context;
   let entityHint: ((entity: string) => EntityHint | undefined) | undefined;
   let boostQuery = query;
+  let portraitAgain = false;
   let pattern = plan.pattern;
   let website: number | undefined;
   let person: DesignArgs['person'];
@@ -1162,7 +1167,17 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     }
     entityHint = entityHintFor(decision.entity, query);
     // Name + the asker's own context ("Ray Lee BlueFlame AI") pulls that person's photos, not a namesake's.
-    boostQuery = contextTerms(query).length ? query : decision.entity.name;
+    const marks = portraitMarks(decision.entity.role, decision.entity.org);
+    portraitAgain = marks.length > 0;
+    if (portraitAgain) {
+      results = {
+        ...results,
+        images: results.images.filter((img) => personPage(decision.entity.name, img) && portraitMatches(marks, img)),
+      };
+    }
+    boostQuery = portraitAgain
+      ? [decision.entity.name, decision.entity.org || decision.entity.role].filter(Boolean).join(' ')
+      : (contextTerms(query).length ? query : decision.entity.name);
     // Person singles must be profile cards so image boost + row pictures run (Lead GATE: David Kim / BlueFlame had 0 imgs on answer pattern),
     // unless the ask is about something of theirs ("Jaylen Brown injuries"): that keeps the planned layout.
     if (pattern !== 'profile' && !askTopic(query, decision.entity.name)) {
@@ -1197,7 +1212,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   const official = foldReadyOfficial(query, results, officialEarly);
   if (official !== results) results = official;
   send('search', results);
-  const boost = imageBoost(pattern, results, env, scope, boostQuery);
+  const boost = imageBoost(pattern, results, env, scope, boostQuery, portraitAgain);
   const crypto = cryptographyHint(query, results.results);
   await design(send, env, { query, pattern, depth: plan.depth, readPages: plan.readPages || deep || fromSeeds, search: results, context: [designContext, crypto].filter(Boolean).join('\n') || undefined, intent: u?.intent, deep, boost, entityHint, person, ticker: quote ? tickerNode(quote) : keepTicker, earlyBrief, website, allowRescue: !isPaperAsk(query), hopUrls }, started, scope, late);
 }

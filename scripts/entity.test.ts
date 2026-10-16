@@ -10,6 +10,7 @@ import {
   priorEntity,
   publicChoices,
   resolveEntity,
+  mixedIdentities,
   givenWithPlace,
   workplaceQueries,
   disambiguationEntries,
@@ -237,14 +238,15 @@ describe('T444 entity disambiguation', () => {
     assert.ok(!h.context!.includes('founder'), 'role word is not enough when an org exists');
     const actor: Entity = { id: 'david-kim-actor', name: 'David Kim', role: 'Actor', terms: ['actor'] };
     assert.deepEqual(entityHintFor(actor, 'David Kim Actor')('David Kim')!.context, ['actor']);
-    assert.equal(entityHintFor(c2, 'Who is David Kim')('David Kim')!.requireContext, undefined);
-    assert.equal(entityHintFor(c2, 'David Kim')('David Kim')!.requireContext, undefined);
+    assert.equal(entityHintFor(c2, 'Who is David Kim')('David Kim')!.requireContext, true);
+    assert.equal(entityHintFor(c2, 'David Kim')('David Kim')!.requireContext, true);
   });
 
   test('t451: entityHintFor marks the hint strict only when the ask names the org', () => {
     const entity: Entity = { id: 'ray-lee-ceo-raycon', name: 'Ray Lee', role: 'CEO', org: 'Raycon', terms: ['ceo', 'raycon'] };
     assert.equal(entityHintFor(entity, 'Raycon CEO')('Ray Lee')!.strict, true);
     assert.equal(entityHintFor(entity, 'Who is Ray Lee')('Ray Lee')!.strict, undefined);
+    assert.equal(entityHintFor(entity, 'Who is Ray Lee')('Ray Lee')!.requireContext, true);
     assert.deepEqual(entityHintFor(entity, 'Who is Ray Lee')('Ray Lee')!.context, ['Raycon']);
   });
 
@@ -338,6 +340,22 @@ test('SPD-C1: a capitalised topic inside a longer question is not a person ask',
   assert.equal(isPersonAsk('Taylor Swift latest album'), true);
   assert.equal(isPersonAsk('Barack Obama'), true);
   assert.equal(isPersonAsk('Who is Jensen Huang'), true);
+});
+
+test('a name shared by different careers asks which person', () => {
+  const rows = [
+    row('Scott Eberle', 'Multiple people share this name.', 'https://example.com/names'),
+    row('Scott Eberle, MD', 'Scott Eberle is a hospice physician.', 'https://example.com/hospice'),
+    row('Scott Eberle, author', 'Scott Eberle is the author of The Soul\'s Red Thread.', 'https://example.com/author'),
+    row('Scott Eberle, attorney', 'Scott Eberle is an attorney in Illinois.', 'https://example.com/law'),
+  ];
+  assert.equal(mixedIdentities('Scott Eberle', rows), true);
+  const d = resolveEntity('Scott Eberle', rows);
+  assert.equal(d.kind, 'choices');
+  if (d.kind !== 'choices') return;
+  assert.ok(d.choices.length >= 2);
+  const descriptors = d.choices.map((c) => c.descriptor.toLowerCase());
+  assert.ok(descriptors.some((d) => /physician|author|attorney/.test(d)), descriptors.join(' | '));
 });
 
 test('Wikipedia disambiguation page seeds choices (live: Who is Ray Lee / David Kim)', () => {
