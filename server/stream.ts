@@ -49,7 +49,8 @@ import { rewriteQuery } from './ai';
 import { type DesignRequest, designParallel, designStream, gateNode } from './design';
 import { BRIEF_ROWS, briefSources, remapBrief, type SourceBrief } from './brief';
 import { claimSources, groundMembers } from './claims';
-import { answerTitle, keepAnswerBody, restoreKeptPapers } from './cardAgree';
+import { answerTitle, fillPaperCard, keepAnswerBody, restoreKeptPapers } from './cardAgree';
+import { dropDisputedBio, type BioSource } from './bioFacts';
 import { abstainComputed, alignFactProse, cardFacts, factAnswer, hasMemberWork, hopQueries, leadMemberRows, nextHop, placeFactLead, unsupportedYear } from './hops';
 import { gapQuery, onTopicCount, rescueQuery, sourcesMiss } from './rescue';
 import { keepPictures, reviewCard, type Review } from './review';
@@ -67,7 +68,7 @@ import type { WebHit } from './cascade';
 import { domainOf } from './util';
 import { choicesIn, distinctActions, subjectWords } from './chips';
 import { anchoredFollowup, asksToCompare, cryptographyHint, faithfulQuery, followSearchQuery, isWritingAsk, needsOwnSearch, ownQuestion, personQuestion, quickPlan, quoteFollowQuery, screenSubject, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
-import { calculationAnswer, isCalculationAsk } from './calculate';
+import { calculationAnswer, isCalculationAsk, rateOnAmount } from './calculate';
 import { comparisonRepair, comparisonTitle } from './compareAnswer';
 import { withFinishedSentences } from './polish';
 import { queryWithPlace, readerPlace, settleReadings } from './readings';
@@ -132,6 +133,8 @@ interface DesignArgs {
   search: SearchResponse;
   simple?: boolean;
   followup?: FollowupContext;
+  /** A follow-up search. A precise bio fact the new question does not ask for is not copied onto the card. */
+  fromFollowup?: boolean;
   context?: string;
   think?: boolean;
   intent?: string;
@@ -262,16 +265,18 @@ function noteSpelling(send: Send, typed: string, rows: readonly { title?: string
 /** Words already on the card that tell this person from someone else with the same name. */
 function personCue(card: AnswerCard | undefined): string {
   if (!card) return '';
-  const bits: string[] = [];
-  if (card.subtitle) bits.push(card.subtitle);
-  const walk = (nodes: readonly CardNode[]): void => {
+  if (card.subtitle?.trim()) return card.subtitle.replace(/\s+/g, ' ').trim().slice(0, 80);
+  const walk = (nodes: readonly CardNode[]): string => {
     for (const node of nodes) {
-      if (node.type === 'profile' && node.subtitle) bits.push(node.subtitle);
-      if ('children' in node && Array.isArray(node.children)) walk(node.children);
+      if (node.type === 'profile' && node.subtitle?.trim()) return node.subtitle.replace(/\s+/g, ' ').trim().slice(0, 80);
+      if ('children' in node && Array.isArray(node.children)) {
+        const nested = walk(node.children);
+        if (nested) return nested;
+      }
     }
+    return '';
   };
-  walk(card.body);
-  return bits.join(' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+  return walk(card.body);
 }
 
 type OfficialSearch = Awaited<ReturnType<typeof searchWithLate>>;
@@ -359,7 +364,12 @@ async function rescueSources(send: Send, env: Env, req: DesignArgs, brief: Sourc
  * has the number. Waiting on more page reads is what held the card back.
  */
 function pagesCanWait(req: DesignArgs): boolean {
-  if (isPersonAsk(req.query) && (req.search.knowledge?.extract?.length ?? 0) > 180) return true;
+  if (isPersonAsk(req.query) && (req.search.knowledge?.extract?.length ?? 0) > 180) {
+    const blob = `${req.search.knowledge?.extract ?? ''}\n${req.search.results.slice(0, 8).map((row) => `${row.title ?? ''} ${row.snippet ?? ''}`).join('\n')}`;
+    // A birthplace, ownership share, or award has to be checked against the page, not only the snippet.
+    if (/\b(?:born|birthplace|owns?|ownership|stake|medal|award|honou?r)\b/i.test(blob)) return false;
+    return true;
+  }
   if (heuristicPattern(req.query) !== 'briefing' || guessFreshness(req.query) !== 'day') return false;
   return req.search.results.slice(0, 5).some((row) => hostTier(row.domain) === 0 && /\d/.test(`${row.title} ${row.snippet}`));
 }
@@ -495,7 +505,24 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       ...designReq.pages.map((page) => page.text),
       ...designReq.search.results.map((row) => `${row.title ?? ''} ${row.snippet ?? ''}`),
     ].join('\n');
-    const quality = keepAnswerBody(questionOf(), restoreKeptPapers(questionOf(), finishQuality(questionOf(), settled.nodes, head?.subtitle ?? ''), designReq.followup?.baseCard?.body, claimSources(designReq.search.results, designReq.pages)), recovered);
+    const question = questionOf();
+    const paperSources = designReq.search.results.map((row, index) => {
+      const page = designReq.pages.find((item) => item.n === index + 1);
+      return { title: row.title, url: row.url, domain: row.domain, text: `${row.title ?? ''} ${row.snippet ?? ''} ${row.content ?? ''} ${page?.text ?? ''}` };
+    });
+    const bioSources: BioSource[] = designReq.search.results.map((row, index) => {
+      const page = designReq.pages.find((item) => item.n === index + 1);
+      const stated = `${row.title ?? ''} ${row.snippet ?? ''}`.trim();
+      return { title: row.title, url: row.url, domain: row.domain, text: page ? `${row.title ?? ''}\n${page.text}` : `${stated} ${row.content ?? ''}`, ...(page ? { stated } : {}) };
+    });
+    const knowledge = designReq.search.knowledge;
+    if (knowledge?.extract) bioSources.unshift({ title: knowledge.title, url: knowledge.url, domain: 'wikipedia.org', text: `${knowledge.title}\n${knowledge.extract}` });
+    const agreed = dropDisputedBio(
+      fillPaperCard(question, keepAnswerBody(question, restoreKeptPapers(question, finishQuality(question, settled.nodes, head?.subtitle ?? ''), designReq.followup?.baseCard?.body, claimSources(designReq.search.results, designReq.pages)), recovered), paperSources),
+      bioSources,
+      { person: designReq.person?.name, question, followup: !!designReq.followup || !!designReq.fromFollowup },
+    );
+    const quality = agreed;
     if (head) {
       if (settled.head) head = { ...head, title: settled.head.title, subtitle: settled.head.subtitle };
       const title = answerTitle(questionOf(), head.title, quality.map((node) => (node ? JSON.stringify(node) : '')).join('\n'));
@@ -1230,7 +1257,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   send('search', results);
   const boost = imageBoost(pattern, results, env, scope, boostQuery, portraitAgain);
   const crypto = cryptographyHint(query, results.results);
-  await design(send, env, { query, pattern, depth: plan.depth, readPages: plan.readPages || deep || fromSeeds, search: results, context: [designContext, crypto].filter(Boolean).join('\n') || undefined, intent: u?.intent, deep, boost, entityHint, person, ticker: quote ? tickerNode(quote) : keepTicker, earlyBrief, website, allowRescue: !isPaperAsk(query), hopUrls }, started, scope, late);
+  await design(send, env, { query, pattern, depth: plan.depth, readPages: plan.readPages || deep || fromSeeds, search: results, context: [designContext, crypto].filter(Boolean).join('\n') || undefined, intent: u?.intent, deep, boost, entityHint, person, ticker: quote ? tickerNode(quote) : keepTicker, earlyBrief, website, allowRescue: !isPaperAsk(query), hopUrls, fromFollowup: rewritten && !isPersonAsk(query) }, started, scope, late);
 }
 
 /** The profile on the card, wherever the layout put it, links the person's own website. */
@@ -1327,6 +1354,19 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
 
   // Arithmetic stays on the figures already on the card and in its sources. A new search
   // is what let an unrelated headline become the answer.
+  if (req.intent !== 'search' && req.intent !== 'adjust') {
+    const priorCard = from?.card ?? [...req.cards].reverse().find((c) => c.card)?.card;
+    const rated = rateOnAmount({ question: req.question, original: req.original, priorTitle: priorCard?.title || from?.title, card: priorCard, search: req.search });
+    if (rated) {
+      const plan = quickPlan(req.original, 'chat');
+      send('plan', { ...plan, mode: 'chat' });
+      send('head', { title: rated.title, subtitle: rated.subtitle });
+      rated.nodes.forEach((node, index) => send('node', { index, node }));
+      send('done', { engine: 'reasoning', removed: 0, pagesRead: 0, ms: Date.now() - started });
+      return;
+    }
+  }
+
   if (req.intent !== 'search' && req.intent !== 'adjust' && isCalculationAsk(req.question)) {
     const priorCard = from?.card ?? [...req.cards].reverse().find((c) => c.card)?.card;
     const priorTitle = priorCard?.title || from?.title;

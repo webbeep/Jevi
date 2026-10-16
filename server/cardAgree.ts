@@ -1,5 +1,6 @@
 import type { CardNode } from '../shared/card';
 import { SENTENCE_BREAK, joinSpacedDecimals } from '../shared/text';
+import { paperOnTopic } from './scholarly';
 
 /**
  * A quote, a verdict, a paper list, a follow-up title, and a shopping line
@@ -30,9 +31,9 @@ function negated(sentence: string): boolean {
   return NEGATED.test(sentence) || /\b(?!NO\b)[Nn]o\b/.test(sentence);
 }
 
-const WHERE_ROLE = /\bwhere (?:does|do|did|is|are)\b[\s\S]{0,80}\b(?:teach|teaches|teaching|work|works|working|study|studies|professor|faculty|employed|practice)\b/i;
+const WHERE_ROLE = /\bwhere (?:does|do|did|is|are)\b[\s\S]{0,80}\b(?:teach|teaches|teaching|work|works|working|study|studies|studied|studying|earn|earned|earning|degree|doctorate|ph\.?d|professor|faculty|employed|practice|born|live|lives|lived|based)\b/i;
 const INSTITUTION = /\b((?:University|College|Institute)(?:\s+of\s+[A-Z][A-Za-z'’.-]+)+(?:(?:,| -)\s+[A-Z][A-Za-z'’.-]+)?|[A-Z][A-Za-z'’.-]*(?:\s+[A-Z][A-Za-z'’.-]*){0,4}\s+(?:University|College|Institute))\b/;
-const TEACHING = /\b(?:teach\w*|professor|faculty|employed|works?)\b/i;
+const TEACHING = /\b(?:teach\w*|professor|faculty|employed|works?|earn\w*|degree|doctorate|ph\.?d|stud(?:y|ies|ied|ying)|born|lives?|lived|based)\b/i;
 
 const MONEY = /\$\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?/;
 const COUNT_WORD: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
@@ -70,10 +71,30 @@ function overlap(text: string, words: readonly string[]): number {
   return words.filter((word) => low.includes(word)).length;
 }
 
-/** A table run together, or a word jammed onto a digit, is not a sentence to quote. */
+/** A table cell, a word jammed onto a digit, or a run of figures is not a sentence to quote. */
 function quotableSentence(text: string): boolean {
   if (/[a-z]\d/i.test(text)) return false;
+  if (text.split(/\s+/).filter(Boolean).length < 6) return false;
   return (text.match(/\d+(?:\.\d+)?/g) ?? []).length < 5;
+}
+
+/** An agency or page the question names ("the NWS page", "FDA"). A nearby sentence does not. */
+function namedSources(query: string): string[] {
+  const out: string[] = [];
+  for (const match of query.matchAll(/\b[A-Z]{2,6}\b/g)) out.push(match[0].toLowerCase());
+  for (const match of query.matchAll(/\b([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3})\s+(?:site|page|report|article|guideline|document)\b/g)) {
+    const name = match[1]!.toLowerCase();
+    if (!QUOTE_STOP.has(name)) out.push(name);
+  }
+  return [...new Set(out)];
+}
+
+function namesAskedSource(text: string, named: readonly string[]): boolean {
+  return named.some((name) => new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(text));
+}
+
+function sourceBlob(source: { text: string; stated?: string }): string {
+  return source.stated ? `${source.stated}\n${source.text}` : source.text;
 }
 
 function loose(text: string): string {
@@ -97,11 +118,11 @@ export function answeringSentence(query: string, text: string): string | undefin
   return best?.sentence;
 }
 
-function sentenceHolding(fragment: string, sources: readonly { text: string }[]): string | undefined {
+function sentenceHolding(fragment: string, sources: readonly { text: string; stated?: string }[]): string | undefined {
   const key = loose(fragment).slice(0, 48);
   if (key.length < 12) return undefined;
   for (const source of sources) {
-    for (const sentence of sentencesOf(source.text)) {
+    for (const sentence of sentencesOf(sourceBlob(source))) {
       if (loose(sentence).includes(key)) return sentence;
     }
   }
@@ -147,17 +168,17 @@ function withoutLeadLabel(sentence: string): string {
   return sentence.replace(/^(?:\|\s*)?(?:[A-Z][A-Za-z0-9.&'-]{1,24}\s+){1,3}(?=(?:Most|The|Adults|A|An)\b)/, '').replace(/^\|+\s*/, '').trim();
 }
 
-function onSource(text: string, sources: readonly { text: string }[]): boolean {
+function onSource(text: string, sources: readonly { text: string; stated?: string }[]): boolean {
   const key = loose(text).slice(0, 40);
   if (key.length < 16) return false;
-  return sources.some((source) => loose(source.text).includes(key));
+  return sources.some((source) => loose(sourceBlob(source)).includes(key));
 }
 
 /**
  * A quotation is the source sentence that answers the question, whole, with the numbers that sentence states.
  * A truncated fragment is finished from that sentence. A nearby sentence with fewer of the question's words is replaced.
  */
-export function finishQuotedText(query: string, text: string, sources: readonly { text: string }[]): string {
+export function finishQuotedText(query: string, text: string, sources: readonly { text: string; stated?: string }[]): string {
   if (!text || !sources.length) return text;
   const words = contentWords(query);
   const quote = quoteSpan(text);
@@ -167,16 +188,18 @@ export function finishQuotedText(query: string, text: string, sources: readonly 
   const smashed = !!quote && /[a-z]\d/i.test(quote.body);
   const subject = quote ? (held ?? quote.body) : text;
   if (wantsNamedQuote(query) && words.length) {
+    const named = namedSources(query);
+    const bonus = (sentence: string) => (named.length && namesAskedSource(sentence, named) ? 100 : 0);
     const offPage = !onSource(quote ? quote.body : text, sources);
     const asksNumber = /\b(?:how many|how much|count|number|figure|total)\b/i.test(query);
     const heldAnswers = !!held && (!asksNumber || /\d/.test(held));
-    let best = smashed || offPage ? -1 : answerScore(query, subject, words);
-    const narrow = held && heldAnswers ? sources.filter((source) => loose(source.text).includes(loose(held).slice(0, 40))) : sources;
+    let best = smashed || offPage ? -1 : answerScore(query, subject, words) + bonus(subject);
+    const narrow = !named.length && held && heldAnswers ? sources.filter((source) => loose(sourceBlob(source)).includes(loose(held).slice(0, 40))) : sources;
     const pool = narrow.length ? narrow : sources;
     for (const source of (pool.length ? pool : sources)) {
-      const answer = answeringSentence(query, source.text);
+      const answer = answeringSentence(query, sourceBlob(source));
       if (!answer) continue;
-      const score = answerScore(query, answer, words);
+      const score = answerScore(query, answer, words) + bonus(answer);
       if (score > best) {
         chosen = answer;
         best = score;
@@ -189,7 +212,8 @@ export function finishQuotedText(query: string, text: string, sources: readonly 
   }
   if (wantsNamedQuote(query) && !chosen && !/[a-z]/i.test(text)) return '';
   if (chosen) chosen = withoutLeadLabel(chosen);
-  if (chosen && wantsNamedQuote(query) && !quote && (proseEnough(text) || /["“«]/.test(text))) {
+  const bare = !/[a-z]{3,}/i.test(text);
+  if (chosen && wantsNamedQuote(query) && !quote && (proseEnough(text) || /["“«]/.test(text) || bare)) {
     const clean = chosen.replace(/^["“«]+|["”»]+$/g, '').trim();
     if (clean.length >= 12) return `"${clean}"`;
   }
@@ -253,6 +277,45 @@ export function dropInventedTitles(query: string, text: string, sources: readonl
 export function peerPaperItems<T extends { text: string }>(query: string, items: readonly T[], sources: readonly { text: string; domain?: string }[]): T[] {
   if (!wantsPeerPapers(query)) return [...items];
   return items.filter((item) => sourceBacksPaper(item.text, sources));
+}
+
+export interface PaperSource {
+  title?: string;
+  url?: string;
+  text: string;
+  domain?: string;
+}
+
+/**
+ * A peer-reviewed ask with no paper titles is not an answer.
+ * Titles come from sources that already name the paper and an open identifier.
+ */
+export function fillPaperCard(query: string, nodes: readonly (CardNode | undefined)[], sources: readonly PaperSource[]): (CardNode | undefined)[] {
+  if (!wantsPeerPapers(query)) return [...nodes];
+  const present = nodes.filter((node): node is CardNode => !!node);
+  const backed = paperItems(present).filter((item) => sourceBacksPaper(item.text, sources));
+  const seen = new Set<string>();
+  const fromSources = sources.flatMap((source) => {
+    const title = (source.title ?? '').split(/\s+[|–—-]\s+/)[0]?.trim() ?? '';
+    const blob = `${source.title ?? ''} ${source.url ?? ''} ${source.text}`;
+    if (title.length < 12 || CLINIC.test(blob) || !OPEN_ID.test(blob) || !paperOnTopic(query, title, source.text)) return [];
+    const id = blob.match(OPEN_ID)?.[0];
+    const text = id ? `${title} (${id})` : title;
+    const key = title.toLowerCase().slice(0, 48);
+    if (seen.has(key) || !sourceBacksPaper(text, [source])) return [];
+    seen.add(key);
+    return [{ text }];
+  });
+  const stripped = nodes.flatMap((node) => {
+    if (!node) return [node];
+    if (node.type === 'stack' && !node.children.length) return [];
+    if (node.type === 'list' && !node.items.length) return [];
+    return [node];
+  });
+  if (backed.length) return stripped.length ? stripped : [...nodes];
+  if (!fromSources.length) return stripped.length ? stripped : [...nodes];
+  const list: CardNode = { type: 'list', style: 'number', items: fromSources.slice(0, 5) };
+  return [...stripped, list];
 }
 
 export function peerPaperSource(query: string, source: { text: string; domain?: string } | undefined): boolean {

@@ -326,6 +326,27 @@ function specFamily(unit: string): string {
   return u;
 }
 
+/** A feature the person stated ("hot-swappable", "that is dimmable"). A number-and-unit is a separate requirement. */
+function askedFeatures(query: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const add = (raw: string) => {
+    const feature = raw.toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (feature.length < 4 || seen.has(feature)) return;
+    if (/^(?:under|below|cheap|best|with|that|this|only)$/.test(feature)) return;
+    seen.add(feature);
+    out.push(feature);
+  };
+  for (const match of query.matchAll(/\b([a-z0-9]{2,}(?:-[a-z0-9]{2,})+)\b/gi)) add(match[1]!);
+  for (const match of query.matchAll(/\b(?:that (?:is|are|has|have)|which (?:is|are|has|have)|with(?: a| an)?|including|includes)\s+([a-z0-9][a-z0-9-][a-z0-9 -]{1,40}?)(?=\s+(?:under|below|for|and)\b|[?.!,]|$)/gi)) add(match[1]!);
+  return out;
+}
+
+function hasFeature(text: string, feature: string): boolean {
+  const blob = text.toLowerCase().replace(/[^a-z0-9]+/g, ' ');
+  return blob.includes(feature);
+}
+
 /** A number-and-unit the person stated ("3-port", "for 3 devices"). Those are requirements. */
 export function askedSpecs(query: string): { n: string; family: string }[] {
   const out: { n: string; family: string }[] = [];
@@ -744,11 +765,23 @@ function alignVerdicts(nodes: readonly (CardNode | undefined)[]): (CardNode | un
   return nodes.map((node) => (node ? walk(node) : node));
 }
 
+/** A priced pick's words. A note with no price is not a pick. */
+function pricedPickText(node: CardNode): string | undefined {
+  const text = node.type === 'tile'
+    ? `${node.label} ${node.value ?? ''} ${node.sub ?? ''}`
+    : node.type === 'hero'
+      ? `${node.value} ${node.caption ?? ''} ${node.label}`
+      : '';
+  return /\$\s?\d/.test(text) ? text : undefined;
+}
+
+function featureMiss(text: string, features: readonly string[]): boolean {
+  return features.some((feature) => !hasFeature(text, feature));
+}
+
 /** Language, repeated rows, and a disagreement the card has already settled. Holes stay holes. */
-/** A stated spec is a requirement. A pick that states a different one does not lead a pick that meets it. */
-function dropSpecMissLead(query: string, nodes: readonly (CardNode | undefined)[]): (CardNode | undefined)[] {
-  const specs = askedSpecs(query);
-  if (!specs.length || !shoppingAsk(query)) return [...nodes];
+/** A stated spec is a requirement. A pick that states a different one, or that lacks a stated feature another pick has, does not lead. */
+function reorderNumericSpecs(nodes: readonly (CardNode | undefined)[], specs: readonly { n: string; family: string }[]): (CardNode | undefined)[] {
   const texts = (node: CardNode): string[] => (
     node.type === 'list' ? node.items.map((item) => `${item.text} ${item.meta ?? ''}`) : [JSON.stringify(node)]
   );
@@ -768,6 +801,99 @@ function dropSpecMissLead(query: string, nodes: readonly (CardNode | undefined)[
     if (node.type === 'hero' && texts(node).some((text) => stanceOf(text) === 'miss')) return undefined;
     return node;
   });
+}
+
+function someFeatureMatch(nodes: readonly (CardNode | undefined)[], features: readonly string[]): boolean {
+  const see = (node: CardNode): boolean => {
+    if (node.type === 'list') return node.items.some((item) => /\$\s?\d/.test(`${item.meta ?? ''} ${item.text}`) && !featureMiss(`${item.meta ?? ''} ${item.text}`, features));
+    const priced = pricedPickText(node);
+    if (priced && !featureMiss(priced, features)) return true;
+    if (node.type === 'stack' || node.type === 'grid' || node.type === 'section' || node.type === 'scroller') return node.children.some(see);
+    if (node.type === 'tabs') return node.tabs.some((tab) => tab.children.some(see));
+    return false;
+  };
+  return nodes.some((node) => !!node && see(node));
+}
+
+function dropFeatureNode(node: CardNode, features: readonly string[]): CardNode | undefined {
+  switch (node.type) {
+    case 'tile':
+    case 'hero': {
+      const priced = pricedPickText(node);
+      return priced && featureMiss(priced, features) ? undefined : node;
+    }
+    case 'list': {
+      const items = node.items.filter((item) => {
+        const text = `${item.meta ?? ''} ${item.text}`;
+        return !(/\$\s?\d/.test(text) && featureMiss(text, features));
+      });
+      if (!items.length) return node;
+      return items.length === node.items.length ? node : { ...node, items };
+    }
+    case 'stack':
+    case 'grid':
+    case 'section':
+    case 'scroller': {
+      const children = node.children.flatMap((child) => {
+        const next = dropFeatureNode(child, features);
+        return next ? [next] : [];
+      });
+      if (!children.length) return undefined;
+      return children.length === node.children.length && children.every((child, index) => child === node.children[index]) ? node : { ...node, children };
+    }
+    case 'tabs':
+      return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: tab.children.flatMap((child) => {
+        const next = dropFeatureNode(child, features);
+        return next ? [next] : [];
+      }) })) };
+    case 'text':
+    case 'callout':
+    case 'quote':
+    case 'draft':
+    case 'heading':
+    case 'stat':
+    case 'keyvalue':
+    case 'timeline':
+    case 'profile':
+    case 'table':
+    case 'steps':
+    case 'accordion':
+    case 'proscons':
+    case 'badges':
+    case 'actions':
+    case 'choices':
+    case 'links':
+    case 'citations':
+    case 'chart':
+    case 'pricing':
+    case 'scaler':
+    case 'slider':
+    case 'reveal':
+    case 'image':
+    case 'gallery':
+    case 'video':
+    case 'code':
+    case 'divider':
+    case 'progress':
+    case 'rating':
+    case 'diagram':
+    case 'ticker':
+    case 'slot':
+      return node;
+    default: {
+      const unreachable: never = node;
+      return unreachable;
+    }
+  }
+}
+
+function dropSpecMissLead(query: string, nodes: readonly (CardNode | undefined)[]): (CardNode | undefined)[] {
+  const specs = askedSpecs(query);
+  const features = askedFeatures(query);
+  if ((!specs.length && !features.length) || !shoppingAsk(query)) return [...nodes];
+  const numbered = specs.length ? reorderNumericSpecs(nodes, specs) : [...nodes];
+  if (!features.length || !someFeatureMatch(numbered, features)) return numbered;
+  return numbered.map((node) => (node ? dropFeatureNode(node, features) : node));
 }
 
 function statesProductPrice(text: string, ceilings: readonly number[]): boolean {

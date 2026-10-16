@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { CardNode } from '../shared/card.ts';
-import { answerTitle, finishQuotedText, keepAnswerBody, restoreKeptPapers } from '../server/cardAgree.ts';
+import { answerTitle, fillPaperCard, finishQuotedText, keepAnswerBody, restoreKeptPapers } from '../server/cardAgree.ts';
 import { bindClaims, type ClaimSource } from '../server/claims.ts';
 import { finishQuality } from '../server/sourceQuality.ts';
 
@@ -139,6 +139,18 @@ test('a quotation the page does not contain is not shown', () => {
   assert.doesNotMatch(next, /hours1/);
 });
 
+test('the sentence that names the asked source is the quote, and a citation stub is not', () => {
+  const nearby = 'Forecasters say a storm with sustained winds of 74 mph is called a hurricane.';
+  const answer = 'The NWS says a tropical cyclone is a hurricane once sustained winds reach 74 mph.';
+  const query = 'Quote the sentence on the NWS page for the wind speed that makes a storm a hurricane.';
+  const next = finishQuotedText(query, `"${nearby}"`, [{ text: nearby }, { text: answer }]);
+  assert.match(next, /NWS says/);
+  assert.doesNotMatch(next, /Forecasters say/);
+  const stub = finishQuotedText(query, '[2]', [{ text: answer }]);
+  assert.match(stub, /NWS says a tropical cyclone/);
+  assert.doesNotMatch(stub, /^\[2\]$/);
+});
+
 test('a follow-up title answers where someone teaches and what a price would cost in tax', () => {
   assert.equal(answerTitle('Where does she teach?', 'Ada Lovelace', 'She teaches at Northshore University.'), 'Northshore University');
   const card = JSON.stringify([{ type: 'hero', value: 'UC Berkeley' }, { type: 'text', text: 'She is also an investigator at the Howard Hughes Medical Institute.' }]);
@@ -150,6 +162,8 @@ test('a follow-up title answers where someone teaches and what a price would cos
   assert.equal(answerTitle('Where does she teach?', 'Mara Chen', taught), 'University of California, Berkeley');
   assert.equal(answerTitle('What if they cost $80?', 'Sneakers', 'The purchase is taxable. Tax $6.40 at the combined rate.'), 'Tax $6.40');
   assert.equal(answerTitle('Who is Ada Lovelace?', 'Ada Lovelace', 'She teaches at Northshore University.'), 'Ada Lovelace');
+  const doctorate = JSON.stringify([{ type: 'hero', value: 'UC Berkeley' }, { type: 'text', text: 'She earned her doctorate in chemical engineering at the University of California, Berkeley.' }]);
+  assert.equal(answerTitle('Where did she earn her doctorate?', 'Pasted question title', doctorate), 'University of California, Berkeley');
 });
 
 test('a where-they-teach follow-up keeps a body that names the school', () => {
@@ -179,4 +193,21 @@ test('a shopping count matches the rows, the headline price matches the row, and
   const rows = table?.type === 'table' ? table.rows : [];
   assert.equal(rows.length, 1);
   assert.match(rows[0]?.join(' ') ?? '', /Acme/);
+});
+
+test('a peer-reviewed card is not an empty list when a source names a paper', () => {
+  const nodes: CardNode[] = [
+    { type: 'hero', value: 'One finding', label: 'Top pick' },
+    { type: 'stack', direction: 'col', gap: 'sm', children: [] },
+  ];
+  const out = fillPaperCard('Peer-reviewed papers on lean tissue during treatment', nodes, [{
+    title: 'Changes in lean tissue during treatment',
+    url: 'https://doi.org/10.1000/example.paper',
+    domain: 'doi.org',
+    text: 'Changes in lean tissue during treatment. DOI: 10.1000/example.paper',
+  }]);
+  const body = JSON.stringify(out);
+  assert.match(body, /Changes in lean tissue during treatment/);
+  assert.match(body, /10\.1000\/example\.paper/);
+  assert.equal(out.some((node) => node?.type === 'stack' && node.children.length === 0), false);
 });

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { calculationAnswer, figureValue, isCalculationAsk, readFigures, subjectTitle } from '../server/calculate.ts';
+import { calculationAnswer, figureValue, isCalculationAsk, rateOnAmount, readFigures, subjectTitle } from '../server/calculate.ts';
 import { extractStats } from '../server/extract.ts';
 import type { AnswerCard } from '../shared/card.ts';
 
@@ -211,4 +211,22 @@ test('a total and a count become a rate when the ask is just to calculate', () =
   assert.match(JSON.stringify(answer), /17\.22/);
   assert.match(JSON.stringify(answer), /620/);
   assert.match(JSON.stringify(answer), /36/);
+});
+
+test('a follow-up that applies a rate already on the card answers at once', () => {
+  const started = Date.now();
+  const card: AnswerCard = {
+    title: 'City shopping',
+    body: [{ type: 'text', text: 'State 5%. City 3%. Combined 8%.' }],
+  };
+  const answer = rateOnAmount({
+    question: 'So on $50, about how many dollars is the tax?',
+    original: 'a jacket in the city',
+    priorTitle: 'City shopping',
+    card,
+  });
+  assert.ok(answer);
+  assert.match(answer?.title ?? '', /\$4\.00/);
+  assert.match(JSON.stringify(answer), /\$50 × 8%/);
+  assert.ok(Date.now() - started < 1000);
 });

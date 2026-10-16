@@ -106,6 +106,8 @@ export interface DesignRequest {
   pages: PageText[];
   simple?: boolean;
   followup?: FollowupContext;
+  /** A follow-up search. Its design call stays short. */
+  fromFollowup?: boolean;
   /** Compact summary of earlier turns, for resolving references in follow-ups. */
   context?: string;
   /** Reason step by step before designing (slower, for hard questions). */
@@ -188,7 +190,7 @@ FIT THE KIND OF REQUEST
 - Best X / what to buy: the verdict first, then a media list of picks — each with its own picture and a price or score badge — then what to look for.
 - X vs Y: a table across the attributes that matter and a one-line verdict on who should pick which. When the comparison is priced plans or tools, a pricing node carries each plan's published price.
 - Best tool / which plan / what it costs for a team: a pricing node, one row per plan. Do not put the team total in a hero, stat, tile or table.
-- Person, place, company or product: profile with picture and key facts, then a short background.
+- Person, place, company or product: profile with picture and key facts, then a short background. A precise bio fact (a birthplace, an ownership share, or an award) is included only when a source about that person states it. Leave it out when sources disagree or a fetched page contradicts the snippet, and do not repeat it on a later turn that did not ask for it.
 - Which of a group did something (appeared in, won, played): one tile per person, value Yes or No. Yes only when a source names that person for that appearance. A credit, video, or song that does not name them is No.
 - News or anything recent: the latest development first with its date; date every item; cite each one and link each story to its source.
 - Wants to watch, listen or go somewhere (videos, tutorials, channels, tools, booking, official sites): put the destinations first as video or links nodes, then a short summary. If they ask for a video or tutorial and a VIDEO source fits, the card opens with one video node.
@@ -208,7 +210,7 @@ RULES
 - A follow-up about one attribute (battery, price, storage) answers that attribute with the figures the sources state for the things being compared. Never paste an unfinished snippet, and never bring in a product the question did not name. The title answers the new question: where someone teaches or works is the institution, and a what-if price states the tax on that price.
 - When the person asks for a quote, quote the sentence that answers the question, including the numbers that sentence states. A nearby sentence is not a substitute, and a sentence cut off mid-way is not the quote.
 - A line under a verdict has to agree with it. Do not add a claim the verdict rejects. If a page does not say whether a paper is a review or an original study, say that, and do not assert either one.
-- A request for peer-reviewed papers lists only papers a source identifies with an open link. Do not invent a title. A count such as "of the three" matches how many picks the card shows, a headline price is the price on that pick's row, and a pick stays inside the stated budget and spec.
+- A request for peer-reviewed papers lists the papers a source identifies, each with its title and an open link. An empty list is not an answer. Do not invent a title. A count such as "of the three" matches how many picks the card shows, a headline price is the price on that pick's row, and a pick stays inside the stated budget and spec.
 - Numbered steps are 1, 2, 3 with no gaps. Keep every step a newcomer needs.
 - Never compute new numbers yourself (multiplying, converting, summing), except in two cases. When the TASK says the sources already imply a lead figure, that figure is the hero. When the follow-up asks you to calculate from figures already on the card or in the sources, the body is that calculation, each number keeps the unit and label the source gave it, and a headline is not the answer. When quantities should change with an amount (servings, loaves, people, budget), use a scaler node whose base and amounts are exactly the source values; the person rescales it live.
 - Plan and subscription prices always go in a pricing node, as the published per-seat or flat amount with its source number. Set billing to annual when the source says billed annually, even if the number is per month. Never multiply by people or seats, and never write a dollar amount or team total anywhere else on the card. If the sources do not state a price, leave that amount out.
@@ -492,7 +494,7 @@ export async function designStream(req: DesignRequest, env: Env, on: DesignEvent
           return unreachable;
         }
       }
-    }, { think: req.think, onThinking: on.thinking });
+    }, { think: req.think, onThinking: on.thinking, ...(req.followup || req.fromFollowup ? { deadlineMs: 12_000 } : {}) });
   } catch (err) {
     console.error('Design stream failed', err);
     failure = err instanceof Error ? err.message : String(err);
@@ -583,7 +585,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
         contentNodes++;
         pictures.emit(node, diagramRegionIndex(i, !!lead, diagramOn), emitNode);
       } else if (parsed?.kind === 'dropped') removed++;
-    });
+    }, req.followup || req.fromFollowup ? { deadlineMs: 12_000 } : {});
   };
 
   const finishCall = () => {
@@ -619,7 +621,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
           return unreachable;
         }
       }
-    });
+    }, req.followup || req.fromFollowup ? { deadlineMs: 12_000 } : {});
   };
 
   if (lead) {

@@ -109,6 +109,23 @@ test('a pick that misses a stated spec does not lead one that meets it', () => {
   assert.equal(items[0], '3-port switch');
 });
 
+test('a priced pick that lacks a stated feature does not stay once another pick has it', () => {
+  const nodes = finishQuality('a keyboard under $40 that is hot-swappable', [
+    {
+      type: 'stack',
+      children: [
+        { type: 'tile', label: 'Acme board', value: '$25', sub: 'wireless gasket mount' },
+        { type: 'tile', label: 'North board', value: '$32', sub: 'hot-swappable linear switches' },
+      ],
+    },
+  ]);
+  const stack = nodes.find((node) => node?.type === 'stack');
+  const labels = stack?.type === 'stack'
+    ? stack.children.flatMap((child) => (child.type === 'tile' ? [child.label] : []))
+    : [];
+  assert.deepEqual(labels, ['North board']);
+});
+
 test('a priced product page leads an unpriced one on a shopping ask', () => {
   const priced = { url: 'https://shop.example/switch', domain: 'shop.example', title: 'Acme HDMI switch', snippet: '3 ports, $18.99' };
   const bare = { url: 'https://blog.example/roundup', domain: 'blog.example', title: 'HDMI switch roundup', snippet: 'Several switches, prices vary' };
