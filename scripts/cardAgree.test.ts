@@ -81,6 +81,22 @@ test('a keep-only follow-up puts back a paper that still qualifies', () => {
   assert.equal(items.length, 2);
 });
 
+test('a quote ask uses the page sentence when the card line is not on the page', () => {
+  const source = 'The recommended amount of sleep for adults is at least 7 hours each day. Local estimates cover who is short on sleep.';
+  const paraphrase = 'Adults in the middle age band need 7 or more hours, and older adults need 7 to 8.';
+  const next = finishQuotedText('quote the page on how much sleep adults need', paraphrase, [page(source)]);
+  assert.match(next, /at least 7 hours each day/);
+  assert.doesNotMatch(next, /middle age band/);
+});
+
+test('a nearby sentence on the page is not the quote when the answering sentence has the number', () => {
+  const source = 'The recommended amount of sleep for adults is at least 7 hours each day. Local estimates cover adults not getting enough sleep.';
+  const nearby = '"Local estimates cover adults not getting enough sleep."';
+  const next = finishQuotedText('quote the page on how much sleep adults need', nearby, [page(source)]);
+  assert.match(next, /at least 7 hours/);
+  assert.doesNotMatch(next, /Local estimates/);
+});
+
 test('a quotation the page does not contain is not shown', () => {
   const source = 'The recommended amount of sleep for adults is at least 7 hours each day.';
   const smashed = 'The page states: "About Sleep Adult 65 years and older 7-8 hours1."';

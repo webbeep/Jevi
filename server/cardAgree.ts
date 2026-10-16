@@ -121,6 +121,18 @@ function proseEnough(text: string): boolean {
   return text.split(/\s+/).filter(Boolean).length >= 8;
 }
 
+function answerScore(query: string, text: string, words: readonly string[]): number {
+  const asksNumber = /\b(?:how many|how much|count|number|figure|total)\b/i.test(query);
+  return overlap(text, words) + (asksNumber && /\d/.test(text) ? 1 : 0);
+}
+
+/** The line is a sentence this fetch already contains. */
+function onSource(text: string, sources: readonly { text: string }[]): boolean {
+  const key = loose(text).slice(0, 40);
+  if (key.length < 16) return false;
+  return sources.some((source) => loose(source.text).includes(key));
+}
+
 /**
  * A quotation is the source sentence that answers the question, whole, with the numbers that sentence states.
  * A truncated fragment is finished from that sentence. A nearby sentence with fewer of the question's words is replaced.
@@ -133,14 +145,15 @@ export function finishQuotedText(query: string, text: string, sources: readonly 
   const truncated = !!quote && cutOff(quote.body, held);
   let chosen: string | undefined;
   const smashed = !!quote && /[a-z]\d/i.test(quote.body);
+  const subject = quote ? (held ?? quote.body) : text;
   if (wantsNamedQuote(query) && words.length) {
-    const quotedScore = quote ? overlap(held ?? quote.body, words) : overlap(text, words);
-    let best = smashed ? -1 : quotedScore;
+    const offPage = !onSource(quote ? quote.body : text, sources);
+    let best = smashed || offPage ? -1 : answerScore(query, subject, words);
     const pool = held ? sources.filter((source) => loose(source.text).includes(loose(held).slice(0, 40))) : sources;
     for (const source of (pool.length ? pool : sources)) {
       const answer = answeringSentence(query, source.text);
       if (!answer) continue;
-      const score = overlap(answer, words);
+      const score = answerScore(query, answer, words);
       if (score > best) {
         chosen = answer;
         best = score;
@@ -151,18 +164,8 @@ export function finishQuotedText(query: string, text: string, sources: readonly 
   if (!chosen && quote && smashed && wantsNamedQuote(query)) {
     return `${text.slice(0, quote.at)}${text.slice(quote.end)}`.replace(/[ \t]{2,}/g, ' ').trim();
   }
-  if (!chosen && wantsNamedQuote(query) && !quote && proseEnough(text)) {
-    let best = overlap(text, words);
-    for (const source of sources) {
-      const answer = answeringSentence(query, source.text);
-      if (!answer) continue;
-      const score = overlap(answer, words);
-      if (score > best) {
-        chosen = answer;
-        best = score;
-      }
-    }
-    if (chosen) return `"${chosen.replace(/^["“«]+|["”»]+$/g, '').trim()}"`;
+  if (chosen && wantsNamedQuote(query) && !quote && proseEnough(text)) {
+    return `"${chosen.replace(/^["“«]+|["”»]+$/g, '').trim()}"`;
   }
   if (!chosen || !quote) return text;
   const clean = chosen.replace(/^["“«]+|["”»]+$/g, '').trim();
