@@ -21,11 +21,27 @@ export function stripMarkup(s: string): string {
   return t;
 }
 
+/** A length cap stops on a word, and it does not stop in the middle of a number ("1.5" must not become "1."). */
+function sliceText(s: string, max: number): string {
+  if (s.length <= max) return s;
+  const start = Math.max(0, max - 16);
+  const window = s.slice(start, max + 16);
+  const re = /\d[\d,]*(?:\.\d+)?(?:\s?°[CF]|\s?%)?/g;
+  let end = max;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(window))) {
+    const from = start + match.index;
+    const to = from + match[0].length;
+    if (from < max && to > max) end = to;
+  }
+  return s.slice(0, end);
+}
+
 const str = (v: unknown, max = 400): string | undefined => {
   if (typeof v === 'number') return String(v);
   if (typeof v !== 'string') return undefined;
   const s = stripMarkup(v);
-  return s ? s.slice(0, max) : undefined;
+  return s ? sliceText(s, max) : undefined;
 };
 const num = (v: unknown): number | undefined => {
   const n = typeof v === 'string' ? Number(v.replace(/[^\d.-]/g, '')) : v;

@@ -1,4 +1,5 @@
 import type { CardNode } from '../shared/card';
+import { joinSpacedDecimals } from '../shared/text';
 
 const norm = (s: string) =>
   s
@@ -17,12 +18,13 @@ const SENTENCE_SRC = String.raw`(?:\d+\.\d+|[^.!?]|(?<!\d)[.!?](?=\d))+[.!?]+(?:
 
 /** Complete sentences that form a prefix of `text`. A fragment after the last period is left out. */
 function sentencePrefix(text: string): string[] {
+  const joined = joinSpacedDecimals(text);
   const re = new RegExp(SENTENCE_SRC, 'y');
   const out: string[] = [];
   let at = 0;
-  while (at < text.length) {
+  while (at < joined.length) {
     re.lastIndex = at;
-    const m = re.exec(text);
+    const m = re.exec(joined);
     if (!m || m.index !== at) break;
     out.push(m[0]);
     at = re.lastIndex;
@@ -35,7 +37,7 @@ function sentencePrefix(text: string): string[] {
  * drops the empty clause; the rest of the sentence stays when it still reads.
  */
 export function withoutEmptySlots(text: string): string {
-  const parts = text.split(/(?<=[.!?])\s+/);
+  const parts = joinSpacedDecimals(text).split(/(?<=[.!?])\s+(?!\d)/);
   const kept = parts.flatMap((sentence) => {
     const next = repairHole(sentence);
     return next ? [next] : [];
@@ -80,7 +82,7 @@ function repairHole(sentence: string): string {
  * A short clause with no sentence at all is left out; a longer one is kept without the ellipsis.
  */
 export function completeSentences(text: string): string {
-  const trimmed = text.replace(/\s+/g, ' ').trim();
+  const trimmed = joinSpacedDecimals(text).replace(/\s+/g, ' ').trim();
   if (!trimmed) return '';
   if (!/(?:\.{3}|…)\s*$/.test(trimmed)) return trimmed;
   const body = trimmed.replace(/(?:\.{3}|…)\s*$/, '').replace(/[\s,;:·•|–—-]+$/g, '').trim();
@@ -128,9 +130,10 @@ export class Polisher {
 
   /** Keeps only sentences not seen before; returns '' when nothing new remains. */
   private fresh(text: string): string {
-    const parts = sentencePrefix(text);
-    const rest = text.slice(parts.join('').length);
-    const sentences = rest.trim() ? [...parts, rest] : parts.length ? parts : [text];
+    const joined = joinSpacedDecimals(text);
+    const parts = sentencePrefix(joined);
+    const rest = joined.slice(parts.join('').length);
+    const sentences = rest.trim() ? [...parts, rest] : parts.length ? parts : [joined];
     const kept = sentences.filter((s) => {
       const key = norm(s);
       if (key.length < 12) return true;

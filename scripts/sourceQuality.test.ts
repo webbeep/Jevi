@@ -123,6 +123,17 @@ test('a named agency and a state count get an official-site search', () => {
   assert.equal(hasOfficialHit('What does the IPCC say is the likely global temperature increase by 2100?', [
     { domain: 'www.ipcc.ch', url: 'https://www.ipcc.ch/report' },
   ]), true);
+  const sleep = 'How much sleep do adults need according to the CDC? Quote the exact line from the CDC page';
+  assert.equal(hasOfficialHit(sleep, [
+    { domain: 'www.cdc.gov', url: 'https://www.cdc.gov/niosh/work-hour-training-for-nurses/longhours/mod2/08.html', title: 'NIOSH training' },
+  ]), false);
+  assert.equal(hasOfficialHit(sleep, [
+    { domain: 'www.cdc.gov', url: 'https://www.cdc.gov/sleep/about/index.html', title: 'About sleep' },
+  ]), true);
+  const probe = officialProbe(sleep);
+  assert.match(probe, /site:cdc\.gov/);
+  assert.match(probe, /sleep adults need/);
+  assert.doesNotMatch(probe, /\bquote\b/i);
   const wolves = officialProbe('How many wolves live in Minnesota?');
   assert.match(wolves, /site:mn\.us|site:mn\.gov/);
   const outbreak = officialProbe('How many cases in the FDA outbreak?');

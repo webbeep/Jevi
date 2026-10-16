@@ -1,5 +1,5 @@
 import type { CardNode } from '../shared/card';
-import { SENTENCE_BREAK } from '../shared/text';
+import { SENTENCE_BREAK, joinSpacedDecimals } from '../shared/text';
 import { factAnswer } from './hops';
 import { numberTokens } from './ground';
 import { withoutEmptySlots } from './polish';
@@ -66,8 +66,11 @@ export function claimSources(
 }
 
 export function shoppingAsk(query: string): boolean {
-  if (ADVICE.test(query) || !SHOPPING.test(query)) return false;
-  if (PRODUCT.test(query)) return true;
+  if (ADVICE.test(query) || TAX_ASK.test(query)) return false;
+  // "Find an HDMI switch under $40" is a shopping ask without the word "best".
+  const pricedProduct = budgetAmounts(query).length > 0 && PRODUCT.test(query);
+  if (!SHOPPING.test(query) && !pricedProduct) return false;
+  if (PRODUCT.test(query) || pricedProduct) return true;
   return !/^(?:how|why|what|who|when|where)\b/i.test(query.trim());
 }
 
@@ -190,11 +193,49 @@ function keepsDerived(query: string, text: string, sources: readonly ClaimSource
   return [answer.lead, ...(answer.accept ?? [])].some((value) => lower.includes(value.toLowerCase()));
 }
 
+/**
+ * A quotation that stops on the whole part of a decimal ("reaching 1.") is finished from the
+ * source sentence that continues it ("1.5°C"). The number is the source's, not a stored figure.
+ */
+function repairCutQuote(text: string, sources: readonly ClaimSource[]): string {
+  const openAt = Math.max(text.lastIndexOf('"'), text.lastIndexOf('“'), text.lastIndexOf('«'));
+  if (openAt < 0) return text;
+  const opener = text[openAt]!;
+  const closer = opener === '“' ? '”' : opener === '«' ? '»' : '"';
+  const inside = text.slice(openAt + 1);
+  if (inside.includes(closer)) return text;
+  const cut = inside.match(/^(.*?)(\d+)\.?\s*$/);
+  if (!cut?.[1] || !cut[2]) return text;
+  const lead = cut[1].toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter((word) => word.length > 2).slice(-5);
+  if (lead.length < 3) return text;
+  for (const source of sources) {
+    const low = source.text.toLowerCase();
+    let pos = 0;
+    for (const word of lead) {
+      const next = low.indexOf(word, pos);
+      if (next < 0) {
+        pos = -1;
+        break;
+      }
+      pos = next + word.length;
+    }
+    if (pos < 0) continue;
+    const after = source.text.slice(pos, pos + 48);
+    const found = after.match(new RegExp(`(?:^|\\s)(${cut[2]}\\.\\d+)(\\s?°[CF]|\\s?%)?`));
+    if (!found || found.index === undefined || found.index > 24) continue;
+    const tail = `${found[1]}${found[2] ?? ''}`.trim();
+    const prefix = text.slice(0, openAt + 1 + cut[1].length);
+    return `${prefix}${tail}${closer}`;
+  }
+  return text;
+}
+
 /** Point each cited number at a page that contains it, and drop a number no cited page states. */
 export function retargetCites(text: string, sources: readonly ClaimSource[], query = ''): string {
-  if (!sources.length) return withoutEmptySlots(text);
-  if (!/\d/.test(text)) return withoutEmptySlots(text);
-  const parts = text.split(SENTENCE_BREAK);
+  const joined = repairCutQuote(joinSpacedDecimals(text), sources);
+  if (!sources.length) return withoutEmptySlots(joined);
+  if (!/\d/.test(joined)) return withoutEmptySlots(joined);
+  const parts = joined.split(SENTENCE_BREAK);
   return parts.flatMap((sentence) => {
     const asked = new Set(numberTokens(query));
     // A number inside a quotation stays, even when the rest of the sentence loses a figure the page does not state.

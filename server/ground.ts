@@ -1,10 +1,12 @@
 import type { AnswerCard, CardNode } from '../shared/card';
+import { joinSpacedDecimals } from '../shared/text';
 
 /** Numbers up to this value may appear without a source (counts, "step 1", etc.). */
 const FREE_NUMBER_MAX = 2;
 
 export function numberTokens(s: string): string[] {
-  return (s.match(/\d[\d,]*(?:\.\d+)?/g) ?? []).map((n) => n.replace(/,/g, '').replace(/\.0+$/, ''));
+  const joined = joinSpacedDecimals(s);
+  return (joined.match(/\d[\d,]*(?:\.\d+)?/g) ?? []).map((n) => n.replace(/,/g, '').replace(/\.0+$/, ''));
 }
 
 export class Grounding {
@@ -25,8 +27,10 @@ export class Grounding {
 
   /** Keeps only sentences whose numbers are all backed by the sources. */
   sentences(text: string): string {
-    return text
-      .split(/(?<=[.!?])\s+/)
+    // Join before the split. "reaching 1. 5°C" is one sentence; splitting it leaves "reaching 1." and drops the 5.
+    const joined = joinSpacedDecimals(text);
+    return joined
+      .split(/(?<=[.!?])\s+(?!\d)/)
       .filter((s) => this.ok(s.replace(/\[\d+\]/g, '')))
       .join(' ');
   }

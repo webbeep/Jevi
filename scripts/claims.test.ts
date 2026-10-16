@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { bindClaims, budgetAmounts, claimSources, groundMembers, priceFor, retargetCites, salesTax, shoppingAsk, type ClaimSource } from '../server/claims.ts';
+import { Grounding } from '../server/ground.ts';
 import type { CardNode } from '../shared/card.ts';
 
 const sources: ClaimSource[] = [
@@ -117,6 +118,22 @@ test('an exempt price does not keep a tax dollar from another line', () => {
   assert.match(body, /^No/);
   assert.doesNotMatch(body, /\$3\.60/);
   assert.match(body, /8\.875%/);
+});
+
+test('a spaced decimal inside a quotation stays one number', () => {
+  const quote = '"Continued greenhouse gas emissions will lead to increasing global warming, with the best estimate of reaching 1. 5°C in the near term in considered scenarios."';
+  const corpus = 'Continued greenhouse gas emissions will lead to increasing global warming, with the best estimate of reaching 1.5°C in the near term in considered scenarios.';
+  const kept = new Grounding(corpus).sentences(quote);
+  assert.match(kept, /reaching 1\.5°C/);
+  const pages: ClaimSource[] = [{ n: 1, text: corpus }];
+  const cut = retargetCites(`${quote.slice(0, quote.indexOf('1.') + 2)}`, pages, 'quote the report');
+  assert.match(cut, /reaching 1\.5°C/);
+  assert.match(cut, /"$/);
+});
+
+test('a budgeted product ask is shopping, and a tax ask is not', () => {
+  assert.equal(shoppingAsk('Help me find an HDMI switch for 3 devices to one 4K TV under $40; only real product models'), true);
+  assert.equal(shoppingAsk('If I buy a $90 pair of sneakers in a store in New York, NY, do I pay sales tax?'), false);
 });
 
 test('a number inside a quotation stays when another figure is dropped', () => {

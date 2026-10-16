@@ -241,7 +241,7 @@ export function officialProbe(query: string): string {
   if (!sites.length && count) sites.push('site:.gov');
   const topic = query
     .replace(/\b[A-Z]{2,8}\b/g, ' ')
-    .replace(/\b(?:what|does|do|did|the|is|are|say|says|said|about|how|many|much|live|lives|living|in|of|a|an|by|for|to|on|likely|according)\b/gi, ' ')
+    .replace(/\b(?:what|does|do|did|the|is|are|say|says|said|about|how|many|much|live|lives|living|in|of|a|an|by|for|to|on|from|likely|according|quote|quotes|quoting|exact|line|lines|page|pages)\b/gi, ' ')
     .replace(/[^a-z0-9\s-]/gi, ' ')
     .replace(/\s+/g, ' ')
     .trim()
@@ -249,18 +249,19 @@ export function officialProbe(query: string): string {
   return `${topic} (${sites.slice(0, 4).join(' OR ')})`.trim();
 }
 
-/** True when a result is the agency or the place named in the question, or the question names neither. */
-export function hasOfficialHit(query: string, rows: readonly { domain?: string; url?: string }[]): boolean {
+/** True when a result is the agency or the place named in the question, or the question names neither. A training or course page on that site does not count: the public page is the one still missing. */
+export function hasOfficialHit(query: string, rows: readonly { domain?: string; url?: string; title?: string }[]): boolean {
   const orgs = orgTokens(query);
   const places = placeHosts(query);
   const journals = journalHosts(query);
+  const primary = (row: { url?: string; title?: string }) => !secondaryPage(row.url || '', row.title || '');
   if (orgs.length || places.length || journals.length) {
-    return rows.some((row) => officialLead(row.domain || hostOf(row.url || ''), orgs, places, journals) === 0);
+    return rows.some((row) => officialLead(row.domain || hostOf(row.url || ''), orgs, places, journals) === 0 && primary(row));
   }
   if (OFFICIAL_ASK.test(query)) {
     return rows.some((row) => {
       const domain = row.domain || hostOf(row.url || '');
-      return hostTier(domain) === 0 || isScholarHost(domain);
+      return (hostTier(domain) === 0 || isScholarHost(domain)) && primary(row);
     });
   }
   return true;

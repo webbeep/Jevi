@@ -23,6 +23,7 @@ test('a trailing ellipsis keeps the last finished sentence, including decimals',
   assert.equal(withoutEmptySlots('In [year] he founded Eureka Labs.'), 'He founded Eureka Labs.');
   assert.equal(withoutEmptySlots('Karpathy founded Eureka Labs in .'), 'Karpathy founded Eureka Labs.');
   assert.equal(withoutEmptySlots('Minnesota has about wolves.'), '');
+  assert.match(withoutEmptySlots('The best estimate of reaching 1. 5°C stands.'), /reaching 1\.5°C/);
   assert.equal(emptyFigure('Unknown'), true);
   assert.equal(emptyFigure('11,842'), false);
   assert.equal(new Polisher(200).apply({ type: 'stat', label: 'FDA cases', value: 'Unknown' }), undefined);
