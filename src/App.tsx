@@ -991,14 +991,14 @@ function QueryMessage({ question, onResend }: { question: string; onResend: (tex
           onChange={(e) => setDraft(e.target.value)}
           aria-label="Edit message"
           rows={Math.min(4, Math.max(1, draft.split('\n').length))}
-          className={cn(MESSAGE, 'w-full resize-none border-0 bg-foreground/[0.06] outline-none focus:ring-0')}
+          className={cn(MESSAGE, 'w-full resize-none border-0 bg-foreground/[0.06] text-base outline-none focus:ring-0')}
         />
-        <div className="flex gap-2">
-          <Button type="button" variant="ghost" size="sm" className="h-8 rounded-lg px-3" onClick={() => { setDraft(question); setEditing(false); }}>
-            Cancel
+        <div className="flex gap-1.5">
+          <Button type="button" variant="ghost" size="icon" className="size-9 shrink-0 rounded-xl" aria-label="Cancel" onClick={() => { setDraft(question); setEditing(false); }}>
+            <X className="size-4" />
           </Button>
-          <Button type="submit" size="sm" className="h-8 rounded-lg px-3" disabled={!draft.trim()}>
-            Resend
+          <Button type="submit" size="icon" className="size-9 shrink-0 rounded-xl" disabled={!draft.trim()} aria-label="Resend">
+            <ArrowUp className="size-4" />
           </Button>
         </div>
       </form>

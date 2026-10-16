@@ -124,6 +124,8 @@ const ROLE_TAIL = new Set(SPECIFIC_ROLES.flatMap(([, label]) => label.toLowerCas
 
 /** Lowercase words after a name that are about the person, not part of the name ("Messi now", "Ed playing"). */
 const LOWER_STOP = /^(?:now|today|currently|really|actually|exactly|again|anyway|net|worth|age|wife|husband|married|dating|dead|alive|famous|known|.*ing|.*ed|.*ly)$/;
+/** A lowercase second word that is a thing, not a surname ("Apple watch", "Open source", "New phone"). */
+const NOT_SURNAME = /^(?:phone|phones|watch|watches|source|sources|database|databases|headphones|stock|price|prices|review|reviews|news|guide|app|apps|pro|max|mini|air|plus|case|cases|band|bands|book|books|paper|music|video|game|games|city|state|park|home|store|shop|sale|deal|deals)$/i;
 
 /**
  * A workplace and a given name, with a company mark between them ("Acme AI Sam"),
@@ -169,13 +171,15 @@ export function personSubject(query: string): string {
       run.push(w);
     } else break;
   }
-  // "who is Ed chu": a sloppy-case surname after a capitalised first name still belongs to the name.
-  if (hadWho && !commaEnd && run.length && run.length < 3 && words.length <= 4) {
+  // "who is Ed chu" and a bare "Scott eberle": a sloppy-case surname after a capitalised first name
+  // still belongs to the name. Two words only, so "Apple watch" and "Open source" stay topics.
+  const bareSloppy = !hadWho && words.length === 2 && run.length === 1 && likelyGivenName(run[0]!) && !TOPIC_WORD.test(run[0]!);
+  if ((hadWho || bareSloppy) && !commaEnd && run.length && run.length < 3 && words.length <= 4) {
     const start = words.indexOf(run[0]!);
     const from = start + run.length;
     for (const [k, w] of words.slice(from).entries()) {
       const lw = w.toLowerCase();
-      if (run.length >= 3 || !/^[a-z][a-z'-]+$/.test(w) || COMMON.has(lw) || LOWER_STOP.test(lw)) break;
+      if (run.length >= 3 || !/^[a-z][a-z'-]+$/.test(w) || COMMON.has(lw) || LOWER_STOP.test(lw) || NOT_SURNAME.test(lw)) break;
       if (ROLE1.has(lw) || DESCRIPTOR_WORDS.has(lw) || ROLE_TAIL.has(lw) || SPORTS_LEAGUE.test(lw) || ORG_TAIL.test(lw)) break;
       run.push(w[0]!.toUpperCase() + w.slice(1));
       if (rawWords[from + k]!.endsWith(',')) break;

@@ -349,8 +349,13 @@ test('a name shared by different careers asks which person', () => {
     row('Scott Eberle, author', 'Scott Eberle is the author of The Soul\'s Red Thread.', 'https://example.com/author'),
     row('Scott Eberle, attorney', 'Scott Eberle is an attorney in Illinois.', 'https://example.com/law'),
   ];
+  assert.equal(personSubject('Scott eberle'), 'Scott Eberle');
+  assert.equal(isPersonAsk('Scott eberle'), true);
+  assert.equal(personSubject('Apple watch'), 'Apple');
+  assert.equal(isPersonAsk('Apple watch'), false);
+  assert.equal(personSubject('Blueflame ai'), 'Blueflame');
   assert.equal(mixedIdentities('Scott Eberle', rows), true);
-  const d = resolveEntity('Scott Eberle', rows);
+  const d = resolveEntity('Scott eberle', rows);
   assert.equal(d.kind, 'choices');
   if (d.kind !== 'choices') return;
   assert.ok(d.choices.length >= 2);
