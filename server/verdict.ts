@@ -1,6 +1,7 @@
 import type { CardNode } from '../shared/card';
 import type { PageText } from './pages';
 import type { SearchResult } from '../shared/types';
+import { withoutFighting } from './cardAgree';
 
 /**
  * Before a verdict tile is shown, keep it from saying more than the card and the
@@ -198,19 +199,50 @@ function fixFace(node: Face, flags: Flags, body: string): CardNode {
   return node;
 }
 
-function mapNode(node: CardNode, flags: Flags, body: string): CardNode | undefined {
+function negativeValue(value: string | undefined): boolean {
+  const v = (value ?? '').trim();
+  if (!v || v.length > 48) return false;
+  if (/^(?:no|false)$/i.test(v)) return true;
+  if (/^no\s+(?:solid|strong|clear|good|real|direct)\s+evidence\b/i.test(v)) return true;
+  if (/^(?:weak|limited|insufficient|inconclusive)\s+evidence\b/i.test(v)) return true;
+  if (/^(?:do not|don't|does not|doesn't)\s+recommend\b/i.test(v)) return true;
+  return false;
+}
+
+function faceSaysNo(node: CardNode): boolean {
+  if ((node.type === 'hero' || node.type === 'tile') && negativeValue(node.value)) return true;
+  if (node.type === 'stack' || node.type === 'grid' || node.type === 'section' || node.type === 'scroller') return node.children.some(faceSaysNo);
+  if (node.type === 'tabs') return node.tabs.some((tab) => tab.children.some(faceSaysNo));
+  return false;
+}
+
+function mapNode(node: CardNode, flags: Flags, body: string, negative: boolean): CardNode | undefined {
   if (node.type === 'stack' || node.type === 'grid' || node.type === 'section' || node.type === 'scroller') {
-    const children = node.children.map((c) => mapNode(c, flags, body)).filter((c): c is CardNode => !!c);
+    const children = node.children.map((c) => mapNode(c, flags, body, negative)).filter((c): c is CardNode => !!c);
     return children.length ? { ...node, children } : undefined;
   }
   if (node.type === 'tabs') {
     const tabs = node.tabs
-      .map((t) => ({ ...t, children: t.children.map((c) => mapNode(c, flags, body)).filter((c): c is CardNode => !!c) }))
+      .map((t) => ({ ...t, children: t.children.map((c) => mapNode(c, flags, body, negative)).filter((c): c is CardNode => !!c) }))
       .filter((t) => t.children.length);
     return tabs.length ? { ...node, tabs } : undefined;
   }
   if (node.type === 'hero' || node.type === 'tile') return fixFace(node, flags, body);
   if (node.type === 'text' && flags.officialNeg && yesLead(node.text)) return undefined;
+  if ((node.type === 'text' || node.type === 'quote' || node.type === 'callout') && negative) {
+    const text = withoutFighting(node.text);
+    if (!text) return undefined;
+    return text === node.text ? node : { ...node, text };
+  }
+  if (node.type === 'list' && negative) {
+    const items = node.items.flatMap((item) => {
+      const text = withoutFighting(item.text);
+      if (!text) return [];
+      return [text === item.text ? item : { ...item, text }];
+    });
+    if (!items.length) return undefined;
+    return items.length === node.items.length && items.every((item, index) => item === node.items[index]) ? node : { ...node, items };
+  }
   return node;
 }
 
@@ -272,17 +304,19 @@ export class VerdictSession {
   offer(node: CardNode, index: number): { node: CardNode; revisions: { index: number; node: CardNode }[] } {
     this.raw.set(index, node);
     const body = this.bodyText();
+    const negative = this.flags.clearNo || this.flags.officialNeg || this.flags.sourceWeak || [...this.raw.values()].some(faceSaysNo);
+    const shown = (next: CardNode | undefined, raw: CardNode): CardNode => next ?? (negative ? { type: 'stack', direction: 'col', gap: 'sm', children: [] } : raw);
     const revisions: { index: number; node: CardNode }[] = [];
     for (const [i, raw] of this.raw) {
       if (i === index) continue;
-      const next = mapNode(raw, this.flags, body) ?? raw;
+      const next = shown(mapNode(raw, this.flags, body, negative), raw);
       const key = JSON.stringify(next);
       if (key !== this.sent.get(i)) {
         this.sent.set(i, key);
         revisions.push({ index: i, node: next });
       }
     }
-    const current = mapNode(node, this.flags, body) ?? node;
+    const current = shown(mapNode(node, this.flags, body, negative), node);
     this.sent.set(index, JSON.stringify(current));
     return { node: current, revisions };
   }

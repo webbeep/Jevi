@@ -133,6 +133,18 @@ test('a clear no stays no, and weak evidence stays weak', () => {
   assert.equal(kept.type === 'hero' ? kept.value : '', 'No solid evidence');
 });
 
+test('a benefit line under a no verdict is dropped', () => {
+  const session = new VerdictSession({
+    query: 'Does the evening tea help people sleep?',
+    results: [hit({ title: 'Tea review', url: 'https://agency.example/tea', domain: 'agency.example', snippet: 'There is no solid evidence the evening tea helps people sleep.' })],
+  });
+  const lead = session.offer({ type: 'hero', value: 'No solid evidence', label: 'Sleep' }, 0);
+  assert.equal(lead.node.type === 'hero' ? lead.node.value : '', 'No solid evidence');
+  const line = session.offer({ type: 'text', text: 'A cup might reduce how long it takes to fall asleep. The trials do not show that effect.' }, 1);
+  assert.match(line.node.type === 'text' ? line.node.text : '', /do not show/);
+  assert.doesNotMatch(line.node.type === 'text' ? line.node.text : '', /might reduce/);
+});
+
 test('a consistent No tile is left alone', () => {
   const lead: CardNode = { type: 'hero', value: 'No', label: 'The store is closed today', caption: 'The owner posted that the shop is shut on Mondays.' };
   const session = new VerdictSession({

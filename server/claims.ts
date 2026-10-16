@@ -3,6 +3,7 @@ import { SENTENCE_BREAK, joinSpacedDecimals } from '../shared/text';
 import { factAnswer } from './hops';
 import { numberTokens } from './ground';
 import { completeCutDecimal, withoutEmptySlots } from './polish';
+import { dropInventedTitles, finishQuotedText, honestHero, honestStudyText, peerPaperItems, peerPaperSource } from './cardAgree';
 
 /** One search result, numbered the way the card cites it, with the text the card was allowed to use. */
 export interface ClaimSource {
@@ -236,7 +237,7 @@ function repairCutQuote(text: string, sources: readonly ClaimSource[]): string {
 
 /** Point each cited number at a page that contains it, and drop a number no cited page states. */
 export function retargetCites(text: string, sources: readonly ClaimSource[], query = ''): string {
-  const joined = repairCutQuote(joinSpacedDecimals(text), sources);
+  const joined = repairCutQuote(finishQuotedText(query, joinSpacedDecimals(text), sources), sources);
   if (!sources.length) return withoutEmptySlots(joined);
   if (!/\d/.test(joined)) return withoutEmptySlots(joined);
   const parts = joined.split(SENTENCE_BREAK);
@@ -416,31 +417,36 @@ function retargetNode(node: CardNode, sources: readonly ClaimSource[], query = '
     case 'quote':
     case 'draft': {
       const cited = retargetCites(node.text, sources, query);
-      const text = cited.split(SENTENCE_BREAK).map((sentence) => {
+      const cleaned = cited.split(SENTENCE_BREAK).map((sentence) => {
         const n = [...sentence.matchAll(/\[(\d+)\]/g)].map((match) => Number(match[1])).at(-1);
         return withoutForeignAgency(sentence, byNumber(sources, n ?? 0));
       }).join(' ');
+      const text = dropInventedTitles(query, honestStudyText(query, cleaned, sources), sources);
+      if (!text) return cleaned ? { type: 'stack', direction: 'col', gap: 'sm', children: [] } : { ...node, text: '' };
       return text === node.text ? node : { ...node, text };
     }
     case 'heading': {
-      const text = retargetCites(node.text, sources, query);
+      const cited = retargetCites(node.text, sources, query);
+      const text = dropInventedTitles(query, honestStudyText(query, cited, sources), sources);
+      if (!text) return cited ? { type: 'stack', direction: 'col', gap: 'sm', children: [] } : { ...node, text: '' };
       return text === node.text ? node : { ...node, text };
     }
     case 'hero': {
-      const caption = node.caption ? completeCutDecimal(retargetCites(node.caption, sources, query), [node.value, node.label]) : node.caption;
-      const nums = significant(node.value);
-      const page = citeValue(node.value, sources, undefined, query);
-      if (!page && keepsDerived(query, node.value, sources)) {
-        return caption === node.caption ? node : { ...node, caption };
+      const face = honestHero(query, node, sources);
+      const caption = face.caption ? completeCutDecimal(retargetCites(face.caption, sources, query), [face.value, face.label]) : face.caption;
+      const nums = significant(face.value);
+      const page = citeValue(face.value, sources, undefined, query);
+      if (!page && keepsDerived(query, face.value, sources)) {
+        return caption === face.caption ? face : { ...face, caption };
       }
       if (!page) {
-        const stripped = nums.length ? stripNums(node.value, nums) : node.value;
-        const value = stripped && /\d/.test(stripped) ? stripped : nums.length ? '' : node.value;
-        return value === node.value && caption === node.caption ? node : { ...node, value, caption };
+        const stripped = nums.length ? stripNums(face.value, nums) : face.value;
+        const value = stripped && /\d/.test(stripped) ? stripped : nums.length ? '' : face.value;
+        return value === face.value && caption === face.caption ? face : { ...face, value, caption };
       }
       const already = caption ? [...caption.matchAll(/\[(\d+)\]/g)].some((match) => Number(match[1]) === page) : false;
       const next = already ? caption : `${caption ? `${caption.replace(/\s*\[\d+\]/g, '').trim()} ` : ''}[${page}]`.trim();
-      return next === node.caption ? node : { ...node, caption: next };
+      return next === face.caption ? face : { ...face, caption: next };
     }
     case 'tile': {
       const valueNums = significant(node.value ?? '');
@@ -496,7 +502,7 @@ function retargetNode(node: CardNode, sources: readonly ClaimSource[], query = '
     }
     case 'list': {
       const items = node.items.map((item) => {
-        const text = retargetCites(item.text, sources);
+        const text = retargetCites(item.text, sources, query);
         // Meta is a plain label next to the source chip, so a number moves the chip
         // instead of writing [n] into the price or the year.
         const metaNums = item.meta ? significant(item.meta) : [];
@@ -517,7 +523,9 @@ function retargetNode(node: CardNode, sources: readonly ClaimSource[], query = '
         }
         return text === item.text && meta === item.meta && source === item.source ? item : { ...item, text, meta, source };
       });
-      return items.every((item, index) => item === node.items[index]) ? node : { ...node, items };
+      const kept = peerPaperItems(query, items, sources);
+      if (!kept.length && items.length) return { type: 'stack', direction: 'col', gap: 'sm', children: [] };
+      return kept.length === node.items.length && kept.every((item, index) => item === node.items[index]) ? node : { ...node, items: kept };
     }
     case 'keyvalue': {
       const items = node.items.map((item) => {
@@ -534,6 +542,12 @@ function retargetNode(node: CardNode, sources: readonly ClaimSource[], query = '
       });
       return items.every((item, index) => item === node.items[index]) ? node : { ...node, items };
     }
+    case 'links': {
+      const items = node.items.filter((item) => peerPaperSource(query, byNumber(sources, item.source)));
+      if (items.length === node.items.length) return node;
+      if (!items.length) return { type: 'stack', direction: 'col', gap: 'sm', children: [] };
+      return { ...node, items };
+    }
     case 'profile':
     case 'steps':
     case 'accordion':
@@ -541,7 +555,6 @@ function retargetNode(node: CardNode, sources: readonly ClaimSource[], query = '
     case 'badges':
     case 'actions':
     case 'choices':
-    case 'links':
     case 'citations':
     case 'pricing':
     case 'scaler':

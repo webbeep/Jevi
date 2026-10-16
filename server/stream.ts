@@ -45,7 +45,8 @@ import type { EngineStatus, Freshness, ImageResult, SearchResponse, SearchResult
 import { rewriteQuery } from './ai';
 import { type DesignRequest, designParallel, designStream, gateNode } from './design';
 import { BRIEF_ROWS, briefSources, remapBrief, type SourceBrief } from './brief';
-import { groundMembers } from './claims';
+import { claimSources, groundMembers } from './claims';
+import { answerTitle, restoreKeptPapers } from './cardAgree';
 import { abstainComputed, alignFactProse, cardFacts, factAnswer, hasMemberWork, hopQueries, leadMemberRows, nextHop, placeFactLead, unsupportedYear } from './hops';
 import { gapQuery, onTopicCount, rescueQuery, sourcesMiss } from './rescue';
 import { keepPictures, reviewCard, type Review } from './review';
@@ -484,9 +485,11 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   const publishReadings = () => {
     const indexes = [...shown.keys()].sort((a, b) => a - b);
     const settled = settleReadings(indexes.map((index) => shown.get(index)), head, questionOf());
-    const quality = finishQuality(questionOf(), settled.nodes);
+    const quality = restoreKeptPapers(questionOf(), finishQuality(questionOf(), settled.nodes), designReq.followup?.baseCard?.body, claimSources(designReq.search.results, designReq.pages));
     if (head) {
       if (settled.head) head = { ...head, title: settled.head.title, subtitle: settled.head.subtitle };
+      const title = answerTitle(questionOf(), head.title, quality.map((node) => (node ? JSON.stringify(node) : '')).join('\n'));
+      if (title !== head.title) head = { ...head, title };
       const key = JSON.stringify(head);
       if (key !== sentHead) {
         sentHead = key;

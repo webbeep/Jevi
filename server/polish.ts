@@ -71,8 +71,8 @@ function repairHole(sentence: string): string {
   if (/\b(?:in|on|at|of|by|from|since|during)\s+(?:he|she|they|it|we)\b/i.test(bare)) return '';
   if (/\b(?:in|on|at|by|from)\s*[.,;:]/i.test(bare)) return '';
   if (/\s[—–_]\s/.test(bare)) return '';
-  // A count that lost its number: "has about wolves" / "about  people".
-  if (!/\d/.test(bare) && /\b(?:about|approximately|around|nearly)\s+[A-Za-z]/i.test(bare)) return '';
+  // A count that lost its number: "has about wolves" / "about  people". "around the clock" is not one.
+  if (!/\d/.test(bare) && /\b(?:about|approximately|around|nearly)\s+(?!(?:the|a|an|to|of|which|this|that)\b)[A-Za-z]/i.test(bare)) return '';
   return s;
 }
 

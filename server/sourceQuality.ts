@@ -4,7 +4,8 @@
  */
 import type { CardNode } from '../shared/card';
 import { joinSpacedDecimals } from '../shared/text';
-import { shoppingAsk } from './claims';
+import { budgetAmounts, shoppingAsk } from './claims';
+import { agreeShopping } from './cardAgree';
 import { restoreCutDecimals } from './polish';
 import { isPaperAsk, isPreprintAsk, leadPreprints } from './scholarly';
 
@@ -783,5 +784,5 @@ function dropUnpricedProductLead(query: string, nodes: readonly (CardNode | unde
 
 export function finishQuality(query: string, nodes: readonly (CardNode | undefined)[]): (CardNode | undefined)[] {
   const cleaned = nodes.map((node) => (node ? cleanNode(query, node) : node));
-  return restoreCutDecimals(alignVerdicts(withoutSettledDisputes(dropSpecMissLead(query, dropUnpricedProductLead(query, cleaned)))));
+  return agreeShopping(shoppingAsk(query), budgetAmounts(query), restoreCutDecimals(alignVerdicts(withoutSettledDisputes(dropSpecMissLead(query, dropUnpricedProductLead(query, cleaned))))));
 }
