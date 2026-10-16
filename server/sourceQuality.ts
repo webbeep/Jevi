@@ -770,14 +770,23 @@ function dropSpecMissLead(query: string, nodes: readonly (CardNode | undefined)[
   });
 }
 
-/** On a shopping card, a product hero with no price does not lead once another pick states one. */
+function statesProductPrice(text: string, ceilings: readonly number[]): boolean {
+  for (const match of text.matchAll(/\$\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?/g)) {
+    const value = Number(match[0].replace(/[^\d.]/g, ''));
+    if (!ceilings.includes(value)) return true;
+  }
+  return false;
+}
+
+/** On a shopping card, a product hero with no price does not lead once another pick states one. The budget in the label is not that price. */
 function dropUnpricedProductLead(query: string, nodes: readonly (CardNode | undefined)[]): (CardNode | undefined)[] {
   if (!shoppingAsk(query)) return [...nodes];
-  const priced = nodes.some((node) => !!node && /\$\s?\d/.test(JSON.stringify(node)));
+  const ceilings = budgetAmounts(query);
+  const priced = nodes.some((node) => !!node && statesProductPrice(JSON.stringify(node), ceilings));
   if (!priced) return [...nodes];
   return nodes.map((node) => {
     if (!node || node.type !== 'hero') return node;
-    if (/\$\s?\d/.test(`${node.value} ${node.caption ?? ''} ${node.label}`)) return node;
+    if (statesProductPrice(`${node.value} ${node.caption ?? ''} ${node.label}`, ceilings)) return node;
     return undefined;
   });
 }

@@ -13,7 +13,7 @@ const QUOTE_STOP = new Set(
   'what when where which does did how many much that this with from have been were will your about into over under than then them they their there these those would could should just like also only most some such very more less best need want make give tell show find help using used according quote quotes quoting exact line lines page pages says said report study paper article sentence words wording document guideline notice official'.split(' '),
 );
 
-const REVIEW_DESIGN = /\b(?:systematic reviews?|meta-analyses|meta-analysis|narrative reviews?|scoping reviews?|literature reviews?|review articles?)\b/i;
+const REVIEW_DESIGN = /\b(?:systematic reviews?|meta-analyses|meta-analysis|narrative reviews?|scoping reviews?|literature reviews?|review articles?|reviews? of the)\b/i;
 const ORIGINAL_DESIGN = /\b(?:original (?:studies|study|research|articles?|papers?)|primary (?:studies|study|research)|research articles?)\b/i;
 const HONEST_DESIGN = 'The page does not say whether this is a review or an original study.';
 
@@ -22,7 +22,7 @@ const OPEN_ID = /\b(?:10\.\d{4,9}\/[^\s,;)>\]]+|PMC\d{5,}|arxiv:\s*\d{4}\.\d{4,5
 const CLINIC = /\b(?:mayo clinic|webmd|healthline|cleveland clinic|medical news today|verywell)\b/i;
 const PAPERISH = /\b(?:papers?|studies|study|peer[- ]reviewed|journal|preprints?)\b/i;
 
-const BENEFIT = /\b(?:may|might|can|could)\s+(?:help|reduce|prevent|protect|lower|improve)\b/i;
+const BENEFIT = /\b(?:(?:may|might|can|could)\s+(?:help|reduce|prevent|protect|lower|improve)|(?:linked to|associated with)\s+(?:a )?(?:lower|reduced|decreased))\b/i;
 const NEGATED = /\b(?:no|not|n't|never|without|lacks?|lacking|does not|do not)\b/i;
 
 const WHERE_ROLE = /\bwhere (?:does|do|did|is|are)\b[\s\S]{0,80}\b(?:teach|teaches|teaching|work|works|working|study|studies|professor|faculty|employed|practice)\b/i;
@@ -132,9 +132,10 @@ export function finishQuotedText(query: string, text: string, sources: readonly 
   const held = quote ? sentenceHolding(quote.body, sources) : undefined;
   const truncated = !!quote && cutOff(quote.body, held);
   let chosen: string | undefined;
+  const smashed = !!quote && /[a-z]\d/i.test(quote.body);
   if (wantsNamedQuote(query) && words.length) {
     const quotedScore = quote ? overlap(held ?? quote.body, words) : overlap(text, words);
-    let best = quotedScore;
+    let best = smashed ? -1 : quotedScore;
     const pool = held ? sources.filter((source) => loose(source.text).includes(loose(held).slice(0, 40))) : sources;
     for (const source of (pool.length ? pool : sources)) {
       const answer = answeringSentence(query, source.text);
@@ -146,7 +147,10 @@ export function finishQuotedText(query: string, text: string, sources: readonly 
       }
     }
   }
-  if (!chosen && truncated && held) chosen = held;
+  if (!chosen && truncated && held && !smashed) chosen = held;
+  if (!chosen && quote && smashed && wantsNamedQuote(query)) {
+    return `${text.slice(0, quote.at)}${text.slice(quote.end)}`.replace(/[ \t]{2,}/g, ' ').trim();
+  }
   if (!chosen && wantsNamedQuote(query) && !quote && proseEnough(text)) {
     let best = overlap(text, words);
     for (const source of sources) {
@@ -273,6 +277,8 @@ export function withoutFighting(text: string): string {
 /** The headline answers the new question: where someone works is the institution, and a what-if price is the tax on that price. */
 export function answerTitle(question: string, proposed: string, cardText: string): string {
   if (WHERE_ROLE.test(question)) {
+    const lead = cardText.match(/"type":"hero","value":"([^"]{2,48})"/)?.[1]?.trim();
+    if (lead && !/^(?:no|yes|mixed|unclear)\b/i.test(lead)) return lead;
     const school = cardText.match(INSTITUTION)?.[1]?.trim();
     if (school && !proposed.toLowerCase().includes(school.toLowerCase())) return school.length <= 48 ? school : school.slice(0, 48).replace(/\s+\S*$/, '');
   }

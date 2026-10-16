@@ -145,6 +145,23 @@ test('a benefit line under a no verdict is dropped', () => {
   assert.doesNotMatch(line.node.type === 'text' ? line.node.text : '', /might reduce/);
 });
 
+test('a pro that fights a no verdict is dropped', () => {
+  const session = new VerdictSession({
+    query: 'Does the evening tea help people sleep?',
+    results: [hit({ title: 'Tea review', url: 'https://agency.example/tea', domain: 'agency.example', snippet: 'There is no solid evidence the evening tea helps people sleep.' })],
+  });
+  session.offer({ type: 'hero', value: 'No solid evidence', label: 'Sleep' }, 0);
+  const node = session.offer({
+    type: 'proscons',
+    pros: ['A cup might reduce how long it takes to fall asleep', 'Linked to lower restless nights in one survey'],
+    cons: ['The trials do not show that effect'],
+  }, 1).node;
+  assert.equal(node.type, 'proscons');
+  if (node.type !== 'proscons') return;
+  assert.deepEqual(node.pros, []);
+  assert.deepEqual(node.cons, ['The trials do not show that effect']);
+});
+
 test('a consistent No tile is left alone', () => {
   const lead: CardNode = { type: 'hero', value: 'No', label: 'The store is closed today', caption: 'The owner posted that the shop is shut on Mondays.' };
   const session = new VerdictSession({

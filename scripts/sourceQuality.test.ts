@@ -78,6 +78,11 @@ test('an unpriced product hero does not lead a card that has a priced pick', () 
   ]);
   assert.equal(nodes[0], undefined);
   assert.equal(nodes[1]?.type, 'list');
+  const budgetLabel = finishQuality('best cordless stick vacuum under $200', [
+    { type: 'hero', value: 'Acme Stick', label: 'Best cordless stick vacuum under $200' },
+    { type: 'list', style: 'bullet', items: [{ text: 'Basic Stick', meta: '$140' }] },
+  ]);
+  assert.equal(budgetLabel[0], undefined);
   const kept = finishQuality('How do HDMI switches work', [
     { type: 'hero', value: 'Kinivo 550BN', label: 'Top pick' },
     { type: 'list', style: 'bullet', items: [{ text: 'Fosmon 3-Port', meta: '$13.99' }] },

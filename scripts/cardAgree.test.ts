@@ -81,8 +81,18 @@ test('a keep-only follow-up puts back a paper that still qualifies', () => {
   assert.equal(items.length, 2);
 });
 
+test('a quotation the page does not contain is not shown', () => {
+  const source = 'The recommended amount of sleep for adults is at least 7 hours each day.';
+  const smashed = 'The page states: "About Sleep Adult 65 years and older 7-8 hours1."';
+  const next = finishQuotedText('quote the page on how much sleep adults need', smashed, [page(source)]);
+  assert.match(next, /at least 7 hours/);
+  assert.doesNotMatch(next, /hours1/);
+});
+
 test('a follow-up title answers where someone teaches and what a price would cost in tax', () => {
   assert.equal(answerTitle('Where does she teach?', 'Ada Lovelace', 'She teaches at Northshore University.'), 'Northshore University');
+  const card = JSON.stringify([{ type: 'hero', value: 'UC Berkeley' }, { type: 'text', text: 'She is also an investigator at the Howard Hughes Medical Institute.' }]);
+  assert.equal(answerTitle('Where does she teach?', 'Jennifer Doudna', card), 'UC Berkeley');
   assert.equal(answerTitle('What if they cost $80?', 'Sneakers', 'The purchase is taxable. Tax $6.40 at the combined rate.'), 'Tax $6.40');
   assert.equal(answerTitle('Who is Ada Lovelace?', 'Ada Lovelace', 'She teaches at Northshore University.'), 'Ada Lovelace');
 });

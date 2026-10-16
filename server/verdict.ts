@@ -243,6 +243,14 @@ function mapNode(node: CardNode, flags: Flags, body: string, negative: boolean):
     if (!items.length) return undefined;
     return items.length === node.items.length && items.every((item, index) => item === node.items[index]) ? node : { ...node, items };
   }
+  if (node.type === 'proscons' && negative) {
+    const pros = node.pros.flatMap((item) => {
+      const text = withoutFighting(item);
+      return text ? [text] : [];
+    });
+    if (!pros.length && !node.cons.length) return undefined;
+    return pros.length === node.pros.length && pros.every((item, index) => item === node.pros[index]) ? node : { ...node, pros };
+  }
   return node;
 }
 
