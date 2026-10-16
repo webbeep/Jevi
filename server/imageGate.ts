@@ -1,5 +1,7 @@
 import { factTileLabel } from '../shared/factTile';
+import { isComposite } from '../shared/imagematch';
 import type { ImageResult } from '../shared/types';
+import { isGenericPreview } from './images';
 
 /**
  * T443 image relevance gate: a wrong picture is worse than none.
@@ -267,6 +269,89 @@ export function pageNames(target: PicTarget, page: { title?: string; snippet?: s
   if (target.kind !== 'named') return false;
   const words = tokens(`${page.title ?? ''} ${page.snippet ?? ''} ${page.url}`);
   return namesOf(target).some((need) => need.slice(0, 3).every((t) => hit(t, words))) && contextOk(target, words, [page.url]);
+}
+
+/** A roundup of several people, not one person's portrait. */
+const TEAM_PAGE = /\b(?:our team|meet the team|leadership team|staff directory|group photo|team photo|meet our|people directory)\b/i;
+
+/** Site chrome and group graphics. A profile photo does not use these paths. */
+const NOT_PORTRAIT = /company-logo|team-photo|group-photo|ghost-person|default-avatar|wordmark|static\.licdn\.com|\/aero-v1\//i;
+
+const HEAD_SPLIT = /\s+[|–—]\s+|\s+-\s+/;
+
+function headOf(title: string): string {
+  return title.split(HEAD_SPLIT)[0]?.trim() ?? title.trim();
+}
+
+/** The title names a different person ("Raj Bakhru"), not this one and not a middle name. */
+function otherPersonIn(person: string, head: string): boolean {
+  const own = tokens(person);
+  const owned = new Set(own);
+  const first = own[0] ?? '';
+  const re = /\b([A-Z][a-z'’-]{2,})\s+([A-Z][a-z'’-]{2,})\b/g;
+  for (const match of head.matchAll(re)) {
+    const a = match[1]!.toLowerCase();
+    const b = match[2]!.toLowerCase();
+    if (owned.has(a) && owned.has(b)) continue;
+    if (owned.has(b) && (a === first || (a.length >= 3 && first.startsWith(a)))) continue;
+    return true;
+  }
+  return false;
+}
+
+function slugHasName(person: string, url: string): boolean {
+  let path = url;
+  try {
+    path = new URL(url).pathname;
+  } catch {
+    // A bare path still carries the name slug.
+  }
+  const bits = path.toLowerCase().split(/[^a-z0-9]+/).filter((part) => part.length >= 3);
+  const own = tokens(person);
+  const surname = own[own.length - 1];
+  const first = own[0];
+  if (!surname || !first || !bits.includes(surname)) return false;
+  return bits.some((bit) => bit === first || first.startsWith(bit) || bit.startsWith(first));
+}
+
+/** The page is this person's own page: the title or the URL slug is their name, not a team page. */
+export function personPage(person: string, row: { title?: string; url: string }): boolean {
+  if (tokens(person).length < 2) return false;
+  const title = row.title ?? '';
+  if (TEAM_PAGE.test(title) || TEAM_PAGE.test(row.url)) return false;
+  const head = headOf(title);
+  if (otherPersonIn(person, head)) return false;
+  const own = tokens(person);
+  const surname = own[own.length - 1]!;
+  const first = own[0]!;
+  const headTokens = tokens(head);
+  const firstHit = headTokens.some((part) => part === first || (part.length >= 3 && first.startsWith(part)));
+  if (headTokens.includes(surname) && firstHit) return true;
+  return slugHasName(person, row.url);
+}
+
+/** A https picture of a person, not a logo, icon, or team graphic. */
+export function portraitSrcOk(src: string): boolean {
+  return /^https:\/\//i.test(src) && !isGenericPreview(src) && !NOT_PORTRAIT.test(src);
+}
+
+/**
+ * The portrait on a page that is about this person. Logos, team graphics, and other
+ * people's photos are left out. Undefined when the page has no usable portrait.
+ */
+export function personPortrait(
+  person: string,
+  pages: readonly { title?: string; url: string; image?: string }[],
+): { src: string; url: string } | undefined {
+  const hits = pages.flatMap((page) => {
+    const src = page.image;
+    if (!src || !portraitSrcOk(src) || isComposite({ title: page.title ?? '', thumb: src })) return [];
+    if (!personPage(person, page)) return [];
+    return [{ src, url: page.url, rank: slugHasName(person, page.url) ? 1 : 0 }];
+  });
+  hits.sort((a, b) => b.rank - a.rank);
+  const best = hits[0];
+  return best ? { src: best.src, url: best.url } : undefined;
 }
 
 /** Card-level pictures (T436 boost, gallery/image refs): at least one of the subject's significant words (4+ letters) is in the picture. */

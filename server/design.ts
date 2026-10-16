@@ -19,7 +19,7 @@ import { clip, type Env } from './util';
 import { VerdictSession } from './verdict';
 import { accepts, mentionsAny, targetFor } from './imageGate';
 import { profileFallback, type ProfilePerson } from './profileFallback';
-import { personCardTitle, personSubject } from './entity';
+import { nameWithWorkplace, personCardTitle, personSubject } from './entity';
 import { isVideoUrl, wantsVideo } from './videoSearch';
 import { guessFreshness, stricter } from './freshness';
 import { isQuoteRow } from './liveQuote';
@@ -301,7 +301,9 @@ function taskBlock(req: DesignRequest): string {
     seasonStatRule(req),
     briefRules(req),
     followupRules(req.followup, req.search.query).trim().replace(/^/, '- '),
-    req.search.results.length ? '' : '- No web sources were found for this; answer from general knowledge, say it may be out of date, and do not cite sources.',
+    req.search.results.length ? '' : nameWithWorkplace(asked)
+      ? '- No page names a person by that given name at that workplace. Say that no matching person was found. Do not guess a job, a handle, or a public role.'
+      : '- No web sources were found for this; answer from general knowledge, say it may be out of date, and do not cite sources.',
     req.context ? `- Conversation so far (use it to resolve references like "it" or "the cheaper one"; don't repeat it):\n${req.context}` : '',
   ]
     .filter((l) => l && l !== '- ')

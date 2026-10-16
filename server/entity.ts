@@ -620,6 +620,102 @@ function namesPlace(row: EntityRow, place: string[]): boolean {
   return place.some((t) => words.includes(t) || (t.length >= 5 && words.some((w) => w.startsWith(t))));
 }
 
+const GIVEN_NAME = (word: string) => NICK_OF.has(word.toLowerCase());
+
+/** A capitalised word that can be a person's given name, not a role or a company token. */
+function likelyGivenName(word: string): boolean {
+  const key = word.toLowerCase();
+  if (ROLE1.has(key) || ROLE_TAIL.has(key) || DESCRIPTOR_WORDS.has(key) || looksLikeOrgToken(word) || ORG_TAIL.test(word) || COMMON.has(key)) return false;
+  if (GIVEN_NAME(word)) return true;
+  return /^[A-Za-z][a-z'’-]{1,}$/.test(word) && word.length >= 3;
+}
+
+/**
+ * The words before the last one are a workplace, not another given name.
+ * "Tim Cook" and "Michael Jordan" start with the given name, so they stay full names.
+ */
+function earlierIsWorkplace(placeRaw: string[], givenWord: string): boolean {
+  if (placeRaw.some((w) => ROLE1.has(w.toLowerCase()) || ROLE_TAIL.has(w.toLowerCase()) || DESCRIPTOR_WORDS.has(w.toLowerCase()))) return false;
+  if (GIVEN_NAME(placeRaw[0] ?? '')) return false;
+  if (GIVEN_NAME(givenWord)) return true;
+  return placeRaw.some((w) => looksLikeOrgToken(w) || w.length >= 6);
+}
+
+/**
+ * "Who is Blueflame Tim" is the same ask as "Who is Tim from Blueflame": a workplace and a
+ * given name, with the workplace first. from/at/with already return undefined here.
+ * `confident` is true when the shape is clear before any search (a known given name, or a
+ * CamelCase workplace), so the search can ask "Tim at Blueflame" without waiting.
+ */
+export function workplaceFirst(query: string): { given: string; place: string[]; placeText: string; confident: boolean } | undefined {
+  const q = query.trim();
+  if (!WHO_IS.test(q) && !ABOUT.test(q)) return undefined;
+  if (givenWithPlace(q)) return undefined;
+  const rest = q.replace(/\?+\s*$/, '').replace(WHO_IS, '').replace(ABOUT, '').replace(LEAD_Q, '').trim();
+  const words = rest.split(/\s+/).map(cleanWord).filter((w) => w && !COMMON.has(w.toLowerCase()));
+  if (words.length < 2 || words.length > 4) return undefined;
+  if (words.some((w) => /^(?:from|at|with)$/i.test(w))) return undefined;
+  const givenWord = words[words.length - 1]!;
+  const placeRaw = words.slice(0, -1);
+  if (!placeRaw.length || !likelyGivenName(givenWord) || !earlierIsWorkplace(placeRaw, givenWord)) return undefined;
+  const place = [...new Set(placeRaw.flatMap((w) => tokens(w)).filter((t) => t.length >= 3 && !COMMON.has(t) && !GENERIC_PLACE_WORD.has(t)))];
+  if (!place.length) return undefined;
+  const given = givenWord[0]!.toUpperCase() + givenWord.slice(1);
+  // A short camel-case name ("LeBron James") is still a person. A workplace here is a long
+  // token ("Blueflame") or a company mark ("BlueFlame", "NASA"), and the last word is the given name.
+  const first = placeRaw[0] ?? '';
+  const orgLike = placeRaw.some((w) => ORG_TAIL.test(w) || (/^[A-Z]{2,}$/.test(w) && !/^(JR|SR|II|III|IV)$/.test(w)) || (looksLikeOrgToken(w) && w.length >= 8));
+  const confident = orgLike || (!GIVEN_NAME(first) && first.length >= 8 && GIVEN_NAME(givenWord));
+  return { given, place, placeText: placeRaw.join(' '), confident };
+}
+
+/** A given name plus a workplace, in either order. "Tim Cook" is not one of these. */
+export function nameWithWorkplace(query: string): boolean {
+  return givenWithPlace(query) || !!workplaceFirst(query)?.confident;
+}
+
+/**
+ * Searches that find the person when the ask puts the workplace first.
+ * "Who is Blueflame Tim" also searches "Tim at Blueflame" (and the formal given name).
+ */
+export function workplaceQueries(query: string): string[] {
+  const ask = workplaceFirst(query);
+  if (!ask?.confident) return [];
+  const at = `${ask.given} at ${ask.placeText}`;
+  const formal = FORMAL[ask.given.toLowerCase()];
+  return formal && formal.toLowerCase() !== ask.given.toLowerCase() ? [at, `${formal} at ${ask.placeText}`] : [at];
+}
+
+/** The title's subject is this exact name ("Blueflame Tim - Wikipedia"), not a later mention. */
+function titleNames(name: string, title: string): boolean {
+  const head = title.split(/\s+[|–—]\s+|\s+-\s+/)[0] ?? '';
+  return hasFullPersonName(name, { title: head, url: '', snippet: '' });
+}
+
+/** Some page prints these words as one person's name, or Wikipedia has that article. */
+function gluedNameIsPerson(name: string, rows: readonly EntityRow[]): boolean {
+  if (tokens(name).length < 2) return false;
+  return rows.some((row) => exactWikiArticle(row, name) || titleNames(name, row.title ?? ''));
+}
+
+function mentionsGiven(row: EntityRow, given: string): boolean {
+  const words = new Set(tokens(`${row.title ?? ''} ${row.snippet ?? ''} ${row.content ?? ''} ${(row.url ?? '').replace(/[./]/g, ' ')}`));
+  return firstNameForms(given.toLowerCase()).some((form) => words.has(form));
+}
+
+/**
+ * Rows to keep for a workplace-first ask, once no page prints that word order as a person's name.
+ * Undefined when this is not that ask, or when the words are already someone's name: the ordinary
+ * full-name gate then keeps "Tim Cook" and "Michael Jordan".
+ */
+export function workplaceKept<T extends EntityRow>(query: string, rows: readonly T[]): T[] | undefined {
+  const ask = workplaceFirst(query);
+  if (!ask) return undefined;
+  const name = personSubject(query);
+  if (!name || gluedNameIsPerson(name, rows)) return undefined;
+  return rows.filter((row) => namesPlace(row, ask.place) && mentionsGiven(row, ask.given));
+}
+
 export function isPersonAsk(query: string, pattern?: string): boolean {
   if (MACHINE_ADDRESS.test(query)) return false;
   if (COMPARE_ASK.test(query) && !WHO_IS.test(query.trim())) return false;
@@ -1642,6 +1738,13 @@ export function resolveEntity(
   // Two full names in the sources are a choice; one full name keeps only that person's rows.
   if (!opts?.prior && !/\s/.test(name) && givenWithPlace(query)) {
     const named = peopleNamedLike(name, rows, placeWords(query, name));
+    if (named) return named;
+  }
+  // "Who is Blueflame Tim" is that same ask with the workplace first. A page that prints
+  // those words as a person's name ("Tim Cook") stays on the full-name path below.
+  const swapped = !opts?.prior ? workplaceFirst(query) : undefined;
+  if (swapped && !gluedNameIsPerson(name, rows)) {
+    const named = peopleNamedLike(swapped.given, rows, swapped.place);
     if (named) return named;
   }
   // A one-token famous ask ("Who is Obama"): one Wikipedia article for the token, plus other

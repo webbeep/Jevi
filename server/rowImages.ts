@@ -1,7 +1,7 @@
 import type { CardNode, ImageCredit } from '../shared/card';
 import { isComposite } from '../shared/imagematch';
 import { shoppingAsk } from './claims';
-import { type EntityHint, type GateContext, type PicTarget, accepts, hostNames, nameLike, namedTarget, pageNames, targetFor } from './imageGate';
+import { type EntityHint, type GateContext, type PicTarget, accepts, hostNames, nameLike, namedTarget, namesPerson, pageNames, personPage, personPortrait, portraitSrcOk, targetFor } from './imageGate';
 import type { ImageResult, SearchResult } from '../shared/types';
 
 /**
@@ -42,6 +42,9 @@ interface Slot {
   ogOk: boolean;
   /** Org tiles: the org's own site among the results. */
   officialSite?: string;
+  /** A person profile: the cited page to read a portrait from when the result has none yet. */
+  pageUrl?: string;
+  profile?: boolean;
   src?: string;
 }
 
@@ -112,6 +115,13 @@ function slotsOf(node: CardNode, out: Slot[], ctx?: GateContext, query?: string)
       out.push({ entity: target.entity, target, source: node.source, ogOk: true });
       return;
     }
+    case 'profile': {
+      if (node.imageSrc || node.imageRef !== undefined || node.imageQuery) return;
+      if (ctx?.person && !namesPerson(node.name, ctx.person)) return;
+      const target = namedTarget(node.name, ctx);
+      out.push({ entity: node.name, target: target.kind === 'none' ? { kind: 'named', entity: node.name } : target, ogOk: true, profile: true });
+      return;
+    }
     case 'list':
       if (listGetsPictures(node, query)) {
         for (const item of node.items) {
@@ -144,6 +154,11 @@ function apply(node: CardNode, slots: Slot[], at: { i: number }, query?: string)
     }
     case 'tile': {
       if (!blankTile(node)) return node;
+      const s = slots[at.i++];
+      return s?.src ? { ...node, imageSrc: s.src } : node;
+    }
+    case 'profile': {
+      if (node.imageSrc || node.imageRef !== undefined || node.imageQuery) return node;
       const s = slots[at.i++];
       return s?.src ? { ...node, imageSrc: s.src } : node;
     }
@@ -206,6 +221,16 @@ export async function fillRowImages(nodes: CardNode[], deps: RowImageDeps, used:
   // 1. Zero calls: the row's own source picture (when that page names it), then gated pooled pictures.
   //    Orgs: a result on the org's own site (its picture or og:image), else nothing.
   for (const s of live) {
+    if (s.profile) {
+      const fromRows = personPortrait(s.entity, deps.results);
+      const portrait = fromRows ?? personPortrait(s.entity, deps.pool.map((img) => ({ title: img.title, url: img.url, image: img.thumb })));
+      if (portrait && !used.has(portrait.src)) {
+        take(s, portrait.src, { url: portrait.url });
+        continue;
+      }
+      const page = deps.results.find((row) => personPage(s.entity, row));
+      if (page) s.pageUrl = page.url;
+    }
     const own = s.source ? deps.results[s.source - 1] : undefined;
     if (s.target.kind === 'org') {
       const site = deps.results.find((r) => hostNames(s.target.entity, r.url));
@@ -258,6 +283,7 @@ export async function fillRowImages(nodes: CardNode[], deps: RowImageDeps, used:
     const want = live
       .filter((s) => !s.src && s.ogOk)
       .flatMap((s) => {
+        if (s.profile) return s.pageUrl ? [{ s, url: s.pageUrl }] : [];
         if (s.target.kind === 'org') return s.officialSite ? [{ s, url: s.officialSite }] : [];
         const own = s.source ? deps.results[s.source - 1] : undefined;
         return own && perSource.get(s.source!) === 1 && pageNames(s.target, own) ? [{ s, url: own.url }] : [];
@@ -267,7 +293,9 @@ export async function fillRowImages(nodes: CardNode[], deps: RowImageDeps, used:
     const pics = await Promise.all(want.map((w) => deps.og!(w.url)));
     want.forEach((w, i) => {
       const src = pics[i];
-      if (https(src) && !used.has(src)) take(w.s, src, { url: w.url });
+      if (!https(src) || used.has(src)) return;
+      if (w.s.profile && !portraitSrcOk(src)) return;
+      take(w.s, src, { url: w.url });
     });
   }
 

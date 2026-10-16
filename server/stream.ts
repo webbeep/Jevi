@@ -16,6 +16,7 @@ import {
   type EntityDecision,
   entityHintFor,
   formalNameQueries,
+  workplaceQueries,
   isDisambiguationPage,
   isPersonAsk,
   personCardTitle,
@@ -735,7 +736,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   // A preseason line lives on the player page, which the web results often miss once the main engine is capped.
   const statLine = playerStatRow(query);
   // Searches that need no model ("$rdw" → "RDW stock news today") lead the rewrites.
-  const instant = [...tickerQueries(query), ...formalNameQueries(query)];
+  const instant = [...tickerQueries(query), ...formalNameQueries(query), ...workplaceQueries(query)];
   const sides = compareSideQueries(query);
   if (!rewritten) {
     // SPD2 (t457): every ask searches its literal words at once; the understood rewrites join the same

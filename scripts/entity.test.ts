@@ -10,6 +10,7 @@ import {
   priorEntity,
   publicChoices,
   resolveEntity,
+  workplaceQueries,
   disambiguationEntries,
   commaDetailQuery,
   correctedPersonQuery,
@@ -1230,6 +1231,69 @@ test('one person who matches the workplace is still one card, without the other 
   if (decision.kind !== 'single') return;
   assert.match(decision.entity.name, /Tim Lee/);
   assert.deepEqual(decision.kept, [0]);
+});
+
+test('a workplace before the given name is the same ask as the given name at that workplace', () => {
+  const rows = [
+    row('Tim Blue - Wikipedia', 'Tim Blue (born July 10, 1984) is a former professional basketball player and power forward.', 'https://en.wikipedia.org/wiki/Tim_Blue'),
+    row('Timothy Estrada - BlueFlame AI', 'As a Software Engineer at Eco-Enterprise, I direct the architectural design and evolution… · Experience: BlueFlame AI · Education: New Jersey Institute of Technology', 'https://www.linkedin.com/in/tim-estrada'),
+    row('Blueflame AI | AI Deal Intelligence', 'Blueflame connects, synthesizes, and activates proprietary firm intelligence.', 'https://blueflame.ai/'),
+  ];
+  for (const q of ['Who is Blueflame Tim', 'Who Is Blueflame Tim', 'Who is Tim at Blueflame']) {
+    const decision = resolveEntity(q, rows, { pattern: 'profile' });
+    assert.equal(decision.kind, 'single', q);
+    if (decision.kind !== 'single') continue;
+    assert.equal(decision.entity.name, 'Timothy Estrada');
+    assert.deepEqual(decision.kept, [1]);
+  }
+  const gated = gateResults('Who is Blueflame Tim', rows);
+  assert.deepEqual(gated.kept.map((kept) => kept.title), ['Timothy Estrada - BlueFlame AI']);
+});
+
+test('a workplace-first ask with two people at that place is a picker', () => {
+  const rows = [
+    row('Tim Lee - Software Engineer at BlueFlame AI | LinkedIn', 'Tim Lee is a software engineer at BlueFlame AI.', 'https://www.linkedin.com/in/timlee'),
+    row('Tim Park - Product Manager at BlueFlame AI | LinkedIn', 'Tim Park leads product at BlueFlame AI in New York.', 'https://www.linkedin.com/in/timpark'),
+    row('BlueFlame AI', 'BlueFlame AI builds an agent for finance teams.', 'https://blueflame.ai/'),
+  ];
+  const decision = resolveEntity('Who is Blueflame Tim', rows, { pattern: 'profile' });
+  assert.equal(decision.kind, 'choices');
+  if (decision.kind !== 'choices') return;
+  const names = decision.choices.map((choice) => choice.name.toLowerCase());
+  assert.ok(names.some((name) => name.includes('tim lee')));
+  assert.ok(names.some((name) => name.includes('tim park')));
+});
+
+test('a real full name is not searched as a workplace', () => {
+  assert.deepEqual(workplaceQueries('Who is Tim Cook'), []);
+  assert.deepEqual(workplaceQueries('Who is Michael Jordan'), []);
+  assert.deepEqual(workplaceQueries('Who is Jensen Huang'), []);
+  assert.deepEqual(workplaceQueries('Who is Barack Obama'), []);
+  assert.deepEqual(workplaceQueries('Who is LeBron James'), []);
+  assert.deepEqual(workplaceQueries('Who is NASA Tim'), ['Tim at NASA', 'Timothy at NASA']);
+  assert.deepEqual(workplaceQueries('Who is Blueflame Tim'), ['Tim at Blueflame', 'Timothy at Blueflame']);
+  assert.deepEqual(workplaceQueries('Who is Tim from Blueflame'), []);
+  const rows = [
+    row('Tim Cook - Wikipedia', 'Timothy Donald Cook is an American business executive, the chief executive officer of Apple.', 'https://en.wikipedia.org/wiki/Tim_Cook'),
+    row('Timothy Cook - Apple', 'Tim Cook is CEO of Apple.', 'https://www.apple.com/leadership/tim-cook/'),
+  ];
+  assert.deepEqual(gateResults('Who is Tim Cook?', rows).kept.map((kept) => kept.url), rows.map((kept) => kept.url));
+  const decision = resolveEntity('Who is Tim Cook?', rows);
+  assert.notEqual(decision.kind, 'skip');
+  if (decision.kind === 'single') assert.match(decision.entity.name, /Cook/);
+  if (decision.kind === 'choices') assert.ok(decision.choices.every((choice) => /cook/i.test(choice.name)));
+});
+
+test('a page that prints the reversed words as a name stays that person', () => {
+  const rows = [
+    row('Blueflame Tim - Wikipedia', 'Blueflame Tim is a streamer known by that handle.', 'https://en.wikipedia.org/wiki/Blueflame_Tim'),
+    row('Timothy Estrada - BlueFlame AI', 'Timothy Estrada is a software engineer at BlueFlame AI.', 'https://www.linkedin.com/in/tim-estrada'),
+  ];
+  const decision = resolveEntity('Who is Blueflame Tim', rows);
+  assert.equal(decision.kind, 'single');
+  if (decision.kind !== 'single') return;
+  assert.match(decision.entity.name, /Blueflame Tim/);
+  assert.ok(!decision.kept.includes(1));
 });
 
 test('a picked person whose page spells the workplace as two words still has that page', () => {

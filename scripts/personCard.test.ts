@@ -3,7 +3,8 @@ import { test } from 'node:test';
 import type { CardNode } from '../shared/card.ts';
 import type { ImageResult, SearchResult } from '../shared/types.ts';
 import { PictureResolver } from '../server/pictures.ts';
-import { accepts, namesakeLabel, properName, targetFor } from '../server/imageGate.ts';
+import { accepts, namesakeLabel, personPortrait, properName, targetFor } from '../server/imageGate.ts';
+import { fillRowImages } from '../server/rowImages.ts';
 import { personFacts, profileFallback } from '../server/profileFallback.ts';
 import { priorEntity, resolveEntity } from '../server/entity.ts';
 import type { Env } from '../server/util.ts';
@@ -94,6 +95,42 @@ test('a snippet-only person card is the standard profile with a third-person sum
     assert.match(text.text, /New Jersey Institute of Technology/);
   }
   assert.ok(!body.some((n) => n.type === 'gallery' || n.type === 'section'));
+});
+
+test('a cited page portrait is the profile photo, including a LinkedIn one', () => {
+  const linkedin = 'https://media.licdn.com/dms/image/profile-displayphoto-shrink_200_200/tim.jpg';
+  const withPhoto: SearchResult[] = [{ ...rows[0]!, image: linkedin }, rows[1]!];
+  const body = profileFallback({ name: 'Timothy Estrada' }, withPhoto, pool.slice(1), hint);
+  const profile = body[0];
+  assert.equal(profile?.type, 'profile');
+  if (profile?.type === 'profile') assert.equal(profile.imageSrc, linkedin);
+  const shown = personPortrait('Timothy Estrada', [
+    { title: 'Welcome to the team - Blueflame AI', url: 'https://blueflame.ai/blog/team', image: 'https://blueflame.ai/team.png' },
+    { title: 'Raj Bakhru, CEO of Blueflame AI', url: 'https://www.linkedin.com/in/raj-bakhru', image: 'https://media.licdn.com/dms/image/raj.jpg' },
+    { title: 'Timothy Estrada - BlueFlame AI', url: 'https://www.linkedin.com/in/tim-estrada', image: 'https://blueflame.ai/logo.png' },
+    { title: 'Timothy Estrada - BlueFlame AI', url: 'https://www.linkedin.com/in/tim-estrada', image: linkedin },
+  ]);
+  assert.equal(shown?.src, linkedin);
+  assert.equal(personPortrait('Timothy Estrada', [
+    { title: 'Timothy Estrada - BlueFlame AI', url: 'https://www.linkedin.com/in/tim-estrada', image: 'https://static.licdn.com/aero-v1/sc/h/logo.png' },
+  ]), undefined);
+});
+
+test('a blank person profile takes the cited portrait and not a colleague or a logo', async () => {
+  const linkedin = 'https://media.licdn.com/dms/image/profile-displayphoto-shrink_200_200/tim.jpg';
+  const results: SearchResult[] = [
+    { title: 'Raj Bakhru, CEO of Blueflame AI', url: 'https://www.linkedin.com/in/raj-bakhru', domain: 'linkedin.com', engines: ['web'], snippet: 'CEO at BlueFlame AI', image: 'https://media.licdn.com/dms/image/raj.jpg' },
+    { title: 'Timothy Estrada - BlueFlame AI | LinkedIn', url: 'https://www.linkedin.com/in/tim-estrada', domain: 'linkedin.com', engines: ['web'], snippet: 'Software Engineer at BlueFlame AI', image: linkedin },
+    { title: 'Our Team | BlueFlame AI', url: 'https://blueflame.ai/team', domain: 'blueflame.ai', engines: ['web'], snippet: 'Meet Timothy Estrada and the team.', image: 'https://blueflame.ai/team.png' },
+  ];
+  const out = await fillRowImages([{ type: 'profile', name: 'Timothy Estrada', subtitle: 'Software engineer' }], {
+    results,
+    pool: [pic('Blueflame AI logo', 'https://blueflame.ai/logo.png', 'https://blueflame.ai/')],
+    person: 'Timothy Estrada',
+  });
+  const profile = out.nodes[0];
+  assert.equal(profile?.type, 'profile');
+  if (profile?.type === 'profile') assert.equal(profile.imageSrc, linkedin);
 });
 
 test('a snippet-only person card never shows another person as its photo', () => {
