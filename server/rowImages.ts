@@ -1,7 +1,8 @@
 import type { CardNode, ImageCredit } from '../shared/card';
 import { isComposite } from '../shared/imagematch';
 import { shoppingAsk } from './claims';
-import { type EntityHint, type GateContext, type PicTarget, accepts, hostNames, nameLike, namedTarget, namesPerson, pageNames, personPage, personPortrait, portraitSrcOk, targetFor } from './imageGate';
+import { isStockArt } from './images';
+import { type EntityHint, type GateContext, type PicTarget, accepts, hostNames, nameLike, namedPictureOk, namedTarget, namesPerson, pageNames, pagePortraitOk, personPage, personPortrait, portraitSrcOk, targetFor } from './imageGate';
 import type { ImageResult, SearchResult } from '../shared/types';
 
 /**
@@ -241,7 +242,8 @@ export async function fillRowImages(nodes: CardNode[], deps: RowImageDeps, used:
       if (site) s.officialSite = site.url;
     } else if (own && pageNames(s.target, own)) {
       const ownPic = own.image ?? deps.pool.find((p) => p.url === own.url)?.thumb;
-      if (https(ownPic) && !used.has(ownPic)) {
+      const ownOk = s.target.kind !== 'named' || (namedPictureOk(s.entity, { thumb: ownPic, url: own.url, source: own.domain }) && pagePortraitOk(s.entity, own, ownPic));
+      if (https(ownPic) && !used.has(ownPic) && ownOk) {
         take(s, ownPic, { url: own.url });
         continue;
       }
@@ -295,6 +297,10 @@ export async function fillRowImages(nodes: CardNode[], deps: RowImageDeps, used:
       const src = pics[i];
       if (!https(src) || used.has(src)) return;
       if (w.s.profile && !portraitSrcOk(src)) return;
+      if (w.s.target.kind === 'named') {
+        const page = deps.results.find((row) => row.url === w.url) ?? { title: '', url: w.url };
+        if (!pagePortraitOk(w.s.entity, page, src)) return;
+      } else if (isStockArt(src)) return;
       take(w.s, src, { url: w.url });
     });
   }

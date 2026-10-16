@@ -1,5 +1,5 @@
 import { TOPIC_WORD } from '../shared/askAbout';
-import { contextTerms, distinguishingTerms, hasFullPersonName, isPersonAsk, nameIsTopic, personSubject, personSourceOk, workplaceKept } from './entity';
+import { contextTerms, distinguishingTerms, givenPlaceKept, hasFullPersonName, isPersonAsk, nameIsTopic, personSubject, personSourceOk, workplaceKept } from './entity';
 import { modelConflict } from './productModel';
 import { cashtags } from './queryClean';
 import { isBlockedHost } from './spamHosts';
@@ -204,6 +204,8 @@ export function gateResults<T extends GateHit>(query: string, rows: readonly T[]
     // "Blueflame Tim" is a workplace plus a given name unless some page prints that as a name.
     const swapped = workplaceKept(query, clean);
     if (swapped) return { kept: swapped, dropped: rows.length - swapped.length };
+    const placed = givenPlaceKept(query, clean);
+    if (placed) return { kept: placed, dropped: rows.length - placed.length };
     const name = personSubject(query);
     const nameToks = name ? name.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length >= 2) : [];
     // Multi-word person names only: a single token is never enough to force the person gate.

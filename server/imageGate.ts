@@ -1,7 +1,7 @@
 import { factTileLabel } from '../shared/factTile';
 import { isComposite } from '../shared/imagematch';
 import type { ImageResult } from '../shared/types';
-import { isGenericPreview } from './images';
+import { isGenericPreview, isStockArt } from './images';
 
 /**
  * T443 image relevance gate: a wrong picture is worse than none.
@@ -231,6 +231,7 @@ function namesOf(target: PicTarget): string[][] {
 /** The gate. */
 export function accepts(target: PicTarget, img: Pick<ImageResult, 'title' | 'url' | 'thumb'> & { source?: string }): boolean {
   if (target.kind === 'none' || !target.entity || !/^https:\/\//i.test(img.thumb)) return false;
+  if (target.kind === 'named' && !namedPictureOk(target.entity, img)) return false;
   if (target.kind === 'org') {
     const main = mainToken(target.entity);
     if (!main) return false;
@@ -330,9 +331,28 @@ export function personPage(person: string, row: { title?: string; url: string })
   return slugHasName(person, row.url);
 }
 
-/** A https picture of a person, not a logo, icon, or team graphic. */
+/** First Last, not a model number. "Raj Bakhru" and "Eiffel Tower" count. "iPhone 17" does not. */
+function looksLikePersonName(entity: string): boolean {
+  const parts = entity.trim().split(/\s+/);
+  return parts.length >= 2 && parts.length <= 4 && parts.every((part) => /^\p{L}[\p{L}'’-]*$/u.test(part));
+}
+
+/** A named person or named thing does not take a Flickr file or other stock art. */
+export function namedPictureOk(_entity: string, img: { title?: string; url?: string; thumb?: string; source?: string }): boolean {
+  const refs = [img.thumb, img.url, img.source].filter((item): item is string => !!item);
+  return !refs.some((item) => isStockArt(item));
+}
+
+/** A page image for a named person has to be that person's own page, and not stock art. */
+export function pagePortraitOk(entity: string, page: { title?: string; url: string }, src?: string): boolean {
+  if (src && (isStockArt(src) || !portraitSrcOk(src))) return false;
+  if (!looksLikePersonName(entity)) return !src || !isStockArt(src);
+  return personPage(entity, page);
+}
+
+/** A https picture of a person, not a logo, icon, team graphic, or stock file. */
 export function portraitSrcOk(src: string): boolean {
-  return /^https:\/\//i.test(src) && !isGenericPreview(src) && !NOT_PORTRAIT.test(src);
+  return /^https:\/\//i.test(src) && !isGenericPreview(src) && !NOT_PORTRAIT.test(src) && !isStockArt(src);
 }
 
 /**

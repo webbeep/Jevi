@@ -17,6 +17,23 @@ const GENERIC_PREVIEW = /logo|fallback|placeholder|default|favicon|\bfav\b|apple
 /** A site-wide preview (logo, favicon, placeholder) rather than a picture of the subject. */
 export const isGenericPreview = (url: string) => GENERIC_PREVIEW.test(url.split('#')[0]);
 
+/** Flickr and stock libraries. A generic scene may use one. A named person or named thing may not. */
+const STOCK_HOST = /(?:^|\.)(?:flickr\.com|staticflickr\.com|pexels\.com|unsplash\.com|pixabay\.com|shutterstock\.com|istockphoto\.com|gettyimages\.com|depositphotos\.com|dreamstime\.com|123rf\.com|freepik\.com|vecteezy\.com|pngtree\.com|alamy\.com|bigstockphoto\.com)$/i;
+
+export function isStockArt(src: string): boolean {
+  if (!src) return false;
+  if (/stock\.adobe\.com/i.test(src)) return true;
+  let host = src;
+  try {
+    if (src.includes('://')) host = new URL(src).hostname;
+  } catch {
+    host = src;
+  }
+  const name = host.replace(/^www\./, '').toLowerCase();
+  if (/^(?:flickr|pexels|unsplash|pixabay|shutterstock|istock|getty)$/.test(name)) return true;
+  return STOCK_HOST.test(name);
+}
+
 /** Thumbnail hosts YouTube serves its frames from, including the numbered shards ("i1.ytimg.com"). */
 const YT_THUMB_HOST = /^(?:i\.ytimg\.com|img\.youtube\.com|i[0-9]\.ytimg\.com)$/i;
 
@@ -266,7 +283,8 @@ export function findImages(query: string, env: Env, n = 1, allowGeneric = false)
   return cached(key, async () => {
     const tasks = sources(env).map((s) => async () => {
       const found = (await s.run(query, n)).filter((img) => img.thumb);
-      const fitting = (allowGeneric && !s.specificOnly ? found : found.filter((img) => matches(query, img.title))).filter((img) => !isComposite(img));
+      const specific = found.filter((img) => matches(query, img.title) && !isStockArt(img.thumb) && !isStockArt(img.url));
+      const fitting = (allowGeneric && !s.specificOnly ? found : specific).filter((img) => !isComposite(img));
       const ranked = fitting.map((img) => ({ img, score: matchScore(query, img.title) })).sort((a, b) => b.score - a.score).map((x) => x.img);
       if (!ranked.length) throw new Error(`${s.name}: no matching picture`);
       return ranked.slice(0, n);

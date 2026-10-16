@@ -114,6 +114,36 @@ describe('T443 image relevance gate', () => {
     assert.equal(accepts(targetFor('Company', 'BlueFlame AI'), img('Office building', 'https://commons.wikimedia.org/x', 'https://upload.wikimedia.org/b.jpg')), false);
     assert.equal(accepts(targetFor('Company', 'BlueFlame AI'), img('', 'https://www.blueflame.ai/', 'https://www.blueflame.ai/logo.png')), true);
   });
+  test('a named person or named thing does not take Flickr or stock art', async () => {
+    const flickr = (title: string, file: string) => img(title, `https://www.flickr.com/photos/${file}`, `https://live.staticflickr.com/${file}.jpg`);
+    assert.equal(accepts({ kind: 'named', entity: 'Raj Bakhru' }, flickr('Raj Bakhru', 'strangers')), false);
+    assert.equal(accepts({ kind: 'named', entity: 'James Tedman' }, flickr('James Tedman moth', 'moth')), false);
+    assert.equal(accepts({ kind: 'named', entity: 'Eiffel Tower' }, flickr('Eiffel Tower at night', 'tower')), false);
+    assert.equal(accepts({ kind: 'named', entity: 'Eiffel Tower' }, img('Eiffel Tower - Wikipedia', 'https://en.wikipedia.org/wiki/Eiffel_Tower', 'https://upload.wikimedia.org/tower.jpg')), true);
+    const nodes: CardNode[] = [{
+      type: 'grid',
+      cols: 2,
+      children: [
+        { type: 'tile', label: 'Raj Bakhru', value: 'CEO', source: 1 },
+        { type: 'tile', label: 'James Tedman', value: 'Head of Europe', source: 2 },
+      ],
+    }];
+    const filled = await fillRowImages(nodes, {
+      results: [
+        res('https://blueflame.ai/about', 'https://live.staticflickr.com/strangers.jpg', 'BlueFlame AI Leadership'),
+        res('https://www.flickr.com/photos/moth', 'https://live.staticflickr.com/moth.jpg', 'James Tedman, Head of Europe'),
+      ],
+      pool: [flickr('Raj Bakhru', 'pool'), flickr('James Tedman', 'moth-pool')],
+      og: async () => 'https://live.staticflickr.com/og.jpg',
+    });
+    const grid = filled.nodes[0];
+    assert.equal(grid?.type, 'grid');
+    if (grid?.type !== 'grid') return;
+    for (const tile of grid.children) {
+      if (tile.type !== 'tile') continue;
+      assert.equal(tile.imageSrc, undefined, tile.label);
+    }
+  });
   test('people need every name token', () => {
     assert.equal(accepts({ kind: 'named', entity: 'Ray Lee' }, img('Ray Lee - BlueFlame AI | LinkedIn')), true);
     assert.equal(accepts({ kind: 'named', entity: 'Ray Lee' }, img('Lee Kuan Yew')), false);

@@ -301,6 +301,9 @@ function taskBlock(req: DesignRequest): string {
     seasonStatRule(req),
     briefRules(req),
     followupRules(req.followup, req.search.query).trim().replace(/^/, '- '),
+    req.search.results.length && nameWithWorkplace(asked)
+      ? '- This ask is one person at a workplace. Answer with that person\'s profile, titled with their name. Do not answer with the company\'s leadership roster or executive team.'
+      : '',
     req.search.results.length ? '' : nameWithWorkplace(asked)
       ? '- No page names a person by that given name at that workplace. Say that no matching person was found. Do not guess a job, a handle, or a public role.'
       : '- No web sources were found for this; answer from general knowledge, say it may be out of date, and do not cite sources.',

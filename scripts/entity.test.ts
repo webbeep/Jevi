@@ -10,6 +10,7 @@ import {
   priorEntity,
   publicChoices,
   resolveEntity,
+  givenWithPlace,
   workplaceQueries,
   disambiguationEntries,
   commaDetailQuery,
@@ -1262,6 +1263,27 @@ test('a workplace-first ask with two people at that place is a picker', () => {
   const names = decision.choices.map((choice) => choice.name.toLowerCase());
   assert.ok(names.some((name) => name.includes('tim lee')));
   assert.ok(names.some((name) => name.includes('tim park')));
+});
+
+test('a given name plus a workplace is that person even without "who is"', () => {
+  assert.equal(personSubject('Tim From Blueflame Ai'), 'Tim');
+  assert.equal(personSubject('Tim from Blueflame'), 'Tim');
+  assert.equal(isPersonAsk('Tim From Blueflame Ai'), true);
+  assert.equal(givenWithPlace('Tim From Blueflame Ai'), true);
+  assert.deepEqual(workplaceQueries('Tim From Blueflame Ai'), ['Tim at Blueflame', 'Timothy at Blueflame']);
+  assert.deepEqual(workplaceQueries('Who is Tim from Blueflame'), []);
+  assert.equal(personSubject('Tim Cook'), 'Tim Cook');
+  assert.equal(givenWithPlace('Tim Cook'), false);
+  const rows = [
+    row('Timothy Estrada - BlueFlame AI', 'As a Software Engineer at Eco-Enterprise… · Experience: BlueFlame AI', 'https://www.linkedin.com/in/tim-estrada'),
+    row('BlueFlame AI Leadership', 'Raj Bakhru is CEO. James Tedman is Head of Europe.', 'https://blueflame.ai/about'),
+  ];
+  const gated = gateResults('Tim From Blueflame Ai', rows);
+  assert.deepEqual(gated.kept.map((kept) => kept.title), ['Timothy Estrada - BlueFlame AI']);
+  const decision = resolveEntity('Tim From Blueflame Ai', rows, { pattern: 'profile' });
+  assert.equal(decision.kind, 'single');
+  if (decision.kind !== 'single') return;
+  assert.equal(decision.entity.name, 'Timothy Estrada');
 });
 
 test('a real full name is not searched as a workplace', () => {

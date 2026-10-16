@@ -140,6 +140,8 @@ export function personSubject(query: string): string {
     // Skip leading Cap interrogatives / common words ("How is…").
     if (!run.length && (COMMON.has(w.toLowerCase()) || /^(how|what|when|where|why|which)$/i.test(w))) continue;
     if (/^[A-Z]/.test(w)) {
+      // "Tim From Blueflame Ai": From is the workplace, not a surname, once a place follows it.
+      if (run.length === 1 && /^(?:from|at|with)$/i.test(w) && i + 1 < words.length) break;
       run.push(w);
       if (run.length === 6) break;
       // "Ed Chu, Montefiore": a comma after a full name ends it; what follows is the detail.
@@ -193,7 +195,8 @@ export function personSubject(query: string): string {
   // "who is tim from blueflame": the name ends before from / at / with; the rest is the workplace.
   const placeAt = words.findIndex((w, i) => i >= 1 && /^(from|at|with)$/i.test(w) && i + 1 < words.length);
   const nameWords = placeAt > 0 ? words.slice(0, placeAt) : words;
-  if (hadWho && nameWords.length <= 4 && nameWords.every((w) => /^[a-z0-9][a-z0-9.'-]*$/i.test(w) && !COMMON.has(w.toLowerCase()))) {
+  const barePlace = !hadWho && placeAt === 1 && likelyGivenName(nameWords[0] ?? '');
+  if ((hadWho || barePlace) && nameWords.length <= 4 && nameWords.every((w) => /^[a-z0-9][a-z0-9.'-]*$/i.test(w) && !COMMON.has(w.toLowerCase()))) {
     return nameWords.map((w) => w[0]!.toUpperCase() + w.slice(1)).join(' ');
   }
   return '';
@@ -592,7 +595,7 @@ const MACHINE_ADDRESS = /\b(?:\d{1,3}\.){3}\d{1,3}\b|\b(?:[0-9a-f]{1,4}:){2,}/i;
  */
 export function givenWithPlace(query: string): boolean {
   const q = query.trim();
-  if (!WHO_IS.test(q) && !ABOUT.test(q)) return false;
+  if (!WHO_IS.test(q) && !ABOUT.test(q)) return bareGivenWithPlace(q);
   const name = personSubject(q);
   if (!name || /\s/.test(name)) return false;
   if (looksLikeOrgToken(name) || ORG_TAIL.test(name) || ROLE1.has(name.toLowerCase())) return false;
@@ -602,6 +605,20 @@ export function givenWithPlace(query: string): boolean {
   const after = rest.slice(at + name.length).trim();
   if (!after || /^[,:]/.test(after) || /\b(?:owners?|company|startup|firm)\b/i.test(after)) return false;
   return /^(?:from|at|with)\s+\S/i.test(after);
+}
+
+/**
+ * "Tim From Blueflame Ai" with no "who is": a given name, from/at/with, and a workplace.
+ * "Tim Cook" has no preposition. "Photos from Paris" is not a given name plus an organisation.
+ */
+function bareGivenWithPlace(query: string): boolean {
+  const words = query.replace(/\?+\s*$/, '').split(/\s+/).map(cleanWord).filter(Boolean);
+  if (words.length < 3 || words.length > 6) return false;
+  if (!/^(?:from|at|with)$/i.test(words[1] ?? '')) return false;
+  const given = words[0] ?? '';
+  if (!/^[\p{L}]/u.test(given) || !likelyGivenName(given)) return false;
+  const place = words.slice(2);
+  return place.some((w) => ORG_TAIL.test(w) || looksLikeOrgToken(w) || w.length >= 8);
 }
 
 /** The workplace words of a given-name ask ("Who is Tim from Blueflame" → ["blueflame"]), in any case. */
@@ -680,10 +697,37 @@ export function nameWithWorkplace(query: string): boolean {
  */
 export function workplaceQueries(query: string): string[] {
   const ask = workplaceFirst(query);
-  if (!ask?.confident) return [];
-  const at = `${ask.given} at ${ask.placeText}`;
-  const formal = FORMAL[ask.given.toLowerCase()];
-  return formal && formal.toLowerCase() !== ask.given.toLowerCase() ? [at, `${formal} at ${ask.placeText}`] : [at];
+  if (ask?.confident) {
+    const at = `${ask.given} at ${ask.placeText}`;
+    const formal = FORMAL[ask.given.toLowerCase()];
+    return formal && formal.toLowerCase() !== ask.given.toLowerCase() ? [at, `${formal} at ${ask.placeText}`] : [at];
+  }
+  // "Who is Tim from Blueflame" already searches well. "Tim From Blueflame Ai" does not:
+  // the extra company word pulls the leadership page, so search the person at the workplace.
+  if (WHO_IS.test(query.trim()) || ABOUT.test(query.trim()) || !givenWithPlace(query)) return [];
+  const given = personSubject(query);
+  if (!given || /\s/.test(given)) return [];
+  const words = query.trim().replace(/\?+\s*$/, '').split(/\s+/).map(cleanWord).filter(Boolean);
+  const at = words.findIndex((w) => /^(?:from|at|with)$/i.test(w));
+  const placeRaw = words.slice(at + 1).filter((w) => !ORG_TAIL.test(w));
+  const placeText = (placeRaw.length ? placeRaw : words.slice(at + 1)).join(' ');
+  if (!placeText) return [];
+  const line = `${given} at ${placeText}`;
+  const formal = FORMAL[given.toLowerCase()];
+  return formal && formal.toLowerCase() !== given.toLowerCase() ? [line, `${formal} at ${placeText}`] : [line];
+}
+
+/**
+ * Rows to keep for "Tim From Blueflame Ai": the given name and the workplace, not the company roster.
+ * Undefined when this is not that ask.
+ */
+export function givenPlaceKept<T extends EntityRow>(query: string, rows: readonly T[]): T[] | undefined {
+  if (!givenWithPlace(query)) return undefined;
+  const given = personSubject(query);
+  if (!given || /\s/.test(given)) return undefined;
+  const place = placeWords(query, given);
+  if (!place.length) return undefined;
+  return rows.filter((row) => namesPlace(row, place) && mentionsGiven(row, given));
 }
 
 /** The title's subject is this exact name ("Blueflame Tim - Wikipedia"), not a later mention. */
@@ -723,6 +767,7 @@ export function isPersonAsk(query: string, pattern?: string): boolean {
   // "Who was Japan's Prime Minister after Hatoyama" names an office, not a person.
   // The person gate would require that office title as a full name and drop every page.
   if (officeSubject(subject)) return false;
+  if (givenWithPlace(query)) return true;
   if (pattern === 'profile') return subject !== '';
   if (WHO_IS.test(query.trim()) || ABOUT.test(query.trim())) {
     // "Who is Datasite, owner of BlueFlame AI": one name word plus more words is a company asked about
