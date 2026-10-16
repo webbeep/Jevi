@@ -207,6 +207,20 @@ test('a Spanish sentence and a settled disagreement leave the card, and a repeat
   assert.deepEqual(out[4]?.type === 'steps' ? out[4].items.map((step) => step.title) : [], ['1. Instructions', '2. Cells read them', '3. The body remembers']);
 });
 
+test('a verdict names a model the table compares, and a clinic blurb is not a paper', () => {
+  const nodes: CardNode[] = [
+    { type: 'table', columns: ['Factor', 'Levoit LVAC-300', 'Dyson V11'], rows: [['Price', '$350', '$584']] },
+    { type: 'text', text: 'Verdict. For one dog and hardwood, the Dyson V15 Detect is the pick.' },
+    { type: 'list', style: 'number', items: [{ text: 'Langer et al. 2026, DOI 10.1001/jama.2026.0287' }, { text: 'GLP-1 Medications and Muscle Loss: What to Know. Mayo Clinic.' }] },
+  ];
+  const out = finishQuality('List peer-reviewed papers on GLP-1 and recommend a vacuum', nodes);
+  assert.match(out[1] && out[1].type === 'text' ? out[1].text : '', /V11/);
+  assert.doesNotMatch(out[1] && out[1].type === 'text' ? out[1].text : '', /V15/);
+  const items = out[2] && out[2].type === 'list' ? out[2].items : [];
+  assert.equal(items.length, 1);
+  assert.match(items[0]?.text ?? '', /Langer/);
+});
+
 test('a news ask leads with newsrooms, not a newsletter or an encyclopedia', () => {
   const row = (domain: string, title: string) => ({ url: `https://${domain}/x`, title, domain, snippet: '' });
   const rows = [

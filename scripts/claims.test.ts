@@ -105,6 +105,33 @@ test('a city sales tax uses the combined rate once the item clears the exemption
   assert.doesNotMatch(body, /4%/);
 });
 
+test('an exempt price does not keep a tax dollar from another line', () => {
+  const pages: ClaimSource[] = [
+    { n: 1, text: 'New York State sales tax is 4%.' },
+    { n: 2, text: 'The combined sales tax rate in New York City is 8.875%. Clothing and footwear priced under $110 are exempt. Items $110 and up pay the full combined rate.' },
+  ];
+  const query = 'If I buy a $90 pair of sneakers in a store in New York, NY, do I pay sales tax?';
+  assert.equal(salesTax(query, pages), undefined);
+  const next = bindClaims({ type: 'text', text: 'No. At exactly $110 or more, the full 4% ($3.60) applies. NYC combined rate 4% ($3.60).' }, pages, query);
+  const body = next.type === 'text' ? next.text : '';
+  assert.match(body, /^No/);
+  assert.doesNotMatch(body, /\$3\.60/);
+  assert.match(body, /8\.875%/);
+});
+
+test('a number the person stated stays, and a stripped year does not leave a broken article', () => {
+  const page = claimSources(
+    [{ title: 'Bottled water', snippet: '', domain: 'pnas.org' }],
+    [{ n: 1, text: 'An imaging study counted 110000 to 370000 particles per liter. The $110 line is a different topic.' }],
+  );
+  const study = retargetCites('A 2024 imaging study counted 110,000 to 370,000 particles per liter [1].', page, 'microplastics in bottled water');
+  assert.doesNotMatch(study, /\bA imaging\b/);
+  assert.doesNotMatch(study, /2024/);
+  assert.match(study, /110,000/);
+  const price = retargetCites('At $150 the sneakers cross the $110 threshold [1].', page, 'What if the same sneakers are $150?');
+  assert.match(price, /\$150/);
+});
+
 test('a fetched page, not its snippet, is what a cited number has to match', () => {
   const page = claimSources(
     [{ title: 'Wolf news', snippet: 'The DNR counted 2,900 wolves.', domain: 'www.mprnews.org' }],

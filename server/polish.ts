@@ -59,6 +59,8 @@ function repairHole(sentence: string): string {
   // "EPs in and 2023" — the year between the preposition and "and" was removed.
   s = s.replace(/\b(?:in|on|at|during|since|from|by)\s+(?=and\b)/gi, '');
   s = s.replace(/\s+\b(?:in|on|at|during|since|from|by)\s*([.,;:])/gi, '$1');
+  // A citation does not sit between "et al." and the year ("Ahmed et al. [1] 2024").
+  s = s.replace(/\b(et al\.?)\s*\[(\d+)\]\s+((?:1[5-9]|20)\d{2})\b/gi, '$1 $3 [$2]');
   s = s.replace(/\s+/g, ' ').replace(/\s+([,.;:!?])/g, '$1').replace(/^[,;:\s]+/, '').trim();
   if (!s) return '';
   s = s.replace(/^[a-z]/, (ch) => ch.toUpperCase());

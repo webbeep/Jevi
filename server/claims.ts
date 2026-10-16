@@ -147,9 +147,20 @@ function withoutForeignAgency(label: string, source: ClaimSource | undefined): s
   return out.replace(/\s{2,}/g, ' ').replace(/\s+([,.;:)])/g, '$1').replace(/,\s*(?=\[)/g, ' ').replace(/^[,:—–-]+\s*/, '').replace(/\s{2,}/g, ' ').trim();
 }
 
+/** The digits of a shown number, without the money or percent wrappers. */
+function bareNumber(num: string): string {
+  return shownNumber(num).source.replace(/^\\\$\?\\s\*/, '').replace(/\\s\?%?\??$/, '');
+}
+
 function stripNums(text: string, nums: readonly string[]): string {
   let out = text;
-  for (const num of nums) out = out.replace(shownNumber(num), ' ');
+  for (const num of nums) {
+    const bare = bareNumber(num);
+    // "A 2024 imaging" loses the year and must not stay "A imaging". Only the article that sat on that number goes.
+    out = out.replace(new RegExp(`\\bA\\s+${bare}\\s+(?=[aeiou])`, 'gi'), '');
+    out = out.replace(new RegExp(`\\bAn\\s+${bare}\\s+(?=[bcdfghjklmnpqrstvwxyz])`, 'gi'), '');
+    out = out.replace(shownNumber(num), ' ');
+  }
   out = out.replace(/\s{2,}/g, ' ').replace(/\s+([,.;:)])/g, '$1').replace(/\(\s*\)/g, '').trim();
   return withoutEmptySlots(out);
 }
@@ -169,7 +180,8 @@ export function retargetCites(text: string, sources: readonly ClaimSource[], que
   if (!/\d/.test(text)) return withoutEmptySlots(text);
   const parts = text.split(SENTENCE_BREAK);
   return parts.flatMap((sentence) => {
-    const nums = significant(sentence);
+    const asked = new Set(numberTokens(query));
+    const nums = significant(sentence).filter((num) => !asked.has(num));
     if (!nums.length) return [sentence];
     const cites = [...sentence.matchAll(/\[(\d+)\]/g)].map((match) => Number(match[1]));
     if (cites.length && cites.every((n) => covers(byNumber(sources, n), nums))) return [withoutEmptySlots(sentence)];
@@ -498,8 +510,71 @@ export function salesTax(query: string, sources: readonly ClaimSource[]): TaxPic
       }
     }
   }
+  if (amount !== undefined && exemptPrice(amount, sources)) return undefined;
   if (!best || best.score < 1) return undefined;
   return { rate: best.rate, n: best.n };
+}
+
+function questionPrice(query: string): number | undefined {
+  const price = query.match(/\$\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)/);
+  return price ? Number(price[1]!.replace(/,/g, '')) : undefined;
+}
+
+/** A source says this price is under an exemption line ("under $110 … exempt"). */
+function exemptPrice(amount: number, sources: readonly ClaimSource[]): boolean {
+  for (const source of sources) {
+    for (const sentence of source.text.split(SENTENCE_BREAK)) {
+      if (!/\bexempt\b/i.test(sentence)) continue;
+      const threshold = sentence.match(/(?:under|below|less than)\s+\$\s?(\d{1,3}(?:,\d{3})*)/i);
+      if (!threshold) continue;
+      if (amount < Number(threshold[1]!.replace(/,/g, ''))) return true;
+    }
+  }
+  return false;
+}
+
+function combinedRate(sources: readonly ClaimSource[]): { rate: number; n: number } | undefined {
+  let best: { rate: number; n: number } | undefined;
+  for (const source of sources) {
+    for (const sentence of source.text.split(SENTENCE_BREAK)) {
+      if (!/\bcombined\b/i.test(sentence)) continue;
+      const percents = [...sentence.matchAll(/(\d{1,2}(?:\.\d+)?)\s*%/g)].map((match) => Number(match[1]));
+      const rate = percents.sort((a, b) => b - a)[0];
+      if (rate !== undefined && (!best || rate > best.rate)) best = { rate, n: source.n };
+    }
+  }
+  return best;
+}
+
+/**
+ * A dollar amount in parentheses has to be the percent in that same sentence times the
+ * price that sentence is about. A rate from another line, or the tax on a different price, goes.
+ * A line that says "combined" uses the combined rate the sources state.
+ */
+export function fixTaxLines(text: string, query: string, sources: readonly ClaimSource[]): string {
+  const price = questionPrice(query);
+  const combined = combinedRate(sources);
+  const parts = text.split(SENTENCE_BREAK);
+  return parts.map((sentence) => {
+    let next = sentence;
+    const above = /(?:or more|and (?:up|above|over))/i.test(next);
+    const cut = next.match(/\$\s?(\d{1,3}(?:,\d{3})*)/);
+    const cutAmount = cut ? Number(cut[1]!.replace(/,/g, '')) : undefined;
+    const aboutHigher = above && price !== undefined && cutAmount !== undefined && price < cutAmount;
+    if (combined && (/\bcombined\b/i.test(next) || aboutHigher)) {
+      next = next.replace(/(\d{1,2}(?:\.\d+)?)\s*%/, `${combined.rate}%`);
+    }
+    const pct = next.match(/(\d{1,2}(?:\.\d+)?)\s*%/);
+    const due = next.match(/\(\s*\$\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?\s*\)/);
+    if (!pct || !due) return next;
+    const rate = Number(pct[1]);
+    const dollars = moneyValue(due[0]);
+    const base = aboutHigher ? cutAmount : price;
+    if (base === undefined) return next;
+    const expected = Math.round(base * rate) / 100;
+    if (Math.abs(dollars - expected) <= 0.05) return next;
+    return next.replace(/\(\s*\$\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?\s*\)/, '').replace(/\s{2,}/g, ' ').replace(/\s+([,.;:])/g, '$1').trim();
+  }).join(' ');
 }
 
 function applyTaxText(text: string, query: string, pick: TaxPick): string {
@@ -1128,13 +1203,72 @@ export function groundMembers(query: string, nodes: CardNode[], sources: readonl
   return changed ? next : undefined;
 }
 
+function repairTaxNode(node: CardNode, query: string, sources: readonly ClaimSource[]): CardNode {
+  const line = (text: string) => fixTaxLines(text, query, sources);
+  switch (node.type) {
+    case 'stack':
+    case 'grid':
+    case 'section':
+    case 'scroller':
+      return { ...node, children: node.children.map((child) => repairTaxNode(child, query, sources)) };
+    case 'tabs':
+      return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: tab.children.map((child) => repairTaxNode(child, query, sources)) })) };
+    case 'text':
+    case 'callout':
+    case 'quote':
+    case 'draft':
+    case 'heading':
+      return { ...node, text: line(node.text) };
+    case 'hero':
+      return { ...node, value: line(node.value), caption: node.caption ? line(node.caption) : node.caption };
+    case 'tile':
+      return { ...node, value: node.value ? line(node.value) : node.value, sub: node.sub ? line(node.sub) : node.sub };
+    case 'stat':
+      return { ...node, value: line(node.value), label: line(node.label) };
+    case 'keyvalue':
+    case 'list':
+    case 'timeline':
+    case 'profile':
+    case 'table':
+    case 'steps':
+    case 'accordion':
+    case 'proscons':
+    case 'badges':
+    case 'actions':
+    case 'choices':
+    case 'links':
+    case 'citations':
+    case 'chart':
+    case 'pricing':
+    case 'scaler':
+    case 'slider':
+    case 'reveal':
+    case 'image':
+    case 'gallery':
+    case 'video':
+    case 'code':
+    case 'divider':
+    case 'progress':
+    case 'rating':
+    case 'diagram':
+    case 'ticker':
+    case 'slot':
+      return node;
+    default: {
+      const unreachable: never = node;
+      return unreachable;
+    }
+  }
+}
+
 /** Move each number's citation onto a page that states it, then fill a missing product price from that page. */
 export function bindClaims(node: CardNode, sources: readonly ClaimSource[], query: string): CardNode {
   if (!sources.length) return node;
   const aimed = retargetNode(node, sources, query);
   const tax = salesTax(query, sources);
   const taxed = tax ? applyTax(aimed, query, tax) : aimed;
-  if (!shoppingAsk(query)) return taxed;
+  const lined = TAX_ASK.test(query) ? repairTaxNode(taxed, query, sources) : taxed;
+  if (!shoppingAsk(query)) return lined;
   const ceilings = budgetAmounts(query);
-  return dropPriceless(fillPrices(taxed, sources, ceilings), ceilings);
+  return dropPriceless(fillPrices(lined, sources, ceilings), ceilings);
 }

@@ -71,7 +71,7 @@ import { isKeepOnly, keptBody } from './refine';
 import { finishQuality, hasOfficialHit, hostTier, officialProbe, preferSources, sinkFormatWords } from './sourceQuality';
 import { isOwnSite, orcidSite, pickOwnSite, probeOwnSite, RESEARCH_ASK, withOwnSite } from './ownSite';
 import { quoteAsk } from '../shared/quoteAsk';
-import { dropStrayDois, isPaperAsk, leadPreprints, scholarlyResults, withScholarly } from './scholarly';
+import { dropClinicPages, dropStrayDois, isPaperAsk, leadPreprints, scholarlyResults, withScholarly } from './scholarly';
 import { recallClips, wantsVideo, withProductClips, withVideos } from './videoSearch';
 import { guessFreshness, preferFresh, staleComplaint, stricter } from './freshness';
 import { isQuoteRow, liveQuote, quoteRow, tickerNode } from './liveQuote';
@@ -766,7 +766,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   const scholar = await scholarly;
   if (scholar.length) results = { ...results, results: withScholarly(scholar, results.results) };
   results = { ...results, results: leadPreprints(query, results.results) };
-  results = { ...results, results: dropStrayDois(query, results.results) };
+  results = { ...results, results: dropClinicPages(query, dropStrayDois(query, results.results)) };
   results = await attachOfficial(query, results, env, scope, officialEarly);
   const clips = await videos;
   if (clips.length) results = { ...results, results: wantsVideo(query) ? withVideos(clips, results.results) : withProductClips(clips, results.results) };

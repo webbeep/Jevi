@@ -385,6 +385,7 @@ export function cleanNode(query: string, node: CardNode): CardNode | undefined {
       const items = node.items.flatMap((item) => {
         const text = cleanText(query, item.text);
         if (!text) return [];
+        if (isPaperAsk(query) && !/10\.\d{4,}/.test(text) && /\b(?:mayo clinic|webmd|healthline|cleveland clinic|medical news today|verywell)\b/i.test(text)) return [];
         const key = text.toLowerCase().replace(/\s+/g, ' ');
         if (seen.has(key)) return [];
         seen.add(key);
@@ -502,8 +503,100 @@ export function withoutSettledDisputes(nodes: readonly (CardNode | undefined)[])
   });
 }
 
+const modelTokens = (text: string) => [...text.matchAll(/\b([A-Z]{1,5}-?\d{2,4})\b/g)].map((match) => match[1]!).filter((token) => /[A-Z]/.test(token) && /\d/.test(token));
+
+function cardModels(nodes: readonly (CardNode | undefined)[]): string[] {
+  const out = new Set<string>();
+  const take = (text: string) => { for (const token of modelTokens(text)) out.add(token); };
+  const walk = (node: CardNode) => {
+    if (node.type === 'table') {
+      node.columns.forEach(take);
+      node.rows.forEach((row) => row.forEach(take));
+    }
+    if (node.type === 'stack' || node.type === 'grid' || node.type === 'section' || node.type === 'scroller') node.children.forEach(walk);
+    if (node.type === 'tabs') node.tabs.forEach((tab) => tab.children.forEach(walk));
+  };
+  for (const node of nodes) if (node) walk(node);
+  return [...out];
+}
+
+/**
+ * A verdict names a model the card's own table compares. "Dyson V15" on a table of the V11
+ * becomes the V11. A model with no relative on the table is left as written.
+ */
+export function verdictOnTable(text: string, models: readonly string[]): string {
+  if (!models.length || !/\b(?:verdict|pick|recommend)\b/i.test(text)) return text;
+  const known = new Set(models);
+  return text.replace(/\b([A-Z]{1,5}-?\d{2,4})\b/g, (token) => {
+    if (!/[A-Z]/.test(token) || !/\d/.test(token) || known.has(token)) return token;
+    const family = token.replace(/\d.*$/, '');
+    const same = models.filter((model) => model.replace(/\d.*$/, '') === family);
+    return same.length === 1 ? same[0]! : token;
+  });
+}
+
+function alignVerdicts(nodes: readonly (CardNode | undefined)[]): (CardNode | undefined)[] {
+  const models = cardModels(nodes);
+  if (!models.length) return [...nodes];
+  const walk = (node: CardNode): CardNode => {
+    switch (node.type) {
+      case 'stack':
+      case 'grid':
+      case 'section':
+      case 'scroller':
+        return { ...node, children: node.children.map(walk) };
+      case 'tabs':
+        return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: tab.children.map(walk) })) };
+      case 'text':
+      case 'callout':
+      case 'quote':
+      case 'draft':
+      case 'heading':
+        return { ...node, text: verdictOnTable(node.text, models) };
+      case 'hero':
+        return { ...node, caption: node.caption ? verdictOnTable(node.caption, models) : node.caption, value: verdictOnTable(node.value, models) };
+      case 'tile':
+      case 'stat':
+      case 'keyvalue':
+      case 'list':
+      case 'timeline':
+      case 'profile':
+      case 'table':
+      case 'steps':
+      case 'accordion':
+      case 'proscons':
+      case 'badges':
+      case 'actions':
+      case 'choices':
+      case 'links':
+      case 'citations':
+      case 'chart':
+      case 'pricing':
+      case 'scaler':
+      case 'slider':
+      case 'reveal':
+      case 'image':
+      case 'gallery':
+      case 'video':
+      case 'code':
+      case 'divider':
+      case 'progress':
+      case 'rating':
+      case 'diagram':
+      case 'ticker':
+      case 'slot':
+        return node;
+      default: {
+        const unreachable: never = node;
+        return unreachable;
+      }
+    }
+  };
+  return nodes.map((node) => (node ? walk(node) : node));
+}
+
 /** Language, repeated rows, and a disagreement the card has already settled. Holes stay holes. */
 export function finishQuality(query: string, nodes: readonly (CardNode | undefined)[]): (CardNode | undefined)[] {
   const cleaned = nodes.map((node) => (node ? cleanNode(query, node) : node));
-  return withoutSettledDisputes(cleaned);
+  return alignVerdicts(withoutSettledDisputes(cleaned));
 }

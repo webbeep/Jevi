@@ -1130,6 +1130,12 @@ test('a one-letter brand misspelling is corrected from the pages, and stops bein
     { title: 'Jensen Huang NVIDIA', url: 'https://example.com/jensen-huang-nvidia', snippet: 'Results for Nvdia and Jensen Huang.' },
   ]), 'Jensen Huang, NVIDIA');
   assert.equal(spellingQuery('Jensen Huang Nvidia', pages), '');
+  assert.equal(spellingQuery('How does Minnesota define a lake for official counts', [
+    { title: 'How a lake is defined', url: 'https://www.dnr.state.mn.us/lakes/faqs.html', snippet: 'A lake is defined as an enclosed basin.' },
+  ]), '');
+  assert.equal(spellingQuery('a near-term plan where you checked the spec', [
+    { title: 'NearTerm plan', url: 'https://example.com/nearterm', snippet: 'Look there for the nearterm plan.' },
+  ]), '');
   assert.equal(personSourceOk('Jensen Huang, Nvidia', pages[0]!), true);
 });
 

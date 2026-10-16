@@ -294,6 +294,23 @@ export function isDoiResult(row: { url?: string; title?: string; snippet?: strin
   return DOI_IN_URL.test(`${row.url ?? ''} ${row.title ?? ''} ${row.snippet ?? ''}`);
 }
 
+/** A clinic or consumer-health page is not a paper, even on a research question. */
+const CLINIC_HOST = /(?:^|\.)(?:mayoclinic\.org|webmd\.com|healthline\.com|clevelandclinic\.org|medicalnewstoday\.com|verywellhealth\.com|hopkinsmedicine\.org|health\.harvard\.edu)$/i;
+
+export function isClinicPage(url: string): boolean {
+  try {
+    return CLINIC_HOST.test(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}
+
+/** On a paper ask, a health-information page is not one of the papers. A DOI page stays. */
+export function dropClinicPages<T extends { url?: string; title?: string; snippet?: string }>(query: string, rows: readonly T[]): T[] {
+  if (!isPaperAsk(query)) return [...rows];
+  return rows.filter((row) => !row.url || isDoiResult(row) || !isClinicPage(row.url));
+}
+
 /** On a research question, a DOI stays only when that paper is about the question. */
 export function dropStrayDois<T extends { url?: string; title?: string; snippet?: string }>(query: string, rows: readonly T[]): T[] {
   if (!isPaperAsk(query)) return [...rows];

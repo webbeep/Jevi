@@ -340,6 +340,29 @@ export function hasFullPersonName(name: string, row: EntityRow): boolean {
   return true;
 }
 
+/** "define" and "defined" are the same word. A misspelling is not an inflection. */
+export function isInflection(typed: string, spelled: string): boolean {
+  const [shorter, longer] = typed.length <= spelled.length ? [typed, spelled] : [spelled, typed];
+  if (!longer.startsWith(shorter) || longer.length === shorter.length) return false;
+  return /^(?:s|es|ed|d|ing|er|est|ly)$/.test(longer.slice(shorter.length));
+}
+
+/** "near-term" and "nearterm" are the same spelling. A hyphen is not a typo. */
+export function sameLetters(typed: string, spelled: string): boolean {
+  const fold = (word: string) => word.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const left = fold(typed);
+  const right = fold(spelled);
+  return left.length >= 4 && left === right;
+}
+
+/** Closed-class words are already spelled. "where" is not a typo for "there". */
+const FUNCTION_WORD = new Set([
+  'about', 'above', 'after', 'again', 'against', 'along', 'among', 'another', 'around', 'because',
+  'before', 'being', 'below', 'between', 'could', 'during', 'every', 'might', 'other', 'ought',
+  'quite', 'rather', 'shall', 'should', 'since', 'their', 'there', 'these', 'those', 'through',
+  'toward', 'under', 'until', 'where', 'which', 'while', 'within', 'without', 'would',
+]);
+
 /** One insertion, deletion, substitution, or adjacent transposition. Both sides are already long enough. */
 export function withinOneEdit(a: string, b: string): boolean {
   if (a === b) return false;
@@ -431,8 +454,9 @@ export function spellingQuery(query: string, rows: readonly { title?: string; sn
     const core = word.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, '');
     if (core.length < 5) return word;
     const low = core.toLowerCase();
+    if (FUNCTION_WORD.has(low)) return word;
     const spell = nearOrgSpelling(low, rows);
-    if (!spell || spell === low) return word;
+    if (!spell || spell === low || isInflection(low, spell.toLowerCase()) || sameLetters(low, spell)) return word;
     // A snippet often repeats the typed query. The title and the address are the page's own spelling.
     const typed = rows.some((row) => tokens(`${row.title ?? ''} ${row.url ?? ''}`).includes(low));
     if (typed) return word;

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   arxivToWork,
+  dropClinicPages,
   dropStrayDois,
   hasCatalogCopy,
   isPaperAsk,
@@ -47,6 +48,16 @@ test('a research DOI stays only when the paper is about the question', () => {
   assert.equal(kept.some((row) => row.url.includes('thelancet.com')), true);
   assert.equal(kept.some((row) => row.url.includes('10.1016')), true);
   assert.equal(paperOnTopic('What does the research say about GLP-1 and weight loss?', 'Unrelated peptide chemistry', ''), false);
+});
+
+test('a clinic page is not a paper', () => {
+  const rows = [
+    { title: 'Langer et al. 2026', url: 'https://doi.org/10.1001/jama.2026.0287', snippet: 'GLP-1 and muscle mass.' },
+    { title: 'GLP-1 Medications and Muscle Loss: What to Know', url: 'https://www.mayoclinic.org/drugs/glp1', snippet: 'Mayo Clinic patient page.' },
+  ];
+  const kept = dropClinicPages('List peer-reviewed papers on GLP-1 drugs and muscle loss', rows);
+  assert.equal(kept.length, 1);
+  assert.match(kept[0]!.url, /doi\.org/);
 });
 
 test('SPD-C4: topic drops task words', () => {
