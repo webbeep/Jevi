@@ -13,7 +13,7 @@ const QUOTE_STOP = new Set(
   'what when where which does did how many much that this with from have been were will your about into over under than then them they their there these those would could should just like also only most some such very more less best need want make give tell show find help using used according quote quotes quoting exact line lines page pages says said report study paper article sentence words wording document guideline notice official'.split(' '),
 );
 
-const REVIEW_DESIGN = /\b(?:systematic reviews?|meta-analyses|meta-analysis|narrative reviews?|scoping reviews?|literature reviews?|review articles?|reviews? of the)\b/i;
+const REVIEW_DESIGN = /\b(?:systematic reviews?|meta-analyses|meta-analysis|narrative reviews?|scoping reviews?|literature reviews?|review articles?|reviews? of the|(?:a|an|\d{4}) reviews?)\b/i;
 const ORIGINAL_DESIGN = /\b(?:original (?:studies|study|research|articles?|papers?)|primary (?:studies|study|research)|research articles?)\b/i;
 const HONEST_DESIGN = 'The page does not say whether this is a review or an original study.';
 
@@ -22,7 +22,7 @@ const OPEN_ID = /\b(?:10\.\d{4,9}\/[^\s,;)>\]]+|PMC\d{5,}|arxiv:\s*\d{4}\.\d{4,5
 const CLINIC = /\b(?:mayo clinic|webmd|healthline|cleveland clinic|medical news today|verywell)\b/i;
 const PAPERISH = /\b(?:papers?|studies|study|peer[- ]reviewed|journal|preprints?)\b/i;
 
-const BENEFIT = /\b(?:(?:may|might|can|could)\s+(?:help|reduce|prevent|protect|lower|improve|act|decrease)|(?:linked to|associated with)\s+(?:a )?(?:lower|reduced|decreased))\b/i;
+const BENEFIT = /\b(?:(?:may|might|can|could)\s+(?:help|reduce|prevent|protect|lower|improve|act|decrease)|(?:linked to|associated with)\s+(?:a )?(?:lower|reduced|decreased)|protective effect|shown to (?:help|protect|reduce|improve))\b/i;
 const NEGATED = /\b(?:no|not|n't|never|without|lacks?|lacking|does not|do not)\b/i;
 
 const WHERE_ROLE = /\bwhere (?:does|do|did|is|are)\b[\s\S]{0,80}\b(?:teach|teaches|teaching|work|works|working|study|studies|professor|faculty|employed|practice)\b/i;
@@ -136,6 +136,11 @@ function answerScore(query: string, text: string, words: readonly string[]): num
 }
 
 /** The line is a sentence this fetch already contains. */
+/** A site label glued on the front ("NIOSH Most adults…") is not part of the sentence. */
+function withoutLeadLabel(sentence: string): string {
+  return sentence.replace(/^(?:\|\s*)?(?:[A-Z][A-Za-z0-9.&'-]{1,24}\s+){1,3}(?=(?:Most|The|Adults|A|An)\b)/, '').replace(/^\|+\s*/, '').trim();
+}
+
 function onSource(text: string, sources: readonly { text: string }[]): boolean {
   const key = loose(text).slice(0, 40);
   if (key.length < 16) return false;
@@ -173,11 +178,19 @@ export function finishQuotedText(query: string, text: string, sources: readonly 
   if (!chosen && quote && smashed && wantsNamedQuote(query)) {
     return `${text.slice(0, quote.at)}${text.slice(quote.end)}`.replace(/[ \t]{2,}/g, ' ').trim();
   }
-  if (chosen && wantsNamedQuote(query) && !quote && proseEnough(text)) {
-    return `"${chosen.replace(/^["“«]+|["”»]+$/g, '').trim()}"`;
+  if (chosen) chosen = withoutLeadLabel(chosen);
+  if (chosen && wantsNamedQuote(query) && !quote && (proseEnough(text) || /["“«]/.test(text))) {
+    const clean = chosen.replace(/^["“«]+|["”»]+$/g, '').trim();
+    if (clean.length >= 12) return `"${clean}"`;
+  }
+  if (!chosen && quote && wantsNamedQuote(query)) {
+    const cleaned = withoutLeadLabel(quote.body);
+    if (cleaned !== quote.body && cleaned.length >= 12) {
+      return `${text.slice(0, quote.at)}${quote.open}${cleaned}${quote.close}${text.slice(quote.end)}`.replace(/[ \t]{2,}/g, ' ').trim();
+    }
   }
   if (!chosen || !quote) return text;
-  const clean = chosen.replace(/^["“«]+|["”»]+$/g, '').trim();
+  const clean = withoutLeadLabel(chosen.replace(/^["“«]+|["”»]+$/g, '').trim());
   return `${text.slice(0, quote.at)}${quote.open}${clean}${quote.close}${text.slice(quote.end)}`.replace(/[ \t]{2,}/g, ' ').trim();
 }
 

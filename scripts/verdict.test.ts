@@ -184,6 +184,11 @@ test('a benefit line inside an accordion under a no verdict is dropped', () => {
     items: [{ title: 'Mechanism', text: 'A cup may act as a sedative by slowing the evening heart rate.' }],
   }, 3).node;
   assert.doesNotMatch(JSON.stringify(acted), /may act/);
+  const shown = session.offer({ type: 'list', style: 'bullet', items: [{ text: 'Light drinking has shown a protective effect in older surveys. The trials do not show that effect.' }] }, 4).node;
+  assert.equal(shown.type, 'list');
+  if (shown.type !== 'list') return;
+  assert.doesNotMatch(shown.items[0]?.text ?? '', /protective effect/);
+  assert.match(shown.items[0]?.text ?? '', /do not show/);
   assert.match(node.items[0]?.text ?? '', /do not show/);
   const row = session.offer({
     type: 'keyvalue',

@@ -106,6 +106,16 @@ test('a quote is the sentence, not the page title or a table run together', () =
   assert.doesNotMatch(next, /Age Group/);
 });
 
+test('an empty quotation is replaced by the sentence, without a site label glued on', () => {
+  const source = '| NIOSH Most adults need about 7 to 8 hours of good-quality sleep per night.';
+  const next = finishQuotedText('quote the page on how much sleep adults need', '" [1]"', [page(source)]);
+  assert.match(next, /^"Most adults need about 7 to 8 hours/);
+  assert.doesNotMatch(next, /NIOSH/);
+  const quoted = finishQuotedText('quote the page on how much sleep adults need', '"| NIOSH Most adults need about 7 to 8 hours of good-quality sleep per night."', [page(source)]);
+  assert.match(quoted, /"Most adults need about 7 to 8 hours/);
+  assert.doesNotMatch(quoted, /NIOSH/);
+});
+
 test('a quotation the page does not contain is not shown', () => {
   const source = 'The recommended amount of sleep for adults is at least 7 hours each day.';
   const smashed = 'The page states: "About Sleep Adult 65 years and older 7-8 hours1."';
