@@ -31,7 +31,8 @@ function negated(sentence: string): boolean {
 }
 
 const WHERE_ROLE = /\bwhere (?:does|do|did|is|are)\b[\s\S]{0,80}\b(?:teach|teaches|teaching|work|works|working|study|studies|professor|faculty|employed|practice)\b/i;
-const INSTITUTION = /\b([A-Z][A-Za-z'’.-]*(?:\s+[A-Z][A-Za-z'’.-]*){0,5}\s+(?:University|College|Institute))\b/;
+const INSTITUTION = /\b((?:University|College|Institute)(?:\s+of\s+[A-Z][A-Za-z'’.-]+)+(?:(?:,| -)\s+[A-Z][A-Za-z'’.-]+)?|[A-Z][A-Za-z'’.-]*(?:\s+[A-Z][A-Za-z'’.-]*){0,4}\s+(?:University|College|Institute))\b/;
+const TEACHING = /\b(?:teach\w*|professor|faculty|employed|works?)\b/i;
 
 const MONEY = /\$\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?/;
 const COUNT_WORD: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
@@ -355,13 +356,24 @@ export function keepAnswerBody(question: string, nodes: readonly (CardNode | und
   });
 }
 
+function schoolIn(text: string): string | undefined {
+  const school = text.match(INSTITUTION)?.[1]?.trim();
+  if (!school) return undefined;
+  return school.length <= 48 ? school : school.slice(0, 48).replace(/\s+\S*$/, '');
+}
+
 /** The headline answers the new question: where someone works is the institution, and a what-if price is the tax on that price. */
 export function answerTitle(question: string, proposed: string, cardText: string): string {
   if (WHERE_ROLE.test(question)) {
-    const lead = cardText.match(/"type":"hero","value":"([^"]{2,48})"/)?.[1]?.trim();
-    if (lead && !/^(?:no|yes|mixed|unclear)\b/i.test(lead)) return lead;
-    const school = cardText.match(INSTITUTION)?.[1]?.trim();
-    if (school && !proposed.toLowerCase().includes(school.toLowerCase())) return school.length <= 48 ? school : school.slice(0, 48).replace(/\s+\S*$/, '');
+    const cueAt = cardText.search(TEACHING);
+    if (cueAt >= 0) {
+      const school = schoolIn(cardText.slice(Math.max(0, cueAt - 40), cueAt + 180));
+      if (school) return school;
+    }
+    const lead = cardText.match(/"type":"hero","value":"([^"]{2,80})"/)?.[1]?.trim();
+    if (lead && !/^(?:no|yes|mixed|unclear)\b/i.test(lead)) return schoolIn(lead) ?? (lead.length <= 48 ? lead : lead.slice(0, 48).replace(/\s+\S*$/, ''));
+    const school = schoolIn(cardText);
+    if (school && !proposed.toLowerCase().includes(school.toLowerCase())) return school;
   }
   const priced = question.match(/\bwhat if\b[\s\S]{0,80}\$\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)|\b(?:sales\s+tax|tax)\b[\s\S]{0,40}\$\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)/i);
   const raw = priced?.[1] ?? priced?.[2];

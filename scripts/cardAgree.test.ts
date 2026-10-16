@@ -143,6 +143,11 @@ test('a follow-up title answers where someone teaches and what a price would cos
   assert.equal(answerTitle('Where does she teach?', 'Ada Lovelace', 'She teaches at Northshore University.'), 'Northshore University');
   const card = JSON.stringify([{ type: 'hero', value: 'UC Berkeley' }, { type: 'text', text: 'She is also an investigator at the Howard Hughes Medical Institute.' }]);
   assert.equal(answerTitle('Where does she teach?', 'Jennifer Doudna', card), 'UC Berkeley');
+  const taught = JSON.stringify([
+    { type: 'hero', value: 'Other University' },
+    { type: 'text', text: 'She is a professor of chemistry at the University of California, Berkeley.' },
+  ]);
+  assert.equal(answerTitle('Where does she teach?', 'Mara Chen', taught), 'University of California, Berkeley');
   assert.equal(answerTitle('What if they cost $80?', 'Sneakers', 'The purchase is taxable. Tax $6.40 at the combined rate.'), 'Tax $6.40');
   assert.equal(answerTitle('Who is Ada Lovelace?', 'Ada Lovelace', 'She teaches at Northshore University.'), 'Ada Lovelace');
 });
