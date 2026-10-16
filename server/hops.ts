@@ -324,17 +324,68 @@ function clauseAt(text: string, at: number): string {
   return text.slice(start, end);
 }
 
-/** The century in the same clause as the naming, not the century the custom began. */
+/** The century in the same clause as the naming, not the century the custom began. Two naming centuries abstain. */
 function namingCentury(corpus: string): string | undefined {
-  let mixed: string | undefined;
+  const naming: string[] = [];
+  const mixed: string[] = [];
+  const keep = (list: string[], lead: string) => {
+    if (!list.includes(lead)) list.push(lead);
+  };
   for (const match of corpus.matchAll(new RegExp(CENTURY_WORD.source, 'gi'))) {
     const clause = clauseAt(corpus, match.index ?? 0);
     if (!NAMING_CLAUSE.test(clause)) continue;
     const lead = centuryLead(match[1]!);
-    if (!ORIGIN_CLAUSE.test(clause)) return lead;
-    mixed ??= lead;
+    if (ORIGIN_CLAUSE.test(clause)) keep(mixed, lead);
+    else keep(naming, lead);
   }
-  return mixed;
+  if (naming.length === 1) return naming[0];
+  if (naming.length > 1) return undefined;
+  return mixed.length === 1 ? mixed[0] : undefined;
+}
+
+const MONTH_WORD = /^(?:january|february|march|april|may|june|july|august|september|october|november|december|monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/i;
+
+/** The one proper name in a sentence that the question did not already use. */
+function namedIn(sentence: string, query: string): string | undefined {
+  const asked = query.toLowerCase();
+  const found: string[] = [];
+  for (const match of sentence.matchAll(/\b[A-Z][\p{L}0-9'’.-]*(?:\s+[A-Z][\p{L}0-9'’.-]*){0,5}/gu)) {
+    const name = match[0];
+    const words = name.split(/\s+/);
+    if (words.every((word) => MONTH_WORD.test(word))) continue;
+    if (asked.includes(name.toLowerCase())) continue;
+    if (words.length === 1 && words[0]!.length < 5) continue;
+    if (!found.includes(name)) found.push(name);
+  }
+  const longest = found.filter((name) => !found.some((other) => other.length > name.length && other.includes(name)));
+  return longest.length === 1 ? longest[0] : undefined;
+}
+
+/**
+ * What opened exactly N years later: the name in the sentence whose date is N years after
+ * another date on the same month and day. Two such names, or none, abstain.
+ */
+function offsetAnswer(query: string, corpus: string): FactAnswer | undefined {
+  const offset = query.match(OFFSET);
+  if (!offset) return undefined;
+  const years = Number(offset[2]);
+  if (!years) return undefined;
+  const dates = datesIn(corpus);
+  const names: string[] = [];
+  for (const anchor of dates) {
+    for (const later of dates) {
+      if (later === anchor || later.year !== anchor.year + years || later.month !== anchor.month || later.day !== anchor.day) continue;
+      const name = namedIn(clauseAt(corpus, later.at), query);
+      if (name && !names.includes(name)) names.push(name);
+    }
+  }
+  if (names.length !== 1) return undefined;
+  const lead = names[0]!;
+  return {
+    lead,
+    label: 'Opened',
+    note: `${lead} opened on the same month and day, ${years} years after an earlier opening the card states. Lead with that name.`,
+  };
 }
 
 /** Capitalized words that are ordinary English, not the proper name a page just introduced. */
@@ -642,6 +693,9 @@ export function factAnswer(query: string, corpus: string): FactAnswer | undefine
   const ratio = ratioAnswer(query, corpus);
   if (ratio) return ratio;
 
+  const opened = offsetAnswer(query, corpus);
+  if (opened) return opened;
+
   if (SCORE.test(query) && NEWEST.test(query)) {
     const scores = seasonScores(corpus);
     const best = scores.sort((a, b) => b.season - a.season)[0];
@@ -679,9 +733,55 @@ export function factAnswer(query: string, corpus: string): FactAnswer | undefine
   return undefined;
 }
 
-/** The same figure, read off the card when the card already states the inputs. */
+/** The same figure, read off the card when the card already states the inputs. The hero is the claim, not an input. */
 export function cardFacts(query: string, nodes: CardNode[]): FactAnswer | undefined {
-  return factAnswer(query, [...nodes.map(nodeText), ...labeledBirth(query, nodes)].join('\n'));
+  const textOf = (node: CardNode) => (node.type === 'hero' ? `${node.label ?? ''} ${node.caption ?? ''}` : nodeText(node));
+  return factAnswer(query, [...nodes.map(textOf), ...labeledBirth(query, nodes)].join('\n'));
+}
+
+const BARE_FIGURE = /^\s*\d+(?:\.\d+)?(?:\s+or\s+\d+(?:\.\d+)?)?\s*$/;
+
+function computedQuestion(query: string): 'age' | 'ratio' | 'offset' | 'century' | undefined {
+  if (AGE.test(query)) return 'age';
+  if (IF_ON.test(query)) return 'ratio';
+  if (OFFSET.test(query)) return 'offset';
+  if (/\bcentury\b/i.test(query)) return 'century';
+  return undefined;
+}
+
+/** The hero states a computed answer the card's other facts do not support. */
+function unsupportedComputed(kind: 'age' | 'ratio' | 'offset' | 'century', value: string): boolean {
+  const text = value.trim();
+  if (!text || /^not stated$/i.test(text)) return false;
+  switch (kind) {
+    case 'age':
+    case 'ratio':
+      return BARE_FIGURE.test(text);
+    case 'century':
+      return /\bcentury\b/i.test(text) || /^\d{1,2}(?:st|nd|rd|th)$/i.test(text);
+    case 'offset':
+      return true;
+    default: {
+      const unreachable: never = kind;
+      return unreachable;
+    }
+  }
+}
+
+/**
+ * A computed answer uses the facts on the card. When those facts are not on the card,
+ * a hero that states one is withdrawn instead of keeping a figure from another draw.
+ */
+export function abstainComputed(query: string, nodes: CardNode[]): CardNode[] | undefined {
+  const kind = computedQuestion(query);
+  if (!kind || cardFacts(query, nodes)) return undefined;
+  let changed = false;
+  const next = nodes.map((node) => {
+    if (node.type !== 'hero' || !unsupportedComputed(kind, node.value)) return node;
+    changed = true;
+    return { ...node, value: 'Not stated' };
+  });
+  return changed ? next : undefined;
 }
 
 /** A card about the person writes "Born: May 12, 1966" without the name. One such row is that person's birth. */
@@ -761,10 +861,21 @@ export function placeFactLead(nodes: CardNode[], fact: FactAnswer): CardNode[] |
     });
     return changed ? next : undefined;
   }
-  if (nodes.some((node) => hasLead(nodeText(node), fact.lead))) return undefined;
-  const accepted = fact.accept ?? [];
-  if (accepted.length && nodes.some((node) => node.type === 'hero' && accepted.some((value) => hasLead(node.value, value)))) return undefined;
+  // The lead can already be a fact in the body (the name that opened that day) while the hero
+  // still states a different answer. Replace that hero. Leave a date, a measurement, or an
+  // accepted alternate (a year-only age of 52 when the lead is "51 or 52") alone.
   const keep = fact.keep ?? [];
+  const accepted = fact.accept ?? [];
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i]!;
+    if (node.type !== 'hero' || hasLead(node.value, fact.lead)) continue;
+    if (accepted.some((value) => hasLead(node.value, value))) continue;
+    const next = patchFactLead(node, fact.lead, keep);
+    if (!next) continue;
+    return nodes.map((item, at) => (at === i ? next : item));
+  }
+  if (nodes.some((node) => hasLead(nodeText(node), fact.lead))) return undefined;
+  if (accepted.length && nodes.some((node) => node.type === 'hero' && accepted.some((value) => hasLead(node.value, value)))) return undefined;
   for (let i = 0; i < nodes.length; i++) {
     const next = patchFactLead(nodes[i]!, fact.lead, keep);
     if (!next) continue;

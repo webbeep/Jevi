@@ -25,6 +25,11 @@ export function isNewsroom(domain: string): boolean {
   return matchesHost(domain, NEWSROOM);
 }
 
+/** A news briefing, not a product ask that happens to say "best". */
+export function isNewsAsk(query: string): boolean {
+  return NEWS_ASK.test(query);
+}
+
 const KEEP_WITHOUT_FORMAT = 5;
 const WHEN_WORDS = new Set(['today', 'tonight', 'yesterday', 'latest', 'now', 'current', 'live', 'week', 'this', 'recent', 'breaking', 'the', 'and', 'what', 'whats']);
 const askWords = (text: string) => text.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 3);

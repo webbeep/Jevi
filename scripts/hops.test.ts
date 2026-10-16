@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { alignFactProse, cardFacts, factAnswer, hopQueries, leadMemberRows, nextHop, patchFactLead, placeFactLead, unsupportedYear } from '../server/hops.ts';
+import { abstainComputed, alignFactProse, cardFacts, factAnswer, hopQueries, leadMemberRows, nextHop, patchFactLead, placeFactLead, unsupportedYear } from '../server/hops.ts';
 import { bindClaims, type ClaimSource } from '../server/claims.ts';
 import type { CardNode } from '../shared/card.ts';
 
@@ -266,6 +266,62 @@ test('a card that states the dates and not the age gains an age hero', () => {
   assert.equal(next?.[0] && next[0].type === 'hero' ? next[0].value : '', '52');
   assert.equal(next?.[1], kv);
   assert.equal(placeFactLead([{ type: 'hero', value: '52', label: 'Age' }], { lead: '52', label: 'Age', note: '' }), undefined);
+});
+
+test('two naming centuries abstain, and a century the card does not support is withdrawn', () => {
+  const both = 'The current name was chosen in the 19th century. A later name was called in the 20th century.';
+  assert.equal(factAnswer(CENTURY, both), undefined);
+  const card: CardNode[] = [
+    { type: 'hero', value: 'the 20th century', label: 'Century' },
+    { type: 'text', text: both },
+  ];
+  assert.equal(cardFacts(CENTURY, card), undefined);
+  const abstained = abstainComputed(CENTURY, card);
+  assert.equal(abstained?.[0] && abstained[0].type === 'hero' ? abstained[0].value : '', 'Not stated');
+  const named: CardNode[] = [
+    { type: 'hero', value: 'the 20th century', label: 'Century' },
+    { type: 'text', text: 'The current name was chosen in the 19th century. The tradition dates to the 18th century.' },
+  ];
+  const fact = cardFacts(CENTURY, named);
+  assert.equal(fact?.lead, 'the 19th century');
+  const led = placeFactLead(named, fact!);
+  assert.equal(led?.[0] && led[0].type === 'hero' ? led[0].value : '', 'the 19th century');
+});
+
+test('an anniversary opening is the name on that date, and a different hero is replaced', () => {
+  const corpus = 'Walt Disney World opened on October 1, 1971. Remy\'s Ratatouille Adventure opened on October 1, 2021. Space Mountain opened on January 15, 1975.';
+  assert.equal(factAnswer(PARK, corpus)?.lead, 'Remy\'s Ratatouille Adventure');
+  const card: CardNode[] = [
+    { type: 'hero', value: 'Space Mountain', label: 'Opened' },
+    { type: 'text', text: corpus },
+  ];
+  const fact = cardFacts(PARK, card);
+  assert.equal(fact?.lead, 'Remy\'s Ratatouille Adventure');
+  const led = placeFactLead(card, fact!);
+  assert.equal(led?.[0] && led[0].type === 'hero' ? led[0].value : '', 'Remy\'s Ratatouille Adventure');
+  const tied = 'Walt Disney World opened on October 1, 1971. Remy\'s Ratatouille Adventure and Space Mountain opened on October 1, 2021.';
+  const flip: CardNode[] = [
+    { type: 'hero', value: 'Space Mountain', label: 'Opened' },
+    { type: 'text', text: tied },
+  ];
+  assert.equal(cardFacts(PARK, flip), undefined);
+  const abstained = abstainComputed(PARK, flip);
+  assert.equal(abstained?.[0] && abstained[0].type === 'hero' ? abstained[0].value : '', 'Not stated');
+});
+
+test('an age the card cannot compute is withdrawn, and full dates still compute it', () => {
+  const thin: CardNode[] = [
+    { type: 'hero', value: '24', label: 'Age' },
+    { type: 'keyvalue', items: [{ label: 'Wedding', value: '2018' }] },
+  ];
+  assert.equal(cardFacts(AGE, thin), undefined);
+  const abstained = abstainComputed(AGE, thin);
+  assert.equal(abstained?.[0] && abstained[0].type === 'hero' ? abstained[0].value : '', 'Not stated');
+  const hours: CardNode[] = [
+    { type: 'hero', value: '1.5–2 hours', label: 'Time' },
+    { type: 'keyvalue', items: [{ label: 'Great North Run', value: '13.1 miles' }] },
+  ];
+  assert.equal(abstainComputed(WALLS, hours), undefined);
 });
 
 test('a derived age stays on the card when the pages state the two dates', () => {

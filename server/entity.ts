@@ -1,6 +1,7 @@
-import { NAME_PARTICLE } from '../shared/askAbout';
+import { NAME_PARTICLE, TOPIC_WORD } from '../shared/askAbout';
 import { boundAsk } from '../shared/queryBound';
-import { nameLike, tokens, type EntityHint } from './imageGate';
+import { nameLike, namesPerson, tokens, type EntityHint } from './imageGate';
+import { hasProductModel } from './productModel';
 import { isBlockedHost, isFictionHost } from './spamHosts';
 
 /**
@@ -215,9 +216,9 @@ export function contextTerms(query: string, name = personSubject(query)): string
       continue;
     }
     // CamelCase orgs (BlueFlame) or short org tails (AI, Inc) — not NBA/NFL alone.
-    // Sports leagues (NBA) are season context, not identity — requiring them dropped the
-    // Nique Clifford Wikipedia bio from a preseason ask.
-    if (SPORTS_LEAGUE.test(w)) continue;
+    // Sports leagues (NBA) and season words (Preseason, Stats) are what was asked, not which
+    // person. Requiring them dropped every page and the ask came back as "no results".
+    if (SPORTS_LEAGUE.test(w) || TOPIC_WORD.test(w)) continue;
     // Cap tokens after the person name count as context (Raycon, USATF, Stripe) — not only CamelCase/ALLCAPS.
     // Alphanumeric org tokens carry a digit and a letter ("C2") — too short for capCtx, still identity.
     const capCtx = /^[A-Z]/.test(w) && (w.length >= 3 || (ABBREV.test(w) && !NAME_SUFFIX.test(w))) && !/^(Who|What|When|Where|Why|How)$/i.test(w);
@@ -323,7 +324,9 @@ export function hasFullPersonName(name: string, row: EntityRow): boolean {
     for (const m of seg.matchAll(longer)) {
       if (!/^[A-Z]/.test(m[1] ?? '')) continue;
       const nxt = (m[1] ?? '').toLowerCase().replace(/[’']/g, '');
-      if (!nxt || AFTER_OK.has(nxt)) continue;
+      if (!nxt || AFTER_OK.has(nxt) || TOPIC_WORD.test(nxt)) continue;
+      // "Jayson Tatum STATS" / "Jayson Tatum BOS": a short all-caps label is a column or a team, not a longer name.
+      if (/^[A-Z]{2,5}$/.test(m[1] ?? '')) continue;
       if (!ORG_TAIL.test(m[1]!) && !/^(Inc|LLC|Ltd|Corp|Co|AI|ML)$/i.test(m[1]!)) return false;
     }
     // Only a repeated first name ("Ray Ray Lee") is a longer-name prefix — not "Description Ray Lee".
@@ -633,6 +636,9 @@ export function isPersonAsk(query: string, pattern?: string): boolean {
     if (wordCount(subject) < 2 && wordCount(rest) > wordCount(subject) && !givenWithPlace(query)) return false;
     return subject !== '';
   }
+  // "Xiaomi Miband 11" is a product, not a person named Xiaomi Miband. The person gate would
+  // require that glued name and drop every "Mi Band 11" page.
+  if (hasProductModel(query)) return false;
   // SPD-C1 (t457): a capitalised phrase inside a longer sentence is the topic, not a person lookup
   // ("Fact-check: Gmail lets you attach files up to 50 MB", "Does AirPods Pro 3 have a heart rate sensor?").
   // Treating it as a person dropped every source without that exact name (live H2H P11/P12/P13: 0–1 sources).
@@ -1446,6 +1452,16 @@ function namesakeCluster(cluster: readonly number[], rows: readonly EntityRow[],
   return pages.length > 0 && pages.every((row) => insertedName(row, name));
 }
 
+/** "Michael Jordan Stats": the name plus a column label, not a second person. */
+function topicLabelCluster(cluster: readonly number[], rows: readonly EntityRow[], name: string): boolean {
+  if (cluster.length !== 1) return false;
+  const row = rows[cluster[0]!]!;
+  if (exactWikiArticle(row, name) || isDisambiguationPage(row)) return false;
+  const own = new Set(tokens(name));
+  const extra = tokens(plainTitle(row)).filter((word) => !own.has(word));
+  return extra.length > 0 && extra.every((word) => TOPIC_WORD.test(word));
+}
+
 /** The Wikipedia article title itself is disambiguated ("John Smith (explorer)"). */
 const wikiNamesake = (row: EntityRow, name: string) => qualifiedTitle(wikiTitleOf(row), name);
 
@@ -1803,7 +1819,8 @@ export function resolveEntity(
 
   // A page about "Michael B. Jordan" does not make "Michael Jordan" ambiguous.
   const compared = famous ? ranked.filter((r) => !namesakeCluster(r.cluster, rows, name)) : ranked;
-  const rivals = compared.length ? compared : ranked;
+  const identity = compared.filter((r) => !topicLabelCluster(r.cluster, rows, name));
+  const rivals = identity.length ? identity : compared;
   if (rivals.length >= 2) {
     if (bare) {
       const top = rivals[0]!.score;
@@ -1905,6 +1922,23 @@ export function askTopic(query: string, name: string, caps = false): string {
     if (!out.includes(t)) out.push(t);
   }
   return out.join(' ');
+}
+
+const QUESTION_TITLE = /^(?:who|what|which|where|when|why|how)\b/i;
+
+/**
+ * A one-person card is titled with that person's name.
+ * A question ("Who is Tim from Blueflame") is not a title. An ask about something of theirs
+ * ("Jensen Huang net worth") keeps that topic when the title already names them.
+ */
+export function personCardTitle(question: string, proposed: string, name: string | undefined): string {
+  const person = name?.trim();
+  if (!person) return proposed;
+  const topic = askTopic(question, person);
+  const questionTitle = /\?\s*$/.test(proposed.trim()) || QUESTION_TITLE.test(proposed.trim());
+  if (!topic) return person;
+  if (questionTitle || !namesPerson(proposed, person)) return `${person} ${topic}`.replace(/\s+/g, ' ').trim();
+  return proposed;
 }
 
 /** Questions asked earlier in the thread, newest first, from the client's conversation digest. */

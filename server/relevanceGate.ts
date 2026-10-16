@@ -1,3 +1,9 @@
+import { TOPIC_WORD } from '../shared/askAbout';
+import { contextTerms, distinguishingTerms, hasFullPersonName, isPersonAsk, nameIsTopic, personSubject, personSourceOk } from './entity';
+import { modelConflict } from './productModel';
+import { cashtags } from './queryClean';
+import { isBlockedHost } from './spamHosts';
+
 /**
  * Drops off-topic hits after they are merged and before the answer model sees them.
  * No network and no model call: names, other capitalised tokens, uncommon words, and numbers
@@ -7,6 +13,8 @@
  * A year or season the question names (2026, 2025-26) drops a hit whose title or snippet
  * only names a clearly different year (1995), unless the name is there and the title itself
  * does not carry the conflicting year.
+ * A product model number (Mi Band 11, iPhone 17) drops a hit that names a different number
+ * on that same line and never states the one that was asked.
  * If nothing passes, the best remaining hits are kept only when they clear a low floor and, for a
  * question carrying three or more key terms, repeat at least two of them.
  * Otherwise the list is empty so the no-fresh-sources path can run.
@@ -34,10 +42,6 @@ const TASK = new Set([
 const FILLER3 = new Set(['new', 'top', 'all', 'any', 'out', 'off', 'way', 'see', 'put', 'set', 'say', 'try', 'own', 'via', 'etc', 'yet', 'ago', 'one', 'two', 'got', 'far', 'big', 'lot', 'few', 'day', 'non']);
 
 const TOKEN = /[A-Za-z0-9]+(?:['’.-][A-Za-z0-9]+)*/g;
-
-import { cashtags } from './queryClean';
-import { isBlockedHost } from './spamHosts';
-import { contextTerms, distinguishingTerms, hasFullPersonName, isPersonAsk, nameIsTopic, personSubject, personSourceOk } from './entity';
 
 export interface GateHit {
   title: string;
@@ -146,10 +150,17 @@ function forms(token: string): string[] {
 
 function hasTerm(hay: string, token: string): boolean {
   const want = new Set(forms(token));
-  for (const word of hay.split(' ')) {
-    if (!word) continue;
+  const words = hay.split(' ').filter(Boolean);
+  for (const word of words) {
     if (want.has(word)) return true;
     for (const form of forms(word)) if (want.has(form)) return true;
+  }
+  // "miband" is how a typed ask writes "mi band".
+  if (token.length >= 5) {
+    for (let i = 0; i < words.length - 1; i++) {
+      if (words[i]!.length < 2 || words[i + 1]!.length < 3) continue;
+      if (words[i]! + words[i + 1]! === token) return true;
+    }
   }
   return false;
 }
@@ -159,7 +170,7 @@ function sharesTerms(profile: Profile, hits: number): boolean {
   return profile.weights.length < 3 || hits >= 2;
 }
 
-function judge(profile: Profile, row: GateHit): { pass: boolean; hard: boolean; score: number; hits: number } {
+function judge(query: string, profile: Profile, row: GateHit): { pass: boolean; hard: boolean; score: number; hits: number } {
   const title = norm(row.title);
   const hay = `${title} ${norm(row.snippet ?? '')} ${norm(row.url)}`;
   const has = (token: string) => hasTerm(hay, token);
@@ -175,7 +186,8 @@ function judge(profile: Profile, row: GateHit): { pass: boolean; hard: boolean; 
   const score = profile.total ? matched / profile.total : 1;
   const lone = profile.phrases.length === 0 && profile.singles.some(has) && sharesTerms(profile, hits);
   const bodyYears = yearsOf(`${row.title} ${row.snippet ?? ''}`);
-  const hard = conflicts(profile.years, bodyYears) && !(fullName && !conflicts(profile.years, yearsOf(row.title)));
+  const yearHard = conflicts(profile.years, bodyYears) && !(fullName && !conflicts(profile.years, yearsOf(row.title)));
+  const hard = yearHard || modelConflict(query, row);
   return { pass: !hard && (fullName || nameTouch || lone || score >= MAIN), hard, score, hits };
 }
 
@@ -205,8 +217,8 @@ export function gateResults<T extends GateHit>(query: string, rows: readonly T[]
         // The page already names this person and that org. The term score cannot see a
         // one-letter company misspelling, or a name that is only in the page text.
         const profile = termsOf(query);
-        const kept = ok.filter((row) => !judge(profile, row).hard);
-        return { kept, dropped: rows.length - kept.length };
+        const kept = ok.filter((row) => !judge(query, profile, row).hard);
+        return { kept: seasonFirst(query, kept), dropped: rows.length - kept.length };
       } else {
         const ctx = contextTerms(query, name);
         const withCtx = clean.filter((row) => hasFullPersonName(name, row) && (
@@ -223,7 +235,7 @@ export function gateResults<T extends GateHit>(query: string, rows: readonly T[]
   }
   if (!pool.length) return { kept: [], dropped: rows.length };
   const profile = termsOf(query);
-  const judged = pool.map((row) => judge(profile, row));
+  const judged = pool.map((row) => judge(query, profile, row));
   const passing = judged.filter((j) => j.pass).length;
   let kept: T[];
   if (passing > 0) {
@@ -238,12 +250,29 @@ export function gateResults<T extends GateHit>(query: string, rows: readonly T[]
   } else {
     kept = pool.filter((_, i) => !judged[i].hard && judged[i].score >= FLOOR && sharesTerms(profile, judged[i].hits));
   }
-  return { kept, dropped: rows.length - kept.length };
+  return { kept: seasonFirst(query, kept), dropped: rows.length - kept.length };
+}
+
+/**
+ * A player stat ask ("Jayson Tatum Preseason Stats") should lead with the page that has the line.
+ * Career and projection pages stay, behind the pages that name the season or the stat.
+ */
+function seasonFirst<T extends GateHit>(query: string, rows: T[]): T[] {
+  if (!isPersonAsk(query) || rows.length < 2) return rows;
+  const topics = (query.match(TOKEN) ?? []).map((word) => word.toLowerCase()).filter((word) => TOPIC_WORD.test(word));
+  if (!topics.length) return rows;
+  const about = (row: T) => {
+    const hay = norm(`${row.title} ${row.snippet ?? ''} ${row.url}`);
+    return topics.some((topic) => hasTerm(hay, topic));
+  };
+  const front = rows.filter(about);
+  if (!front.length || front.length === rows.length) return rows;
+  return [...front, ...rows.filter((row) => !about(row))];
 }
 
 /** Rows that clearly match the question (not ones kept only because most of the list scored low). */
 export function strongCount(query: string, rows: readonly GateHit[]): number {
   const { kept } = gateResults(query, rows);
   const profile = termsOf(query);
-  return kept.filter((row) => judge(profile, row).pass).length;
+  return kept.filter((row) => judge(query, profile, row).pass).length;
 }

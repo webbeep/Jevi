@@ -1,6 +1,7 @@
 import type { CardNode, ImageCredit } from '../shared/card';
 import { isComposite } from '../shared/imagematch';
-import { type EntityHint, type GateContext, type PicTarget, accepts, hostNames, namedTarget, pageNames, targetFor } from './imageGate';
+import { shoppingAsk } from './claims';
+import { type EntityHint, type GateContext, type PicTarget, accepts, hostNames, nameLike, namedTarget, pageNames, targetFor } from './imageGate';
 import type { ImageResult, SearchResult } from '../shared/types';
 
 /**
@@ -26,6 +27,8 @@ export interface RowImageDeps {
   person?: string;
   /** t444: every filled picture reports the page it came from, so the client can show its tap-to-source credit. */
   onCredit?: (credit: ImageCredit) => void;
+  /** The ask. A shopping list of products gets a picture per item even when the list is not marked media. */
+  query?: string;
 }
 
 /** Result titles + snippets: proper-noun evidence for one-word labels. */
@@ -60,7 +63,41 @@ export function rowEntity(text: string): string {
 const blankTile = (n: Extract<CardNode, { type: 'tile' }>) => !n.imageSrc && n.imageRef === undefined && !n.imageQuery;
 const blankItem = (i: Extract<CardNode, { type: 'list' }>['items'][number]) => !i.imageSrc && i.imageRef === undefined && !i.imageQuery;
 
-function slotsOf(node: CardNode, out: Slot[], ctx?: GateContext): void {
+const STEP = /^(?:mix|add|preheat|stir|bake|cut|place|heat|combine|pour|serve|whisk|fold|cook|boil|simmer|chop|slice|let|set|remove|transfer|repeat|then|rinse|drain|season|cover|bring)\b/i;
+
+/** A short name a picture can show: a product, a variety, a place. Not a step. */
+function thingName(entity: string): boolean {
+  if (!entity || entity.length < 3 || STEP.test(entity)) return false;
+  const words = entity.split(/\s+/);
+  if (words.length > 6) return false;
+  if (words.length >= 5 && /\b(?:is|are|was|were|has|have|with|that)\b/i.test(entity)) return false;
+  return /^[A-Z0-9]/.test(words[0] ?? '');
+}
+
+/**
+ * A media list always gets pictures. So does a shopping list, and any other list whose items
+ * are short names. A numbered procedure does not.
+ */
+function listGetsPictures(node: Extract<CardNode, { type: 'list' }>, query?: string): boolean {
+  if (node.style === 'media') return true;
+  if (node.style === 'number') return false;
+  const names = node.items.map((item) => rowEntity(item.text)).filter(thingName);
+  if (names.length < 2 || names.length < node.items.length) return false;
+  if (query && shoppingAsk(query)) return true;
+  return names.every((entity) => entity.split(/\s+/).length <= 4);
+}
+
+/** The picture target for one list item. A name the row itself capitalizes still counts. */
+function itemPictureTarget(entity: string, text: string, ctx?: GateContext): PicTarget {
+  const named = namedTarget(entity, ctx);
+  if (named.kind !== 'none') return named;
+  const words = entity.trim().split(/\s+/);
+  const written = words.length > 0 && words.length <= 4 && words.every((word) => /^[A-Z0-9]/.test(word)) && nameLike(entity) && !STEP.test(text);
+  if (!written || ctx?.person) return named;
+  return { kind: 'named', entity: entity.trim() };
+}
+
+function slotsOf(node: CardNode, out: Slot[], ctx?: GateContext, query?: string): void {
   switch (node.type) {
     case 'stat': {
       // Stat tiles carry no source: only a gated picture that names them, never og:image.
@@ -76,12 +113,11 @@ function slotsOf(node: CardNode, out: Slot[], ctx?: GateContext): void {
       return;
     }
     case 'list':
-      if (node.style === 'media') {
+      if (listGetsPictures(node, query)) {
         for (const item of node.items) {
           if (!blankItem(item)) continue;
           const entity = rowEntity(item.text);
-          const target: PicTarget = namedTarget(entity, ctx);
-          out.push({ entity, target, source: item.source, ogOk: true });
+          out.push({ entity, target: itemPictureTarget(entity, item.text, ctx), source: item.source, ogOk: true });
         }
       }
       return;
@@ -89,17 +125,17 @@ function slotsOf(node: CardNode, out: Slot[], ctx?: GateContext): void {
     case 'grid':
     case 'section':
     case 'scroller':
-      node.children.forEach((c) => slotsOf(c, out, ctx));
+      node.children.forEach((c) => slotsOf(c, out, ctx, query));
       return;
     case 'tabs':
-      node.tabs.forEach((t) => t.children.forEach((c) => slotsOf(c, out, ctx)));
+      node.tabs.forEach((t) => t.children.forEach((c) => slotsOf(c, out, ctx, query)));
       return;
     default:
       return;
   }
 }
 
-function apply(node: CardNode, slots: Slot[], at: { i: number }): CardNode {
+function apply(node: CardNode, slots: Slot[], at: { i: number }, query?: string): CardNode {
   switch (node.type) {
     case 'stat': {
       if (node.image) return node;
@@ -112,7 +148,7 @@ function apply(node: CardNode, slots: Slot[], at: { i: number }): CardNode {
       return s?.src ? { ...node, imageSrc: s.src } : node;
     }
     case 'list': {
-      if (node.style !== 'media') return node;
+      if (!listGetsPictures(node, query)) return node;
       return {
         ...node,
         items: node.items.map((item) => {
@@ -126,18 +162,18 @@ function apply(node: CardNode, slots: Slot[], at: { i: number }): CardNode {
     case 'grid':
     case 'section':
     case 'scroller':
-      return { ...node, children: node.children.map((c) => apply(c, slots, at)) };
+      return { ...node, children: node.children.map((c) => apply(c, slots, at, query)) };
     case 'tabs':
-      return { ...node, tabs: node.tabs.map((t) => ({ ...t, children: t.children.map((c) => apply(c, slots, at)) })) };
+      return { ...node, tabs: node.tabs.map((t) => ({ ...t, children: t.children.map((c) => apply(c, slots, at, query)) })) };
     default:
       return node;
   }
 }
 
-/** True when the node has a tile or media row without any picture. */
-export function hasBlankPictures(node: CardNode, ctx?: GateContext): boolean {
+/** True when the node has a tile or named list row without any picture. */
+export function hasBlankPictures(node: CardNode, ctx?: GateContext, query?: string): boolean {
   const out: Slot[] = [];
-  slotsOf(node, out, ctx);
+  slotsOf(node, out, ctx, query);
   return out.length > 0;
 }
 
@@ -152,7 +188,7 @@ export async function fillRowImages(nodes: CardNode[], deps: RowImageDeps, used:
   const ctx: GateContext = { corpus: corpusOf(deps.results), hintFor: deps.hintFor, person: deps.person };
   const perNode = nodes.map((n) => {
     const s: Slot[] = [];
-    slotsOf(n, s, ctx);
+    slotsOf(n, s, ctx, deps.query);
     return s;
   });
   const all = perNode.flat();
@@ -242,7 +278,7 @@ export async function fillRowImages(nodes: CardNode[], deps: RowImageDeps, used:
       return n;
     }
     changed.push(true);
-    return apply(n, perNode[i], { i: 0 });
+    return apply(n, perNode[i], { i: 0 }, deps.query);
   });
   return { nodes: out, changed, imageCalls, og };
 }

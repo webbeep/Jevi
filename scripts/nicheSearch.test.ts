@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { clearDeadEngines, newLedger, queriesForAsk } from '../server/budget.ts';
 import { cascadeWeb } from '../server/cascade.ts';
-import { askTopic, askedQuestions, commaDetailQuery, formalNameQueries, hasFullPersonName, isPersonAsk, nameIsTopic, personSubject, pickTopic, pickTopicQuery, resolveEntity } from '../server/entity.ts';
+import { askTopic, askedQuestions, commaDetailQuery, formalNameQueries, hasFullPersonName, isPersonAsk, nameIsTopic, personCardTitle, personSubject, pickTopic, pickTopicQuery, resolveEntity } from '../server/entity.ts';
 import { readPeople } from '../server/peopleSplit.ts';
 import { coverage } from '../server/search.ts';
 import { cashtags, expandCashtags, relaxQuery, tickerQueries } from '../server/queryClean.ts';
@@ -129,6 +129,13 @@ const DEBUT_ROWS = [
   { title: 'LeBron preseason debut: 10 points in 18 minutes', url: 'https://c.example.com/3', snippet: 'LeBron James looked sharp.' },
   { title: 'LeBron James preseason debut status revealed by Nick Nurse', url: 'https://d.example.com/4', snippet: 'Nurse said James will play.' },
 ];
+
+test('a person card is titled with the name, and a topic ask keeps the topic', () => {
+  assert.equal(personCardTitle('Who is Tim from Blueflame', 'Who is Tim from Blueflame', 'Timothy Estrada'), 'Timothy Estrada');
+  assert.equal(personCardTitle('What is Jensen Huang\'s net worth?', 'What is Jensen Huang\'s net worth?', 'Jensen Huang'), 'Jensen Huang net worth');
+  assert.equal(personCardTitle('What is Jensen Huang\'s net worth?', 'Jensen Huang Net Worth', 'Jensen Huang'), 'Jensen Huang Net Worth');
+  assert.equal(personCardTitle('best running shoes for beginners', 'Best running shoes', undefined), 'Best running shoes');
+});
 
 test('a title-cased topic is not a person named "Lebron Preseason" (every source was dropped)', () => {
   assert.equal(isPersonAsk('Lebron Preseason debut'), true);

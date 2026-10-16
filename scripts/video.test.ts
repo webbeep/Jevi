@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { designParallel } from '../server/design.ts';
 import type { Env } from '../server/util.ts';
-import { parseYouTube, videoResults, wantsVideo, withVideos } from '../server/videoSearch.ts';
+import { parseYouTube, productClipQueries, recallClips, videoResults, wantsVideo, withProductClips, withVideos } from '../server/videoSearch.ts';
 import type { CardNode } from '../shared/card.ts';
 import type { SearchResult } from '../shared/types.ts';
 
@@ -34,6 +34,39 @@ test('watch asks are recognised', () => {
   assert.equal(wantsVideo('LeBron James 76ers preseason debut highlights vs Brooklyn Nets'), true);
   assert.equal(wantsVideo('iphone 17 review video'), true);
   assert.equal(wantsVideo('who is Ed chu'), false);
+  assert.equal(wantsVideo('Google Fitbit Edge vs Xiaomi Miband 11'), false);
+});
+
+test('a numbered product searches YouTube for that product, and the clips follow the written sources', async () => {
+  assert.deepEqual(productClipQueries('Google Fitbit Edge vs Xiaomi Miband 11'), ['Xiaomi Miband 11']);
+  assert.deepEqual(productClipQueries('iphone 17 vs pixel 10'), ['iphone 17', 'pixel 10']);
+  assert.deepEqual(productClipQueries('best wireless headphones under $100'), []);
+  assert.deepEqual(productClipQueries('is renting or buying a home cheaper'), []);
+  const html = page([
+    renderer('abcdefghijk', 'Xiaomi Mi Band 11 review — specs and price', 'The Tech Chap'),
+    renderer('bbbbbbbbbbb', 'Xiaomi Mi Band 4 vs Fitbit Inspire HR', 'Wareable'),
+    renderer('ccccccccccc', 'Unrelated cooking video', 'Kitchen'),
+  ]);
+  const seen: string[] = [];
+  const ok = (async (url: string) => {
+    seen.push(url);
+    return new Response(html);
+  }) as unknown as typeof fetch;
+  const rows = await recallClips('Google Fitbit Edge vs Xiaomi Miband 11', ok);
+  assert.equal(seen.length, 1);
+  assert.match(seen[0]!, /search_query=Xiaomi%20Miband%2011/);
+  assert.deepEqual(rows.map((r) => r.url.slice(-11)), ['abcdefghijk']);
+  const web = Array.from({ length: 9 }, (_, i) => ({
+    title: `Fitbit Edge spec ${i + 1}`,
+    url: `https://news${i}.example.com/edge`,
+    snippet: 'Google Fitbit Edge launched with GPS and ECG.',
+    domain: `news${i}.example.com`,
+    engines: ['serper'],
+  }));
+  const merged = withProductClips(rows, web);
+  assert.equal(merged[8]!.url, rows[0]!.url);
+  assert.equal(merged[0]!.url, web[0]!.url);
+  assert.equal(merged.length, 10);
 });
 
 test('parseYouTube reads video rows from ytInitialData', () => {

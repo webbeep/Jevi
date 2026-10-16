@@ -948,10 +948,10 @@ describe('EN4: the extractive card header names the chosen person on a picked ch
     assert.deepEqual(heads.map((h) => h.title), ['best wireless headphones']);
   });
 
-  test('a non-profile pattern and a card with no person hint keep the raw pick query', async () => {
+  test('a briefing keeps the pick query, and a profile card is titled with the name', async () => {
     const hintFor = entityHintFor(raycon, PICK);
     assert.deepEqual((await headOf(PICK, hintFor, 'briefing')).heads.map((h) => h.title), [PICK]);
-    assert.deepEqual((await headOf(PICK, undefined, 'profile')).heads.map((h) => h.title), [PICK]);
+    assert.deepEqual((await headOf(PICK, undefined, 'profile')).heads.map((h) => h.title), ['Ray Lee']);
   });
 
   test('an on-topic encyclopedia panel still wins the header', async () => {

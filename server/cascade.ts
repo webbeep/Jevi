@@ -8,7 +8,7 @@ import { loadSkips, tripSkip } from './engineSkip';
 import { SERPER_IMAGES_SHARE, takeSlot, type CapBucket } from './providerCap';
 import { HttpStatusError, type Env, clip, domainOf, fetchJson } from './util';
 import { gateResults, strongCount } from './relevanceGate';
-import { latinQuery } from './sourceQuality';
+import { isNewsAsk, isNewsroom, latinQuery } from './sourceQuality';
 import { fetchWikiSearch } from './wikiSearch';
 import { youKeyedSearch, youKeylessSearch, youKeyPresent } from './youSearch';
 
@@ -464,9 +464,13 @@ export async function cascadeWeb(q: Query, env: Env, ledger: CallLedger, waitUnt
     if (!r.ok) return false;
     const kept = gateResults(q.q, r.value.hits.filter((h) => h.url && h.title)).kept;
     if (kept.length < LITERAL_OK) return false;
-    // A today ask whose literal rows are mostly older pages ("news tldr today" finds a newsletter and encyclopedia
-    // articles) is thin: the dated rewrites are the ones that carry today's stories.
-    return q.freshness !== 'day' || kept.filter((row) => withinDay(row.date, cascadeStarted)).length >= TODAY_OK;
+    if (q.freshness !== 'day') return true;
+    const recent = kept.filter((row) => withinDay(row.date, cascadeStarted));
+    // A today ask whose literal rows are mostly older pages is thin: the dated rewrites carry today's stories.
+    // A news ask is still thin when those recent rows are encyclopedias or newsletters. The literal search
+    // often lands before the dated rewrites, and answering from it leads with those pages.
+    if (!isNewsAsk(q.q)) return recent.length >= TODAY_OK;
+    return recent.filter((row) => isNewsroom(domainOf(row.url))).length >= TODAY_OK;
   };
   /**
    * Rewrites for a step whose literal call is already running. A thin or failed literal search waits for

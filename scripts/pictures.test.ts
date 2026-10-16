@@ -102,3 +102,118 @@ test('a product row still gets its pictures when the rest of the card finishes f
   assert.equal(done?.type, 'list');
   if (done?.type === 'list') assert.equal(done.items.every((item) => !!item.imageSrc), true);
 });
+
+test('a short-name list gets a picture per item, and a numbered procedure does not', async () => {
+  const credits: { src: string }[] = [];
+  let lookups = 0;
+  const find = async (query: string): Promise<ImageResult[]> => {
+    lookups += 1;
+    const src = `https://img.test/${encodeURIComponent(query)}.jpg`;
+    return [{ url: `https://img.test/${encodeURIComponent(query)}`, thumb: src, title: query, source: 'img.test', license: 'open', credit: query }];
+  };
+  const shoes: CardNode = {
+    type: 'list',
+    items: [{ text: 'Brooks Ghost 18' }, { text: 'Nike Winflo 12' }, { text: 'Asics Novablast 6' }],
+  };
+  const shown: CardNode[] = [];
+  const resolver = new PictureResolver({} as Env, [], (credit) => credits.push(credit), 'best running shoes for beginners', find, {
+    results: [],
+    cardImages: async () => [],
+  });
+  resolver.emit(shoes, 0, (node) => shown.push(node));
+  await delay(40);
+  assert.equal(lookups, 3);
+  await resolver.flush(200);
+  assert.equal(credits.length, 3);
+  const done = shown.at(-1);
+  assert.equal(done?.type, 'list');
+  if (done?.type === 'list') assert.equal(done.items.every((item) => !!item.imageSrc), true);
+
+  let recipeLookups = 0;
+  const recipe: CardNode = {
+    type: 'list',
+    style: 'number',
+    items: [{ text: 'Preheat the oven' }, { text: 'Mix the flour' }, { text: 'Bake for 20 minutes' }],
+  };
+  new PictureResolver({} as Env, [], () => undefined, 'how to bake bread', async () => {
+    recipeLookups += 1;
+    return [];
+  }, { results: [], cardImages: async () => [] }).emit(recipe, 0, () => undefined);
+  await delay(40);
+  assert.equal(recipeLookups, 0);
+
+  let varietyLookups = 0;
+  const varieties: CardNode = {
+    type: 'list',
+    items: [{ text: 'Honeycrisp' }, { text: 'Granny Smith' }, { text: 'Fuji' }],
+  };
+  new PictureResolver({} as Env, [], () => undefined, 'apple varieties', async () => {
+    varietyLookups += 1;
+    return [];
+  }, { results: [], cardImages: async () => [] }).emit(varieties, 0, () => undefined);
+  await delay(40);
+  assert.equal(varietyLookups, 3);
+});
+
+test('a softmax caption drops a page preview and keeps a real heatmap', () => {
+  const preview: ImageResult = {
+    url: 'https://www.ibm.com/blog/attention',
+    thumb: 'https://assets.ibm.com/is/image/ibm/attention-leadspace.jpg',
+    title: 'Attention mechanism',
+    source: 'ibm.com',
+    license: 'source',
+  };
+  const heatmap: ImageResult = {
+    url: 'https://en.wikipedia.org/wiki/Attention',
+    thumb: 'https://upload.wikimedia.org/wikipedia/commons/attention-heatmap.png',
+    title: 'Attention heatmap',
+    source: 'wikipedia',
+    license: 'open',
+  };
+  const caption = 'Each row is a token; brighter cells are the tokens it listens to most';
+  const dropped: CardNode[] = [];
+  new PictureResolver({} as Env, [preview], () => undefined, 'Explain how an LLM attention layer works')
+    .emit({ type: 'image', ref: 0, caption, aspect: 'wide' }, 0, (node) => dropped.push(node));
+  const gone = dropped[0];
+  assert.equal(gone?.type, 'image');
+  if (gone?.type !== 'image') return;
+  assert.equal(gone.ref, undefined);
+  assert.equal(gone.src, undefined);
+  assert.equal(gone.query, undefined);
+  assert.match(gone.caption ?? '', /brighter cells/);
+
+  const kept: CardNode[] = [];
+  new PictureResolver({} as Env, [heatmap], () => undefined, 'Explain how an LLM attention layer works')
+    .emit({ type: 'image', ref: 0, caption, aspect: 'wide' }, 0, (node) => kept.push(node));
+  const stay = kept[0];
+  assert.equal(stay?.type, 'image');
+  if (stay?.type !== 'image') return;
+  assert.equal(stay.ref, 0);
+});
+
+test('a softmax picture query does not search for a stand-in photo', async () => {
+  let lookups = 0;
+  const shown: CardNode[] = [];
+  const resolver = new PictureResolver({} as Env, [{
+    url: 'https://www.ibm.com/blog/attention',
+    thumb: 'https://assets.ibm.com/is/image/ibm/attention-leadspace.jpg',
+    title: 'Attention mechanism',
+    source: 'ibm.com',
+    license: 'source',
+  }], () => undefined, 'Explain how an LLM attention layer works', async () => {
+    lookups += 1;
+    return [];
+  });
+  resolver.emit({
+    type: 'image',
+    query: 'softmax attention heatmap',
+    caption: 'Each row is a token; brighter cells are the tokens it listens to most',
+  }, 0, (node) => shown.push(node));
+  await resolver.flush();
+  assert.equal(lookups, 0);
+  const last = shown.at(-1);
+  assert.equal(last?.type, 'image');
+  if (last?.type !== 'image') return;
+  assert.equal(last.src, undefined);
+  assert.equal(last.query, undefined);
+});

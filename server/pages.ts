@@ -11,6 +11,30 @@ import { hasCatalogCopy } from './scholarly';
 import { HttpStatusError, type Env, stripHtml } from './util';
 
 export const BROWSER_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36';
+
+/** Season words whose numbers live past a player page's bio. */
+const SEASON_FOCUS = /\b(pre-?season|post-?season|playoffs?)\b/i;
+
+/**
+ * The opening of a player page is the bio and the season averages. A preseason line is
+ * further down (news, game log). Keep the opening, then the first later mention of the
+ * season the question asked for, so that line is not cut off.
+ */
+export function focusPage(text: string, query: string | undefined, maxChars: number): string {
+  const cut = (s: string) => (s.length > maxChars ? `${s.slice(0, maxChars)}…` : s);
+  const asked = query && SEASON_FOCUS.exec(query)?.[1]?.toLowerCase().replace('-', '');
+  if (!asked || text.length <= maxChars) return cut(text);
+  const needle = asked.startsWith('playoff') ? 'playoff' : asked;
+  const lower = text.toLowerCase();
+  // Stop before the season-average table that usually follows the bio, so that table
+  // is not what the card treats as the preseason line.
+  const headLen = Math.min(1000, Math.max(400, maxChars - 900));
+  const at = lower.indexOf(needle, headLen);
+  if (at < 0) return cut(text);
+  const start = Math.max(headLen, at - 160);
+  const merged = `${text.slice(0, headLen)}\n…\n${text.slice(start, at + 700)}`;
+  return cut(merged);
+}
 const MIN_TEXT = 300;
 /** Jina payment/quota failures skip that reader for ~6h (shared KV ENGINE_SKIP), so asks go straight to direct fetch. */
 const JINA_TRIP = new Set(['payment', 'quota', 'credit']);
@@ -159,12 +183,12 @@ async function readReadable(url: string, env: Env, signal: AbortSignal, images: 
 }
 
 /** Fetches one page's readable text. Keyless Jina when the key is missing or Jina is dead; direct fetch is the fallback. */
-export async function pageText(url: string, env: Env, timeoutMs = 9000, maxChars = 6000, images?: Map<string, string>, scope?: AskScope): Promise<string> {
+export async function pageText(url: string, env: Env, timeoutMs = 9000, maxChars = 6000, images?: Map<string, string>, scope?: AskScope, focus?: string): Promise<string> {
   if (!isFetchable(url)) throw new Error('URL not allowed');
   if (!readable(url)) throw new Error('site refuses automated reads');
   const signal = AbortSignal.timeout(timeoutMs);
   const text = await readReadable(url, env, signal, images, scope);
-  return text.length > maxChars ? `${text.slice(0, maxChars)}…` : text;
+  return focusPage(text, focus, maxChars);
 }
 
 /**
@@ -179,6 +203,7 @@ export async function collectPages(
   opts: { count: number; need: number; budgetMs: number },
   late?: Promise<LateExtras>,
   scope?: AskScope,
+  focus?: string,
 ): Promise<PageText[]> {
   const count = Math.min(5, Math.max(0, opts.count));
   const need = Math.min(count, opts.need);
@@ -187,7 +212,7 @@ export async function collectPages(
   const ready: PageText[] = numbered
     .filter(({ r }) => r.content && !isBlockPage(r.content) && (r.content.length >= MIN_TEXT || hasCatalogCopy(r)))
     .slice(0, count)
-    .map(({ r, n }) => ({ n, url: r.url, text: r.content! }));
+    .map(({ r, n }) => ({ n, url: r.url, text: focusPage(r.content!, focus, 6000) }));
   if (ready.length >= need) return ready;
 
   const have = new Set(ready.map((p) => p.n));
@@ -206,9 +231,9 @@ export async function collectPages(
     let pending = missing.length;
     if (!pending) resolve();
     for (const { r, n } of missing) {
-      Promise.any([fromLate(r.url), pageText(r.url, env, opts.budgetMs + 500, 6000, images, scope)])
+      Promise.any([fromLate(r.url), pageText(r.url, env, opts.budgetMs + 500, 6000, images, scope, focus)])
         .then((text) => {
-          pages.push({ n, url: r.url, text, image: images.get(r.url) });
+          pages.push({ n, url: r.url, text: focusPage(text, focus, 6000), image: images.get(r.url) });
           if (pages.length >= need) resolve();
         })
         .catch(() => undefined)

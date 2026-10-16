@@ -337,4 +337,36 @@ describe('search fallback', { concurrency: 1 }, () => {
       clearDeadEngines();
     }
   });
+
+  test('a today news ask whose fresh rows are encyclopedias and newsletters waits for newsrooms', async () => {
+    clearDeadEngines();
+    const orig = globalThis.fetch;
+    const now = new Date().toISOString();
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('google.serper.dev/search')) {
+        const asked = JSON.parse(String(init?.body)) as { q?: string };
+        if (asked.q === 'top news headlines today') {
+          await new Promise((resolve) => setTimeout(resolve, 1100));
+          const rooms = ['reuters.com', 'apnews.com', 'bbc.com', 'nytimes.com'];
+          const organic = rooms.map((host) => ({ title: `Top news headlines today ${host}`, link: `https://www.${host}/today`, snippet: 'Today news headlines.', date: now }));
+          return Response.json({ organic });
+        }
+        const pages = ['https://en.wikipedia.org/wiki/News', 'https://en.wikipedia.org/wiki/Headline', 'https://tldr.tech/news', 'https://example.substack.com/p/today'];
+        const organic = pages.map((link) => ({ title: 'News tldr today', link, snippet: 'News tldr today roundup.', date: now }));
+        return Response.json({ organic });
+      }
+      return Response.json({});
+    };
+    try {
+      const allow = { prepare() { return { bind() { return { async first() { return { count: 1 }; } }; } }; } };
+      const env = { SEARCH_ORDER: 'serper', SERPER_API_KEY: 's', DB: allow } as Env;
+      const later = new Promise<{ more: string[]; freshness: 'day' }>((resolve) => setTimeout(() => resolve({ more: ['top news headlines today'], freshness: 'day' }), 200));
+      const out = await cascadeWeb({ q: 'news tldr today', later, freshness: 'day', count: 8 }, env, newLedger());
+      assert.ok(out.more.some((m) => m.hits.some((h) => h.url.includes('reuters.com'))));
+    } finally {
+      globalThis.fetch = orig;
+      clearDeadEngines();
+    }
+  });
 });

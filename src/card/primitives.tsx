@@ -19,6 +19,8 @@ import { Icon } from './Icon';
 import { ICON_NAMES } from './iconNames';
 import { RichText } from './RichText';
 import { GAIN, LOSS, returnColor } from './returnColor';
+import { claimsFigure, showsFigure } from '../../shared/figure';
+import { SoftmaxFigure } from './SoftmaxFigure';
 import { playerSignal, videoEmbed, withOrigin, type VideoEmbed } from './videoEmbed';
 
 type Of<T extends CardNode['type']> = Extract<CardNode, { type: T }>;
@@ -902,6 +904,12 @@ export function ImageView({ node }: { node: Of<'image'> }) {
   const link = usePictureLink(src);
   const credit = useCredit(src) ?? domainLabel(hostOf(node.link ?? link));
   const aspect = node.aspect === 'square' ? 'aspect-square' : node.aspect === 'tall' ? 'aspect-[3/4]' : 'aspect-video';
+  const claim = `${node.caption ?? ''} ${node.query ?? ''}`;
+  const depicted = !!src && showsFigure({ title: ref?.title, url: node.link ?? ref?.url ?? link, thumb: src });
+  if (claimsFigure(claim) && !depicted) {
+    if (!src && node.query && busy) return <Skeleton className={cn('w-full rounded-xl', aspect)} />;
+    return <SoftmaxFigure caption={node.caption} />;
+  }
   if (!src) return node.query && busy ? <Skeleton className={cn('w-full rounded-xl', aspect)} /> : null;
   return (
     <figure className="overflow-hidden rounded-xl border bg-muted animate-in fade-in">

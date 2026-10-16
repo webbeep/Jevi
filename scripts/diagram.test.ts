@@ -4,8 +4,13 @@ import type { CardNode } from '../shared/card.ts';
 import {
   DIAGRAM_SANDBOX,
   acceptDiagram,
+  diagramNeedsRetry,
   diagramDocument,
+  diagramFrameHeight,
   diagramIntent,
+  diagramIsLine,
+  diagramSelectionText,
+  layoutDiagram,
   diagramRegionIndex,
   diagramSlotAt,
   diagramsEnabled,
@@ -99,6 +104,48 @@ test('diagrams stay off until ZO_DIAGRAMS is explicitly on', () => {
 
 const CORPUS = 'Photosynthesis uses light, chlorophyll, water, and carbon dioxide to make sugar. The light reactions happen in the chloroplast.';
 
+const LLM = 'The decoder generates the output text one token at a time. The attention mechanism focuses on specific parts of the input text. Introduction Training Key Innovation Architecture Limitations Applications.';
+
+test('article sections are not a diagram of how something works', () => {
+  const toc = acceptDiagram({
+    type: 'diagram',
+    title: 'Large Language Models',
+    nodes: [
+      { id: 'a', label: 'Introduction', detail: 'Large language models are a type of artificial intelligence designed to understand and generate human-like text.' },
+      { id: 'b', label: 'Training' },
+      { id: 'c', label: 'Key Innovation' },
+      { id: 'd', label: 'Architecture' },
+      { id: 'e', label: 'Limitations' },
+      { id: 'f', label: 'Applications' },
+    ],
+  }, LLM, 'concept');
+  assert.equal(toc, undefined);
+  const card = acceptDiagram({
+    nodes: [
+      { id: 'a', label: 'Token', detail: 'The decoder generates the output text one token at a time.' },
+      { id: 'b', label: 'Attention', detail: 'The attention mechanism focuses on specific parts of the input text.' },
+      { id: 'c', label: 'Decoder', detail: 'The decoder generates the output text one token at a time.' },
+    ],
+  }, LLM, 'concept');
+  assert.ok(card);
+  assert.deepEqual(card.nodes.map((n) => n.label), ['Token', 'Attention', 'Decoder']);
+  assert.match(card.nodes[0]?.detail ?? '', /token/);
+  const graphic = diagramDocument(card, true);
+  assert.match(graphic, /<svg/);
+  assert.match(graphic, /class="arrow"/);
+  assert.match(graphic, /marker-end="url\(#arrowhead\)"/);
+  assert.equal(graphic.includes('<button'), false);
+  assert.equal(diagramNeedsRetry({
+    nodes: [
+      { label: 'Introduction' },
+      { label: 'Training' },
+      { label: 'Architecture' },
+    ],
+  }, undefined), true);
+  assert.equal(diagramNeedsRetry({ nodes: [] }, undefined), false);
+  assert.equal(diagramNeedsRetry({ nodes: [{ label: 'Token' }, { label: 'Attention' }, { label: 'Decoder' }] }, card), false);
+});
+
 test('a diagram keeps source-backed stages and drops an invented one', () => {
   const card = acceptDiagram({
     type: 'diagram',
@@ -122,6 +169,227 @@ test('a diagram keeps source-backed stages and drops an invented one', () => {
     { from: 'n1', to: 'n2' },
     { from: 'n2', to: 'n3' },
   ]);
+});
+
+const BILL = 'A bill is introduced, then the House and the Senate each vote, and the President signs it.';
+
+test('a split stays a branch instead of one line', () => {
+  const card = acceptDiagram({
+    nodes: [
+      { id: 'a', label: 'Introduced' },
+      { id: 'b', label: 'House' },
+      { id: 'c', label: 'Senate' },
+      { id: 'd', label: 'President' },
+    ],
+    edges: [
+      { from: 'a', to: 'b' },
+      { from: 'a', to: 'c' },
+      { from: 'b', to: 'd' },
+      { from: 'c', to: 'd' },
+    ],
+  }, BILL, 'flow');
+  assert.ok(card);
+  assert.deepEqual(card.edges.map((edge) => [edge.from, edge.to]), [
+    ['n0', 'n1'],
+    ['n0', 'n2'],
+    ['n1', 'n3'],
+    ['n2', 'n3'],
+  ]);
+  assert.match(card.mermaid ?? '', /n0 --> n1/);
+  assert.match(card.mermaid ?? '', /n0 --> n2/);
+  const layout = layoutDiagram(card, 340);
+  const house = layout.boxes[1]!;
+  const senate = layout.boxes[2]!;
+  const president = layout.boxes[3]!;
+  assert.equal(house.y, senate.y);
+  assert.notEqual(house.x, senate.x);
+  assert.ok(president.y > house.y);
+  assert.equal(layout.wires.length, 4);
+  const graphic = diagramDocument(card, true, 340);
+  assert.match(graphic, /class="arrow"/);
+  assert.equal((graphic.match(/marker-end=/g) ?? []).length, 4);
+});
+
+test('a loop is dropped and an unknown stage is not an edge', () => {
+  const card = acceptDiagram({
+    nodes: [
+      { id: 'a', label: 'Introduced' },
+      { id: 'b', label: 'House' },
+      { id: 'c', label: 'President' },
+    ],
+    edges: [
+      { from: 'a', to: 'b' },
+      { from: 'b', to: 'c' },
+      { from: 'c', to: 'a' },
+      { from: 'a', to: 'missing' },
+    ],
+  }, BILL, 'flow');
+  assert.ok(card);
+  assert.equal(card.edges.length, 2);
+  assert.equal(card.edges.some((edge) => edge.from === 'n2' && edge.to === 'n0'), false);
+});
+
+test('diagram layout benchmark keeps branches, padding, and no overlap', () => {
+  const cases: { name: string; card: NonNullable<ReturnType<typeof acceptDiagram>>; branch: boolean }[] = [];
+  const bill = acceptDiagram({
+    nodes: [
+      { id: 'a', label: 'Introduced' },
+      { id: 'b', label: 'House' },
+      { id: 'c', label: 'Senate' },
+      { id: 'd', label: 'President' },
+    ],
+    edges: [
+      { from: 'a', to: 'b' }, { from: 'a', to: 'c' }, { from: 'b', to: 'd' }, { from: 'c', to: 'd' },
+    ],
+  }, BILL, 'flow');
+  const photo = acceptDiagram({
+    nodes: [
+      { id: 'a', label: 'Light' },
+      { id: 'b', label: 'Chlorophyll' },
+      { id: 'c', label: 'Water' },
+      { id: 'd', label: 'Sugar' },
+    ],
+    edges: [
+      { from: 'a', to: 'b' }, { from: 'a', to: 'c' }, { from: 'b', to: 'd' }, { from: 'c', to: 'd' },
+    ],
+  }, CORPUS, 'concept');
+  const line = acceptDiagram({
+    nodes: [
+      { id: 'a', label: 'Light' },
+      { id: 'b', label: 'Chlorophyll' },
+      { id: 'c', label: 'Water' },
+      { id: 'd', label: 'Sugar' },
+    ],
+  }, CORPUS, 'concept');
+  assert.ok(bill && photo && line);
+  cases.push({ name: 'bill', card: bill, branch: true }, { name: 'photo', card: photo, branch: true }, { name: 'line', card: line, branch: false });
+  let branched = 0;
+  for (const item of cases) {
+    const layout = layoutDiagram(item.card, 340);
+    const branchedEdges = item.card.edges.filter((edge) => item.card.edges.filter((other) => other.from === edge.from).length > 1);
+    if (item.branch) {
+      assert.ok(branchedEdges.length >= 1, item.name);
+      branched++;
+      const siblings = layout.boxes.filter((box) => box.y === layout.boxes[1]!.y);
+      assert.ok(siblings.length >= 2, item.name);
+    } else {
+      assert.equal(diagramIsLine(item.card), true, item.name);
+      assert.equal(new Set(layout.boxes.map((box) => box.y)).size, item.card.nodes.length, item.name);
+      for (const box of layout.boxes) assert.ok(box.w <= layout.width - 64, item.name);
+    }
+    for (const box of layout.boxes) {
+      assert.ok(box.x >= 22, item.name);
+      assert.ok(box.x + box.w <= layout.width - 22, item.name);
+      assert.ok(box.y >= 40, item.name);
+      assert.ok(box.y + box.h <= layout.height - 16, item.name);
+      assert.ok(box.note.length === 0, item.name);
+    }
+    for (let i = 0; i < layout.boxes.length; i++) {
+      for (let j = i + 1; j < layout.boxes.length; j++) {
+        const a = layout.boxes[i]!;
+        const b = layout.boxes[j]!;
+        const overlap = a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+        assert.equal(overlap, false, item.name);
+      }
+    }
+    for (const edge of item.card.edges) {
+      const from = layout.boxes[item.card.nodes.findIndex((step) => step.id === edge.from)]!;
+      const to = layout.boxes[item.card.nodes.findIndex((step) => step.id === edge.to)]!;
+      assert.ok(to.y > from.y, item.name);
+    }
+  }
+  assert.equal(diagramIsLine(bill), false);
+  assert.equal(diagramFrameHeight(bill, 340), layoutDiagram(bill, 340).height);
+  assert.ok(diagramFrameHeight(bill, 340) < diagramFrameHeight(line, 340));
+  console.log(JSON.stringify({ cases: cases.length, branched, line: line.nodes.length }));
+  assert.equal(branched, 2);
+});
+
+const ATTENTION = 'For each token x in an input sequence, self-attention compares that token with every other token before it writes a context-aware representation.';
+
+test('a straight attention diagram stays off the frame and keeps the whole sentence', () => {
+  const card = {
+    type: 'diagram' as const,
+    kind: 'concept' as const,
+    title: 'How LLM attention works',
+    nodes: [
+      { id: 'n0', label: 'Token', detail: ATTENTION },
+      { id: 'n1', label: 'Self-attention', detail: 'Self-attention compares every token with the others.' },
+      { id: 'n2', label: 'Attention heads', detail: 'Attention heads run the comparison together.' },
+      { id: 'n3', label: 'Context', detail: 'The result is a context-aware representation.' },
+    ],
+    edges: [
+      { from: 'n0', to: 'n1' },
+      { from: 'n1', to: 'n2' },
+      { from: 'n2', to: 'n3' },
+    ],
+  };
+  assert.equal(diagramIsLine(card), true);
+  assert.equal(diagramSelectionText(card, 0), ATTENTION);
+  assert.equal(diagramSelectionText(card, 0).includes('…'), false);
+  for (const width of [280, 320, 390, 640]) {
+    const layout = layoutDiagram(card, width);
+    const first = layout.boxes[0]!;
+    assert.ok(first.y >= 40, String(width));
+    assert.ok(first.x >= 30, String(width));
+    assert.ok(first.x + first.w <= layout.width - 30, String(width));
+    assert.ok(first.note.length >= 1, String(width));
+    assert.match(first.note[0] ?? '', /For each token/);
+    assert.ok(first.h >= 60, String(width));
+    for (const box of layout.boxes) {
+      assert.ok(box.y >= 40, String(width));
+      assert.ok(box.x >= 22, String(width));
+      assert.ok(box.x + box.w <= layout.width - 22, String(width));
+      const labelMax = Math.max(4, Math.floor((Math.max(7.1, box.w - 18)) / 7.1));
+      const noteMax = Math.max(4, Math.floor((Math.max(6.3, box.w - 18)) / 6.3));
+      for (const line of box.lines) assert.ok(line.length <= labelMax, `${width} ${line}`);
+      for (const line of box.note) assert.ok(line.length <= noteMax, `${width} ${line}`);
+    }
+    const graphic = diagramDocument(card, true, width);
+    assert.match(graphic, /class="note"/);
+    assert.match(graphic, /For each token/);
+    assert.equal(graphic.includes('id="detail"'), false);
+    assert.equal(graphic.includes('2.8em'), false);
+    assert.match(graphic, /zo-diagram/);
+    assert.equal(diagramFrameHeight(card, width), layout.height);
+  }
+});
+
+test('attention parts that split sit on one row and join again', () => {
+  const card = {
+    type: 'diagram' as const,
+    kind: 'concept' as const,
+    nodes: [
+      { id: 'n0', label: 'Token', detail: ATTENTION },
+      { id: 'n1', label: 'Query', detail: 'The query is what this token asks of the others.' },
+      { id: 'n2', label: 'Key', detail: 'The key is what another token can match.' },
+      { id: 'n3', label: 'Value', detail: 'The value is the information that gets mixed.' },
+      { id: 'n4', label: 'Attention', detail: 'Attention mixes a value into the token.' },
+    ],
+    edges: [
+      { from: 'n0', to: 'n1' },
+      { from: 'n0', to: 'n2' },
+      { from: 'n0', to: 'n3' },
+      { from: 'n1', to: 'n4' },
+      { from: 'n2', to: 'n4' },
+      { from: 'n3', to: 'n4' },
+    ],
+  };
+  assert.equal(diagramIsLine(card), false);
+  for (const width of [320, 390]) {
+    const layout = layoutDiagram(card, width);
+    const query = layout.boxes[1]!;
+    const key = layout.boxes[2]!;
+    const value = layout.boxes[3]!;
+    const attention = layout.boxes[4]!;
+    assert.equal(query.y, key.y);
+    assert.equal(key.y, value.y);
+    assert.ok(query.x < key.x && key.x < value.x);
+    assert.ok(attention.y > query.y);
+    assert.ok(layout.boxes[0]!.y >= 40);
+    assert.ok(layout.boxes[0]!.w > query.w);
+    assert.equal(layout.wires.length, 6);
+  }
 });
 
 test('a flow compiles Mermaid that quotes every remaining label', () => {

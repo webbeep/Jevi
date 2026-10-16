@@ -1,4 +1,5 @@
 import type { CardNode, ImageCredit } from '../shared/card';
+import { claimsFigure, showsFigure } from '../shared/figure';
 import { fileWords, fitsEntity, isComposite, namesSibling, rankForEntity, splitEntities } from '../shared/imagematch';
 import type { ImageResult } from '../shared/types';
 import { findImages } from './images';
@@ -193,9 +194,14 @@ export class PictureResolver {
         return { ...node, refs };
       }
       case 'image': {
-        if (node.ref === undefined) return node;
+        const claim = `${node.caption ?? ''} ${node.query ?? ''}`;
+        const figure = claimsFigure(claim);
+        if (node.ref === undefined) return figure && !node.query ? { ...node, src: undefined } : node;
         const img = this.pool[node.ref];
-        if (img && this.cardPicture(img, node.caption ? `${this.subject} ${node.caption}` : this.subject)) return node;
+        const about = node.caption ? `${this.subject} ${node.caption}` : this.subject;
+        const named = !!img && (this.ctx.person ? this.cardPicture(img, about) : mentionsAny(about, img));
+        if (named && (!figure || showsFigure(img))) return node;
+        if (figure) return { ...node, ref: undefined, query: undefined, src: undefined };
         return { ...node, ref: undefined, query: this.ctx.person ? undefined : node.query ?? node.caption };
       }
       case 'stack':
@@ -275,8 +281,16 @@ export class PictureResolver {
         return { ...node, items };
       }
       case 'image': {
-        if (!node.query) return node;
-        const pic = await this.one(node.query, true);
+        const query = node.query;
+        if (!query) return node;
+        const claim = `${query} ${node.caption ?? ''}`;
+        if (claimsFigure(claim)) {
+          const pooled = this.pool.find((img) => img.thumb && !this.used.has(img.thumb) && showsFigure(img) && mentions(query, img));
+          if (!pooled) return { ...node, query: undefined, src: undefined, ref: undefined };
+          const pic = this.take(pooled);
+          return { ...node, query: undefined, src: pic.src, link: pic.link, caption: node.caption ?? pic.title };
+        }
+        const pic = await this.one(query, true);
         return { ...node, query: undefined, src: pic?.src, link: pic?.link, caption: node.caption ?? pic?.title };
       }
       case 'gallery': {
@@ -306,7 +320,7 @@ export class PictureResolver {
     };
     track(vetted);
     // Start the card's one picture search early so it is ready when the card completes.
-    if (this.rows?.cardImages && hasBlankPictures(vetted, this.ctx)) void this.rows.cardImages();
+    if (this.rows?.cardImages && hasBlankPictures(vetted, this.ctx, this.subject)) void this.rows.cardImages();
     if (PictureResolver.needs(vetted)) {
       this.pending.push(
         this.resolve(vetted)
@@ -317,7 +331,7 @@ export class PictureResolver {
     }
     // A ranked list names each product and leaves the picture blank. Looking them up only after the
     // card is written misses the short wait before done, so the row is still empty (running shoes).
-    if (this.rows && hasBlankPictures(vetted, this.ctx)) this.startRowFill(vetted, track);
+    if (this.rows && hasBlankPictures(vetted, this.ctx, this.subject)) this.startRowFill(vetted, track);
   }
 
   /** Fills one node's blank rows. Queued so later nodes see pictures the earlier ones already took. */
@@ -333,7 +347,7 @@ export class PictureResolver {
 
   private async fillNode(node: CardNode): Promise<CardNode | undefined> {
     if (!this.rows) return undefined;
-    const filled = await fillRowImages([node], { lookup: (entity) => this.find(entity, this.env, 3, false), ...this.rows, pool: this.pool, onCredit: this.onCredit }, this.used);
+    const filled = await fillRowImages([node], { lookup: (entity) => this.find(entity, this.env, 3, false), ...this.rows, pool: this.pool, onCredit: this.onCredit, query: this.subject }, this.used);
     this.rowStats.imageCalls = Math.max(this.rowStats.imageCalls, filled.imageCalls);
     this.rowStats.og += filled.og;
     if (filled.changed[0]) this.rowStats.filled += 1;
@@ -366,7 +380,7 @@ export class PictureResolver {
     if (!this.rows || !this.latest.size) return;
     try {
       const entries = [...this.latest.entries()];
-      const filled = await fillRowImages(entries.map(([, e]) => e.node), { lookup: (entity) => this.find(entity, this.env, 3, false), ...this.rows, pool: this.pool, onCredit: this.onCredit }, this.used);
+      const filled = await fillRowImages(entries.map(([, e]) => e.node), { lookup: (entity) => this.find(entity, this.env, 3, false), ...this.rows, pool: this.pool, onCredit: this.onCredit, query: this.subject }, this.used);
       this.rowStats.imageCalls = Math.max(this.rowStats.imageCalls, filled.imageCalls);
       this.rowStats.og += filled.og;
       let count = this.rowStats.filled;

@@ -19,7 +19,7 @@ import { clip, type Env } from './util';
 import { VerdictSession } from './verdict';
 import { accepts, mentionsAny, targetFor } from './imageGate';
 import { profileFallback, type ProfilePerson } from './profileFallback';
-import { personSubject } from './entity';
+import { personCardTitle, personSubject } from './entity';
 import { isVideoUrl, wantsVideo } from './videoSearch';
 import { guessFreshness, stricter } from './freshness';
 import { isQuoteRow } from './liveQuote';
@@ -179,7 +179,7 @@ STYLE — visual first, minimal text
 - Text budget: labels 1-4 words; tile and stat values as short as possible; subtitles under 10 words; a text node is 1-2 short sentences. Never repeat the same fact in two places. No filler ("Here is", "In summary", "It is important to note"). Never end a sentence with an ellipsis: finish it, or leave the unfinished tail out.
 - When the person wants to understand something (why/how/what is, or an explainer layout), explanation is the content: use clear, plain sentences in short paragraphs or an accordion, keep every step of the reasoning (don't skip what a newcomer needs), and add a one-line analogy. Still concise.
 - Predict what they will want next: offer the 1-3 most likely adjustments as controls (choices, slider, scaler) or "refine" actions — e.g. a different budget, size, date range, audience or level of detail — so they never have to type a clarification.
-- Pictures: every picture must show the specific item it sits next to — each product, place, dish or person gets its own imageQuery with its exact name. Use pictures where seeing the item helps (products, places, food, people, animals, landmarks, designs); skip them for abstract topics. Never attach imageQuery or imageRef to a fact tile (host, co-hosts, network, new episodes, schedule, rating, genre, runtime); those stay text. Never reuse one picture for several items and never use a general stock-style photo. Never use an IMAGES index for an item when the image's description names another item or says vs/compare; give each item its own imageQuery instead.
+- Pictures: every picture must show the specific item it sits next to — each product, place, dish or person gets its own imageQuery with its exact name. Use pictures where seeing the item helps (products, places, food, people, animals, landmarks, designs); skip them for abstract topics. Never add an image for a mechanism (softmax, attention, a heatmap, how something works): a page preview is not that figure. Never attach imageQuery or imageRef to a fact tile (host, co-hosts, network, new episodes, schedule, rating, genre, runtime); those stay text. Never reuse one picture for several items and never use a general stock-style photo. Never use an IMAGES index for an item when the image's description names another item or says vs/compare; give each item its own imageQuery instead.
 - Charts and tables only when they add understanding: a chart needs 3+ comparable magnitudes from the sources (a trend, a ranking, shares of a whole). Never chart two numbers, clock times, or a list of game scores — those are a table, one row per game, with the full names. A table needs 2+ items compared across 2+ attributes. A stat or tile is better for a single number.
 
 FIT THE KIND OF REQUEST
@@ -261,6 +261,12 @@ function briefRules(req: DesignRequest): string {
   ].filter(Boolean).join('\n');
 }
 
+function seasonStatRule(req: DesignRequest): string {
+  const asked = `${req.query} ${req.followup?.question ?? ''}`;
+  if (!/\bpre-?season\b/i.test(asked)) return '';
+  return '- PRESEASON: the person asked for preseason stats. A regular-season average, a career line, or a projection is not the preseason line. When PAGE TEXT or SOURCES state a preseason game, lead with that line (points, rebounds, assists, the opponent and the date). Never label a season average as preseason.';
+}
+
 function timeRules(req: DesignRequest): string {
   const today = `- Today is ${new Date().toISOString().slice(0, 10)} (UTC).`;
   const askedQuery = req.followup?.question ?? req.query;
@@ -284,7 +290,7 @@ function taskBlock(req: DesignRequest): string {
   const sides = req.pattern === 'compare' ? compareSides(asked) : [];
   return [
     `- Pre-selected layout: "${pattern.label}" (${pattern.description}).`,
-    sides.length >= 2 ? `- Compare exactly these sides, not an earlier topic: ${sides.join(' | ')}. The title names the sides. Use a table, or one section per side, with only facts from the sources. A biography of one side does not answer. If the sources never line the sides up, say so in one callout and still show what each side's sources do say. Never end a sentence with an ellipsis.` : '',
+    sides.length >= 2 ? `- Compare exactly these sides, not an earlier topic: ${sides.join(' | ')}. The title names the sides. Use a table, or one section per side, with only facts from the sources. A biography of one side does not answer. If the sources never line the sides up, say so in one callout and still show what each side's sources do say. A different model number is a different product: never copy specs, a price, or a date from one model onto another. A VIDEO source can show that a review exists; state a spec or a price only when that source's text states it. Never end a sentence with an ellipsis.` : '',
     asksLocalConditions(asked) ? '- Local reading: the title is the place (city and region), never the word Weather or Forecast. The hero is the current temperature and the sky only — do not repeat the place as a hero label. Every other reading (humidity, wind, pressure, a later hour) appears once. A series is later periods, never another copy of right now.' : '',
     `- ${DEPTH_HINT[req.depth]}`,
     req.intent ? `- What the person wants: ${req.intent} Answer that; sources that only match their words but not this are background at most.` : '',
@@ -292,6 +298,7 @@ function taskBlock(req: DesignRequest): string {
     req.facts ? `- The sources already imply the answer. Lead with ${req.facts.lead}. ${req.facts.note}` : '',
     timeRules(req),
     liveQuoteRule(req),
+    seasonStatRule(req),
     briefRules(req),
     followupRules(req.followup, req.search.query).trim().replace(/^/, '- '),
     req.search.results.length ? '' : '- No web sources were found for this; answer from general knowledge, say it may be out of date, and do not cite sources.',
@@ -699,7 +706,9 @@ function extractive(req: DesignRequest, on: DesignEvents): DesignSummary {
   const refs = [1, 2, 3, 4].filter((i) => i <= search.results.length);
   if (refs.length) body.push({ type: 'citations', refs });
 
-  on.head({ title: onTopic && k ? k.title : personTitle || query, subtitle: patternById(patternId).label });
+  const proposed = onTopic && k ? k.title : personTitle || query;
+  const who = req.person?.name || personTitle || (patternId === 'profile' ? subject : '');
+  on.head({ title: personCardTitle(query, proposed, who || undefined), subtitle: patternById(patternId).label });
   const emitNode = bindVerdict(req, on.node);
   body.forEach((node, i) => emitNode(node, i));
   return { engine: 'extractive', removed: 0 };

@@ -1,5 +1,6 @@
 import { DEEP_PAGES, routeOf } from './router';
 import { serperImages } from './cascade';
+import { playerStatRow } from './playerLine';
 import { publicEvent } from './publicPayload';
 import {
   askTopic,
@@ -17,6 +18,7 @@ import {
   formalNameQueries,
   isDisambiguationPage,
   isPersonAsk,
+  personCardTitle,
   knowledgeForKept,
   knowledgeRow,
   middleInitialPerson,
@@ -33,7 +35,7 @@ import {
   resolveEntity,
 } from './entity';
 import { fetchWikiArticle, fetchWikiDisambiguation, fetchWikiLeadImage } from './wikiSearch';
-import { type EntityHint, mentionsAny, namesPerson } from './imageGate';
+import { type EntityHint, mentionsAny } from './imageGate';
 import type { RowImagePlan } from './pictures';
 import type { AnswerCard, CardNode, FollowupContext, FollowupIntent, LayoutPlan } from '../shared/card';
 import { type AskRef, cardSearchQuery, plainFollowup, refContext, topicOf, usefulFollowups, withRef } from '../shared/askAbout';
@@ -43,7 +45,7 @@ import { rewriteQuery } from './ai';
 import { type DesignRequest, designParallel, designStream, gateNode } from './design';
 import { BRIEF_ROWS, briefSources, remapBrief, type SourceBrief } from './brief';
 import { groundMembers } from './claims';
-import { alignFactProse, cardFacts, factAnswer, hasMemberWork, hopQueries, leadMemberRows, nextHop, placeFactLead, unsupportedYear } from './hops';
+import { abstainComputed, alignFactProse, cardFacts, factAnswer, hasMemberWork, hopQueries, leadMemberRows, nextHop, placeFactLead, unsupportedYear } from './hops';
 import { gapQuery, onTopicCount, rescueQuery, sourcesMiss } from './rescue';
 import { keepPictures, reviewCard, type Review } from './review';
 import { permitted } from './images';
@@ -69,7 +71,7 @@ import { finishQuality, hasOfficialHit, hostTier, officialProbe, preferSources, 
 import { isOwnSite, orcidSite, pickOwnSite, probeOwnSite, RESEARCH_ASK, withOwnSite } from './ownSite';
 import { quoteAsk } from '../shared/quoteAsk';
 import { dropStrayDois, isPaperAsk, leadPreprints, scholarlyResults, withScholarly } from './scholarly';
-import { videoResults, wantsVideo, withVideos } from './videoSearch';
+import { recallClips, wantsVideo, withProductClips, withVideos } from './videoSearch';
 import { guessFreshness, preferFresh, staleComplaint, stricter } from './freshness';
 import { isQuoteRow, liveQuote, quoteRow, tickerNode } from './liveQuote';
 import { findTicker } from '../shared/tickerNotes';
@@ -354,7 +356,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     : req.earlyBrief ? req.earlyBrief.then((early) => early ? remapBrief(early.brief, early.judged, req.search.results) : undefined)
     : briefSources({ query: req.query, intent: req.intent, context: req.context, results: req.search.results, isLive: isQuoteRow, shown: req.ticker ? TICKER_SHOWN : undefined }, env);
   // Page reads overlap the source check. A rescue throws those pages away and reads the new rows.
-  const reading = collectPages(req.search.results, env, budget, late, scope);
+  const reading = collectPages(req.search.results, env, budget, late, scope, req.query);
   const briefWait = skipReads && briefing
     ? Promise.race([briefing, new Promise<SourceBrief | undefined>((resolve) => setTimeout(() => resolve(undefined), 400))])
     : briefing;
@@ -394,7 +396,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       }
     }
   }
-  const pages = reread ? await collectPages(req.search.results, env, budget, undefined, scope) : await reading;
+  const pages = reread ? await collectPages(req.search.results, env, budget, undefined, scope, req.query) : await reading;
   mark(scope.ledger, 'pages');
   const fresh = pages.filter((p) => !req.search.results[p.n - 1]?.content);
   if (fresh.length) send('pages', fresh.map(({ n, url, text }) => ({ n, url, text })));
@@ -469,11 +471,11 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     layout: (regions) => send('layout', regions),
     head: (h) => {
       const question = questionOf();
-      const person = designReq.pattern === 'profile' ? designReq.person?.name : undefined;
-      // A card about one person is titled with their name, not the words that were asked ("Tim from BlueFlame AI", "Who Is Jensen Huang").
+      const locked = designReq.person?.name || priorEntity(designReq.context)?.name;
+      // A picked person is titled with their name even when the layout is not already a profile.
       // An ask about something of theirs ("Jensen Huang net worth") keeps that in the title.
-      const named = person && (!namesPerson(h.title, person) || !askTopic(question, person));
-      const title = designReq.pattern === 'compare' ? comparisonTitle(question, h.title) : named ? person : h.title;
+      const aboutPerson = !!locked && (designReq.pattern === 'profile' || !!designReq.person || isPersonAsk(question));
+      const title = designReq.pattern === 'compare' ? comparisonTitle(question, h.title) : personCardTitle(question, h.title, aboutPerson ? locked : undefined);
       head = title === h.title ? h : { ...h, title };
       publishReadings();
     },
@@ -556,10 +558,19 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   const settleFacts = () => {
     const indexes = [...shown.keys()].sort((a, b) => a - b);
     const nodes = indexes.map((index) => shown.get(index)!);
-    const fromCard = cardFacts(req.query, nodes);
-    // A year-only age from the sources gives way to the full dates the card itself shows.
-    const grounded = facts && !(facts.accept && fromCard && !fromCard.accept) ? facts : fromCard ?? facts;
+    // A computed figure uses the facts the card already shows. A figure from the raw pages,
+    // or a hero the model wrote without those facts, changes from draw to draw.
+    const grounded = cardFacts(req.query, nodes);
     if (!grounded) {
+      const abstained = abstainComputed(req.query, nodes);
+      if (abstained) {
+        abstained.forEach((node, i) => {
+          if (node === nodes[i]) return;
+          const index = indexes[i]!;
+          shown.set(index, node);
+          send('node', { index, node });
+        });
+      }
       for (const index of indexes) {
         const node = shown.get(index);
         if (!node || node.type !== 'hero' || !unsupportedYear(req.query, factCorpus, node.value)) continue;
@@ -720,7 +731,9 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   // SPD-C4 (t457): paper/DOI asks also read OpenAlex, in parallel with the web search.
   const scholarly = scholarlyResults(query);
   // Watch asks also read YouTube (keyless), in parallel: web results rarely carry a playable video.
-  const videos = videoResults(query);
+  const videos = recallClips(query);
+  // A preseason line lives on the player page, which the web results often miss once the main engine is capped.
+  const statLine = playerStatRow(query);
   // Searches that need no model ("$rdw" → "RDW stock news today") lead the rewrites.
   const instant = [...tickerQueries(query), ...formalNameQueries(query)];
   const sides = compareSideQueries(query);
@@ -755,7 +768,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   results = { ...results, results: dropStrayDois(query, results.results) };
   results = await attachOfficial(query, results, env, scope, officialEarly);
   const clips = await videos;
-  if (clips.length) results = { ...results, results: withVideos(clips, results.results) };
+  if (clips.length) results = { ...results, results: wantsVideo(query) ? withVideos(clips, results.results) : withProductClips(clips, results.results) };
   const quote = await quoting;
   const live = quote ? quoteRow(quote) : undefined;
   if (live) {
@@ -794,6 +807,11 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     }
   }
   let late: Promise<LateExtras> | undefined = found.late;
+  const line = await statLine;
+  if (line) {
+    const key = normalizeUrl(line.url);
+    results = { ...results, results: [line, ...results.results.filter((row) => normalizeUrl(row.url) !== key)] };
+  }
   // EN4 part 8: set when the answer is rebuilt from the rows behind a Which-one? pick, so the
   // seed pages get re-read instead of designed from the snippets alone.
   let fromSeeds = false;
