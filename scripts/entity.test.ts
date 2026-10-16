@@ -384,6 +384,17 @@ test('two identical choices are one person, and two careers stay a picker', () =
     { name: 'Mara Chen', descriptor: 'Scientist at Future Institute', query: 'Mara Chen scientist', id: 'a', seeds: [0] },
     { name: 'Mara Chen', descriptor: 'Professor at University of Lakes', query: 'Mara Chen professor', id: 'b', seeds: [1] },
   ], rows), false);
+  const article = [
+    row('Mara Chen', 'Mara Chen is a scientist at the Future Institute.', 'https://en.wikipedia.org/wiki/Mara_Chen'),
+    row('Mara Chen, professor', 'Mara Chen is a professor at the University of Lakes.', 'https://example.edu/chen'),
+    row('Scientist Mara Chen', 'Mara Chen is a scientist at the Future Institute in Washington.', 'https://future.example/chen'),
+    row('Mara Chen lab', 'Professor Mara Chen teaches chemistry at the University of Lakes.', 'https://news.example/chen'),
+  ];
+  const withArticle = [
+    ...article,
+    row('List of awards received by Mara Chen', 'The scientist and professor Mara Chen received the prize.', 'https://en.wikipedia.org/wiki/List_of_awards_received_by_Mara_Chen'),
+  ];
+  assert.equal(resolveEntity('Who is Mara Chen', withArticle).kind, 'single');
 });
 
 test('two identical choices are one person even when a page says the name is shared', () => {

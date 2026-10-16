@@ -2078,7 +2078,10 @@ export function resolveEntity(
       const exact = exactHit.i;
       // A namesake article ("John Smith (explorer)") proves ambiguity, not fame.
       const support = rows.filter((r, i) => i !== exact && wikiNamePage(r, name) && !qualifiedNamesake(r, name)).length;
-      if (support >= 2 && !anotherPerson) {
+      // One other encyclopedia page about this name is the same person. A second person is a
+      // qualifier article, a disambiguation list, or a middle initial, and those stay a picker.
+      const secondPerson = anotherPerson || rows.some((row) => isDisambiguationPage(row) || qualifiedNamesake(row, name));
+      if (support >= 1 && !secondPerson) {
         const win = [...new Set([...(strong.find((c) => c.includes(exact)) ?? [exact]), ...weak])];
         // Another, disambiguated person is a different person: never credited to this one.
         const kept = eligible.map((e) => e.i).filter((i) => !qualifiedNamesake(rows[i]!, name));
