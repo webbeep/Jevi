@@ -10,6 +10,8 @@ export interface ClaimSource {
   text: string;
   /** Host the citation points at, when the result has one. */
   domain?: string;
+  /** Title and snippet. A fetched page can omit a figure the search result stated for the thing asked. */
+  stated?: string;
 }
 
 const FREE = 2;
@@ -57,11 +59,13 @@ export function claimSources(
   const page = new Map(pages.map((item) => [item.n, item.text]));
   return results.map((result, index) => {
     const read = page.get(index + 1);
-    // A fetched page is the citation. A number that exists only in the snippet is not on that page.
+    const stated = `${result.title ?? ''} ${result.snippet ?? ''}`.trim();
+    // A fetched page is the citation. The snippet is kept aside so a figure it states for the
+    // thing asked is not dropped when the page read misses that sentence.
     const text = read
       ? `${result.title ?? ''}\n${read}`
-      : `${result.title ?? ''} ${result.snippet ?? ''} ${result.content ?? ''}`;
-    return { n: index + 1, text, domain: result.domain };
+      : `${stated} ${result.content ?? ''}`;
+    return { n: index + 1, text, domain: result.domain, stated: read ? stated : undefined };
   });
 }
 
@@ -246,6 +250,7 @@ export function retargetCites(text: string, sources: readonly ClaimSource[], que
     const page = sources.find((source) => covers(source, nums))?.n ?? bestPage(nums, sources, cites);
     if (!page) {
       if (keepsDerived(query, sentence, sources)) return [sentence];
+      if (query && nums.every((num) => sources.some((source) => statedForAsk(source, num, query)))) return [sentence];
       const bare = stripNums(sentence.replace(/\s*\[\d+\]/g, ''), nums);
       return bare ? [bare] : [];
     }
@@ -286,11 +291,48 @@ function hasPrice(text: string | undefined, ceilings: readonly number[]): boolea
   return true;
 }
 
-function citeValue(text: string, sources: readonly ClaimSource[], current: number | undefined): number | undefined {
+const ASK_STOP = new Set([
+  'what', 'when', 'where', 'which', 'does', 'did', 'how', 'many', 'much', 'that', 'this', 'with', 'from', 'have',
+  'been', 'were', 'will', 'your', 'about', 'into', 'over', 'under', 'than', 'then', 'them', 'they', 'their',
+  'there', 'these', 'those', 'would', 'could', 'should', 'just', 'like', 'also', 'only', 'most', 'some', 'such',
+  'very', 'more', 'less', 'best', 'need', 'want', 'make', 'give', 'tell', 'show', 'find', 'help', 'using',
+  'used', 'according', 'quote', 'exact', 'line', 'page', 'says', 'said',
+]);
+
+/** Where `num` is written in `text`, so a nearby subject can be checked. -1 when the digits are not there. */
+function numberAt(text: string, num: string): number {
+  const match = shownNumber(num).exec(text);
+  return match?.index ?? -1;
+}
+
+/**
+ * The search result states `num` next to the thing the question asks about.
+ * A snippet number with no tie to that subject does not count.
+ */
+function statedForAsk(source: ClaimSource | undefined, num: string, query: string): boolean {
+  const stated = source?.stated;
+  if (!stated || !query.trim() || !numberTokens(stated).includes(num)) return false;
+  const words = [...new Set(query.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 4 && !ASK_STOP.has(word)))];
+  if (!words.length) return false;
+  const at = numberAt(stated, num);
+  const low = stated.toLowerCase();
+  const window = at < 0 ? low : low.slice(Math.max(0, at - 96), at + num.length + 96);
+  const near = words.filter((word) => window.includes(word)).length;
+  const need = words.length === 1 ? 1 : Math.min(2, words.length);
+  return near >= need;
+}
+
+function citeValue(text: string, sources: readonly ClaimSource[], current: number | undefined, query = ''): number | undefined {
   const nums = significant(text);
   if (!nums.length) return current;
   if (current && covers(byNumber(sources, current), nums)) return current;
-  return sources.find((source) => covers(source, nums))?.n ?? (current && nums.some((num) => has(byNumber(sources, current), num)) ? current : undefined);
+  const page = sources.find((source) => covers(source, nums))?.n;
+  if (page) return page;
+  if (query) {
+    const stated = sources.find((source) => nums.every((num) => statedForAsk(source, num, query)));
+    if (stated) return stated.n;
+  }
+  return current && nums.some((num) => has(byNumber(sources, current), num)) ? current : undefined;
 }
 
 function fillPrices(node: CardNode, sources: readonly ClaimSource[], ceilings: readonly number[]): CardNode {
@@ -387,7 +429,7 @@ function retargetNode(node: CardNode, sources: readonly ClaimSource[], query = '
     case 'hero': {
       const caption = node.caption ? completeCutDecimal(retargetCites(node.caption, sources, query), [node.value, node.label]) : node.caption;
       const nums = significant(node.value);
-      const page = citeValue(node.value, sources, undefined);
+      const page = citeValue(node.value, sources, undefined, query);
       if (!page && keepsDerived(query, node.value, sources)) {
         return caption === node.caption ? node : { ...node, caption };
       }
@@ -407,7 +449,8 @@ function retargetNode(node: CardNode, sources: readonly ClaimSource[], query = '
       if (valueNums.length) {
         const full = node.source && covers(byNumber(sources, node.source), valueNums)
           ? node.source
-          : sources.find((item) => covers(item, valueNums))?.n;
+          : sources.find((item) => covers(item, valueNums))?.n
+            ?? (query ? sources.find((item) => valueNums.every((num) => statedForAsk(item, num, query)))?.n : undefined);
         if (full) source = full;
         else if (value && keepsDerived(query, value, sources)) {
           // The figure is the age, quotient, year, or score the sources imply.

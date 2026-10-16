@@ -68,6 +68,20 @@ const NOT_A_COMPANY = new Set([
 
 const CASHTAG = /(?:^|[^A-Za-z0-9])\$([A-Za-z]{1,5})(?![A-Za-z0-9])/;
 
+/** A lone token that is an ordinary word, not a ticker. A fund symbol is not in this list. */
+const EVERYDAY = new Set(
+  `a am an as at be by do go if in is it me my no of on or so to up us we he she its the and for
+  are was were you your our not but can has had his her him how who why all any few nor too
+  day week year time home help word news best good much more some than then them they this that
+  what when where which will just like into over also back only most many such very been would
+  could should about after other people make take come want need look find give tell show from
+  with have into gold silver oil corn milk wine food book film game city town name work life
+  love true real next last first same each both part case fact idea side line page list`.split(/\s+/),
+);
+
+/** Said beside a bare symbol: "qqqm etf", "spy quote". */
+const SYMBOL_TAIL = new Set(['etf', 'etfs', 'fund', 'funds', 'quote', 'quotes', 'price', 'prices', 'chart', 'charts', 'stock', 'stocks', 'share', 'shares']);
+
 function norm(query: string): string {
   return ` ${query.toLowerCase().replace(/[“”"'’?!,]/g, ' ').replace(/\s+/g, ' ').trim()} `;
 }
@@ -120,6 +134,22 @@ function stockAsk(raw: string, q: string): QuoteAsk | undefined {
   return { kind: 'stock', lookup: name };
 }
 
+/**
+ * A ticker or fund symbol on its own ("Qqqm", "SPY etf"), including when the words never say "stock".
+ * An everyday word, a coin, and a multi-word question stay out of this path.
+ */
+function symbolAsk(raw: string): QuoteAsk | undefined {
+  const words = raw.trim().replace(/[?.!,]+$/g, '').split(/\s+/).filter(Boolean);
+  if (!words.length || words.length > 3) return undefined;
+  const names = words.filter((word) => !SYMBOL_TAIL.has(word.toLowerCase()));
+  if (names.length !== 1) return undefined;
+  const token = names[0]!;
+  if (!/^[A-Za-z]{2,5}$/.test(token)) return undefined;
+  const lower = token.toLowerCase();
+  if (EVERYDAY.has(lower) || NOT_A_COMPANY.has(lower) || CRYPTO[lower]) return undefined;
+  return { kind: 'stock', symbol: token.toUpperCase(), name: token.toUpperCase() };
+}
+
 /** Longer than this is an essay that mentions a market, not a request for one instrument's price. */
 export const QUOTE_MAX = 120;
 
@@ -132,5 +162,6 @@ export function quoteAsk(query: string): QuoteAsk | undefined {
     ?? coinAlone(q)
     ?? (short ? fromTable(q, COMMODITY, 'commodity', /\b(?:price[sd]?|prices|per ounce|barrel|futures|today|now|rate|trading|spot)\b/) : undefined)
     ?? (short && !/\b(?:stock|shares?)\b/.test(q) ? fromTable(q, INDEX, 'index', /\b(?:index|today|now|price|level|points|futures|up|down|drop(?:ped|ping)?|rall(?:y|ied)|close[sd]?|open(?:ed)?)\b/) : undefined)
-    ?? stockAsk(query, q);
+    ?? stockAsk(query, q)
+    ?? symbolAsk(query);
 }

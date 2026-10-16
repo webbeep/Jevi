@@ -62,7 +62,7 @@ import { type LateExtras, normalizeUrl, searchWithLate } from './search';
 import type { WebHit } from './cascade';
 import { domainOf } from './util';
 import { choicesIn, distinctActions, subjectWords } from './chips';
-import { anchoredFollowup, asksToCompare, cryptographyHint, faithfulQuery, isWritingAsk, needsOwnSearch, ownQuestion, personQuestion, quickPlan, quoteFollowQuery, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
+import { anchoredFollowup, asksToCompare, cardFollowQuery, cryptographyHint, faithfulQuery, isWritingAsk, needsOwnSearch, ownQuestion, personQuestion, pointsAtCard, quickPlan, quoteFollowQuery, screenSubject, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
 import { calculationAnswer, isCalculationAsk } from './calculate';
 import { comparisonRepair, comparisonTitle } from './compareAnswer';
 import { withFinishedSentences } from './polish';
@@ -270,25 +270,60 @@ function personCue(card: AnswerCard | undefined): string {
 
 type OfficialSearch = Awaited<ReturnType<typeof searchWithLate>>;
 
+interface EarlyOfficial {
+  promise: Promise<OfficialSearch | undefined>;
+  /** The probe, when it has already finished. Reading this never waits. */
+  ready: () => OfficialSearch | undefined;
+}
+
 /** The agency or place search, started with the literal one so the card does not wait for it after the main search. */
-function startOfficial(query: string, env: Env, scope: AskScope): Promise<OfficialSearch | undefined> | undefined {
+function startOfficial(query: string, env: Env, scope: AskScope): EarlyOfficial | undefined {
   const probe = officialProbe(query);
   if (!probe) return undefined;
   // Its own call slot, so the rewrites keep theirs.
   scope.ledger.bonus = (scope.ledger.bonus ?? 0) + 1;
-  return searchWithLate({ q: probe, freshness: 'any', count: 6, lite: true }, env, scope).catch(() => undefined);
+  let settled = false;
+  let value: OfficialSearch | undefined;
+  const promise = searchWithLate({ q: probe, freshness: 'any', count: 6, lite: true }, env, scope).then(
+    (found) => {
+      settled = true;
+      value = found;
+      return found;
+    },
+    () => {
+      settled = true;
+      return undefined;
+    },
+  );
+  return { promise, ready: () => (settled ? value : undefined) };
 }
 
-async function attachOfficial(query: string, results: SearchResponse, env: Env, scope: AskScope, early?: Promise<OfficialSearch | undefined>): Promise<SearchResponse> {
+async function attachOfficial(query: string, results: SearchResponse, env: Env, scope: AskScope, early?: EarlyOfficial): Promise<SearchResponse> {
   if (!results.results.length || hasOfficialHit(query, results.results)) return results;
   const probe = officialProbe(query);
   if (!probe) return results;
-  let extra = early ? await early : undefined;
+  // A training page on the agency's site is already in hand. Take the public-page search only
+  // when it has finished. Waiting for it after the main search is the extra pause.
+  const inHand = results.results.some((row) => hostTier(row.domain || domainOf(row.url || '')) === 0);
+  const folded = foldReadyOfficial(query, results, early);
+  if (folded !== results) return folded;
+  if (inHand) return results;
+  let extra = early ? await early.promise : undefined;
   if (!extra) {
     const room = SEARCH_CALL_CAP + (scope.ledger.bonus ?? 0) - searchCalls(scope.ledger);
     if (room < 1) scope.ledger.bonus = (scope.ledger.bonus ?? 0) + 1;
     extra = await searchWithLate({ q: probe, freshness: 'any', count: 6, lite: true }, env, scope);
   }
+  const add = extra.response.results.filter((row) => !results.results.some((have) => have.url === row.url));
+  if (!add.length) return results;
+  console.log(JSON.stringify({ zo: 'official', added: add.length, lead: add[0]?.domain }));
+  return { ...results, results: preferSources(query, [...add, ...results.results]) };
+}
+
+/** Merges a public-page search that has already finished. Never waits. */
+function foldReadyOfficial(query: string, results: SearchResponse, early?: EarlyOfficial): SearchResponse {
+  const extra = early?.ready();
+  if (!extra?.response.results.length || hasOfficialHit(query, results.results)) return results;
   const add = extra.response.results.filter((row) => !results.results.some((have) => have.url === row.url));
   if (!add.length) return results;
   console.log(JSON.stringify({ zo: 'official', added: add.length, lead: add[0]?.domain }));
@@ -1147,6 +1182,8 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     }
   }
   results = { ...results, results: leadMemberRows(query, leadPreprints(query, results.results), hopUrls) };
+  const official = foldReadyOfficial(query, results, officialEarly);
+  if (official !== results) results = official;
   send('search', results);
   const boost = imageBoost(pattern, results, env, scope, boostQuery);
   const crypto = cryptographyHint(query, results.results);
@@ -1364,10 +1401,27 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
   // A person the card never names is a new search. Waiting on the planner, and its chat
   // fallback, was answering that question from the card already on screen.
   const covered = [req.original, from?.title, from?.card?.title, from?.card?.subtitle].filter(Boolean).join('\n');
+  const onScreen = from?.card ?? [...req.cards].reverse().find((card) => card.card)?.card;
+  const chart = findTicker(onScreen?.body ?? []);
+  const subject = screenSubject(onScreen?.title, req.original);
+  const cardText = [covered, onScreen ? `${onScreen.title}\n${onScreen.subtitle ?? ''}\n${JSON.stringify(onScreen.body)}` : ''].filter(Boolean).join('\n');
   if (req.intent !== 'adjust' && needsOwnSearch(req.question, covered)) {
     const query = personQuestion(req.question);
     send('rewrite', { query });
     await searchAndDesign(send, env, query, 'any', context, started, scope, false);
+    return;
+  }
+
+  // A follow-up that points at the card is a new search for its own words, and that search
+  // keeps the subject already on screen. "Explain this move" searches the company, not the bare sentence.
+  if (req.intent !== 'adjust' && pointsAtCard(req.question, cardText)) {
+    const named = quoteFollowQuery(req.question, [subject, onScreen?.title, req.original].filter((part): part is string => !!part));
+    const query = named ?? cardFollowQuery(req.question, subject, cardText) ?? req.question.trim();
+    const lock = subject
+      ? `This follow-up is about ${subject}, the subject already on screen. Answer about that subject. Do not say no source identifies it.`
+      : '';
+    send('rewrite', { query });
+    await searchAndDesign(send, env, query, 'any', [lock, context].filter(Boolean).join('\n') || undefined, started, scope, true, undefined, undefined, chart);
     return;
   }
 
@@ -1379,9 +1433,6 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
     await searchAndDesign(send, env, query, 'any', undefined, started, scope, false);
     return;
   }
-
-  const onScreen = from?.card ?? [...req.cards].reverse().find((card) => card.card)?.card;
-  const chart = findTicker(onScreen?.body ?? []);
 
   // A price or stock ask still gets the live line chart, including when it is a follow-up
   // that only names the attribute ("what's the price") of the instrument already on screen.
@@ -1482,6 +1533,24 @@ function plainRequest(req: StreamRequest): StreamRequest {
   }
 }
 
+/**
+ * Normal answers land in a few seconds. Past that, a stuck search fails in the open.
+ * The bound is well under a minute beyond a normal answer, and a search that finishes is not delayed.
+ */
+export const ASK_BOUND_MS = 40_000;
+
+export function failOpen<T>(work: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('The search took too long')), ms);
+  });
+  // The work keeps running after the bound. A later rejection must not surface as unhandled.
+  work.catch(() => undefined);
+  return Promise.race([work, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
 export async function runStream(raw: StreamRequest, env: Env, rawSend: Send, opts?: StreamOpts): Promise<void> {
   const started = Date.now();
   const req = plainRequest(raw);
@@ -1506,22 +1575,24 @@ export async function runStream(raw: StreamRequest, env: Env, rawSend: Send, opt
     place: readerPlace(requestCf(opts?.request)),
   };
   try {
-    switch (req.kind) {
-      case 'search':
-        if (opts?.typed && opts.typed !== req.query) send('rewrite', { query: req.query });
-        await searchAndDesign(send, env, req.query, req.freshness, req.context, started, scope);
-        return;
-      case 'design':
-        await design(send, env, req, started, scope);
-        return;
-      case 'followup':
-        await followup(send, env, req, started, scope);
-        return;
-      default: {
-        const unreachable: never = req;
-        throw new Error(`Unknown stream request ${JSON.stringify(unreachable)}`);
+    await failOpen((async () => {
+      switch (req.kind) {
+        case 'search':
+          if (opts?.typed && opts.typed !== req.query) send('rewrite', { query: req.query });
+          await searchAndDesign(send, env, req.query, req.freshness, req.context, started, scope);
+          return;
+        case 'design':
+          await design(send, env, req, started, scope);
+          return;
+        case 'followup':
+          await followup(send, env, req, started, scope);
+          return;
+        default: {
+          const unreachable: never = req;
+          throw new Error(`Unknown stream request ${JSON.stringify(unreachable)}`);
+        }
       }
-    }
+    })(), ASK_BOUND_MS);
   } finally {
     logAsk(scope.ledger, scope.served);
   }

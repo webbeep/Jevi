@@ -192,7 +192,7 @@ async function jsonFrom<T>(env: Env, p: Provider, system: string, user: string, 
         stream: false,
         ...p.extra?.(false, p.model),
       }, 15_000, 40_000);
-      const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+      const data = (await deadline(res.json(), 15_000, p.label)) as { choices?: { message?: { content?: string } }[] };
       return parseObject<T>(data.choices?.[0]?.message?.content ?? '');
     }
     case 'binding': {
@@ -251,10 +251,17 @@ export function contentDelta(data: string): string | undefined {
 }
 
 /** Parses an SSE body into text deltas; `onReasoning` fires on hidden-reasoning deltas. */
-async function readSse(body: ReadableStream<Uint8Array>, onText: (t: string) => void, onReasoning: () => void): Promise<void> {
+async function readSse(body: ReadableStream<Uint8Array>, onText: (t: string) => void, onReasoning: () => void, signal?: AbortSignal): Promise<void> {
   // Decoding in place instead of piping through a TextDecoderStream saves a stream hop per network chunk.
   const reader = body.getReader();
   const decoder = new TextDecoder();
+  const stopped = new Error('answer stream stopped');
+  let rejectRead: ((err: Error) => void) | undefined;
+  const onAbort = () => {
+    rejectRead?.(stopped);
+    reader.cancel().catch(() => undefined);
+  };
+  signal?.addEventListener('abort', onAbort, { once: true });
   let buf = '';
   const take = (value: string) => {
     buf += value;
@@ -292,8 +299,14 @@ async function readSse(body: ReadableStream<Uint8Array>, onText: (t: string) => 
       }
     }
   };
+  try {
+  if (signal?.aborted) throw stopped;
   for (;;) {
-    const { value, done } = await reader.read();
+    const pending = reader.read();
+    const { value, done } = await new Promise<ReadableStreamReadResult<Uint8Array>>((resolve, reject) => {
+      rejectRead = reject;
+      pending.then(resolve, reject);
+    });
     if (done) {
       const tail = decoder.decode();
       if (tail) take(tail);
@@ -301,6 +314,10 @@ async function readSse(body: ReadableStream<Uint8Array>, onText: (t: string) => 
     }
     const text = decoder.decode(value, { stream: true });
     if (text) take(text);
+  }
+  } finally {
+    signal?.removeEventListener('abort', onAbort);
+    reader.cancel().catch(() => undefined);
   }
 }
 
@@ -318,7 +335,8 @@ async function streamFrom(env: Env, p: Provider, system: string, user: string, m
         ...p.extra?.(think, p.model),
       }, Math.min(think ? 30_000 : 12_000, total), total);
       if (!res.body) throw new ProviderError(`${p.label} sent no body`, 45_000);
-      return readSse(res.body, onText, onReasoning);
+      // Aborting the fetch does not always end reader.read(). The signal ends the read in the open.
+      return readSse(res.body, onText, onReasoning, AbortSignal.timeout(total));
     }
     case 'binding': {
       const userTrim = trimForWorkersAi(user, p.maxChars);

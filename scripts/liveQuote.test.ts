@@ -37,6 +37,9 @@ describe('quoteAsk', () => {
     assert.equal(symbolOf('s&p 500 today'), '^GSPC');
     assert.equal(symbolOf('dow jones today'), '^DJI');
     assert.equal(symbolOf('dow chemical stock price'), 'lookup:dow chemical');
+    assert.equal(symbolOf('Qqqm'), 'QQQM');
+    assert.equal(symbolOf('qqqm etf'), 'QQQM');
+    assert.equal(symbolOf('SPY'), 'SPY');
   });
 
   test('not a price ask', () => {
@@ -51,6 +54,7 @@ describe('quoteAsk', () => {
       'click the link below',
       'who is Ed Chu',
       'Jaylen Brown injuries',
+      'time',
     ]) assert.equal(quoteAsk(q), undefined, q);
   });
 

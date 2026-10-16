@@ -213,6 +213,19 @@ test('a number the person stated stays, and a stripped year does not leave a bro
   assert.match(price, /\$150/);
 });
 
+test('a figure the sources state for the thing asked stays when the page read misses it', () => {
+  const page = claimSources(
+    [{ title: 'Heater guide', snippet: 'The portable heater draws 4.2W while it is running.', domain: 'reviews.example' }],
+    [{ n: 1, text: 'A buying guide. The power figure is not in the extracted text.' }],
+  );
+  const hero = bindClaims(
+    { type: 'hero', value: '4.2W', label: 'Draw' },
+    page,
+    'portable heater wattage',
+  );
+  assert.equal(hero.type === 'hero' ? hero.value : '', '4.2W');
+});
+
 test('a fetched page, not its snippet, is what a cited number has to match', () => {
   const page = claimSources(
     [{ title: 'Wolf news', snippet: 'The DNR counted 2,900 wolves.', domain: 'www.mprnews.org' }],
@@ -220,6 +233,8 @@ test('a fetched page, not its snippet, is what a cited number has to match', () 
   );
   const text = retargetCites('Minnesota has about 2,900 wolves [1].', page);
   assert.doesNotMatch(text, /2,900/);
+  const asked = retargetCites('Minnesota has about 2,900 wolves [1].', page, 'How many wolves are in Minnesota?');
+  assert.doesNotMatch(asked, /2,900/);
   const percent = retargetCites('A review found 15% of users lost weight [1].', page);
   assert.doesNotMatch(percent, /%|15/);
 });

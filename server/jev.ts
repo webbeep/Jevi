@@ -34,7 +34,9 @@ export async function askJev(
     if (res.ok) return ((await res.json()) as { answers: Record<string, JevAnswer> }).answers;
     if (res.status !== 429 && res.status !== 529) throw new Error(`Jev HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
     const retryAfter = Number(res.headers.get('retry-after')) || 0;
-    await new Promise((r) => setTimeout(r, Math.max(retryAfter * 1000, 300 * 2 ** attempt)));
+    // A Retry-After of many minutes was holding the answer open. Cap the pause.
+    const wait = Math.min(2_000, Math.max(retryAfter * 1000, 300 * 2 ** attempt));
+    await new Promise((r) => setTimeout(r, wait));
   }
   throw new Error('Jev overloaded');
 }

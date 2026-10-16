@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { anchoredFollowup, asksToCompare, cryptographyHint, faithfulQuery, isWritingAsk, needsOwnSearch, ownQuestion, personQuestion, quoteFollowQuery, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from '../server/askGuard.ts';
+import { anchoredFollowup, asksToCompare, cardFollowQuery, cryptographyHint, faithfulQuery, isWritingAsk, needsOwnSearch, ownQuestion, personQuestion, pointsAtCard, quoteFollowQuery, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from '../server/askGuard.ts';
 import { isPersonAsk } from '../server/entity.ts';
 import { planLayout } from '../server/plan.ts';
 import type { CardNode } from '../shared/card.ts';
@@ -85,6 +85,20 @@ test('an unrelated follow-up is its own question, and a related one keeps the su
   assert.equal(ownQuestion('why is it moving today?', 'Btc Usd'), false);
   assert.equal(ownQuestion('Not this', 'who is Ed Chu'), false);
   assert.equal(ownQuestion('Draft the unblock email', 'It Takes Two'), false);
+});
+
+test('a follow-up that points at the card keeps that subject, and an unrelated one stays its own question', () => {
+  const card = 'Moderna\nShares fell 9.2% in morning trading, hitting a session low of $214.30 after the trial update.';
+  const explain = 'Explain "Shares fell 9.2% in morning trading, hitting a session low of $214.30"';
+  assert.equal(pointsAtCard(explain, card), true);
+  assert.equal(ownQuestion(explain, 'Moderna'), true);
+  assert.match(cardFollowQuery(explain, 'Moderna', card) ?? '', /^Moderna Shares fell 9\.2%/);
+  assert.equal(pointsAtCard('explain this move', 'Moderna'), true);
+  assert.equal(cardFollowQuery('explain this move', 'Moderna', 'Moderna'), 'Moderna this move');
+  assert.equal(pointsAtCard('of those, which are cheaper', card), false);
+  assert.equal(cardFollowQuery('What is photosynthesis?', 'Moderna', card), undefined);
+  assert.equal(ownQuestion('What is photosynthesis?', card), true);
+  assert.equal(pointsAtCard('Draft the unblock email', card), false);
 });
 
 test('a price follow-up names the instrument already on screen', () => {

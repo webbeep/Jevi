@@ -300,6 +300,78 @@ function secondaryPage(url: string, title: string): boolean {
 
 const STICKER = /\$\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?/;
 
+const SPEC_FAMILY: Record<string, string> = {
+  port: 'ports?|devices?|inputs?|outputs?',
+  inch: 'inches|inch',
+  gb: 'gb',
+  tb: 'tb',
+  mb: 'mb',
+  hz: 'hz|khz|mhz|ghz',
+  watt: 'watts?|w',
+  mp: 'mp|megapixels?',
+  core: 'cores?',
+  slot: 'slots?',
+};
+
+function specFamily(unit: string): string {
+  const u = unit.toLowerCase();
+  if (/^(?:ports?|devices?|inputs?|outputs?)$/.test(u)) return 'port';
+  if (/^inches?$/.test(u)) return 'inch';
+  if (/^(?:hz|khz|mhz|ghz)$/.test(u)) return 'hz';
+  if (/^watts?$/.test(u) || u === 'w') return 'watt';
+  if (/^(?:mp|megapixels?)$/.test(u)) return 'mp';
+  if (/^cores?$/.test(u)) return 'core';
+  if (/^slots?$/.test(u)) return 'slot';
+  return u;
+}
+
+/** A number-and-unit the person stated ("3-port", "for 3 devices"). Those are requirements. */
+export function askedSpecs(query: string): { n: string; family: string }[] {
+  const out: { n: string; family: string }[] = [];
+  const seen = new Set<string>();
+  const re = /\b(\d+(?:\.\d+)?)\s*-?\s*(ports?|devices?|inputs?|outputs?|inches|inch|gb|tb|mb|hz|khz|mhz|ghz|watts?|mp|megapixels?|cores?|slots?)\b/gi;
+  for (const match of query.matchAll(re)) {
+    const family = specFamily(match[2]!);
+    const n = match[1]!.replace(/\.0+$/, '');
+    const key = `${family}:${n}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ n, family });
+  }
+  return out;
+}
+
+function specStance(text: string, specs: readonly { n: string; family: string }[]): 'match' | 'miss' | 'open' {
+  let match = false;
+  let miss = false;
+  for (const spec of specs) {
+    const units = SPEC_FAMILY[spec.family] ?? spec.family;
+    const re = new RegExp(String.raw`\b(\d+(?:\.\d+)?)\s*-?\s*(?:${units})\b`, 'gi');
+    for (const found of text.matchAll(re)) {
+      const n = found[1]!.replace(/\.0+$/, '');
+      if (n === spec.n) match = true;
+      else miss = true;
+    }
+  }
+  if (match && !miss) return 'match';
+  if (miss && !match) return 'miss';
+  return 'open';
+}
+
+/** An official page that attributes the figure to a different agency is that agency's summary. */
+function defersTo(row: { domain?: string; url?: string; title?: string; snippet?: string }): string | undefined {
+  const host = (row.domain || hostOf(row.url || '')).toLowerCase();
+  const text = `${row.title ?? ''} ${row.snippet ?? ''}`;
+  const re = /\b(?:according to|per|published by|reported by)\s+(?:the\s+)?([A-Za-z]{3,8})\b/gi;
+  for (const match of text.matchAll(re)) {
+    const raw = match[1]!;
+    if (raw !== raw.toUpperCase()) continue;
+    const token = raw.toLowerCase();
+    if (!host.includes(token)) return token;
+  }
+  return undefined;
+}
+
 /** 0 when the question names this host (IPCC → ipcc.ch), the place's own site, or a named journal. */
 function officialLead(domain: string, orgs: readonly string[], places: readonly string[], journals: readonly string[]): number {
   const host = domainOf(domain);
@@ -346,6 +418,10 @@ export function preferSources<T extends RankedHit>(query: string, rows: readonly
   const byLead = (a: (typeof pool)[number], b: (typeof pool)[number]) => {
     const lead = leadOf(a) - leadOf(b);
     if (lead) return lead;
+    if (deferred.size) {
+      const pub = publishRank(a) - publishRank(b);
+      if (pub) return pub;
+    }
     const hostA = siteOf(a.row.domain || hostOf(a.row.url));
     const hostB = siteOf(b.row.domain || hostOf(b.row.url));
     // The public page of an authority outranks its own training or course page, before a newer module year can win.
@@ -363,6 +439,27 @@ export function preferSources<T extends RankedHit>(query: string, rows: readonly
       if (!ay && stale(by)) return -1;
     }
     return 0;
+  };
+  const outbreak = /\boutbreak\b/i.test(query);
+  const deferred = new Set<string>();
+  if (outbreak) {
+    for (const item of pool) {
+      const token = defersTo(item.row);
+      if (token) deferred.add(token);
+    }
+  }
+  const publishRank = (item: (typeof pool)[number]) => {
+    if (!deferred.size) return 1;
+    const host = (item.row.domain || hostOf(item.row.url)).toLowerCase();
+    if ([...deferred].some((token) => host.includes(token))) return 0;
+    if (defersTo(item.row)) return 2;
+    return 1;
+  };
+  const specs = shoppingAsk(query) ? askedSpecs(query) : [];
+  const specOrder = (item: (typeof pool)[number]) => {
+    if (!specs.length) return 1;
+    const stance = specStance(`${item.row.title} ${item.row.snippet ?? ''}`, specs);
+    return stance === 'match' ? 0 : stance === 'miss' ? 2 : 1;
   };
   const askTokens = new Set(askWords(query).filter((word) => word.length >= 3 && !WHEN_WORDS.has(word)));
   const priceRank = (item: (typeof pool)[number]) => {
@@ -391,7 +488,7 @@ export function preferSources<T extends RankedHit>(query: string, rows: readonly
     pool.sort((a, b) => byLead(a, b) || desk(a) - desk(b) || Number(a.tier === 3) - Number(b.tier === 3) || a.index - b.index);
   } else if (shoppingAsk(query)) {
     // A priced row that matches the ask leads. An unpriced row stays, behind it.
-    pool.sort((a, b) => byLead(a, b) || priceRank(b) - priceRank(a) || Number(a.tier === 3) - Number(b.tier === 3) || a.index - b.index);
+    pool.sort((a, b) => byLead(a, b) || specOrder(a) - specOrder(b) || priceRank(b) - priceRank(a) || Number(a.tier === 3) - Number(b.tier === 3) || a.index - b.index);
   } else {
     pool.sort((a, b) => byLead(a, b) || (promote ? a.tier - b.tier : Number(a.tier === 3) - Number(b.tier === 3)) || a.index - b.index);
   }
@@ -647,6 +744,31 @@ function alignVerdicts(nodes: readonly (CardNode | undefined)[]): (CardNode | un
 }
 
 /** Language, repeated rows, and a disagreement the card has already settled. Holes stay holes. */
+/** A stated spec is a requirement. A pick that states a different one does not lead a pick that meets it. */
+function dropSpecMissLead(query: string, nodes: readonly (CardNode | undefined)[]): (CardNode | undefined)[] {
+  const specs = askedSpecs(query);
+  if (!specs.length || !shoppingAsk(query)) return [...nodes];
+  const texts = (node: CardNode): string[] => (
+    node.type === 'list' ? node.items.map((item) => `${item.text} ${item.meta ?? ''}`) : [JSON.stringify(node)]
+  );
+  const stanceOf = (text: string) => specStance(text, specs);
+  const sawMatch = nodes.some((node) => !!node && texts(node).some((text) => stanceOf(text) === 'match'));
+  if (!sawMatch) return [...nodes];
+  return nodes.map((node) => {
+    if (!node) return node;
+    if (node.type === 'list') {
+      const rank = (text: string) => {
+        const stance = stanceOf(text);
+        return stance === 'match' ? 0 : stance === 'miss' ? 2 : 1;
+      };
+      const items = [...node.items].sort((a, b) => rank(`${a.text} ${a.meta ?? ''}`) - rank(`${b.text} ${b.meta ?? ''}`));
+      return items.every((item, index) => item === node.items[index]) ? node : { ...node, items };
+    }
+    if (node.type === 'hero' && texts(node).some((text) => stanceOf(text) === 'miss')) return undefined;
+    return node;
+  });
+}
+
 /** On a shopping card, a product hero with no price does not lead once another pick states one. */
 function dropUnpricedProductLead(query: string, nodes: readonly (CardNode | undefined)[]): (CardNode | undefined)[] {
   if (!shoppingAsk(query)) return [...nodes];
@@ -661,5 +783,5 @@ function dropUnpricedProductLead(query: string, nodes: readonly (CardNode | unde
 
 export function finishQuality(query: string, nodes: readonly (CardNode | undefined)[]): (CardNode | undefined)[] {
   const cleaned = nodes.map((node) => (node ? cleanNode(query, node) : node));
-  return restoreCutDecimals(alignVerdicts(withoutSettledDisputes(dropUnpricedProductLead(query, cleaned))));
+  return restoreCutDecimals(alignVerdicts(withoutSettledDisputes(dropSpecMissLead(query, dropUnpricedProductLead(query, cleaned)))));
 }

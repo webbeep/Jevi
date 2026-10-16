@@ -6,11 +6,17 @@ import { callCap, clearDeadEngines, engineDead, moreQueries, newLedger, queriesF
 import { packSearch, readSearchCache, searchCacheKey, writeSearchCache, type CacheDb } from '../server/cache.ts';
 import { cascadeWeb } from '../server/cascade.ts';
 import { search } from '../server/search.ts';
-import { runStream } from '../server/stream.ts';
+import { failOpen, runStream } from '../server/stream.ts';
 import { cacheBypass, validTestToken } from '../server/token.ts';
 import type { Env } from '../server/util.ts';
 import { WIKI_UA, parseWikiSearch } from '../server/wikiSearch.ts';
 import type { SearchResponse } from '../shared/types.ts';
+
+test('a stuck search fails in the open', async () => {
+  const started = Date.now();
+  await assert.rejects(failOpen(new Promise(() => undefined), 40), /took too long/);
+  assert.ok(Date.now() - started < 500);
+});
 
 const fixture = readFileSync(new URL('./fixtures/ddg-lite.html', import.meta.url), 'utf8');
 const wikiFixture = JSON.parse(readFileSync(new URL('./fixtures/wiki-search.json', import.meta.url), 'utf8')) as unknown;

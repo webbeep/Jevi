@@ -79,6 +79,58 @@ export function ownQuestion(question: string, covered: string): boolean {
   return asked.some((word) => !ATTRIBUTE.has(word) && !subject.has(word));
 }
 
+/** "Of those" / "drop any" / "keep only" classifies the items already listed. It is not a new search. */
+const CLASSIFY = /\b(?:of those|of these|which of the ones|drop any|keep only)\b/i;
+
+function sharesCard(text: string, covered: string): boolean {
+  const words = contentStems(text).filter((word) => word.length >= 4 && !ATTRIBUTE.has(word));
+  if (words.length < 2) return false;
+  const card = covered.toLowerCase();
+  const hits = words.filter((word) => card.includes(word)).length;
+  return hits >= 2 && hits / words.length >= 0.34;
+}
+
+/**
+ * The follow-up points at the card already on screen: it explains a sentence from that card,
+ * or it is a short question that points back ("explain this move"). A new subject does not.
+ */
+export function pointsAtCard(question: string, covered: string): boolean {
+  const q = question.trim();
+  if (!q || isWritingAsk(q) || isCalculationAsk(q) || CLASSIFY.test(q)) return false;
+  const quoted = [...q.matchAll(/["“]([^"”]{8,})/g)].map((match) => match[1]!);
+  if (quoted.some((part) => sharesCard(part, covered))) return true;
+  if (/^explain\b/i.test(q)) {
+    const rest = q.replace(/^explain\b[:\s-]*/i, '').replace(/^["“]+|["”]+$/g, '').trim();
+    if (!rest || PRONOUN.test(rest) || sharesCard(rest, covered)) return true;
+  }
+  if (PRONOUN.test(q) && q.split(/\s+/).length <= 8) return true;
+  return false;
+}
+
+/** A short title already on screen. A long sentence is not a subject to paste into the next search. */
+export function screenSubject(title: string | undefined, original: string): string {
+  const pick = (value: string) => {
+    const text = value.trim();
+    if (!text || text.length > 60 || text.split(/\s+/).length > 6) return '';
+    return text;
+  };
+  return pick(title ?? '') || pick(original);
+}
+
+/**
+ * The follow-up's own words, with the subject already on screen when the follow-up points at that card.
+ * Undefined when the follow-up is its own question.
+ */
+export function cardFollowQuery(question: string, subject: string, covered: string): string | undefined {
+  const q = question.trim();
+  if (!pointsAtCard(q, covered)) return undefined;
+  const body = q.replace(/^explain\b[:\s-]*/i, '').replace(/^["“]+|["”]+$/g, '').replace(/\s+/g, ' ').trim();
+  const words = body || q;
+  const name = subject.trim();
+  if (!name || words.toLowerCase().includes(name.toLowerCase())) return words;
+  return `${name} ${words}`.replace(/\s+/g, ' ').trim();
+}
+
 const PRICE_CUE = /\b(?:price|prices|quote|quotes|stock|shares?|chart|charts|trading|worth|how much)\b|\$[A-Za-z]{1,5}\b/i;
 
 /**

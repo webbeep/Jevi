@@ -85,6 +85,20 @@ test('an unpriced product hero does not lead a card that has a priced pick', () 
   assert.equal(kept[0]?.type, 'hero');
 });
 
+test('a pick that misses a stated spec does not lead one that meets it', () => {
+  const match = { url: 'https://shop.example/three', domain: 'shop.example', title: 'Acme 3-port switch', snippet: '$18.99' };
+  const miss = { url: 'https://shop.example/five', domain: 'shop.example', title: 'Acme 5-port switch', snippet: '$21.00' };
+  const rows = preferSources('best hdmi switch for 3 devices under $40', [miss, match]);
+  assert.equal(rows[0]?.url, match.url);
+  const nodes = finishQuality('best hdmi switch for 3 devices under $40', [
+    { type: 'hero', value: '5-port switch', label: 'Top pick', caption: '$21.00' },
+    { type: 'list', style: 'bullet', items: [{ text: '5-port switch', meta: '$21.00' }, { text: '3-port switch', meta: '$18.99' }] },
+  ]);
+  assert.equal(nodes[0], undefined);
+  const items = nodes[1]?.type === 'list' ? nodes[1].items.map((item) => item.text) : [];
+  assert.equal(items[0], '3-port switch');
+});
+
 test('a priced product page leads an unpriced one on a shopping ask', () => {
   const priced = { url: 'https://shop.example/switch', domain: 'shop.example', title: 'Acme HDMI switch', snippet: '3 ports, $18.99' };
   const bare = { url: 'https://blog.example/roundup', domain: 'blog.example', title: 'HDMI switch roundup', snippet: 'Several switches, prices vary' };
@@ -194,6 +208,13 @@ test('government, a journal of record, and a state page lead a count or a paper 
     hit('www.nytimes.com', 'Outbreak', 'News coverage'),
   ]);
   assert.equal(outbreak[0]?.domain, 'www.fda.gov');
+  const published = preferSources('How many people were sickened in the recent foodborne outbreak?', [
+    hit('www.fda.gov', 'Agency update', 'According to the CDC, illnesses were reported across several states'),
+    hit('www.nytimes.com', 'Outbreak news', 'A news recap of the illnesses'),
+    hit('www.cdc.gov', 'Outbreak investigation', 'The agency is publishing the case count'),
+    hit('www.usda.gov', 'Food safety note', 'A summary of the investigation'),
+  ]);
+  assert.equal(published[0]?.domain, 'www.cdc.gov');
   const lancet = preferSources('What did studies find about GLP-1 drugs and weight loss?', [
     hit('www.healthline.com', 'GLP-1 recap', 'A consumer recap'),
     hit('www.thelancet.com', 'Semaglutide trial', 'The Lancet trial'),
