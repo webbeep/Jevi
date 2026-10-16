@@ -106,6 +106,21 @@ test('a quote is the sentence, not the page title or a table run together', () =
   assert.doesNotMatch(next, /Age Group/);
 });
 
+test('a nearby sentence is replaced by the numbered sentence even from another page', () => {
+  const nearby = 'CDC PLACES has local estimates on adults not getting enough sleep.';
+  const answer = 'The recommended amount of sleep for adults is at least 7 hours each day.';
+  const next = finishQuotedText('quote the page on how much sleep adults need', `"${nearby}"`, [page(nearby, 1), page(answer, 2)]);
+  assert.match(next, /at least 7 hours/);
+  assert.doesNotMatch(next, /PLACES/);
+});
+
+test('a title run into the sentence is not part of the quote', () => {
+  const source = 'FastStats: Sleep in Adults The recommended amount of sleep for adults is at least 7 hours each day.';
+  const next = finishQuotedText('quote the page on how much sleep adults need', 'The writeup runs the age bands together and never quotes the daily recommendation.', [page(source)]);
+  assert.match(next, /The recommended amount of sleep for adults is at least 7 hours each day/);
+  assert.doesNotMatch(next, /FastStats/);
+});
+
 test('an empty quotation is replaced by the sentence, without a site label glued on', () => {
   const source = '| NIOSH Most adults need about 7 to 8 hours of good-quality sleep per night.';
   const next = finishQuotedText('quote the page on how much sleep adults need', '" [1]"', [page(source)]);

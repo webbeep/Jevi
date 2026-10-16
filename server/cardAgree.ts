@@ -58,7 +58,7 @@ function sentencesOf(text: string): string[] {
     return `\uE000${shields.length - 1}\uE001`;
   });
   return joinSpacedDecimals(shielded)
-    .split(/\n+/)
+    .split(/\n+|(?<=[a-z])\s+(?=[A-Z])/)
     .flatMap((part) => part.split(SENTENCE_BREAK))
     .map((sentence) => sentence.replace(/\uE000(\d+)\uE001/g, (_, index) => shields[Number(index)] ?? '').trim())
     .filter((sentence) => sentence.length >= 20 && /[a-z]/i.test(sentence));
@@ -167,8 +167,11 @@ export function finishQuotedText(query: string, text: string, sources: readonly 
   const subject = quote ? (held ?? quote.body) : text;
   if (wantsNamedQuote(query) && words.length) {
     const offPage = !onSource(quote ? quote.body : text, sources);
+    const asksNumber = /\b(?:how many|how much|count|number|figure|total)\b/i.test(query);
+    const heldAnswers = !!held && (!asksNumber || /\d/.test(held));
     let best = smashed || offPage ? -1 : answerScore(query, subject, words);
-    const pool = held ? sources.filter((source) => loose(source.text).includes(loose(held).slice(0, 40))) : sources;
+    const narrow = held && heldAnswers ? sources.filter((source) => loose(source.text).includes(loose(held).slice(0, 40))) : sources;
+    const pool = narrow.length ? narrow : sources;
     for (const source of (pool.length ? pool : sources)) {
       const answer = answeringSentence(query, source.text);
       if (!answer) continue;
@@ -183,6 +186,7 @@ export function finishQuotedText(query: string, text: string, sources: readonly 
   if (!chosen && quote && smashed && wantsNamedQuote(query)) {
     return `${text.slice(0, quote.at)}${text.slice(quote.end)}`.replace(/[ \t]{2,}/g, ' ').trim();
   }
+  if (wantsNamedQuote(query) && !chosen && !/[a-z]/i.test(text)) return '';
   if (chosen) chosen = withoutLeadLabel(chosen);
   if (chosen && wantsNamedQuote(query) && !quote && (proseEnough(text) || /["“«]/.test(text))) {
     const clean = chosen.replace(/^["“«]+|["”»]+$/g, '').trim();
