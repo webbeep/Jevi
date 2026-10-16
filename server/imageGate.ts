@@ -368,12 +368,52 @@ export function portraitMarks(role?: string, org?: string): string[] {
   return [...new Set(orgToks.length ? orgToks : roleToks)];
 }
 
+const ORG_FACT = /company|employer|organi[sz]ation|experience|workplace|previously|prior|former|also at/i;
+
+/** Companies and roles written on the profile. A prior employer does not hide the company the page names. */
+function profileOrgs(node: { subtitle?: string; facts?: { label: string; value: string }[] }): string[] {
+  const orgs = (node.facts ?? []).filter((f) => ORG_FACT.test(f.label)).map((f) => f.value);
+  const at = node.subtitle ? /\bat\s+(.+)$/i.exec(node.subtitle) : undefined;
+  if (at?.[1]) orgs.push(at[1]);
+  return orgs;
+}
+
 /** The company or role written on a profile, used to keep another namesake's photo off it. */
 export function profilePortraitMarks(node: { subtitle?: string; facts?: { label: string; value: string }[] }): string[] {
-  const company = node.facts?.find((f) => /company|employer|organi[sz]ation/i.test(f.label))?.value;
+  const orgs = profileOrgs(node);
   const role = node.facts?.find((f) => /^(role|title|position|occupation)$/i.test(f.label))?.value;
-  const at = !company && node.subtitle ? /\bat\s+(.+)$/i.exec(node.subtitle) : undefined;
-  return portraitMarks(role || (at ? undefined : node.subtitle), company || at?.[1]);
+  const fromOrgs = orgs.flatMap((org) => portraitMarks(undefined, org));
+  const fromRole = portraitMarks(role || (orgs.length ? undefined : node.subtitle), undefined);
+  return [...new Set([...fromOrgs, ...fromRole])];
+}
+
+/**
+ * The company or role the portrait search should name. The workplace in the ask wins when the
+ * first employer on the card is a previous one ("Eco-Enterprise" on a BlueFlame page).
+ */
+export function portraitWorkplace(org?: string, role?: string, asked: readonly string[] = []): string | undefined {
+  const place = asked.flatMap((item) => tokens(item)).filter((t) => t.length >= 4 && !ORG_GENERIC.has(t) && !ROLE_GENERIC.has(t) && !STOP.has(t));
+  const orgToks = tokens(org ?? '');
+  if (org && place.some((t) => orgToks.includes(t) || orgToks.some((word) => word.includes(t)))) return org;
+  if (place.length) return place.join(' ');
+  const fallback = org || role;
+  return fallback || undefined;
+}
+
+/** Search again for this resolved person: their name plus the company or role that picks them. */
+export function portraitSearchQuery(name: string, org?: string, role?: string, asked: readonly string[] = []): string {
+  return [name, portraitWorkplace(org, role, asked)].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+}
+
+/** The portrait search for a profile: name plus a company or role that appears on the card. */
+export function profilePortraitQuery(node: { name: string; subtitle?: string; facts?: { label: string; value: string }[] }, asked: readonly string[] = []): string {
+  const orgs = profileOrgs(node);
+  const role = node.facts?.find((f) => /^(role|title|position|occupation)$/i.test(f.label))?.value;
+  if (asked.length) {
+    const aligned = orgs.find((org) => portraitWorkplace(org, undefined, asked) === org);
+    return portraitSearchQuery(node.name, aligned, role, asked);
+  }
+  return portraitSearchQuery(node.name, orgs.join(' ') || undefined, role || node.subtitle, []);
 }
 
 /** Hint context words that tell this person from a namesake. */

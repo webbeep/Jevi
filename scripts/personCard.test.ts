@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import type { CardNode } from '../shared/card.ts';
 import type { ImageResult, SearchResult } from '../shared/types.ts';
 import { PictureResolver } from '../server/pictures.ts';
-import { accepts, namesakeLabel, personPortrait, portraitMatches, properName, targetFor } from '../server/imageGate.ts';
+import { accepts, namesakeLabel, personPortrait, portraitMatches, portraitSearchQuery, portraitWorkplace, profilePortraitQuery, properName, targetFor } from '../server/imageGate.ts';
 import { fillRowImages } from '../server/rowImages.ts';
 import { personFacts, profileFallback } from '../server/profileFallback.ts';
 import { priorEntity, resolveEntity } from '../server/entity.ts';
@@ -103,6 +103,62 @@ test('a snippet-only person card is the standard profile with a third-person sum
     assert.match(text.text, /New Jersey Institute of Technology/);
   }
   assert.ok(!body.some((n) => n.type === 'gallery' || n.type === 'section'));
+});
+
+test('a resolved person keeps the portrait on the page about him, including when another employer is listed first', () => {
+  const photo = 'https://media.licdn.com/dms/image/profile-displayphoto-shrink_200_200/tim.jpg';
+  const linkedin = pic('Timothy Estrada - BlueFlame AI | LinkedIn', photo, 'https://www.linkedin.com/in/tim-estrada');
+  const logo = pic('Timothy Estrada - BlueFlame AI', 'https://static.licdn.com/aero-v1/sc/h/logo.png', 'https://www.linkedin.com/in/tim-estrada');
+  const profile = {
+    type: 'profile' as const,
+    name: 'Timothy Estrada',
+    subtitle: 'Software engineer, per LinkedIn',
+    facts: [
+      { label: 'Company', value: 'Eco-Enterprise' },
+      { label: 'Experience', value: 'BlueFlame AI' },
+    ],
+  };
+  assert.equal(portraitWorkplace('Eco-Enterprise', 'Software Engineer', ['blueflame']), 'blueflame');
+  assert.equal(portraitSearchQuery('Timothy Estrada', 'Eco-Enterprise', 'Software Engineer', ['blueflame']), 'Timothy Estrada blueflame');
+  assert.match(profilePortraitQuery(profile, ['blueflame']), /Timothy Estrada/);
+  assert.match(profilePortraitQuery(profile, ['blueflame']), /BlueFlame/i);
+  assert.doesNotMatch(profilePortraitQuery(profile, ['blueflame']), /Eco-Enterprise/);
+  const shown: CardNode[] = [];
+  new PictureResolver({} as Env, [logo, linkedin], () => undefined, 'Timothy Estrada', async () => [], { results: rows, hintFor: hint, person: 'Timothy Estrada' })
+    .emit(profile, 0, (n) => shown.push(n));
+  const card = shown[0];
+  assert.equal(card?.type, 'profile');
+  if (card?.type === 'profile') assert.equal(card.imageSrc, photo);
+  const missed: CardNode[] = [];
+  new PictureResolver({} as Env, [logo], () => undefined, 'Timothy Estrada', async () => [], { results: rows, hintFor: hint, person: 'Timothy Estrada' })
+    .emit(profile, 0, (n) => missed.push(n));
+  const again = missed[0];
+  assert.equal(again?.type === 'profile' ? again.imageSrc : 'x', undefined);
+  assert.match(again?.type === 'profile' ? again.imageQuery ?? '' : '', /BlueFlame|blueflame/);
+});
+
+test('a resolved person searches again and keeps the portrait that search finds', async () => {
+  const photo = 'https://media.licdn.com/dms/image/profile-displayphoto-shrink_200_200/tim.jpg';
+  const linkedin = pic('Timothy Estrada - BlueFlame AI | LinkedIn', photo, 'https://www.linkedin.com/in/tim-estrada');
+  const shown: CardNode[] = [];
+  const resolver = new PictureResolver({} as Env, [], () => undefined, 'Timothy Estrada', async () => [linkedin], {
+    results: rows,
+    hintFor: hint,
+    person: 'Timothy Estrada',
+  });
+  resolver.emit({
+    type: 'profile',
+    name: 'Timothy Estrada',
+    subtitle: 'Software engineer, per LinkedIn',
+    facts: [
+      { label: 'Company', value: 'Eco-Enterprise' },
+      { label: 'Experience', value: 'BlueFlame AI' },
+    ],
+  }, 0, (n) => shown.push(n));
+  await resolver.flush();
+  const card = shown.at(-1);
+  assert.equal(card?.type, 'profile');
+  if (card?.type === 'profile') assert.equal(card.imageSrc, photo);
 });
 
 test('a resolved person does not take a namesake portrait from the original results', () => {

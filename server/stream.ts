@@ -38,7 +38,7 @@ import {
   mixedIdentities,
 } from './entity';
 import { fetchWikiArticle, fetchWikiDisambiguation, fetchWikiLeadImage } from './wikiSearch';
-import { type EntityHint, mentionsAny, personPage, portraitMarks, portraitMatches } from './imageGate';
+import { type EntityHint, mentionsAny, personPage, portraitMarks, portraitMatches, portraitSearchQuery, portraitWorkplace } from './imageGate';
 import type { RowImagePlan } from './pictures';
 import type { AnswerCard, CardNode, FollowupContext, FollowupIntent, LayoutPlan } from '../shared/card';
 import { type AskRef, cardSearchQuery, plainFollowup, refContext, topicOf, usefulFollowups, withRef } from '../shared/askAbout';
@@ -57,7 +57,7 @@ import { collectPages, ogImageOf } from './pages';
 import { MADE_PATTERNS, compareSideQueries, heuristicPattern, skeletonCard } from './patterns';
 import { planLayout } from './plan';
 import type { AskScope, CallLedger } from './budget';
-import { SEARCH_CALL_CAP, logAsk, mark, moreQueries, newLedger, queriesForAsk, searchCalls } from './budget';
+import { SEARCH_CALL_CAP, extraSearchRoom, logAsk, mark, moreQueries, newLedger, queriesForAsk, searchCalls } from './budget';
 import { gateResults } from './relevanceGate';
 import { entityQuery, plainQuotes, relaxQuery, tickerQueries } from './queryClean';
 import { type LateExtras, normalizeUrl, searchWithLate } from './search';
@@ -761,9 +761,13 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   scope.ledger.route = route;
   // Fact hops take the rewrite slots first. A two-fact question spends both, even on the quick route.
   const hopList = paper ? [] : hopQueries(query);
+  // Both forms of a workplace ask ("Tim at X", "Timothy at X") have to run, or a second person
+  // who only shows up under one of them never reaches the picker.
+  const places = workplaceQueries(query);
+  const extraWait = hopList.length || places.length ? 1800 : undefined;
   const withHops = (extras: string[]) => {
-    const room = Math.max(route === 'deep' ? 2 : 1, Math.min(hopList.length, 2));
-    return moreQueries(query, [...hopList, ...extras]).slice(0, room);
+    const room = extraSearchRoom(route, hopList.length, places.length);
+    return moreQueries(query, [...hopList, ...places, ...extras]).slice(0, room);
   };
   const deep = route === 'deep';
   let found: Awaited<ReturnType<typeof searchWithLate>>;
@@ -787,7 +791,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
       return { more: withHops([...sides, ...instant, ...extraQueries(query, x)]), freshness: freshness === 'any' ? x?.freshness ?? literalFresh : freshness };
     });
     // A price ask is answered by the live quote; the rewrites only add the news around it.
-    found = await searchWithLate({ q: queriesForAsk(query, []), more: withHops([...sides, ...instant]), later, freshness: literalFresh, count: 20, waitExtras: deep && !paper, extrasCutMs: quoteAsk(query) ? QUOTE_EXTRAS_MS : hopList.length ? 1500 : undefined, onLiteral }, env, scope);
+    found = await searchWithLate({ q: queriesForAsk(query, []), more: withHops([...sides, ...instant]), later, freshness: literalFresh, count: 20, waitExtras: deep && !paper, extrasCutMs: quoteAsk(query) ? QUOTE_EXTRAS_MS : extraWait, onLiteral }, env, scope);
     mark(scope.ledger, 'found');
     u = await understood;
   } else {
@@ -795,7 +799,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     // Literal question first. Planner rewrites are the later calls, still inside the cap.
     const q = queriesForAsk(query, instant);
     const more = withHops([...sides, ...instant]);
-    found = await searchWithLate({ q, more, freshness: freshness === 'any' ? guessFreshness(query) : freshness, count: 20, extrasCutMs: hopList.length ? 1500 : undefined, onLiteral }, env, scope);
+    found = await searchWithLate({ q, more, freshness: freshness === 'any' ? guessFreshness(query) : freshness, count: 20, extrasCutMs: extraWait, onLiteral }, env, scope);
   }
   let results = applyPickGate(query, applyRelevance(query, { ...found.response, query }, scope.ledger));
   // "AI news today" must not lead with last week's launch: past-window rows drop once enough current ones remain.
@@ -1167,7 +1171,9 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     }
     entityHint = entityHintFor(decision.entity, query);
     // Name + the asker's own context ("Ray Lee BlueFlame AI") pulls that person's photos, not a namesake's.
-    const marks = portraitMarks(decision.entity.role, decision.entity.org);
+    const askedPlace = contextTerms(query, decision.entity.name);
+    const workplace = portraitWorkplace(decision.entity.org, decision.entity.role, askedPlace);
+    const marks = portraitMarks(decision.entity.role, workplace);
     portraitAgain = marks.length > 0;
     if (portraitAgain) {
       results = {
@@ -1176,7 +1182,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
       };
     }
     boostQuery = portraitAgain
-      ? [decision.entity.name, decision.entity.org || decision.entity.role].filter(Boolean).join(' ')
+      ? portraitSearchQuery(decision.entity.name, decision.entity.org, decision.entity.role, askedPlace)
       : (contextTerms(query).length ? query : decision.entity.name);
     // Person singles must be profile cards so image boost + row pictures run (Lead GATE: David Kim / BlueFlame had 0 imgs on answer pattern),
     // unless the ask is about something of theirs ("Jaylen Brown injuries"): that keeps the planned layout.

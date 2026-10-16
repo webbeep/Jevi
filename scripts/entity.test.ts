@@ -1280,6 +1280,22 @@ test('a workplace before the given name is the same ask as the given name at tha
   assert.deepEqual(gated.kept.map((kept) => kept.title), ['Timothy Estrada - BlueFlame AI']);
 });
 
+test('a workplace before the given name asks when the sources name two people there', () => {
+  const rows = [
+    row('Timothy Estrada - BlueFlame AI', 'As a Software Engineer at Eco-Enterprise… · Experience: BlueFlame AI', 'https://www.linkedin.com/in/tim-estrada'),
+    row('Tim Kiely - COO - BlueFlame AI | LinkedIn', 'Tim Kiely is COO at BlueFlame AI.', 'https://www.linkedin.com/in/tim-kiely'),
+    row('BlueFlame AI', 'BlueFlame AI builds an agent for finance teams.', 'https://blueflame.ai/'),
+  ];
+  for (const q of ['Blueflame ai Tim', 'Who is Blueflame Tim', 'Tim at Blueflame AI']) {
+    const decision = resolveEntity(q, rows, { pattern: 'profile' });
+    assert.equal(decision.kind, 'choices', q);
+    if (decision.kind !== 'choices') continue;
+    const names = decision.choices.map((choice) => choice.name.toLowerCase());
+    assert.ok(names.some((name) => name.includes('timothy estrada')), q);
+    assert.ok(names.some((name) => name.includes('tim kiely')), q);
+  }
+});
+
 test('a workplace-first ask with two people at that place is a picker', () => {
   const rows = [
     row('Tim Lee - Software Engineer at BlueFlame AI | LinkedIn', 'Tim Lee is a software engineer at BlueFlame AI.', 'https://www.linkedin.com/in/timlee'),
