@@ -251,6 +251,24 @@ function mapNode(node: CardNode, flags: Flags, body: string, negative: boolean):
     if (!pros.length && !node.cons.length) return undefined;
     return pros.length === node.pros.length && pros.every((item, index) => item === node.pros[index]) ? node : { ...node, pros };
   }
+  if (node.type === 'accordion' && negative) {
+    const items = node.items.flatMap((item) => {
+      const text = withoutFighting(item.text);
+      if (!text) return [];
+      return [text === item.text ? item : { ...item, text }];
+    });
+    if (!items.length) return undefined;
+    return items.length === node.items.length && items.every((item, index) => item === node.items[index]) ? node : { ...node, items };
+  }
+  if (node.type === 'keyvalue' && negative) {
+    const items = node.items.flatMap((item) => {
+      const value = withoutFighting(item.value);
+      if (!value) return [];
+      return [value === item.value ? item : { ...item, value }];
+    });
+    if (!items.length) return undefined;
+    return items.length === node.items.length && items.every((item, index) => item === node.items[index]) ? node : { ...node, items };
+  }
   return node;
 }
 

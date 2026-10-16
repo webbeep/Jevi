@@ -778,15 +778,27 @@ function statesProductPrice(text: string, ceilings: readonly number[]): boolean 
   return false;
 }
 
-/** On a shopping card, a product hero with no price does not lead once another pick states one. The budget in the label is not that price. */
+/** Dollars on a pick. A follow-up chip or a choice prompt is not a pick. */
+function productPriceTexts(node: CardNode): string[] {
+  if (node.type === 'hero') return [`${node.value} ${node.caption ?? ''}`];
+  if (node.type === 'tile') return [`${node.value ?? ''} ${node.sub ?? ''}`];
+  if (node.type === 'list') return node.items.map((item) => `${item.meta ?? ''} ${item.text}`);
+  if (node.type === 'table') return node.rows.map((row) => row.join(' '));
+  if (node.type === 'pricing') return node.plans.map((plan) => plan.prices.map((price) => (price.amount === undefined ? '' : `$${price.amount}`)).join(' '));
+  if (node.type === 'stack' || node.type === 'grid' || node.type === 'section' || node.type === 'scroller') return node.children.flatMap(productPriceTexts);
+  if (node.type === 'tabs') return node.tabs.flatMap((tab) => tab.children.flatMap(productPriceTexts));
+  return [];
+}
+
+/** On a shopping card, a product hero with no price does not lead once another pick states one. The budget in the label, and a dollar in a follow-up chip, are not that price. */
 function dropUnpricedProductLead(query: string, nodes: readonly (CardNode | undefined)[]): (CardNode | undefined)[] {
   if (!shoppingAsk(query)) return [...nodes];
   const ceilings = budgetAmounts(query);
-  const priced = nodes.some((node) => !!node && statesProductPrice(JSON.stringify(node), ceilings));
+  const priced = nodes.some((node) => !!node && productPriceTexts(node).some((text) => statesProductPrice(text, ceilings)));
   if (!priced) return [...nodes];
   return nodes.map((node) => {
     if (!node || node.type !== 'hero') return node;
-    if (statesProductPrice(`${node.value} ${node.caption ?? ''} ${node.label}`, ceilings)) return node;
+    if (productPriceTexts(node).some((text) => statesProductPrice(text, ceilings))) return node;
     return undefined;
   });
 }
