@@ -615,7 +615,7 @@ function MediaThumb({ item, index }: { item: Of<'list'>['items'][number]; index:
       </span>
     );
   }
-  if (item.imageQuery && busy) return <Skeleton className="size-12 shrink-0 rounded-lg sm:size-14" />;
+  if (item.imageQuery && busy) return null;
   return (
     <span className="flex size-12 shrink-0 items-center justify-center rounded-lg bg-muted text-sm font-semibold text-muted-foreground sm:size-14">
       {item.icon ? <Icon name={item.icon} className="size-5" /> : index + 1}
@@ -898,19 +898,18 @@ export function Callout({ node }: { node: Of<'callout'> }) {
 }
 
 export function ImageView({ node }: { node: Of<'image'> }) {
-  const { images, busy } = useCard();
+  const { images } = useCard();
   const ref = node.ref !== undefined ? images[node.ref] : undefined;
   const src = node.src ?? ref?.thumb;
   const link = usePictureLink(src);
   const credit = useCredit(src) ?? domainLabel(hostOf(node.link ?? link));
-  const aspect = node.aspect === 'square' ? 'aspect-square' : node.aspect === 'tall' ? 'aspect-[3/4]' : 'aspect-video';
   const claim = `${node.caption ?? ''} ${node.query ?? ''}`;
   const depicted = !!src && showsFigure({ title: ref?.title, url: node.link ?? ref?.url ?? link, thumb: src });
   if (claimsFigure(claim) && !depicted) {
-    if (!src && node.query && busy) return <Skeleton className={cn('w-full rounded-xl', aspect)} />;
+    if (!src) return null;
     return <SoftmaxFigure caption={node.caption} />;
   }
-  if (!src) return node.query && busy ? <Skeleton className={cn('w-full rounded-xl', aspect)} /> : null;
+  if (!src) return null;
   return (
     <figure className="overflow-hidden rounded-xl border bg-muted animate-in fade-in">
       <img src={src} alt={node.caption ?? ref?.title ?? ''} loading="lazy" className={cn('w-full object-cover', node.aspect === 'square' ? 'aspect-square' : node.aspect === 'tall' ? 'aspect-[3/4]' : 'aspect-video')} />
@@ -925,14 +924,14 @@ export function ImageView({ node }: { node: Of<'image'> }) {
 }
 
 export function Gallery({ node }: { node: Of<'gallery'> }) {
-  const { images, busy } = useCard();
+  const { images } = useCard();
   const items = node.pics?.length
     ? node.pics.map((p) => ({ thumb: p.src, url: p.link, title: p.title, source: hostOf(p.link) }))
     : node.refs.map((r) => images[r]).filter(Boolean);
   const { credits } = useCard();
   const [open, setOpen] = useState<number | null>(null);
   const current = open === null ? undefined : items[open];
-  if (!items.length) return node.query && busy ? <div className="grid grid-cols-3 gap-1.5">{[0, 1, 2].map((i) => <Skeleton key={i} className="aspect-square rounded-lg" />)}</div> : null;
+  if (!items.length) return null;
   return (
     <>
       <div className={cn('grid gap-1.5', items.length >= 3 ? 'grid-cols-3' : 'grid-cols-2')}>
