@@ -181,6 +181,18 @@ test('an official snippet beats a commercial combined rate', () => {
   assert.doesNotMatch(next.type === 'text' ? next.text : '', /7\.5%/);
 });
 
+test('a component rate stays and the combined line uses the official rate', () => {
+  const pages: ClaimSource[] = [
+    { n: 1, domain: 'www.rates.example', text: 'Harbor City sales tax\nThe combined rate is 7.5%.' },
+    { n: 2, domain: 'www.harborcity.gov', text: 'Harbor City sales tax\nThe state rate is 6.25%. The combined rate is 7.125%.' },
+  ];
+  const next = bindClaims({ type: 'text', text: 'The state rate is 6.25%. The combined rate is 7.5%.' }, pages, 'sales tax in Harbor City');
+  const body = next.type === 'text' ? next.text : '';
+  assert.match(body, /state rate is 6\.25%/);
+  assert.match(body, /7\.125%/);
+  assert.doesNotMatch(body, /7\.5%/);
+});
+
 test('a fee is the amount the official page states', () => {
   const pages: ClaimSource[] = [
     { n: 1, domain: 'travelblog.example', text: 'The renewal fee is $64.' },
@@ -202,6 +214,15 @@ test('a fee is the amount the official page states', () => {
   assert.match(body, /\$42/);
   assert.match(body, /\$18/);
   assert.doesNotMatch(body, /\$64/);
+  const split: ClaimSource[] = [
+    { n: 1, domain: 'county.example.gov', text: 'County notes\nThe renewal fee is $64.' },
+    { n: 2, domain: 'permits.harbor.gov', text: 'Renew a harbor permit by mail\nThe renewal fee for a harbor permit book is $42. A book and card is $80.' },
+  ];
+  assert.equal(officialCharge('What is the renewal fee for a harbor permit book by mail?', split)?.amount, '$42');
+  const lead = bindClaims({ type: 'stat', label: 'Renewal fee', value: '$64' }, split, 'What is the renewal fee for a harbor permit book by mail?');
+  assert.match(lead.type === 'stat' ? lead.value : '', /\$42/);
+  const pair = bindClaims({ type: 'text', text: 'A book and card is $80.' }, split, 'What is the renewal fee for a harbor permit book by mail?');
+  assert.match(pair.type === 'text' ? pair.text : '', /\$80/);
 });
 
 test('an exempt price does not keep a tax dollar from another line', () => {

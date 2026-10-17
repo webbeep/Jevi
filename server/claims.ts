@@ -750,16 +750,21 @@ export function fixTaxLines(text: string, query: string, sources: readonly Claim
   }).join(' ');
 }
 
-function applyTaxText(text: string, query: string, pick: TaxPick): string {
+function applyTaxText(text: string, query: string, pick: TaxPick, keep: ReadonlySet<number>): string {
   const price = query.match(/\$\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)/);
   const amount = price ? Number(price[1]!.replace(/,/g, '')) : undefined;
   const shown = [...text.matchAll(/(\d{1,2}(?:\.\d+)?)\s*(?:%|percent\b)/gi)].map((match) => Number(match[1]));
   const wrong = shown.find((rate) => Math.abs(rate - pick.rate) > 0.001);
   if (wrong === undefined) return text;
-  let out = text.replace(/(\d{1,2}(?:\.\d+)?)\s*(?:%|percent\b)/gi, (raw, num) => {
-    if (Math.abs(Number(num) - pick.rate) <= 0.001) return raw;
-    return raw.includes('%') ? `${pick.rate}%` : `${pick.rate} percent`;
-  });
+  let out = text.split(SENTENCE_BREAK).map((sentence) => {
+    const component = /\b(?:state|county|city|local|municipal)\b/i.test(sentence) && !/\b(?:combined|total|overall)\b/i.test(sentence);
+    return sentence.replace(/(\d{1,2}(?:\.\d+)?)\s*(?:%|percent\b)/gi, (raw, num) => {
+      const rate = Number(num);
+      if (Math.abs(rate - pick.rate) <= 0.001) return raw;
+      if (component && keep.has(rate)) return raw;
+      return raw.includes('%') ? `${pick.rate}%` : `${pick.rate} percent`;
+    });
+  }).join(' ');
   out = out.replace(/\[(\d+)\]/g, `[${pick.n}]`);
   if (amount === undefined) return out;
   const due = amount * pick.rate / 100;
@@ -779,40 +784,47 @@ function applyTaxText(text: string, query: string, pick: TaxPick): string {
   return out.replace(/\s+\./g, '.').replace(/\s{2,}/g, ' ');
 }
 
-function applyTax(node: CardNode, query: string, pick: TaxPick): CardNode {
+function ratesIn(source: ClaimSource | undefined): Set<number> {
+  const found = new Set<number>();
+  if (!source) return found;
+  for (const match of `${source.text}\n${source.stated ?? ''}`.matchAll(/(\d{1,2}(?:\.\d+)?)\s*%/g)) found.add(Number(match[1]));
+  return found;
+}
+
+function applyTax(node: CardNode, query: string, pick: TaxPick, keep: ReadonlySet<number>): CardNode {
   switch (node.type) {
     case 'stack':
     case 'grid':
     case 'section':
     case 'scroller':
-      return { ...node, children: node.children.map((child) => applyTax(child, query, pick)) };
+      return { ...node, children: node.children.map((child) => applyTax(child, query, pick, keep)) };
     case 'tabs':
-      return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: tab.children.map((child) => applyTax(child, query, pick)) })) };
+      return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: tab.children.map((child) => applyTax(child, query, pick, keep)) })) };
     case 'text':
     case 'callout':
     case 'quote':
     case 'draft':
     case 'heading': {
-      const text = applyTaxText(node.text, query, pick);
+      const text = applyTaxText(node.text, query, pick, keep);
       return text === node.text ? node : { ...node, text };
     }
     case 'hero': {
-      const caption = node.caption ? applyTaxText(node.caption, query, pick) : node.caption;
-      const value = applyTaxText(node.value, query, pick);
+      const caption = node.caption ? applyTaxText(node.caption, query, pick, keep) : node.caption;
+      const value = applyTaxText(node.value, query, pick, keep);
       return caption === node.caption && value === node.value ? node : { ...node, caption, value };
     }
     case 'tile': {
-      const value = node.value ? applyTaxText(node.value, query, pick) : node.value;
-      const sub = node.sub ? applyTaxText(node.sub, query, pick) : node.sub;
+      const value = node.value ? applyTaxText(node.value, query, pick, keep) : node.value;
+      const sub = node.sub ? applyTaxText(node.sub, query, pick, keep) : node.sub;
       return value === node.value && sub === node.sub ? node : { ...node, value, sub, source: node.source ?? pick.n };
     }
     case 'stat': {
-      const value = applyTaxText(node.value, query, pick);
+      const value = applyTaxText(node.value, query, pick, keep);
       return value === node.value ? node : { ...node, value };
     }
     case 'keyvalue': {
       const items = node.items.map((item) => {
-        const value = applyTaxText(item.value, query, pick);
+        const value = applyTaxText(item.value, query, pick, keep);
         return value === item.value ? item : { ...item, value };
       });
       return items.every((item, index) => item === node.items[index]) ? node : { ...node, items };
@@ -1598,8 +1610,12 @@ export function officialCharge(query: string, sources: readonly ClaimSource[]): 
       const money = labeledFee(sentence);
       if (!money) continue;
       const low = sentence.toLowerCase();
+      const title = (source.text.split('\n')[0] ?? '').toLowerCase();
       let score = 1;
-      for (const word of want) if (low.includes(word)) score += 3;
+      for (const word of want) {
+        if (low.includes(word)) score += 3;
+        if (title.includes(word)) score += 2;
+      }
       if (/\btotal\b/i.test(sentence)) score += 2;
       if (/\bcard\b/i.test(low) && !/\bcard\b/i.test(query)) score -= 4;
       if (!best || score > best.score) best = { amount: money.raw, value: money.value, n: source.n, score };
@@ -1609,10 +1625,9 @@ export function officialCharge(query: string, sources: readonly ClaimSource[]): 
   return { amount: best.amount, value: best.value, n: best.n };
 }
 
-function officialAmounts(sources: readonly ClaimSource[]): (value: number) => boolean {
+function officialAmounts(source: ClaimSource | undefined): (value: number) => boolean {
   const values: number[] = [];
-  for (const source of sources) {
-    if (!officialDomain(source.domain)) continue;
+  if (source) {
     for (const match of `${source.text}\n${source.stated ?? ''}`.matchAll(new RegExp(MONEY.source, 'g'))) values.push(moneyValue(match[0]));
   }
   return (value) => values.some((have) => Math.abs(have - value) < 0.001);
@@ -1702,10 +1717,10 @@ export function bindClaims(node: CardNode, sources: readonly ClaimSource[], quer
   if (!sources.length) return node;
   const aimed = retargetNode(node, sources, query);
   const tax = salesTax(query, sources);
-  const taxed = tax ? applyTax(aimed, query, tax) : aimed;
+  const taxed = tax ? applyTax(aimed, query, tax, ratesIn(sources.find((source) => source.n === tax.n))) : aimed;
   const lined = TAX_ASK.test(query) ? repairTaxNode(taxed, query, sources) : taxed;
   const fee = officialCharge(query, sources);
-  const charged = fee ? applyCharge(lined, fee, officialAmounts(sources)) : lined;
+  const charged = fee ? applyCharge(lined, fee, officialAmounts(sources.find((source) => source.n === fee.n))) : lined;
   if (!shoppingAsk(query)) return charged;
   const ceilings = budgetAmounts(query);
   return dropPriceless(keepBudgetPrices(fillPrices(charged, sources, ceilings), ceilings), ceilings, query);
