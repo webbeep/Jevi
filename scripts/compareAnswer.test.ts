@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import type { CardNode } from '../shared/card.ts';
 import type { SearchResponse } from '../shared/types.ts';
 import { asksToCompare } from '../server/askGuard.ts';
-import { answersComparison, comparisonNodes, comparisonRepair, comparisonTitle, keepComparedProducts, mentionsSide, sameProduct } from '../server/compareAnswer.ts';
+import { answersComparison, comparisonNodes, comparisonRepair, comparisonTitle, keepComparedProducts, mentionsSide, missingSideNode, sameProduct } from '../server/compareAnswer.ts';
 import { candidates } from '../server/extract.ts';
 import { compareSideQueries, compareSides } from '../server/patterns.ts';
 import { Polisher, completeSentences, emptyFigure, withoutEmptySlots } from '../server/polish.ts';
@@ -156,4 +156,18 @@ test('a list of products is one side each, and a follow-up keeps the price and p
   assert.equal(table?.type, 'table');
   if (table?.type !== 'table') return;
   assert.deepEqual(table.rows[0], ['Price', '$179.99', '$48']);
+  const added = missingSideNode('Compare Northwatch 2, Glowband 4 and Harbor Band 8', [
+    { type: 'tile', label: 'Northwatch 2', value: '$90' },
+    { type: 'tile', label: 'Glowband 4', value: '$40' },
+  ], {
+    query: 'Compare Northwatch 2, Glowband 4 and Harbor Band 8',
+    results: [{ title: 'Harbor Band 8 review', url: 'https://example.com/harbor', snippet: 'The Harbor Band 8 costs $60 and lasts a week.', domain: 'example.com', engines: ['web'] }],
+    images: [],
+    engines: [],
+  });
+  assert.equal(added?.type, 'grid');
+  if (added?.type !== 'grid') return;
+  const harbor = added.children[0];
+  assert.equal(harbor?.type === 'tile' ? harbor.label : '', 'Harbor Band 8');
+  assert.equal(harbor?.type === 'tile' ? harbor.value : '', '$60');
 });

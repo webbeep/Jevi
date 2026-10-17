@@ -70,7 +70,7 @@ import { domainOf } from './util';
 import { choicesIn, distinctActions, subjectWords } from './chips';
 import { anchoredFollowup, asksToCompare, cryptographyHint, faithfulQuery, followSearchQuery, isWritingAsk, needsOwnSearch, ownQuestion, personQuestion, quickPlan, quoteFollowQuery, screenSubject, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
 import { calculationAnswer, isCalculationAsk, rateOnAmount } from './calculate';
-import { comparisonRepair, comparisonTitle, keepComparedProducts } from './compareAnswer';
+import { comparisonRepair, comparisonTitle, keepComparedProducts, missingSideNode } from './compareAnswer';
 import { withFinishedSentences } from './polish';
 import { queryWithPlace, readerPlace, settleReadings } from './readings';
 import { isKeepOnly, keptBody } from './refine';
@@ -636,11 +636,17 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       }
     }
     const kept = designReq.priorBody?.length ? keepComparedProducts(designReq.priorBody, shown, question, designReq.priorImages) : undefined;
-    if (!kept) return;
-    for (const patch of kept) {
-      shown.set(patch.index, patch.node);
-      send('node', { index: patch.index, node: patch.node });
+    if (kept) {
+      for (const patch of kept) {
+        shown.set(patch.index, patch.node);
+        send('node', { index: patch.index, node: patch.node });
+      }
     }
+    const extra = missingSideNode(question, [...shown.values()], designReq.search);
+    if (!extra) return;
+    const index = Math.max(-1, ...shown.keys()) + 1;
+    shown.set(index, extra);
+    send('node', { index, node: extra });
   };
   const memberSources = () => req.search.results.map((row, i) => {
     const page = pages.find((item) => item.n === i + 1);

@@ -309,3 +309,24 @@ export function keepComparedProducts(prior: readonly CardNode[], nodes: Map<numb
   }
   return patches.length ? patches : undefined;
 }
+
+/** A named side the card left out, filled from the search that was run for it. */
+export function missingSideNode(question: string, nodes: readonly CardNode[], search: SearchResponse): CardNode | undefined {
+  const present: string[] = [];
+  const walk = (node: CardNode) => {
+    if (node.type === 'tile') present.push(node.label);
+    if (node.type === 'table') present.push(...node.columns.slice(1));
+    if ('children' in node && Array.isArray(node.children)) node.children.forEach(walk);
+    if (node.type === 'tabs') for (const tab of node.tabs) tab.children.forEach(walk);
+  };
+  nodes.forEach(walk);
+  const missing = compareSides(question).filter((side) => !present.some((label) => sameProduct(label, side)));
+  if (!missing.length) return undefined;
+  const children: CardNode[] = missing.slice(0, 3).map((side) => {
+    const row = (search.results ?? []).find((item) => mentionsSide(side, `${item.title ?? ''} ${item.snippet ?? ''}`));
+    const price = `${row?.title ?? ''} ${row?.snippet ?? ''}`.match(MONEY)?.[0];
+    return { type: 'tile', label: sideTitle(side), ...(price ? { value: price } : {}) };
+  });
+  const cols: 2 | 3 = children.length >= 3 ? 3 : 2;
+  return { type: 'grid', cols, children };
+}
