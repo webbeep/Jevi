@@ -660,6 +660,8 @@ export function salesTax(query: string, sources: readonly ClaimSource[]): TaxPic
         if (stateOnly) score -= 3;
         for (const word of questionWords(query)) if (low.includes(word)) score += 4;
         if (otherPlace(sentence, query)) score -= 20;
+        if (percents.length > 1 && !combined) score -= 6;
+        if (rate < 1 && percents.some((item) => item >= 1)) score -= 12;
         if (aboveCut && forBelow && !forAbove && !combined) score -= 5;
         if (belowCut && combined && forBelow) score -= 4;
         if (aboveCut && (combined || forAbove)) score += 3;

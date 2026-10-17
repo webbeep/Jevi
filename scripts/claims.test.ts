@@ -232,6 +232,14 @@ test('a list percent agrees with the official rate', () => {
   assert.doesNotMatch(blob, /2\.69%/);
 });
 
+test('a small share inside a breakdown is not the merchandise rate', () => {
+  const pages: ClaimSource[] = [
+    { n: 1, domain: 'www.harborstate.gov', text: 'Harbor State sales tax\nThe general merchandise rate is 6.25%.' },
+    { n: 2, domain: 'www.harborstate.gov', text: 'Harbor State sales tax\nGeneral merchandise consists of a 5.00% state rate, a 1.00% local rate and a 0.25% county rate.' },
+  ];
+  assert.deepEqual(salesTax('What is the sales tax on general merchandise in Harbor State?', pages), { rate: 6.25, n: 1 });
+});
+
 test('a city rate does not lead when the official page states the broader rate', () => {
   const pages: ClaimSource[] = [
     { n: 1, domain: 'www.harborstate.gov', text: 'Harbor State sales tax\nThe general merchandise rate is 6.25%.' },
