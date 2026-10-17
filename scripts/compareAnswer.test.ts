@@ -131,7 +131,7 @@ test('a list of products is one side each, and a follow-up keeps the price and p
     type: 'grid',
     cols: 2,
     children: [
-      { type: 'tile', label: 'Northwatch 2', value: '$99' },
+      { type: 'tile', label: 'Northwatch 2', value: '$99', imageSrc: 'https://img.example/other.png' },
       { type: 'tile', label: 'Northwatch Air', value: '$80' },
       { type: 'tile', label: 'Glow Band 4', value: '$48' },
     ],

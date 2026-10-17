@@ -267,8 +267,8 @@ export function keepComparedProducts(prior: readonly CardNode[], nodes: Map<numb
       let next = node;
       const price = money(node.value);
       if (product.price && price && price !== product.price) next = { ...next, value: withPrice(node.value ?? '', product.price) };
-      if (product.price && !price && (!node.value || NOT_STATED.test(node.value))) next = { ...next, value: product.price };
-      if (!next.imageSrc && product.imageSrc) next = { ...next, imageSrc: product.imageSrc, imageQuery: undefined };
+      if (product.price && !price && (!node.value || NOT_STATED.test(node.value) || /\bno price\b/i.test(node.value ?? ''))) next = { ...next, value: product.price };
+      if (product.imageSrc && next.imageSrc !== product.imageSrc) next = { ...next, imageSrc: product.imageSrc, imageRef: undefined, imageQuery: undefined };
       return next;
     }
     if (node.type === 'table' && node.columns.length >= 2) {
