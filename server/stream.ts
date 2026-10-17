@@ -48,7 +48,7 @@ import type { EngineStatus, Freshness, ImageResult, SearchResponse, SearchResult
 import { rewriteQuery } from './ai';
 import { type DesignRequest, designParallel, designStream, gateNode } from './design';
 import { BRIEF_ROWS, briefSources, remapBrief, type SourceBrief } from './brief';
-import { claimSources, groundMembers } from './claims';
+import { agreeOfficialRate, claimSources, groundMembers } from './claims';
 import { answerTitle, fillPaperCard, keepAnswerBody, restoreKeptPapers, wantsNamedQuote } from './cardAgree';
 import { dropDisputedBio, type BioSource } from './bioFacts';
 import { withoutGluedPerson } from './peopleSplit';
@@ -727,11 +727,22 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       send('node', { index, node });
     });
   };
+  const alignRates = () => {
+    const asked = designReq.followup?.question ?? designReq.query;
+    const sources = claimSources(designReq.search.results, pages);
+    for (const [index, node] of [...shown.entries()]) {
+      const next = agreeOfficialRate(node, asked, sources);
+      if (next === node) continue;
+      shown.set(index, next);
+      send('node', { index, node: next });
+    }
+  };
   if (arrived.ready && arrived.review) applyReview(send, designReq, shown, arrived.review, started);
   settleComparison();
   settleFacts();
   settleMembers();
   publishReadings();
+  alignRates();
   send('done', { ...summary, pagesRead: pages.length, ms: Date.now() - started });
   if (pendingReview && !arrived.ready) {
     const review = await pendingReview;
@@ -740,6 +751,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     settleFacts();
     settleMembers();
     publishReadings();
+    alignRates();
     mark(scope.ledger, 'reviewed');
   } else if (pendingReview) {
     mark(scope.ledger, 'reviewed');

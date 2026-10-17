@@ -1918,6 +1918,13 @@ function alignFee(node: CardNode, fee: ChargePick, allowed: (value: number) => b
   }
 }
 
+/** The last pass: every percent on a tax card is the official rate, including nodes added after the first bind. */
+export function agreeOfficialRate(node: CardNode, query: string, sources: readonly ClaimSource[]): CardNode {
+  const tax = salesTax(query, sources);
+  if (!tax) return node;
+  return alignTax(applyTax(node, query, tax, ratesIn(sources.find((source) => source.n === tax.n))), tax.rate);
+}
+
 /** Move each number's citation onto a page that states it, then fill a missing product price from that page. */
 export function bindClaims(node: CardNode, sources: readonly ClaimSource[], query: string): CardNode {
   if (!sources.length) return node;
