@@ -18,9 +18,9 @@ function showsAnswer(node: CardNode | undefined): node is CardNode {
 
 /**
  * The body of a card that is still streaming. Each region of the chosen layout is designed in its own
- * call and can finish before the one above it. Once any real section has arrived, show the whole layout:
- * arrived sections in place, and that region's own skeleton where its call is still running, so a later
- * section does not jump when an earlier hole fills.
+ * call and can finish before the one above it. The waiting layout is the full skeleton, and it is only
+ * shown before any real component arrives. Once a slot's own component is in, that slot is the component:
+ * an empty slot is not drawn beside it, so its skeleton does not keep shimmering after the sentence.
  * Nodes after the layout (the optional control, actions, citations) stay in index order and wait out a
  * hole, because a late one would push the ones below it down and those holes were never on screen.
  * When nothing real has arrived yet, return nothing — the waiting layout is already the full skeleton.
@@ -32,8 +32,8 @@ export function liveBody(live: { nodes: (CardNode | undefined)[]; regions: CardN
   const out: CardNode[] = [];
   for (let i = 0; i < live.regions.length; i++) {
     const node = live.nodes[i];
-    if (isBlankLayout(node)) continue;
-    out.push(node ?? live.regions[i] ?? { type: 'slot', hint: 'answer', shape: 'block' });
+    if (!node || node.type === 'slot' || isBlankLayout(node)) continue;
+    out.push(node);
   }
   for (let i = live.regions.length; i < live.nodes.length; i++) {
     const node = live.nodes[i];

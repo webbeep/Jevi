@@ -1026,8 +1026,8 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
   onResend: (text: string) => void;
 }) {
   const streaming = !!turn.live?.nodes.some(Boolean);
-  // Parallel region calls finish out of order. The first real section replaces the full-card wait;
-  // sections still running keep their own skeletons inside the streamed body.
+  // Parallel region calls finish out of order. The first real section replaces the full-card wait.
+  // A slot that does not have its component yet is left out, so its skeleton does not sit beside the sentence.
   const answerStarted = !!turn.live && liveBody(turn.live, true).some((n) => n.type !== 'citations' && n.type !== 'slot');
   const offlinePartial = Boolean(turn.offline && (turn.live?.head || streaming));
   // Jev's plan already names the layout. Once the sources have landed, that skeleton is the placeholder —

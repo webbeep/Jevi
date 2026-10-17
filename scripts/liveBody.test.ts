@@ -7,20 +7,20 @@ const text = (t: string): CardNode => ({ type: 'text', text: t });
 const slot = (hint: string): CardNode => ({ type: 'slot', hint, shape: 'block' });
 const citations = (refs: number[]): CardNode => ({ type: 'citations', refs });
 
-test('an arrived prefix keeps the remaining region skeletons', () => {
+test('an arrived sentence drops skeletons for slots that do not have their component yet', () => {
   const regions = [slot('a'), slot('b'), slot('c'), slot('d')];
   const nodes: (CardNode | undefined)[] = [text('0'), text('1')];
-  assert.deepEqual(liveBody({ nodes, regions }, true), [text('0'), text('1'), slot('c'), slot('d')]);
+  assert.deepEqual(liveBody({ nodes, regions }, true), [text('0'), text('1')]);
   nodes[2] = text('2');
-  assert.deepEqual(liveBody({ nodes, regions }, true), [text('0'), text('1'), text('2'), slot('d')]);
+  assert.deepEqual(liveBody({ nodes, regions }, true), [text('0'), text('1'), text('2')]);
 });
 
-test('a later region shows immediately and the hole keeps its own skeleton', () => {
+test('a later region shows immediately and an empty hole is not left as a skeleton', () => {
   const regions = [slot('0'), slot('1'), slot('2'), slot('3'), slot('4'), slot('5')];
   const nodes: (CardNode | undefined)[] = [text('0'), undefined, text('2'), text('3'), text('4')];
-  assert.deepEqual(liveBody({ nodes, regions }, true), [text('0'), slot('1'), text('2'), text('3'), text('4'), slot('5')]);
+  assert.deepEqual(liveBody({ nodes, regions }, true), [text('0'), text('2'), text('3'), text('4')]);
   nodes[1] = text('1');
-  assert.deepEqual(liveBody({ nodes, regions }, true), [text('0'), text('1'), text('2'), text('3'), text('4'), slot('5')]);
+  assert.deepEqual(liveBody({ nodes, regions }, true), [text('0'), text('1'), text('2'), text('3'), text('4')]);
 });
 
 test('nothing arrived shows nothing: the research trail covers the wait', () => {
@@ -52,7 +52,7 @@ test('actions after the layout show once the finish prefix is contiguous, and a 
   const regions = [slot('a'), slot('b')];
   const actions: CardNode = { type: 'actions', items: [{ label: 'Compare', query: 'Compare them', kind: 'refine' }] };
   const held: (CardNode | undefined)[] = [text('lead'), undefined, undefined, actions, citations([1])];
-  assert.deepEqual(liveBody({ nodes: held, regions }, true), [text('lead'), slot('b')]);
+  assert.deepEqual(liveBody({ nodes: held, regions }, true), [text('lead')]);
   const ready: (CardNode | undefined)[] = [text('lead'), text('rest'), actions, citations([1])];
   assert.deepEqual(liveBody({ nodes: ready, regions }, true), [text('lead'), text('rest'), actions, citations([1])]);
 });
