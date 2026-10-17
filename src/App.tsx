@@ -1157,7 +1157,7 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
               version={`${turn.id}-${turn.version}`}
               filling={offlinePartial ? false : turn.filling}
               streaming={offlinePartial ? false : streaming}
-              status={offlinePartial ? undefined : (turn.status ?? (turn.thinking && !streaming ? 'Thinking it through…' : undefined))}
+              status={offlinePartial ? undefined : turn.status}
               pattern={turn.pattern}
               alternatives={turn.kind === 'digest' ? [] : turn.plan?.alternatives ?? []}
               onPattern={(p) => actions.setPattern(id, p)}

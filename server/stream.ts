@@ -78,6 +78,7 @@ import { finishQuality, hasOfficialHit, hostTier, officialProbe, preferSources, 
 import { isOwnSite, orcidSite, pickOwnSite, probeOwnSite, RESEARCH_ASK, withOwnSite } from './ownSite';
 import { quoteAsk } from '../shared/quoteAsk';
 import { dropClinicPages, dropStrayDois, isPaperAsk, leadPreprints, scholarlyResults, withScholarly } from './scholarly';
+import { variantChoices, variantConflict } from './productModel';
 import { recallClips, wantsVideo, withProductClips, withVideos } from './videoSearch';
 import { guessFreshness, preferFresh, staleComplaint, stricter } from './freshness';
 import { isQuoteRow, liveQuote, quoteRow, tickerNode } from './liveQuote';
@@ -885,7 +886,8 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   results = { ...results, results: dropClinicPages(query, dropStrayDois(query, results.results)) };
   results = foldReadyOfficial(query, results, officialEarly);
   const clips = await ifReady(videos, [] as Awaited<typeof videos>);
-  if (clips.length) results = { ...results, results: wantsVideo(query) ? withVideos(clips, results.results) : withProductClips(clips, results.results) };
+  const onModel = clips.filter((clip) => !variantConflict(query, clip));
+  if (onModel.length) results = { ...results, results: wantsVideo(query) ? withVideos(onModel, results.results) : withProductClips(onModel, results.results) };
   const quote = quoteAsk(query) ? await quoting : await ifReady(quoting, undefined);
   const live = quote ? quoteRow(quote) : undefined;
   if (live) {
@@ -1305,6 +1307,14 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
       }
     }
   }
+  if (compareSides(query).length < 2) {
+    const offered = variantChoices(query, found.response.results);
+    if (offered) {
+      send('head', { title: query });
+      send('done', { engine: 'extractive', removed: 0, pagesRead: 0, ms: Date.now() - started, choices: offered });
+      return;
+    }
+  }
   if (compareSides(query).length >= 2 && pattern !== 'compare') {
     pattern = 'compare';
     send('plan', { ...plan, pattern, skeleton: skeletonCard(query, pattern) });
@@ -1462,8 +1472,10 @@ function engineErrors(engines: EngineStatus[]): string[] {
 }
 
 async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind: 'followup' }>, started: number, scope: AskScope) {
-  // The stream has bytes before any search or planner. A stuck follow-up cannot look like a dead connection.
-  send('thinking', {});
+  // The same wait as a first search: sources already in hand, then the layout, then the card.
+  // A thinking line is not that wait.
+  const carried = (req.search?.results ?? []).slice(0, 8);
+  if (carried.length) send('peek', carried.map(({ title, url, domain, date }) => ({ title, url, domain, date })));
   const cleaned = plainFollowup(req.question);
   if (cleaned !== req.question) req = { ...req, question: cleaned };
   // "Watch on YouTube" is a search for the video, even when the button was marked ask.

@@ -227,6 +227,13 @@ export function useSession() {
     const controller = new AbortController();
     controllers.current.set(id, controller);
     const mine = epoch.current;
+    const bound = window.setTimeout(() => {
+      if (mine !== epoch.current || controller.signal.aborted) return;
+      const turn = get(id);
+      if (!turn?.filling || turn.result) return;
+      controller.abort();
+      update(id, { filling: false, thinking: false, status: undefined, live: undefined, error: "This didn't finish. Please retry.", retryable: true });
+    }, 50_000);
     const alive = () => mine === epoch.current && !controller.signal.aborted;
     let route = id;
     const prior = get(id);
@@ -419,6 +426,7 @@ export function useSession() {
       }
       if (!restored) throw err;
     } finally {
+      window.clearTimeout(bound);
       controller.abort();
       if (controllers.current.get(id) === controller) controllers.current.delete(id);
     }
@@ -530,7 +538,7 @@ export function useSession() {
     const ctx = searchOf(from) ?? [...ref.current].reverse().find((t) => t.search);
     if (!ctx?.search) return;
     const base = intent === 'adjust' && from?.result ? { id: from.id, title: from.result.card.title, card: from.result.card } : undefined;
-    const id = add({ kind: intent === 'search' ? 'search' : 'answer', question: q, searchId: ctx.id, filling: true, origin: intent, base, pattern: base ? from?.pattern : undefined, ref: askRef });
+    const id = add({ kind: 'search', question: q, searchId: ctx.id, filling: true, origin: intent, base, pattern: base ? from?.pattern : undefined, ref: askRef });
     scrollToTurn(id);
     const root = chainOf(from?.id);
     const found = [...ref.current].reverse().find((t) => root && t.id >= root.id && (!from || t.id <= from.id) && t.search);
