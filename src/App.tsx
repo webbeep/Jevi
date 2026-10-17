@@ -1034,7 +1034,8 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
   // its hero, tiles, grid and section titles — not a generic pair of shimmer blocks. A later `layout`
   // event (a profile override, a video lead) replaces it with the skeleton the card will actually fill.
   const chosenLayout = turn.live?.regions.length ? turn.live.regions : turn.plan?.skeleton.body ?? [];
-  const sourcesSettled = !!turn.search;
+  // Peek rows are already sources. The chosen layout replaces them as soon as they are on screen.
+  const sourcesSettled = !!turn.search || (turn.peek?.length ?? 0) > 0;
   // The skeleton is the wait only. A finished card clears `live`, which used to make this true again
   // and put the placeholder back on top of the result.
   const layoutReady = showWaitingLayout({

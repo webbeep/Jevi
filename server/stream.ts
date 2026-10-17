@@ -848,14 +848,15 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   const span = freshness !== 'any' ? freshness : stricter(guessFreshness(query), u?.freshness === 'day' || u?.freshness === 'week' ? u.freshness : 'any');
   results = { ...results, results: preferFresh(results.results, span) };
   if (heuristicPattern(query) === 'briefing') results = { ...results, results: sinkFormatWords(query, u?.queries ?? [], results.results) };
-  const scholar = await scholarly;
+  // A paper ask needs the catalog. Anything else uses it only when it has already arrived.
+  const scholar = isPaperAsk(query) ? await scholarly : await ifReady(scholarly, [] as Awaited<typeof scholarly>);
   if (scholar.length) results = { ...results, results: withScholarly(scholar, results.results) };
   results = { ...results, results: leadPreprints(query, results.results) };
   results = { ...results, results: dropClinicPages(query, dropStrayDois(query, results.results)) };
-  results = await attachOfficial(query, results, env, scope, officialEarly);
-  const clips = await videos;
+  results = foldReadyOfficial(query, results, officialEarly);
+  const clips = await ifReady(videos, [] as Awaited<typeof videos>);
   if (clips.length) results = { ...results, results: wantsVideo(query) ? withVideos(clips, results.results) : withProductClips(clips, results.results) };
-  const quote = await quoting;
+  const quote = quoteAsk(query) ? await quoting : await ifReady(quoting, undefined);
   const live = quote ? quoteRow(quote) : undefined;
   if (live) {
     results = { ...results, results: [live, ...results.results.filter((r) => !isQuoteRow(r))] };
@@ -1264,6 +1265,20 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   const boost = imageBoost(pattern, results, env, scope, boostQuery, portraitAgain);
   const crypto = cryptographyHint(query, results.results);
   await design(send, env, { query, pattern, depth: plan.depth, readPages: plan.readPages || deep || fromSeeds, search: results, context: [designContext, crypto].filter(Boolean).join('\n') || undefined, intent: u?.intent, deep, boost, entityHint, person, ticker: quote ? tickerNode(quote) : keepTicker, earlyBrief, website, allowRescue: !isPaperAsk(query), hopUrls, fromFollowup: rewritten && !isPersonAsk(query) }, started, scope, late);
+}
+
+/** The value if the work has already finished, otherwise the fallback. Does not wait. */
+function ifReady<T>(work: Promise<T>, fallback: T): Promise<T> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value: T) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    work.then(finish, () => finish(fallback));
+    queueMicrotask(() => finish(fallback));
+  });
 }
 
 /** The profile on the card, wherever the layout put it, links the person's own website. */
