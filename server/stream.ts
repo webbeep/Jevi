@@ -70,7 +70,7 @@ import { domainOf } from './util';
 import { choicesIn, distinctActions, subjectWords } from './chips';
 import { anchoredFollowup, asksToCompare, cryptographyHint, faithfulQuery, followSearchQuery, foreignName, isWritingAsk, lockChainQuery, needsOwnSearch, ownQuestion, personQuestion, quickPlan, quoteFollowQuery, sameSubjectQuery, screenSubject, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
 import { calculationAnswer, isCalculationAsk, rateOnAmount } from './calculate';
-import { comparisonRepair, comparisonTitle, keepComparedProducts, missingSideNode } from './compareAnswer';
+import { comparisonRepair, comparisonTitle, keepComparedProducts, mentionsSide, missingSideNode } from './compareAnswer';
 import { withFinishedSentences } from './polish';
 import { queryWithPlace, readerPlace, settleReadings } from './readings';
 import { isKeepOnly, keptBody } from './refine';
@@ -1305,6 +1305,17 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   await design(send, env, { query, pattern, depth: plan.depth, readPages: plan.readPages || deep || fromSeeds, search: results, context: [designContext, crypto].filter(Boolean).join('\n') || undefined, intent: u?.intent, deep, boost, entityHint, person, ticker: quote ? tickerNode(quote) : keepTicker, earlyBrief, website, allowRescue: !isPaperAsk(query), hopUrls, fromFollowup: rewritten && !isPersonAsk(query), priorBody, priorImages }, started, scope, late);
 }
 
+/** The preview picture on a page that names this product. A review with no picture is skipped. */
+async function productPhoto(side: string, rows: readonly SearchResult[]): Promise<ImageResult | undefined> {
+  const matches = rows.filter((row) => row.url && mentionsSide(side, `${row.title} ${row.snippet ?? ''}`)).slice(0, 3);
+  const found = await Promise.all(matches.map(async (row) => {
+    const thumb = await ogImageOf(row.url, 1600);
+    if (!thumb) return undefined;
+    return { url: row.url, thumb, title: row.title || side, source: row.domain || side, license: 'source' as const };
+  }));
+  return found.find((image) => image !== undefined);
+}
+
 /** Each named product, including ones already on the card. A missing row is searched before the card says it is not stated. */
 async function searchNamedSides(query: string, results: SearchResponse, env: Env, scope: AskScope, send: Send): Promise<SearchResponse> {
   const sides = compareSides(query).slice(0, 4);
@@ -1312,9 +1323,11 @@ async function searchNamedSides(query: string, results: SearchResponse, env: Env
   scope.ledger.bonus = (scope.ledger.bonus ?? 0) + sides.length;
   const found = await Promise.all(sides.map(async (side) => {
     const again = await searchWithLate({ q: `${side} specs price`, freshness: 'any', count: 6, lite: true }, env, scope);
+    const rows = applyRelevance(side, { ...again.response, query: side }, scope.ledger).results;
+    const photo = await productPhoto(side, rows);
     return {
-      results: applyRelevance(side, { ...again.response, query: side }, scope.ledger).results,
-      images: again.response.images ?? [],
+      results: rows,
+      images: photo ? [photo, ...(again.response.images ?? [])] : (again.response.images ?? []),
     };
   }));
   const add = found.flatMap((item) => item.results).filter((row) => row.url && !results.results.some((have) => have.url === row.url)).slice(0, 12);
