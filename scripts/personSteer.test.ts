@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { movesOn } from '../server/ai.ts';
 import { personSubject } from '../server/entity.ts';
-import { choiceOnlyQuery, notRejected, readPeople } from '../server/peopleSplit.ts';
+import { choiceOnlyQuery, notRejected, readPeople, withoutGluedPerson } from '../server/peopleSplit.ts';
 import { personSteer, pronounFollow, roleFollow, threadPerson, topicOnly, withoutChosen } from '../server/personSteer.ts';
 import { plainQuotes } from '../server/queryClean.ts';
 
@@ -58,6 +58,8 @@ test('a choice searches that person only, not another candidate glued on', () =>
   assert.equal(out.find((c) => c.name === 'Richard Schimel')?.query, 'Richard Schimel');
   assert.equal(out.find((c) => c.name === 'Ricky Cheuk')?.query, 'Ricky Cheuk');
   assert.equal(choiceOnlyQuery('Ada Lovelace', 'Ada Lovelace mathematician', ['Charles Babbage']), 'Ada Lovelace mathematician');
+  assert.equal(withoutGluedPerson('Jordan Lee Executive Jordan Lee Tennis'), 'Jordan Lee Tennis');
+  assert.equal(withoutGluedPerson('Richard Schimel Ricky Blueflame AI'), 'Ricky Blueflame AI');
 });
 
 test('people choices carry the full name the results use, never a stray one', () => {

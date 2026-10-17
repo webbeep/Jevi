@@ -78,18 +78,22 @@ export function choiceOnlyQuery(name: string, query: string, others: readonly st
 export function withoutGluedPerson(query: string): string {
   const words = query.trim().split(/\s+/).filter(Boolean);
   if (words.length < 3) return words.join(' ');
-  const given = (word: string) => /^[A-Z]/.test(word) && firstNameForms(word.toLowerCase()).length > 1;
+  const cap = (word: string) => /^[A-Z][a-z]{1,}/.test(word);
+  const given = (word: string) => cap(word) && firstNameForms(word.toLowerCase()).length > 1;
   let cut = 0;
+  const anchor = wordKey(words[0] ?? '');
   const seen = new Map<string, number>();
   for (let i = 0; i < words.length; i++) {
     const word = words[i]!;
-    if (!given(word)) continue;
+    if (!cap(word)) continue;
     const key = wordKey(word);
+    // A repeated surname is still the chosen person. Only a repeated given name starts another one.
+    if (key !== anchor && !given(word)) continue;
     const prev = seen.get(key);
     if (prev !== undefined) cut = i;
     seen.set(key, i);
   }
-  if (cut === 0 && words.length >= 4 && given(words[0]!) && /^[A-Z]/.test(words[1]!) && given(words[2]!) && wordKey(words[0]!) !== wordKey(words[2]!)) cut = 2;
+  if (cut === 0 && words.length >= 4 && given(words[0]!) && cap(words[1]!) && given(words[2]!) && wordKey(words[0]!) !== wordKey(words[2]!)) cut = 2;
   return words.slice(cut).join(' ');
 }
 
