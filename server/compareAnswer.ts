@@ -223,6 +223,16 @@ export function comparisonNodes(question: string, search: SearchResponse): CardN
 }
 
 function groundCompareNode(node: CardNode, sides: string[], search: SearchResponse): CardNode {
+  if (node.type === 'text' || node.type === 'callout' || node.type === 'heading') {
+    const text = node.text.split(/(?<=[.!?])\s+/).map((sentence) => {
+      if (!RELATIVE_PRICE.test(sentence)) return sentence;
+      const side = sides.find((item) => mentionsSide(item, sentence));
+      const price = side ? stickerPrice(side, search) : undefined;
+      if (!price) return sentence.replace(RELATIVE_PRICE, '').replace(/\s{2,}/g, ' ').trim();
+      return sentence.replace(RELATIVE_PRICE, price);
+    }).filter(Boolean).join(' ');
+    return text === node.text ? node : { ...node, text };
+  }
   if (node.type === 'tile') {
     const side = sides.find((item) => mentionsSide(item, node.label));
     if (!side) return node;

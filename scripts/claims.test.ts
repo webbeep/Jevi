@@ -222,6 +222,16 @@ test('a component rate stays and the combined line uses the official rate', () =
   assert.doesNotMatch(body, /7\.5%/);
 });
 
+test('a list percent agrees with the official rate', () => {
+  const pages: ClaimSource[] = [
+    { n: 1, domain: 'www.harborstate.gov', text: 'Harbor State sales tax\nThe general merchandise rate is 6.25%.' },
+  ];
+  const next = bindClaims({ type: 'list', items: [{ text: 'General merchandise is 2.69%.' }, { text: 'The state rate is 6.25%.' }] }, pages, 'What is the sales tax on general merchandise in Harbor State?');
+  const blob = JSON.stringify(next);
+  assert.match(blob, /6\.25%/);
+  assert.doesNotMatch(blob, /2\.69%/);
+});
+
 test('a city rate does not lead when the official page states the broader rate', () => {
   const pages: ClaimSource[] = [
     { n: 1, domain: 'www.harborstate.gov', text: 'Harbor State sales tax\nThe general merchandise rate is 6.25%.' },

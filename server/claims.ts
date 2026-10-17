@@ -846,14 +846,36 @@ function applyTax(node: CardNode, query: string, pick: TaxPick, keep: ReadonlySe
       });
       return items.every((item, index) => item === node.items[index]) ? node : { ...node, items };
     }
-    case 'list':
-    case 'timeline':
-    case 'profile':
-    case 'table':
-    case 'steps':
+    case 'list': {
+      const items = node.items.map((item) => {
+        const text = applyTaxText(item.text, query, pick, keep);
+        const meta = item.meta ? applyTaxText(item.meta, query, pick, keep) : item.meta;
+        return text === item.text && meta === item.meta ? item : { ...item, text, meta };
+      });
+      return items.every((item, index) => item === node.items[index]) ? node : { ...node, items };
+    }
+    case 'table': {
+      const rows = node.rows.map((row) => row.map((cell) => applyTaxText(cell, query, pick, keep)));
+      return rows.every((row, index) => row.every((cell, cellIndex) => cell === node.rows[index]?.[cellIndex])) ? node : { ...node, rows };
+    }
+    case 'timeline': {
+      const items = node.items.map((item) => {
+        const title = applyTaxText(item.title, query, pick, keep);
+        const text = item.text ? applyTaxText(item.text, query, pick, keep) : item.text;
+        return title === item.title && text === item.text ? item : { ...item, title, text };
+      });
+      return items.every((item, index) => item === node.items[index]) ? node : { ...node, items };
+    }
     case 'accordion':
+      return { ...node, items: node.items.map((item) => ({ ...item, title: applyTaxText(item.title, query, pick, keep), text: applyTaxText(item.text, query, pick, keep) })) };
     case 'proscons':
+      return { ...node, pros: node.pros.map((item) => applyTaxText(item, query, pick, keep)), cons: node.cons.map((item) => applyTaxText(item, query, pick, keep)) };
     case 'badges':
+      return { ...node, items: node.items.map((item) => applyTaxText(item, query, pick, keep)) };
+    case 'steps':
+      return { ...node, items: node.items.map((item) => ({ ...item, title: applyTaxText(item.title, query, pick, keep), detail: item.detail ? applyTaxText(item.detail, query, pick, keep) : item.detail })) };
+    case 'profile':
+      return { ...node, subtitle: node.subtitle ? applyTaxText(node.subtitle, query, pick, keep) : node.subtitle, facts: node.facts?.map((fact) => ({ ...fact, value: applyTaxText(fact.value, query, pick, keep) })) };
     case 'actions':
     case 'choices':
     case 'links':
