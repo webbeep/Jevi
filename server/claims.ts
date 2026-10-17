@@ -812,32 +812,43 @@ function applyTax(node: CardNode, query: string, pick: TaxPick, keep: ReadonlySe
   switch (node.type) {
     case 'stack':
     case 'grid':
-    case 'section':
     case 'scroller':
       return { ...node, children: node.children.map((child) => applyTax(child, query, pick, keep)) };
+    case 'section': {
+      const title = node.title ? applyTaxText(node.title, query, pick, keep) : node.title;
+      const children = node.children.map((child) => applyTax(child, query, pick, keep));
+      return title === node.title && children.every((child, index) => child === node.children[index]) ? node : { ...node, title, children };
+    }
     case 'tabs':
       return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: tab.children.map((child) => applyTax(child, query, pick, keep)) })) };
     case 'text':
-    case 'callout':
     case 'quote':
     case 'draft':
     case 'heading': {
       const text = applyTaxText(node.text, query, pick, keep);
       return text === node.text ? node : { ...node, text };
     }
+    case 'callout': {
+      const text = applyTaxText(node.text, query, pick, keep);
+      const title = node.title ? applyTaxText(node.title, query, pick, keep) : node.title;
+      return text === node.text && title === node.title ? node : { ...node, text, title };
+    }
     case 'hero': {
       const caption = node.caption ? applyTaxText(node.caption, query, pick, keep) : node.caption;
-      const value = applyTaxText(node.value, query, pick, keep);
-      return caption === node.caption && value === node.value ? node : { ...node, caption, value };
+      const label = node.label ? applyTaxText(node.label, query, pick, keep) : node.label;
+      const value = node.unit === '%' || node.unit === 'percent' ? String(pick.rate) : applyTaxText(node.value, query, pick, keep);
+      return caption === node.caption && label === node.label && value === node.value ? node : { ...node, caption, label, value };
     }
     case 'tile': {
       const value = node.value ? applyTaxText(node.value, query, pick, keep) : node.value;
       const sub = node.sub ? applyTaxText(node.sub, query, pick, keep) : node.sub;
-      return value === node.value && sub === node.sub ? node : { ...node, value, sub, source: node.source ?? pick.n };
+      const label = applyTaxText(node.label, query, pick, keep);
+      return value === node.value && sub === node.sub && label === node.label ? node : { ...node, value, sub, label, source: node.source ?? pick.n };
     }
     case 'stat': {
-      const value = applyTaxText(node.value, query, pick, keep);
-      return value === node.value ? node : { ...node, value };
+      const label = applyTaxText(node.label, query, pick, keep);
+      const value = node.unit === '%' || node.unit === 'percent' ? String(pick.rate) : applyTaxText(node.value, query, pick, keep);
+      return label === node.label && value === node.value ? node : { ...node, label, value };
     }
     case 'keyvalue': {
       const items = node.items.map((item) => {
