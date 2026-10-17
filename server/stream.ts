@@ -57,7 +57,7 @@ import { gapQuery, onTopicCount, rescueQuery, sourcesMiss } from './rescue';
 import { keepPictures, reviewCard, type Review } from './review';
 import { permitted } from './images';
 import { hasLlm } from './llm';
-import { collectPages, ogImageOf } from './pages';
+import { BROWSER_UA, collectPages, ogImageOf } from './pages';
 import { MADE_PATTERNS, compareSideQueries, compareSides, heuristicPattern, skeletonCard } from './patterns';
 import { planLayout } from './plan';
 import type { AskScope, CallLedger } from './budget';
@@ -1305,12 +1305,22 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   await design(send, env, { query, pattern, depth: plan.depth, readPages: plan.readPages || deep || fromSeeds, search: results, context: [designContext, crypto].filter(Boolean).join('\n') || undefined, intent: u?.intent, deep, boost, entityHint, person, ticker: quote ? tickerNode(quote) : keepTicker, earlyBrief, website, allowRescue: !isPaperAsk(query), hopUrls, fromFollowup: rewritten && !isPersonAsk(query), priorBody, priorImages }, started, scope, late);
 }
 
+/** A preview URL the browser can actually show. A blocked page image is not a photo. */
+async function imageLoads(url: string): Promise<boolean> {
+  try {
+    const res = await fetch(url, { method: 'HEAD', headers: { 'User-Agent': BROWSER_UA, Accept: 'image/*' }, signal: AbortSignal.timeout(1200), redirect: 'follow' });
+    return res.ok && (res.headers.get('content-type') ?? '').includes('image');
+  } catch {
+    return false;
+  }
+}
+
 /** The preview picture on a page that names this product. A review with no picture is skipped. */
 async function productPhoto(side: string, rows: readonly SearchResult[]): Promise<ImageResult | undefined> {
-  const matches = rows.filter((row) => row.url && mentionsSide(side, `${row.title} ${row.snippet ?? ''}`)).slice(0, 3);
+  const matches = rows.filter((row) => row.url && mentionsSide(side, `${row.title} ${row.snippet ?? ''}`)).slice(0, 5);
   const found = await Promise.all(matches.map(async (row) => {
     const thumb = await ogImageOf(row.url, 1600);
-    if (!thumb) return undefined;
+    if (!thumb || !(await imageLoads(thumb))) return undefined;
     return { url: row.url, thumb, title: row.title || side, source: row.domain || side, license: 'source' as const };
   }));
   return found.find((image) => image !== undefined);
@@ -1324,7 +1334,7 @@ async function searchNamedSides(query: string, results: SearchResponse, env: Env
   const found = await Promise.all(sides.map(async (side) => {
     const again = await searchWithLate({ q: `${side} specs price`, freshness: 'any', count: 6, lite: true }, env, scope);
     const rows = applyRelevance(side, { ...again.response, query: side }, scope.ledger).results;
-    const photo = await productPhoto(side, rows);
+    const photo = await productPhoto(side, [...rows, ...results.results]);
     return {
       results: rows,
       images: photo ? [photo, ...(again.response.images ?? [])] : (again.response.images ?? []),
