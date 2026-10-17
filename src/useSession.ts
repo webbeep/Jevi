@@ -3,6 +3,7 @@ import type { AskRef } from '../shared/askAbout';
 import type { AnswerCard, CardNode, CardResponse, FollowupContext, FollowupIntent, ImageCredit, LayoutPlan } from '../shared/card';
 import { loadSnapshot, normalizeAnswerQuery } from '../shared/answerKey';
 import { readChoices } from '../shared/choices';
+import { chainStartIndex } from '../shared/chainSubject';
 import { cardDigest } from '../shared/digest';
 import { MAX_AUTO_RECONNECTS, OFFLINE_MESSAGE, friendlyError, isConnectionError, reconnectDelay } from '../shared/offline';
 import { billingFromSources, settleCardPrices } from '../shared/pricing';
@@ -188,18 +189,25 @@ export function useSession() {
   }, [commit]);
   const searchOf = useCallback((t: Turn | undefined) => (t ? ref.current.find((x) => x.id === t.searchId) : undefined), []);
 
+  const chainOf = (endId?: number) => {
+    const turns = ref.current.map((t) => ({ question: t.question, title: t.result?.card.title }));
+    const end = endId === undefined ? turns.length - 1 : ref.current.findIndex((t) => t.id === endId);
+    const start = chainStartIndex(turns, end < 0 ? 0 : end);
+    return ref.current[start];
+  };
+
   /**
    * Conversation memory for the model: the topic this chain started with,
    * short digests of earlier turns in that chain, and a fuller digest of the card
    * being acted on. Another chain's places and businesses stay out.
    */
-  const memory = (beforeId?: number, focusId?: number, rootId?: number) => {
-    const inChain = (t: Turn) => rootId === undefined || t.id === rootId || t.searchId === rootId;
+  const memory = (beforeId?: number, focusId?: number, minId?: number) => {
+    const inChain = (t: Turn) => minId === undefined || t.id >= minId;
     const done = ref.current.filter((t) => t.result && inChain(t) && (beforeId === undefined || t.id < beforeId));
     if (!done.length) return '';
     const focus = done.find((t) => t.id === focusId) ?? done[done.length - 1];
     const earlier = done.filter((t) => t !== focus).slice(-7);
-    const root = rootId !== undefined ? ref.current.find((t) => t.id === rootId) : ref.current[0];
+    const root = minId !== undefined ? ref.current.find((t) => t.id === minId) : ref.current[0];
     return [
       `Topic: ${root?.question ?? focus.question}`,
       ...(earlier.length ? ['Earlier turns, oldest first:', ...earlier.map((t) => `- Q: ${t.question} → ${cardDigest(t.result!.card, 260)}`)] : []),
@@ -419,14 +427,17 @@ export function useSession() {
   const design = useCallback(async (id: number, opts: { pattern?: string; simple?: boolean; followup?: FollowupContext; status?: string } = {}) => {
     const turn = get(id);
     const ctx = searchOf(turn);
-    if (!turn?.plan || !ctx?.search) return;
+    const chain = chainOf(id);
+    const found = [...ref.current].reverse().find((t) => chain && t.id >= chain.id && t.id <= id && t.search);
+    const search = found?.search ?? ctx?.search;
+    if (!turn?.plan || !search) return;
     const pattern = opts.pattern ?? turn.pattern ?? turn.plan.pattern;
     const simple = opts.simple ?? turn.simple;
     const followup = opts.followup
       ?? (turn.base ? { mode: 'refine' as const, question: turn.question, baseCard: turn.base.card } : turn.kind === 'answer' ? { mode: turn.mode ?? 'answer', question: turn.question } : undefined);
     update(id, { filling: true, status: opts.status, pattern, simple, error: undefined, live: undefined });
-    const context = memory(id, turn.base?.id, ctx.id) || undefined;
-    await run(id, { kind: 'design', query: ctx.search.query, pattern, depth: turn.plan.depth, readPages: turn.plan.readPages, search: ctx.search, simple, followup, context }).catch(() => undefined);
+    const context = memory(id, turn.base?.id, chain?.id) || undefined;
+    await run(id, { kind: 'design', query: search.query, pattern, depth: turn.plan.depth, readPages: turn.plan.readPages, search, simple, followup, context }).catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [update, run]);
 
@@ -521,14 +532,17 @@ export function useSession() {
     const base = intent === 'adjust' && from?.result ? { id: from.id, title: from.result.card.title, card: from.result.card } : undefined;
     const id = add({ kind: intent === 'search' ? 'search' : 'answer', question: q, searchId: ctx.id, filling: true, origin: intent, base, pattern: base ? from?.pattern : undefined, ref: askRef });
     scrollToTurn(id);
-    const cards = ref.current.filter((t) => t.result && t.id !== id && (t.id === ctx.id || t.searchId === ctx.id)).slice(-8).map((t) => ({ id: t.id, title: t.result!.card.title, card: t.result!.card, pattern: t.pattern }));
+    const root = chainOf(from?.id);
+    const found = [...ref.current].reverse().find((t) => root && t.id >= root.id && (!from || t.id <= from.id) && t.search);
+    const search = found?.search ?? ctx.search;
+    const cards = ref.current.filter((t) => t.result && t.id !== id && root && t.id >= root.id).slice(-8).map((t) => ({ id: t.id, title: t.result!.card.title, card: t.result!.card, pattern: t.pattern }));
     await run(id, {
       kind: 'followup',
       question: q,
-      original: ctx.question,
-      search: ctx.search,
+      original: root?.question ?? ctx.question,
+      search,
       cards,
-      context: memory(id, from?.id, ctx.id) || undefined,
+      context: memory(id, from?.id, root?.id) || undefined,
       intent,
       from: from?.id,
       ...(askRef ? { ref: askRef } : {}),
