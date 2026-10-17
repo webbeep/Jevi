@@ -68,9 +68,9 @@ import { type LateExtras, normalizeUrl, searchWithLate } from './search';
 import type { WebHit } from './cascade';
 import { domainOf } from './util';
 import { choicesIn, distinctActions, subjectWords } from './chips';
-import { anchoredFollowup, asksToCompare, cryptographyHint, faithfulQuery, followSearchQuery, foreignName, isWritingAsk, lockChainQuery, needsOwnSearch, ownQuestion, personQuestion, quickPlan, quoteFollowQuery, sameSubjectQuery, screenSubject, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
+import { anchoredFollowup, asksToCompare, comparisonFollow, cryptographyHint, faithfulQuery, followSearchQuery, foreignName, isWritingAsk, lockChainQuery, needsOwnSearch, ownQuestion, personQuestion, quickPlan, quoteFollowQuery, sameSubjectQuery, screenSubject, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
 import { calculationAnswer, isCalculationAsk, rateOnAmount } from './calculate';
-import { comparisonRepair, comparisonTitle, keepComparedProducts, mentionsSide, missingSideNode } from './compareAnswer';
+import { comparisonRepair, comparisonTitle, keepComparedProducts, mentionsSide, missingSideNode, nameForms, stickerPrice } from './compareAnswer';
 import { withFinishedSentences } from './polish';
 import { queryWithPlace, readerPlace, settleReadings } from './readings';
 import { isKeepOnly, keptBody } from './refine';
@@ -837,8 +837,8 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   const places = workplaceQueries(query);
   const extraWait = hopList.length || places.length ? 1800 : undefined;
   const withHops = (extras: string[]) => {
-    const room = extraSearchRoom(route, hopList.length, places.length);
-    return moreQueries(query, [...hopList, ...places, ...extras]).slice(0, room);
+    const room = extraSearchRoom(route, hopList.length, places.length, compareSides(query).length);
+    return moreQueries(query, [...hopList, ...places, ...extras], room);
   };
   const deep = route === 'deep';
   let found: Awaited<ReturnType<typeof searchWithLate>>;
@@ -1069,6 +1069,23 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
         results = { ...results, results: cited, knowledge: undefined };
         fromSeeds = true;
         recovered = 'seeds';
+      }
+    }
+    if (!results.results.length && seedRows?.length) {
+      const asked = query.match(/^(?:what|who)\s+(?:is|are)\s+(.+?)\s*\??$/i)?.[1]?.replace(/[?.!]+$/, '').trim() || query.trim();
+      const forms = nameForms(asked, seedRows.map((row) => `${row.title} ${row.snippet ?? ''}`).join('\n'))
+        .filter((form) => form.toLowerCase() !== asked.toLowerCase())
+        .slice(0, 2);
+      for (const form of forms) {
+        searchRoom(scope);
+        const again = await searchWithLate({ q: `${form} price`, freshness: 'any', count: 8, lite: true }, env, scope);
+        const kept = rowsAbout(asked, form, again.response.results);
+        if (!kept.length) continue;
+        results = { ...again.response, results: kept, knowledge: undefined };
+        late = again.late;
+        recovered = 'relaxed';
+        console.log(JSON.stringify({ zo: 'product-form', form, kept: kept.length }));
+        break;
       }
     }
     if (!results.results.length && hasLlm(env)) recovered = 'knowledge';
@@ -1326,19 +1343,41 @@ async function productPhoto(side: string, rows: readonly SearchResult[]): Promis
   return found.find((image) => image !== undefined);
 }
 
-/** Each named product, including ones already on the card. A missing row is searched before the card says it is not stated. */
+function searchRoom(scope: AskScope) {
+  const room = SEARCH_CALL_CAP + (scope.ledger.bonus ?? 0) - searchCalls(scope.ledger);
+  if (room < 1) scope.ledger.bonus = (scope.ledger.bonus ?? 0) + (1 - room);
+}
+
+/** Pages about this product, including a spaced name ("Glow Band") for a one-word side ("Glowband"). */
+function rowsAbout(side: string, form: string, rows: readonly SearchResult[]): SearchResult[] {
+  return rows.filter((row) => {
+    const text = `${row.title} ${row.snippet ?? ''}`;
+    return mentionsSide(side, text) || mentionsSide(form, text);
+  });
+}
+
+/** Each named product, including ones already on the card. A missing price is another search of that product. */
 async function searchNamedSides(query: string, results: SearchResponse, env: Env, scope: AskScope, send: Send): Promise<SearchResponse> {
   const sides = compareSides(query).slice(0, 4);
   if (sides.length < 2) return results;
-  scope.ledger.bonus = (scope.ledger.bonus ?? 0) + sides.length;
+  const corpus = results.results.map((row) => `${row.title} ${row.snippet ?? ''}`).join('\n');
   const found = await Promise.all(sides.map(async (side) => {
-    const again = await searchWithLate({ q: `${side} specs price`, freshness: 'any', count: 6, lite: true }, env, scope);
-    const rows = applyRelevance(side, { ...again.response, query: side }, scope.ledger).results;
+    const forms = nameForms(side, `${corpus}\n${side}`);
+    let rows: SearchResult[] = [];
+    let images: ImageResult[] = [];
+    const havePrice = () => stickerPrice(side, { ...results, results: [...rows, ...results.results] });
+    if (!havePrice()) {
+      for (const form of forms) {
+        searchRoom(scope);
+        const again = await searchWithLate({ q: `${form} price`, freshness: 'any', count: 6, lite: true }, env, scope);
+        rows = [...rows, ...rowsAbout(side, form, again.response.results)];
+        images = [...(again.response.images ?? []), ...images];
+        if (havePrice()) break;
+      }
+    }
     const photo = await productPhoto(side, [...rows, ...results.results]);
-    return {
-      results: rows,
-      images: photo ? [photo, ...(again.response.images ?? [])] : (again.response.images ?? []),
-    };
+    if (photo) images = [photo, ...images];
+    return { results: rows, images };
   }));
   const add = found.flatMap((item) => item.results).filter((row) => row.url && !results.results.some((have) => have.url === row.url)).slice(0, 12);
   const seen = new Set(results.images.map((image) => image.thumb));
@@ -1482,6 +1521,14 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
     send('head', { title: answer.title, subtitle: answer.subtitle });
     answer.nodes.forEach((node, index) => send('node', { index, node }));
     send('done', { engine: 'reasoning', removed: 0, pagesRead: 0, ms: Date.now() - started });
+    return;
+  }
+
+  // A follow-up about one product on a comparison searches that product. Both names are not one token.
+  const compared = req.intent !== 'adjust' ? comparisonFollow(req.question, req.original) : undefined;
+  if (compared) {
+    send('rewrite', { query: compared });
+    await searchAndDesign(send, env, compared, 'any', context, started, scope, true, req.search?.results);
     return;
   }
 

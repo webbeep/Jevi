@@ -184,6 +184,10 @@ function labelOnly(box: Box, label: string, E?: string): string {
   if (personName(subject0)) return aboutPerson(subject, detail);
   if (subject0.split(' ').length > 7) return `Explain "${cut(subject0, 80)}"`;
   if (E && (box.kind === 'tile' || box.kind === 'stat' || box.kind === 'fact') && subject0.split(' ').every((w) => isCap(w) || isLowerWord(w)) && !mentions(subject0, E)) {
+    // The card title named several products. Ask about this one, not "A B's b".
+    const owner = E.split(/\s+/);
+    const labelWord = subject0.toLowerCase();
+    if (owner.length >= 3 && owner.some((word) => word.toLowerCase() === labelWord)) return `What is ${subject}?`;
     return `What is ${possessive(E)} ${lowerLabel(subject)}?`;
   }
   return `What is ${subject}?`;
@@ -309,6 +313,8 @@ const DATE_WORD = (w: string) => MONTH.test(w) || /^(19|20)\d{2}$/.test(w) || /^
  * entity, but the tap still has to say NBA — otherwise "Top 10 plays" searches the wrong sport.
  */
 export function topicOf(title: string | undefined): string | undefined {
+  // "Northwatch vs Glowband" is two products. Dropping "vs" would glue them into one name.
+  if (title && /\s+(?:vs\.?|versus)\s+/i.test(title)) return undefined;
   const named = entityOf(title);
   if (named) return named;
   let t = clean(title);

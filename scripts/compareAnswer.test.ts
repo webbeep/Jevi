@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import type { CardNode } from '../shared/card.ts';
 import type { SearchResponse } from '../shared/types.ts';
 import { asksToCompare } from '../server/askGuard.ts';
-import { answersComparison, comparisonNodes, comparisonRepair, comparisonTitle, keepComparedProducts, mentionsSide, missingSideNode, sameProduct, showsComparison } from '../server/compareAnswer.ts';
+import { answersComparison, comparisonNodes, comparisonRepair, comparisonTitle, keepComparedProducts, mentionsSide, missingSideNode, nameForms, sameProduct, showsComparison } from '../server/compareAnswer.ts';
 import { candidates } from '../server/extract.ts';
 import { compareSideQueries, compareSides } from '../server/patterns.ts';
 import { Polisher, completeSentences, emptyFigure, withoutEmptySlots } from '../server/polish.ts';
@@ -54,6 +54,11 @@ test('snippet sentences are not stored already cut off', () => {
   const texts = candidates(search(CLIPPED)).map((c) => c.text);
   assert.ok(texts.some((t) => t.includes('25.5') && t.includes('(229).')));
   assert.ok(texts.every((t) => !/…|\.\.\.|Big 12/.test(t)));
+});
+
+test('a one-word product is also searched as the spaced name the sources use', () => {
+  assert.deepEqual(nameForms('Glowband', 'Reviewed the Harbor Glow Band against the Northwatch.'), ['Glowband', 'Glow Band', 'Harbor Glow Band']);
+  assert.deepEqual(nameForms('Northwatch 2', 'The Northwatch 2 costs $90.'), ['Northwatch 2']);
 });
 
 test('a comparison follow-up is searched on its own, and a pronoun one is not', () => {

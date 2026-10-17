@@ -1,10 +1,16 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { anchoredFollowup, asksToCompare, cardFollowQuery, cryptographyHint, faithfulQuery, followSearchQuery, foreignName, isWritingAsk, lockChainQuery, needsOwnSearch, ownQuestion, personQuestion, pointsAtCard, quoteFollowQuery, sameSubjectQuery, screenSubject, scrubLeak, standsAlone, stripForeignNames, withoutLeakActions, withoutRepeatedCallouts } from '../server/askGuard.ts';
+import { anchoredFollowup, asksToCompare, cardFollowQuery, comparisonFollow, cryptographyHint, faithfulQuery, followSearchQuery, foreignName, isWritingAsk, lockChainQuery, needsOwnSearch, ownQuestion, personQuestion, pointsAtCard, quoteFollowQuery, sameSubjectQuery, screenSubject, scrubLeak, standsAlone, stripForeignNames, withoutLeakActions, withoutRepeatedCallouts } from '../server/askGuard.ts';
 import { isPersonAsk } from '../server/entity.ts';
 import { planLayout } from '../server/plan.ts';
 import type { CardNode } from '../shared/card.ts';
 import { followupLabel, visibleSpelling } from '../shared/followupLabel.ts';
+
+test('a follow-up about one compared product does not glue both names', () => {
+  assert.equal(comparisonFollow("What is Northwatch Glowband's glowband?", 'Northwatch 2 vs Glowband'), 'What is Glowband?');
+  assert.equal(comparisonFollow('What is Glowband?', 'Northwatch 2 vs Glowband'), 'What is Glowband?');
+  assert.equal(comparisonFollow('which one has better battery life?', 'Northwatch 2 vs Glowband'), undefined);
+});
 
 test('a which-one follow-up stays on the comparison already on screen', () => {
   assert.equal(anchoredFollowup('iphone 17 vs pixel 10', 'which one has better battery life?'), 'iphone 17 vs pixel 10 battery life');

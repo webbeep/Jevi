@@ -36,6 +36,39 @@ function mentionsJoined(side: string, text: string): boolean {
   return false;
 }
 
+const BRAND_SKIP = new Set(['the', 'and', 'for', 'with', 'from', 'this', 'that', 'best', 'top', 'new', 'vs', 'versus', 'review', 'reviews', 'compare', 'comparison']);
+
+/**
+ * Names to search for one product: the words they typed, a spaced split the sources use
+ * ("glowband" beside "Glow Band"), and a brand sitting in front of that split.
+ */
+export function nameForms(side: string, corpus: string): string[] {
+  const compact = side.toLowerCase().replace(/[^a-z0-9]+/g, '');
+  const forms: string[] = [];
+  const add = (value: string) => {
+    const text = value.replace(/\s+/g, ' ').trim();
+    if (text.length < 2 || forms.some((have) => have.toLowerCase() === text.toLowerCase())) return;
+    forms.push(text);
+  };
+  add(side);
+  if (compact.length < 4) return forms;
+  const words = corpus.match(/[A-Za-z0-9]+/g) ?? [];
+  for (let i = 0; i < words.length; i++) {
+    let acc = '';
+    for (let j = i; j < words.length && j < i + 4; j++) {
+      acc += words[j]!.toLowerCase();
+      if (acc.length > compact.length) break;
+      if (acc !== compact || j === i) continue;
+      const phrase = words.slice(i, j + 1).join(' ');
+      add(phrase);
+      const prev = words[i - 1];
+      if (prev && /^[A-Z]/.test(prev) && prev.length >= 3 && !BRAND_SKIP.has(prev.toLowerCase())) add(`${prev} ${phrase}`);
+      break;
+    }
+  }
+  return forms;
+}
+
 /** True when `text` uses this side's own name, not a generic word that merely sits next to it. */
 export function mentionsSide(side: string, text: string): boolean {
   if (mentionsJoined(side, text)) return true;
@@ -137,6 +170,7 @@ function joinSides(sides: string[]): string {
  */
 const STICKER = /(?:\$|€|£|¥)\s?\d{1,4}(?:,\d{3})*(?:\.\d{2})?/g;
 const RELATIVE_PRICE = /\b(?:cheaper|cost(?:s|ing)? more|more expensive|less expensive|saving|saves|discount|between|than)\b|(?:\$|€|£|¥)\s?\d[\d,]*(?:\.\d{2})?\s*[–-]\s*(?:\$|€|£|¥)?\s?\d/i;
+const NO_PRICE = /\bno price stated\b|\bprice (?:is )?not stated\b|\bno specs or price\b/i;
 
 /** One amount the source states for this product. A range or a "cheaper" line is not that price. */
 export function stickerPrice(side: string, search: SearchResponse): string | undefined {
@@ -225,9 +259,10 @@ export function comparisonNodes(question: string, search: SearchResponse): CardN
 function groundCompareNode(node: CardNode, sides: string[], search: SearchResponse): CardNode {
   if (node.type === 'text' || node.type === 'callout' || node.type === 'heading') {
     const text = node.text.split(/(?<=[.!?])\s+/).map((sentence) => {
-      if (!RELATIVE_PRICE.test(sentence)) return sentence;
       const side = sides.find((item) => mentionsSide(item, sentence));
       const price = side ? stickerPrice(side, search) : undefined;
+      if (price && NO_PRICE.test(sentence)) return '';
+      if (!RELATIVE_PRICE.test(sentence)) return sentence;
       if (!price) return sentence.replace(RELATIVE_PRICE, '').replace(/\s{2,}/g, ' ').trim();
       return sentence.replace(RELATIVE_PRICE, price);
     }).filter(Boolean).join(' ');

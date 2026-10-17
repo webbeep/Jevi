@@ -199,6 +199,12 @@ test('topicOf keeps the subject of a topic title', () => {
   assert.equal(topicOf('iPhone 17 Pro'), 'iPhone 17 Pro');
   assert.equal(topicOf('How to ripen avocados'), 'ripen avocados');
   assert.equal(topicOf(undefined), undefined);
+  assert.equal(topicOf('Northwatch 2 vs Glowband 4'), undefined);
+});
+
+test('a comparison tile asks about that product, not both names glued together', () => {
+  assert.equal(askQuestion({ kind: 'tile', label: 'Glowband', entity: 'Northwatch Edge Glowband' }), 'What is Glowband?');
+  assert.equal(askQuestion({ kind: 'tile', label: 'Glowband' }), 'What is Glowband?');
 });
 
 test('usefulFollowups drops a question that only repeats the card', () => {

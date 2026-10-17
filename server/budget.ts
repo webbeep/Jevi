@@ -149,14 +149,14 @@ export function queriesForAsk(literal: string, _extras: string[]): string {
  * At most two: with the literal search that is the whole three-call cap,
  * so Wikipedia runs only when fewer than two rewrites are left.
  */
-export function moreQueries(literal: string, extras: string[]): string[] {
+export function moreQueries(literal: string, extras: string[], limit = 2): string[] {
   const base = cleanQuery(literal).toLowerCase();
   const out: string[] = [];
   for (const raw of extras) {
     const q = cleanQuery(raw);
     if (!q || q.toLowerCase() === base || out.some((x) => x.toLowerCase() === q.toLowerCase())) continue;
     out.push(q);
-    if (out.length === 2) break;
+    if (out.length === limit) break;
   }
   return out;
 }
@@ -166,8 +166,10 @@ export function moreQueries(literal: string, extras: string[]): string[] {
  * A workplace plus a given name searches both forms ("Tim at X" and "Timothy at X").
  * One of those is not enough: the other person never reaches the picker.
  */
-export function extraSearchRoom(route: 'quick' | 'deep', hops: number, workplace = 0): number {
-  return Math.min(2, Math.max(route === 'deep' ? 2 : 1, Math.min(hops, 2), Math.min(workplace, 2)));
+export function extraSearchRoom(route: 'quick' | 'deep', hops: number, workplace = 0, compares = 0): number {
+  const base = Math.max(route === 'deep' ? 2 : 1, Math.min(hops, 2), Math.min(workplace, 2));
+  // A comparison searches each product, not only the first extra slot.
+  return Math.min(4, Math.max(base, Math.min(compares, 4)));
 }
 
 /** One line per ask. No keys, headers, query text, or URLs. `served` is the engine name only. */

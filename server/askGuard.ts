@@ -5,6 +5,7 @@ import { isBlockPage } from './blockPage';
 import { isCalculationAsk } from './calculate';
 import { repeatsCallout } from './chips';
 import { isPersonAsk, personSubject } from './entity';
+import { mentionsSide } from './compareAnswer';
 import { compareSides, heuristicPattern, patternById, skeletonCard } from './patterns';
 
 const IP = /\b(?:\d{1,3}\.){3}\d{1,3}\b|\b(?:[0-9a-f]{1,4}:){2,}[0-9a-f:]*/i;
@@ -292,6 +293,29 @@ export function quoteFollowQuery(question: string, subjects: readonly string[]):
       words = words.slice(0, -1);
     }
   }
+  return undefined;
+}
+
+/**
+ * A follow-up on a comparison that names one product, or a possessive that glued both names
+ * into one token ("What is Northwatch Glowband's glowband?"). The search is that product.
+ */
+export function comparisonFollow(question: string, original: string): string | undefined {
+  const sides = compareSides(original);
+  if (sides.length < 2) return undefined;
+  const q = question.trim();
+  const owned = q.match(/^(?:what|who)\s+(?:is|are)\s+(.+?)['’]s\s+(.+?)\s*\??$/i);
+  if (owned) {
+    const owner = owned[1] ?? '';
+    const object = (owned[2] ?? '').replace(/[?.!]+$/, '').trim();
+    const inOwner = sides.filter((side) => mentionsSide(side, owner));
+    if (inOwner.length >= 2 && object) {
+      const asked = sides.find((side) => mentionsSide(side, object));
+      return `What is ${asked ?? object}?`;
+    }
+  }
+  const named = sides.filter((side) => mentionsSide(side, q));
+  if (named.length === 1) return q;
   return undefined;
 }
 
