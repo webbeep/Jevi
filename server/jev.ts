@@ -22,7 +22,8 @@ export async function askJev(
   const key = jevKey(env);
   if (!key) throw new Error('JEV_API_KEY not configured');
   const base = env.JEV_BASE_URL || 'https://api.typesafe.ai';
-  const body = JSON.stringify({ model: env.JEV_MODEL || 'jev-1.13.0', state, questions });
+  // jev-latest still aliases jev-1.13.0. jev-1.14.0 is the current release (Oct 2026).
+  const body = JSON.stringify({ model: env.JEV_MODEL || 'jev-1.14.0', state, questions });
 
   for (let attempt = 0; attempt < 3; attempt++) {
     const res = await fetch(`${base}/v1/systemone`, {

@@ -49,8 +49,9 @@ import { rewriteQuery } from './ai';
 import { type DesignRequest, designParallel, designStream, gateNode } from './design';
 import { BRIEF_ROWS, briefSources, remapBrief, type SourceBrief } from './brief';
 import { claimSources, groundMembers } from './claims';
-import { answerTitle, fillPaperCard, keepAnswerBody, restoreKeptPapers } from './cardAgree';
+import { answerTitle, fillPaperCard, keepAnswerBody, restoreKeptPapers, wantsNamedQuote } from './cardAgree';
 import { dropDisputedBio, type BioSource } from './bioFacts';
+import { withoutGluedPerson } from './peopleSplit';
 import { abstainComputed, alignFactProse, cardFacts, factAnswer, hasMemberWork, hopQueries, leadMemberRows, nextHop, placeFactLead, unsupportedYear } from './hops';
 import { gapQuery, onTopicCount, rescueQuery, sourcesMiss } from './rescue';
 import { keepPictures, reviewCard, type Review } from './review';
@@ -364,12 +365,7 @@ async function rescueSources(send: Send, env: Env, req: DesignArgs, brief: Sourc
  * has the number. Waiting on more page reads is what held the card back.
  */
 function pagesCanWait(req: DesignArgs): boolean {
-  if (isPersonAsk(req.query) && (req.search.knowledge?.extract?.length ?? 0) > 180) {
-    const blob = `${req.search.knowledge?.extract ?? ''}\n${req.search.results.slice(0, 8).map((row) => `${row.title ?? ''} ${row.snippet ?? ''}`).join('\n')}`;
-    // A birthplace, ownership share, or award has to be checked against the page, not only the snippet.
-    if (/\b(?:born|birthplace|owns?|ownership|stake|medal|award|honou?r)\b/i.test(blob)) return false;
-    return true;
-  }
+  if (isPersonAsk(req.query) && (req.search.knowledge?.extract?.length ?? 0) > 180) return true;
   if (heuristicPattern(req.query) !== 'briefing' || guessFreshness(req.query) !== 'day') return false;
   return req.search.results.slice(0, 5).some((row) => hostTier(row.domain) === 0 && /\d/.test(`${row.title} ${row.snippet}`));
 }
@@ -412,7 +408,11 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   const briefWait = skipReads && briefing
     ? Promise.race([briefing, new Promise<SourceBrief | undefined>((resolve) => setTimeout(() => resolve(undefined), 400))])
     : briefing;
-  let brief = await briefWait?.finally(() => mark(scope.ledger, 'brief'));
+  // Sources are already in. The layout does not wait on a source check that has not finished.
+  let brief = await Promise.race([
+    briefWait ?? Promise.resolve(undefined),
+    new Promise<SourceBrief | undefined>((resolve) => setTimeout(() => resolve(undefined), 0)),
+  ]).finally(() => mark(scope.ledger, 'brief'));
   if (brief) console.log(JSON.stringify({ zo: 'brief', use: brief.use.length, stale: brief.stale, offTopic: brief.offTopic, conflicts: brief.conflicts.length, missing: !!brief.missing }));
   let rescued = false;
   let reread = false;
@@ -448,7 +448,11 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       }
     }
   }
-  const pages = reread ? await collectPages(req.search.results, env, budget, undefined, scope, req.query) : await reading;
+  const pagesReady = reread ? collectPages(req.search.results, env, budget, undefined, scope, req.query) : reading;
+  // A quote needs the named page. Every other card starts from the sources already in hand.
+  const pages = wantsNamedQuote(req.query)
+    ? await pagesReady
+    : await Promise.race([pagesReady, new Promise<Awaited<typeof pagesReady>>((resolve) => setTimeout(() => resolve([]), 0))]);
   mark(scope.ledger, 'pages');
   const fresh = pages.filter((p) => !req.search.results[p.n - 1]?.content);
   if (fresh.length) send('pages', fresh.map(({ n, url, text }) => ({ n, url, text })));
@@ -756,6 +760,8 @@ function applyReview(send: Send, req: DesignRequest, shown: Map<number, CardNode
  * Rewritten follow-ups already say what they mean, so they skip the understanding step.
  */
 async function searchAndDesign(send: Send, env: Env, query: string, freshness: Freshness, context: string | undefined, started: number, scope: AskScope, rewritten = false, seedRows?: SearchResult[], steer?: { avoid: Set<string>; rejected: string }, keepTicker?: CardNode) {
+  const unglued = withoutGluedPerson(query);
+  if (unglued !== query.trim()) query = unglued;
   const located = queryWithPlace(query, scope.place);
   if (located !== query) {
     send('rewrite', { query: located });
@@ -1319,6 +1325,8 @@ function engineErrors(engines: EngineStatus[]): string[] {
 }
 
 async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind: 'followup' }>, started: number, scope: AskScope) {
+  // The stream has bytes before any search or planner. A stuck follow-up cannot look like a dead connection.
+  send('thinking', {});
   const cleaned = plainFollowup(req.question);
   if (cleaned !== req.question) req = { ...req, question: cleaned };
   // "Watch on YouTube" is a search for the video, even when the button was marked ask.
@@ -1416,9 +1424,10 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
       await searchAndDesign(send, env, query, 'any', [chosen, pickContext].filter(Boolean).join('\n'), started, scope, true, req.search?.results);
       return;
     }
-    // A Which-one? pick is already the person to search. Any other search button is a short label
-    // for this card ("apple varieties" on an apple pie card), so the search keeps that subject.
-    const query = person ? picked : cardSearchQuery(picked, askedQuestions(req.context)[0] ?? req.original);
+    // A Which-one? pick is already the person to search. The earlier question is not glued on,
+    // and neither is another candidate. A short button on some other card still keeps that card's subject.
+    const rawQuery = person || isPersonAsk(req.original) ? picked : cardSearchQuery(picked, askedQuestions(req.context)[0] ?? req.original);
+    const query = withoutGluedPerson(rawQuery);
     // The pick is final: it locks the person so the same name never offers another picker.
     const label = person ? pickSeeds(picked, req.search?.results ?? []).label : '';
     const chosen = person && personSubject(picked) ? `Chosen person: ${personSubject(picked)}${label ? ` — ${label}` : ''}` : '';

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { movesOn } from '../server/ai.ts';
 import { personSubject } from '../server/entity.ts';
-import { notRejected, readPeople } from '../server/peopleSplit.ts';
+import { choiceOnlyQuery, notRejected, readPeople } from '../server/peopleSplit.ts';
 import { personSteer, pronounFollow, roleFollow, threadPerson, topicOnly, withoutChosen } from '../server/personSteer.ts';
 import { plainQuotes } from '../server/queryClean.ts';
 
@@ -45,6 +45,19 @@ test('"not this" after a first-name ask offers the other people with that name',
   assert.equal(threadPerson(plainQuotes('Who’s Ricky'), 'Chosen person: Ricky Cheuk — Hong Kong rugby'), 'Ricky');
   assert.equal(personSubject(plainQuotes('Who’s Ricky')), 'Ricky');
   assert.equal(personSubject('whos Jessica Hamrick'), 'Jessica Hamrick');
+});
+
+test('a choice searches that person only, not another candidate glued on', () => {
+  const rows = { people: [
+    { name: 'Richard Schimel', who: 'Founder of a fund', rows: [1], query: 'Richard Schimel Ricky Blueflame AI' },
+    { name: 'Ricky Blueflame AI', who: 'At the company they named', rows: [2], query: 'Richard Schimel Ricky Blueflame AI' },
+    { name: 'Ricky Cheuk', who: 'The person they named', rows: [3], query: 'Ricky Gervais Ricky Cheuk' },
+  ] };
+  const out = readPeople(rows, 'Ricky', 3)!;
+  assert.equal(out.find((c) => c.name === 'Ricky Blueflame AI')?.query, 'Ricky Blueflame AI');
+  assert.equal(out.find((c) => c.name === 'Richard Schimel')?.query, 'Richard Schimel');
+  assert.equal(out.find((c) => c.name === 'Ricky Cheuk')?.query, 'Ricky Cheuk');
+  assert.equal(choiceOnlyQuery('Ada Lovelace', 'Ada Lovelace mathematician', ['Charles Babbage']), 'Ada Lovelace mathematician');
 });
 
 test('people choices carry the full name the results use, never a stray one', () => {

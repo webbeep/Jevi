@@ -154,4 +154,6 @@ test('"crypto" beside cryptography papers means the field', () => {
 test('a follow-up label stays the words that were typed', () => {
   assert.equal(followupLabel('what does this company make', 'Moderna Stock Price what does this company make'), 'what does this company make');
   assert.equal(followupLabel('What is photosynthesis?', 'What is photosynthesis?'), 'What is photosynthesis?');
+  assert.equal(followupLabel('Ricky cheuk', 'Ricky Gervais Ricky Cheuk'), 'Ricky cheuk');
+  assert.equal(followupLabel('Ricky Gervais Ricky Cheuk', 'Ricky Cheuk'), 'Ricky Cheuk');
 });
