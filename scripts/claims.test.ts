@@ -240,6 +240,41 @@ test('a small share inside a breakdown is not the merchandise rate', () => {
   assert.deepEqual(salesTax('What is the sales tax on general merchandise in Harbor State?', pages), { rate: 6.25, n: 1 });
 });
 
+test('a revenue share is not the sales tax rate', () => {
+  const pages: ClaimSource[] = [
+    {
+      n: 1,
+      domain: 'www.harborstate.gov',
+      text: 'Harbor State sales tax\nSales tax revenues as a percentage of total general revenues declined from almost 30% in fiscal year 1990 to less than 23%. The state sales tax rate has remained constant at 6.25%.',
+    },
+  ];
+  assert.deepEqual(salesTax('What is the sales tax on general merchandise in Harbor State?', pages), { rate: 6.25, n: 1 });
+});
+
+test('a local increment is not the rate the official page states', () => {
+  const pages: ClaimSource[] = [
+    {
+      n: 1,
+      domain: 'www.harborstate.gov',
+      text: 'Harbor State sales tax\nWhile local add-ons have grown, the state sales tax rate has remained constant at 6.25% for the past twenty years. The current state sales tax rate is 6.25%, of which the state retains 80% of the tax. A uniform state sales and use tax rate on general merchandise of 6.25 percent was established. The tax may be imposed in 0.25% increments and cannot exceed 1%. 0.25% sales tax on general merchandise in Madison County. The tax rate is 0.25%.',
+    },
+  ];
+  assert.deepEqual(salesTax('What is the sales tax on general merchandise in Harbor State?', pages), { rate: 6.25, n: 1 });
+  const next = bindClaims({
+    type: 'stack',
+    gap: 'md',
+    children: [
+      { type: 'hero', value: '0.25%', label: 'Harbor State sales tax on general merchandise' },
+      { type: 'text', text: 'Qualifying food, drugs and medical appliances are taxed at 1%.' },
+      { type: 'chart', kind: 'bar', unit: '%', title: 'Compare rate', data: [{ label: 'Statewide', value: 0.04 }, { label: 'Palatine', value: 2.69 }] },
+    ],
+  }, pages, 'What is the sales tax on general merchandise in Harbor State?');
+  const blob = JSON.stringify(next);
+  assert.match(blob, /6\.25%/);
+  assert.doesNotMatch(blob, /0\.25%|0\.04|2\.69|1%/);
+  assert.doesNotMatch(blob, /"type":"chart"/);
+});
+
 test('a city rate does not lead when the official page states the broader rate', () => {
   const pages: ClaimSource[] = [
     { n: 1, domain: 'www.harborstate.gov', text: 'Harbor State sales tax\nThe general merchandise rate is 6.25%.' },

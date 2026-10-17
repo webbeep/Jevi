@@ -1292,7 +1292,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     pattern = 'compare';
     send('plan', { ...plan, pattern, skeleton: skeletonCard(query, pattern) });
   }
-  if (priorBody?.length && compareSides(query).length >= 2) results = await searchNamedSides(query, results, env, scope, send);
+  if (compareSides(query).length >= 2) results = await searchNamedSides(query, results, env, scope, send);
   results = { ...results, results: leadMemberRows(query, leadPreprints(query, results.results), hopUrls) };
   const chargeAsk = /\b(?:tax|taxes|fee|fees|fine|fines|toll|tolls|duty|duties|surcharge|levy|levies)\b/i.test(query);
   const official = chargeAsk
@@ -1312,13 +1312,18 @@ async function searchNamedSides(query: string, results: SearchResponse, env: Env
   scope.ledger.bonus = (scope.ledger.bonus ?? 0) + sides.length;
   const found = await Promise.all(sides.map(async (side) => {
     const again = await searchWithLate({ q: `${side} specs price`, freshness: 'any', count: 6, lite: true }, env, scope);
-    return applyRelevance(side, { ...again.response, query: side }, scope.ledger).results;
+    return {
+      results: applyRelevance(side, { ...again.response, query: side }, scope.ledger).results,
+      images: again.response.images ?? [],
+    };
   }));
-  const add = found.flat().filter((row) => row.url && !results.results.some((have) => have.url === row.url)).slice(0, 12);
-  if (!add.length) return results;
-  const next = { ...results, results: [...add, ...results.results] };
+  const add = found.flatMap((item) => item.results).filter((row) => row.url && !results.results.some((have) => have.url === row.url)).slice(0, 12);
+  const seen = new Set(results.images.map((image) => image.thumb));
+  const images = found.flatMap((item) => item.images).filter((image) => image.thumb && !seen.has(image.thumb) && seen.add(image.thumb));
+  if (!add.length && !images.length) return results;
+  const next = { ...results, results: add.length ? [...add, ...results.results] : results.results, images: images.length ? [...images, ...results.images].slice(0, 24) : results.images };
   send('search', next);
-  console.log(JSON.stringify({ zo: 'compare-sides', sides, added: add.length }));
+  console.log(JSON.stringify({ zo: 'compare-sides', sides, added: add.length, images: images.length }));
   return next;
 }
 

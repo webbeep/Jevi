@@ -604,6 +604,65 @@ function roundedStandIn(round: number, precise: number): boolean {
   return round === Math.trunc(precise) || round === Math.round(precise);
 }
 
+const NOT_A_PLACE = new Set([
+  'while', 'where', 'which', 'after', 'before', 'under', 'there', 'these', 'those', 'their',
+  'other', 'also', 'many', 'most', 'some', 'such', 'only', 'even', 'from', 'into', 'over',
+  'with', 'this', 'that', 'each', 'both', 'more', 'than', 'then', 'when', 'what', 'have',
+  'been', 'were', 'will', 'would', 'could', 'should', 'during', 'within', 'without',
+  'between', 'through', 'including', 'excluding', 'effective', 'source', 'table', 'below',
+  'above', 'therefore', 'however', 'although', 'because', 'since', 'until', 'among',
+  'across', 'around', 'based', 'using', 'being', 'about', 'first', 'years', 'listed',
+  'various', 'following', 'current', 'history', 'reform', 'public', 'county', 'percent',
+  'january', 'february', 'march', 'april', 'june', 'july', 'august', 'september',
+  'october', 'november', 'december', 'upon', 'remained', 'remains', 'constant', 'uniform',
+  'established', 'imposed', 'authorized', 'twenty', 'build', 'fund', 'proceeds',
+]);
+
+/** Percents that are the rate, not a share of the proceeds ("of which the state retains 80%"). */
+function percentRates(sentence: string): number[] {
+  const cut = sentence.split(/\bof which\b/i)[0] ?? sentence;
+  const rates: number[] = [];
+  for (const match of cut.matchAll(/(\d{1,2}(?:\.\d+)?)\s*(?:%|percent\b)/gi)) {
+    const at = match.index ?? 0;
+    const after = cut.slice(at + match[0].length);
+    if (/^\s+of\b/i.test(after)) continue;
+    const before = cut.slice(Math.max(0, at - 32), at);
+    if (/\b(?:retains|reserved|distributed|portion|share)\s*$/i.test(before)) continue;
+    rates.push(Number(match[1]));
+  }
+  return rates;
+}
+
+/** A fund split ("1.75% to the Build Fund") is not the sales tax rate. */
+function allocationShare(sentence: string): boolean {
+  return /\b(?:fund|reserved|distributed|distribution|portion|proceeds)\b/i.test(sentence) && !/\brate\b/i.test(sentence);
+}
+
+/** "30% of total general revenues" is how big the tax is in the budget, not the rate on a purchase. */
+function revenueShare(sentence: string): boolean {
+  return /\b(?:percentage of|fiscal year|per year)\b/i.test(sentence) && !/\b(?:tax rate|merchandise)\b/i.test(sentence);
+}
+
+function sentenceHasAskWord(sentence: string, word: string): boolean {
+  if (!sentence.includes(word)) return false;
+  if (word === 'general' && /\bgeneral\s+revenues?\b/i.test(sentence) && !/\bgeneral\s+merchandise\b/i.test(sentence)) return false;
+  return true;
+}
+
+/** "In 0.25% increments" is a step local taxes may use, not the rate being asked. */
+function rateIncrement(sentence: string): boolean {
+  return /\b(?:increments?|in addition|above and beyond|add-on|add on)\b/i.test(sentence);
+}
+
+function sourceStatesFullRate(source: ClaimSource): boolean {
+  const body = `${source.text}\n${source.stated ?? ''}`;
+  for (const sentence of body.split(SENTENCE_BREAK)) {
+    if (allocationShare(sentence) || rateIncrement(sentence)) continue;
+    if (percentRates(sentence).some((rate) => rate >= 1 && rate <= 30)) return true;
+  }
+  return false;
+}
+
 interface RateCand {
   rate: number;
   n: number;
@@ -626,19 +685,22 @@ export function salesTax(query: string, sources: readonly ClaimSource[]): TaxPic
   const amount = price ? Number(price[1]!.replace(/,/g, '')) : undefined;
   const place = placePhrase(query);
   const found: RateCand[] = [];
+  const fullerOfficial = sources.some((source) => officialDomain(source.domain) && sourceStatesFullRate(source));
   for (const source of sources) {
     const official = officialDomain(source.domain);
     const body = `${source.text}\n${source.stated ?? ''}`;
     const head = (body.split('\n')[0] ?? '').toLowerCase();
     const sentences = body.split(SENTENCE_BREAK);
     for (const sentence of sentences) {
-      const percents = [...sentence.matchAll(/(\d{1,2}(?:\.\d+)?)\s*%/g)].map((match) => Number(match[1]));
+      if (allocationShare(sentence) || revenueShare(sentence)) continue;
+      const percents = percentRates(sentence);
       if (!percents.length) continue;
       const low = sentence.toLowerCase();
       const blob = `${head} ${low}`;
       const namesPlace = place.length > 0 && (place.every((word) => blob.includes(word)) || (place.includes('nyc') && blob.includes('new york')));
       const aboutPlace = place.length === 0 || namesPlace;
-      const combined = /\b(combined|total|overall)\b/i.test(sentence);
+      const aboutRevenue = /\b(?:total\s+(?:general\s+)?revenue|percentage of)\b/i.test(sentence);
+      const combined = !aboutRevenue && (/\b(?:combined|overall)\b/i.test(sentence) || /\btotal\b/i.test(sentence));
       const stateOnly = /\bstate\b/i.test(sentence) && !combined;
       const threshold = sentence.match(/(?:under|below|less than)\s+\$\s?(\d{1,3}(?:,\d{3})*)/i);
       const cut = threshold ? Number(threshold[1]!.replace(/,/g, '')) : undefined;
@@ -658,10 +720,14 @@ export function salesTax(query: string, sources: readonly ClaimSource[]): TaxPic
         else if (official) score += 2;
         if (!aboutPlace) score -= 8;
         if (stateOnly) score -= 3;
-        for (const word of questionWords(query)) if (low.includes(word)) score += 4;
+        for (const word of questionWords(query)) if (sentenceHasAskWord(low, word)) score += 4;
         if (otherPlace(sentence, query)) score -= 20;
         if (percents.length > 1 && !combined) score -= 6;
         if (rate < 1 && percents.some((item) => item >= 1)) score -= 12;
+        if (rateIncrement(sentence)) score -= 18;
+        // A tenth of a percent does not lead when an official page states a full rate.
+        if (rate < 1 && fullerOfficial) score -= 16;
+        if (/\b(?:current|remained|remains)\b/i.test(sentence)) score += 8;
         if (aboveCut && forBelow && !forAbove && !combined) score -= 5;
         if (belowCut && combined && forBelow) score -= 4;
         if (aboveCut && (combined || forAbove)) score += 3;
@@ -697,7 +763,7 @@ function otherPlace(sentence: string, query: string): boolean {
   return names.some((name) => {
     const word = name.toLowerCase();
     if (asked.includes(word)) return false;
-    if (QUESTION_SKIP.has(word)) return false;
+    if (QUESTION_SKIP.has(word) || NOT_A_PLACE.has(word)) return false;
     return word.length >= 5;
   });
 }
@@ -1785,15 +1851,43 @@ function withLeadRate(text: string, lead: number): string {
   return text.replace(/(\d{1,2}(?:\.\d+)?)\s*(?:%|percent\b)/i, (raw) => (raw.includes('%') ? `${lead}%` : `${lead} percent`));
 }
 
+/** A chart or slider whose percents are not the lead rate. Those numbers would disagree with the card. */
+function strayRateNode(node: CardNode, lead: number): boolean {
+  if (node.type === 'slider') {
+    const unit = (node.unit ?? '').toLowerCase();
+    return (unit === '%' || unit === 'percent') && Math.abs(node.value - lead) > 0.001;
+  }
+  if (node.type !== 'chart') return false;
+  const unit = (node.unit ?? '').replace(/\s/g, '').toLowerCase();
+  const values = node.data.map((item) => item.value);
+  const rates = unit === '%' || unit === 'percent' || values.some((value) => value < 1 || !Number.isInteger(value));
+  if (!rates) return false;
+  return values.some((value) => Math.abs(value - lead) > 0.001);
+}
+
+function alignTaxChildren(children: readonly CardNode[], lead: number): CardNode[] {
+  return children.map((child) => alignTax(child, lead)).filter((child) => {
+    if (strayRateNode(child, lead)) return false;
+    if ('children' in child && Array.isArray(child.children) && child.children.length === 0) return false;
+    return true;
+  });
+}
+
 function alignTax(node: CardNode, lead: number): CardNode {
   switch (node.type) {
     case 'stack':
     case 'grid':
-    case 'section':
-    case 'scroller':
-      return { ...node, children: node.children.map((child) => alignTax(child, lead)) };
+    case 'scroller': {
+      const children = alignTaxChildren(node.children, lead);
+      return children.length === node.children.length && children.every((child, index) => child === node.children[index]) ? node : { ...node, children };
+    }
+    case 'section': {
+      const children = alignTaxChildren(node.children, lead);
+      if (!children.length) return { type: 'divider' };
+      return children.length === node.children.length && children.every((child, index) => child === node.children[index]) ? node : { ...node, children };
+    }
     case 'tabs':
-      return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: tab.children.map((child) => alignTax(child, lead)) })) };
+      return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: alignTaxChildren(tab.children, lead) })) };
     case 'text':
     case 'callout':
     case 'quote':
