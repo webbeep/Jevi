@@ -135,11 +135,12 @@ export function pointsAtCard(question: string, covered: string): boolean {
   return false;
 }
 
-/** A short title already on screen. A long sentence still yields the proper name it opens with. */
+/** A short title already on screen. A pronoun question ("how tall is it?") is not the subject. A long sentence still yields the proper name it opens with. */
 export function screenSubject(title: string | undefined, original: string): string {
   const pick = (value: string) => {
     const text = value.trim();
     if (!text || text.length > 60 || text.split(/\s+/).length > 6) return '';
+    if (/\b(it|its|this|that|they|them)\b/i.test(text)) return '';
     return text;
   };
   return pick(title ?? '') || pick(original) || namedSubject(title ?? '') || namedSubject(original);
@@ -178,15 +179,17 @@ export function foreignName(text: string, allowed: string): boolean {
   });
 }
 
-/** Drops capitalised names `allowed` does not contain. The user's other words stay. */
-export function stripForeignNames(query: string, allowed: string): string {
+/** Drops capitalised names `allowed` does not contain. An aspect word the person did not capitalise ("open") drops too. */
+export function stripForeignNames(query: string, allowed: string, typed = ''): string {
   const allow = allowed.toLowerCase();
   const words = query.split(/\s+/).filter(Boolean);
   const kept = words.filter((raw, index) => {
     const bare = bareWord(raw);
     if (!NAME_WORD.test(bare)) return true;
     if (index === 0 && LEAD_NAME.has(bare.toLowerCase())) return true;
-    return allow.includes(bare.toLowerCase());
+    if (!allow.includes(bare.toLowerCase())) return false;
+    if (ASPECT.has(stem(bare.toLowerCase())) && typed && !typed.includes(bare)) return false;
+    return true;
   });
   const out = kept.join(' ').replace(/\s+/g, ' ').trim();
   return out || query.trim();
@@ -204,12 +207,7 @@ function namesNewTopic(question: string, allowed: string): boolean {
     if (stems.some((word) => word.length >= 4 && !known.has(word) && !ATTRIBUTE.has(word))) return true;
   }
   const novel = contentStems(question).filter((word) => word.length >= 4 && !known.has(word) && !ATTRIBUTE.has(word));
-  if (novel.length === 1 && !ASPECT.has(novel[0]!)) return true;
-  if (novel.length >= 2) {
-    const aspects = novel.filter((word) => ASPECT.has(word)).length;
-    if (aspects / novel.length < 0.5) return true;
-  }
-  return false;
+  return novel.length === 1 && !ASPECT.has(novel[0]!);
 }
 
 /**
@@ -236,7 +234,7 @@ export function lockChainQuery(question: string, rewritten: string, subject: str
   const name = subject.trim();
   const subjectText = `${anchor}\n${name}`;
   const switched = foreignName(question, subjectText) || namesNewTopic(question, subjectText);
-  const cleaned = stripForeignNames(rewritten.trim() || question.trim(), switched ? question : `${question}\n${subjectText}`);
+  const cleaned = stripForeignNames(rewritten.trim() || question.trim(), switched ? question : `${question}\n${subjectText}`, question);
   if (switched || !name) return cleaned;
   if (cleaned.toLowerCase().includes(name.toLowerCase())) return cleaned;
   return `${name} ${cleaned}`.replace(/\s+/g, ' ').trim();

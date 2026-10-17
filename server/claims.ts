@@ -628,8 +628,9 @@ export function salesTax(query: string, sources: readonly ClaimSource[]): TaxPic
   const found: RateCand[] = [];
   for (const source of sources) {
     const official = officialDomain(source.domain);
-    const head = (source.text.split('\n')[0] ?? '').toLowerCase();
-    const sentences = source.text.split(SENTENCE_BREAK);
+    const body = `${source.text}\n${source.stated ?? ''}`;
+    const head = (body.split('\n')[0] ?? '').toLowerCase();
+    const sentences = body.split(SENTENCE_BREAK);
     for (const sentence of sentences) {
       const percents = [...sentence.matchAll(/(\d{1,2}(?:\.\d+)?)\s*%/g)].map((match) => Number(match[1]));
       if (!percents.length) continue;
@@ -699,9 +700,10 @@ function combinedRate(sources: readonly ClaimSource[], query = ''): { rate: numb
   const place = placePhrase(query);
   let best: { rate: number; n: number; score: number } | undefined;
   for (const source of sources) {
-    const head = (source.text.split('\n')[0] ?? '').toLowerCase();
+    const body = `${source.text}\n${source.stated ?? ''}`;
+    const head = (body.split('\n')[0] ?? '').toLowerCase();
     const official = officialDomain(source.domain);
-    for (const sentence of source.text.split(SENTENCE_BREAK)) {
+    for (const sentence of body.split(SENTENCE_BREAK)) {
       if (!/\bcombined\b/i.test(sentence)) continue;
       const percents = [...sentence.matchAll(/(\d{1,2}(?:\.\d+)?)\s*%/g)].map((match) => Number(match[1]));
       const rate = percents.sort((a, b) => b - a)[0];
@@ -724,7 +726,7 @@ function combinedRate(sources: readonly ClaimSource[], query = ''): { rate: numb
  */
 export function fixTaxLines(text: string, query: string, sources: readonly ClaimSource[]): string {
   const price = questionPrice(query);
-  const combined = combinedRate(sources, query);
+  const combined = salesTax(query, sources) ?? combinedRate(sources, query);
   const parts = text.split(SENTENCE_BREAK);
   return parts.map((sentence) => {
     let next = sentence;
@@ -754,7 +756,10 @@ function applyTaxText(text: string, query: string, pick: TaxPick): string {
   const shown = [...text.matchAll(/(\d{1,2}(?:\.\d+)?)\s*(?:%|percent\b)/gi)].map((match) => Number(match[1]));
   const wrong = shown.find((rate) => Math.abs(rate - pick.rate) > 0.001);
   if (wrong === undefined) return text;
-  let out = text.replace(/(\d{1,2}(?:\.\d+)?)\s*(?:%|percent\b)/i, (raw) => (raw.includes('%') ? `${pick.rate}%` : `${pick.rate} percent`));
+  let out = text.replace(/(\d{1,2}(?:\.\d+)?)\s*(?:%|percent\b)/gi, (raw, num) => {
+    if (Math.abs(Number(num) - pick.rate) <= 0.001) return raw;
+    return raw.includes('%') ? `${pick.rate}%` : `${pick.rate} percent`;
+  });
   out = out.replace(/\[(\d+)\]/g, `[${pick.n}]`);
   if (amount === undefined) return out;
   const due = amount * pick.rate / 100;
@@ -1589,13 +1594,14 @@ export function officialCharge(query: string, sources: readonly ClaimSource[]): 
   let best: ChargePick & { score: number } | undefined;
   for (const source of sources) {
     if (!officialDomain(source.domain)) continue;
-    for (const sentence of source.text.split(SENTENCE_BREAK)) {
+    for (const sentence of `${source.text}\n${source.stated ?? ''}`.split(SENTENCE_BREAK)) {
       const money = labeledFee(sentence);
       if (!money) continue;
       const low = sentence.toLowerCase();
       let score = 1;
       for (const word of want) if (low.includes(word)) score += 3;
       if (/\btotal\b/i.test(sentence)) score += 2;
+      if (/\bcard\b/i.test(low) && !/\bcard\b/i.test(query)) score -= 4;
       if (!best || score > best.score) best = { amount: money.raw, value: money.value, n: source.n, score };
     }
   }
@@ -1607,7 +1613,7 @@ function officialAmounts(sources: readonly ClaimSource[]): (value: number) => bo
   const values: number[] = [];
   for (const source of sources) {
     if (!officialDomain(source.domain)) continue;
-    for (const match of source.text.matchAll(new RegExp(MONEY.source, 'g'))) values.push(moneyValue(match[0]));
+    for (const match of `${source.text}\n${source.stated ?? ''}`.matchAll(new RegExp(MONEY.source, 'g'))) values.push(moneyValue(match[0]));
   }
   return (value) => values.some((have) => Math.abs(have - value) < 0.001);
 }

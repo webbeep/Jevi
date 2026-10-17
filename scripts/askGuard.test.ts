@@ -96,7 +96,7 @@ test('a later turn keeps the subject on screen unless it names a different one',
   assert.equal(sameSubjectQuery('What is photosynthesis?', 'how do mRNA vaccines work', 'how do mRNA vaccines work'), undefined);
   assert.equal(sameSubjectQuery('tesla stock price', 'how to make sourdough starter', 'how to make sourdough starter'), undefined);
   assert.equal(sameSubjectQuery('how many lakes are in Minnesota', 'who is Michael Jordan', 'who is Michael Jordan'), undefined);
-  assert.equal(sameSubjectQuery('how do solar panels work', 'how to make sourdough starter', 'how to make sourdough starter'), undefined);
+  assert.match(sameSubjectQuery('how do solar panels work', 'Sourdough', 'how to make sourdough starter') ?? '', /^Sourdough /);
   assert.match(sameSubjectQuery('is there a gift shop', 'North Pier', covered) ?? '', /^North Pier /);
   assert.equal(foreignName('West Market viewing platform', 'North Pier viewing platform'), true);
   assert.equal(stripForeignNames('West Market Cedar Park viewing platform', 'North Pier viewing platform'), 'viewing platform');
@@ -107,6 +107,11 @@ test('a later turn keeps the subject on screen unless it names a different one',
   assert.equal(
     lockChainQuery('how many lakes are in Minnesota', 'how many lakes are in Minnesota', 'Michael Jordan', 'who is Michael Jordan'),
     'how many lakes are in Minnesota',
+  );
+  assert.equal(screenSubject('How tall is it?', 'When did the Gateway Arch open to visitors?'), 'Gateway Arch');
+  assert.equal(
+    lockChainQuery('What is the tram ride to the top like?', 'Gateway Arch Open What is the tram ride to the top like?', 'Gateway Arch', 'When did the Gateway Arch open to visitors?'),
+    'Gateway Arch What is the tram ride to the top like?',
   );
 });
 

@@ -170,12 +170,28 @@ test('a round rate loses to the combined rate the official page states', () => {
   assert.doesNotMatch(next.type === 'text' ? next.text : '', /\b7%/);
 });
 
+test('an official snippet beats a commercial combined rate', () => {
+  const pages: ClaimSource[] = [
+    { n: 1, domain: 'www.rates.example', text: 'Harbor City sales tax\nThe combined rate is 7.5%.' },
+    { n: 2, domain: 'www.harborcity.gov', text: 'Harbor City tax\nRates are listed in the table.', stated: 'Harbor City total rate 7.125%' },
+  ];
+  assert.deepEqual(salesTax('sales tax in Harbor City', pages), { rate: 7.125, n: 2 });
+  const next = bindClaims({ type: 'text', text: 'The combined rate is 7.5%.' }, pages, 'sales tax in Harbor City');
+  assert.match(next.type === 'text' ? next.text : '', /7\.125%/);
+  assert.doesNotMatch(next.type === 'text' ? next.text : '', /7\.5%/);
+});
+
 test('a fee is the amount the official page states', () => {
   const pages: ClaimSource[] = [
     { n: 1, domain: 'travelblog.example', text: 'The renewal fee is $64.' },
     { n: 2, domain: 'permits.harbor.gov', text: 'Harbor permits\nThe renewal fee for a harbor permit is $42. The application fee is $18.' },
   ];
   assert.deepEqual(officialCharge('What is the renewal fee for a harbor permit?', pages), { amount: '$42', value: 42, n: 2 });
+  const snippet: ClaimSource[] = [
+    { n: 1, domain: 'notes.example', text: 'The renewal fee is $64. A book and card is $80.' },
+    { n: 2, domain: 'permits.harbor.gov', text: 'Harbor permits\nFee schedule.', stated: 'The renewal fee for a harbor permit book is $42. A book and card renewal is $80.' },
+  ];
+  assert.deepEqual(officialCharge('What is the renewal fee for a harbor permit book?', snippet), { amount: '$42', value: 42, n: 2 });
   const next = bindClaims({ type: 'stat', label: 'Renewal fee', value: '$64 [1]' }, pages, 'What is the renewal fee for a harbor permit?');
   const value = next.type === 'stat' ? next.value : '';
   assert.match(value, /\$42/);

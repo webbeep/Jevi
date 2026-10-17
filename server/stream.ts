@@ -1278,7 +1278,10 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   }
   if (priorBody?.length && compareSides(query).length >= 2) results = await searchNamedSides(query, results, env, scope, send);
   results = { ...results, results: leadMemberRows(query, leadPreprints(query, results.results), hopUrls) };
-  const official = foldReadyOfficial(query, results, officialEarly);
+  const chargeAsk = /\b(?:tax|taxes|fee|fees|fine|fines|toll|tolls|duty|duties|surcharge|levy|levies)\b/i.test(query);
+  const official = chargeAsk
+    ? await attachOfficial(query, results, env, scope, officialEarly)
+    : foldReadyOfficial(query, results, officialEarly);
   if (official !== results) results = official;
   send('search', results);
   const boost = imageBoost(pattern, results, env, scope, boostQuery, portraitAgain);
