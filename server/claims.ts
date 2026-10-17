@@ -650,9 +650,11 @@ export function salesTax(query: string, sources: readonly ClaimSource[]): TaxPic
       for (const rate of rates) {
         let score = 0;
         if (namesPlace) score += 4;
-        if (combined && aboutPlace) score += 12;
+        // A commercial combined rate does not outrank a figure the official page states.
+        const officialBeatsCommercial = sources.some((item) => officialDomain(item.domain));
+        if (combined && aboutPlace) score += official || !officialBeatsCommercial ? 12 : 2;
         else if (combined) score += 1;
-        if (official && aboutPlace) score += 6;
+        if (official && aboutPlace) score += officialBeatsCommercial ? 20 : 6;
         else if (official) score += 2;
         if (!aboutPlace) score -= 8;
         if (stateOnly) score -= 3;
@@ -1712,15 +1714,182 @@ function applyCharge(node: CardNode, pick: ChargePick, stated: (value: number) =
   }
 }
 
+function addedRates(text: string): number | undefined {
+  if (!text.includes('+')) return undefined;
+  const parts = [...text.matchAll(/(\d{1,2}(?:\.\d+)?)\s*%/g)].map((match) => Number(match[1]));
+  if (parts.length < 2) return undefined;
+  return Math.round(parts.reduce((sum, rate) => sum + rate, 0) * 1000) / 1000;
+}
+
+/** A sum that does not equal the lead rate leaves the card. The lead is what remains. */
+function withoutBrokenSum(text: string, lead: number): string {
+  const kept = text.split(SENTENCE_BREAK).filter((sentence) => {
+    const sum = addedRates(sentence);
+    return sum === undefined || Math.abs(sum - lead) <= 0.051;
+  });
+  return kept.join(' ').replace(/\s{2,}/g, ' ').trim();
+}
+
+function withLeadRate(text: string, lead: number): string {
+  if (!/(\d{1,2}(?:\.\d+)?)\s*(?:%|percent\b)/i.test(text)) return text;
+  return text.replace(/(\d{1,2}(?:\.\d+)?)\s*(?:%|percent\b)/i, (raw) => (raw.includes('%') ? `${lead}%` : `${lead} percent`));
+}
+
+function alignTax(node: CardNode, lead: number): CardNode {
+  switch (node.type) {
+    case 'stack':
+    case 'grid':
+    case 'section':
+    case 'scroller':
+      return { ...node, children: node.children.map((child) => alignTax(child, lead)) };
+    case 'tabs':
+      return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: tab.children.map((child) => alignTax(child, lead)) })) };
+    case 'text':
+    case 'callout':
+    case 'quote':
+    case 'draft':
+    case 'heading': {
+      const text = withoutBrokenSum(node.text, lead);
+      return text === node.text ? node : { ...node, text };
+    }
+    case 'hero': {
+      const value = withLeadRate(node.value, lead);
+      const caption = node.caption ? withoutBrokenSum(node.caption, lead) : node.caption;
+      return value === node.value && caption === node.caption ? node : { ...node, value, caption };
+    }
+    case 'stat': {
+      const value = withLeadRate(node.value, lead);
+      return value === node.value ? node : { ...node, value };
+    }
+    case 'tile': {
+      const value = node.value ? withLeadRate(node.value, lead) : node.value;
+      const sub = node.sub ? withoutBrokenSum(node.sub, lead) : node.sub;
+      return value === node.value && sub === node.sub ? node : { ...node, value, sub };
+    }
+    case 'keyvalue':
+    case 'list':
+    case 'timeline':
+    case 'profile':
+    case 'table':
+    case 'steps':
+    case 'accordion':
+    case 'proscons':
+    case 'badges':
+    case 'actions':
+    case 'choices':
+    case 'links':
+    case 'citations':
+    case 'chart':
+    case 'pricing':
+    case 'scaler':
+    case 'slider':
+    case 'reveal':
+    case 'image':
+    case 'gallery':
+    case 'video':
+    case 'code':
+    case 'divider':
+    case 'progress':
+    case 'rating':
+    case 'diagram':
+    case 'ticker':
+    case 'slot':
+      return node;
+    default: {
+      const unreachable: never = node;
+      return unreachable;
+    }
+  }
+}
+
+function statedMoney(text: string, fee: ChargePick, allowed: (value: number) => boolean): string {
+  return text.replace(new RegExp(MONEY.source, 'g'), (raw) => {
+    const value = moneyValue(raw);
+    if (Math.abs(value - fee.value) < 0.001 || allowed(value)) return raw;
+    return '';
+  }).replace(/\s{2,}/g, ' ').replace(/\s+([,.;:])/g, '$1').trim();
+}
+
+/** The lead amount is the official charge. A different amount the official page does not state goes. */
+function alignFee(node: CardNode, fee: ChargePick, allowed: (value: number) => boolean): CardNode {
+  const line = (text: string) => statedMoney(text, fee, allowed);
+  const lead = (text: string) => {
+    if (!MONEY.test(text)) return line(text);
+    const value = moneyValue(text.match(MONEY)?.[0] ?? '');
+    if (Math.abs(value - fee.value) < 0.001 || allowed(value)) return line(text);
+    return fee.amount;
+  };
+  switch (node.type) {
+    case 'stack':
+    case 'grid':
+    case 'section':
+    case 'scroller':
+      return { ...node, children: node.children.map((child) => alignFee(child, fee, allowed)) };
+    case 'tabs':
+      return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: tab.children.map((child) => alignFee(child, fee, allowed)) })) };
+    case 'text':
+    case 'callout':
+    case 'quote':
+    case 'draft':
+    case 'heading': {
+      const text = line(node.text);
+      return text === node.text ? node : { ...node, text };
+    }
+    case 'hero':
+    case 'stat': {
+      const value = lead(node.type === 'hero' ? node.value : node.value);
+      return value === (node.type === 'hero' ? node.value : node.value) ? node : { ...node, value };
+    }
+    case 'tile': {
+      const value = node.value ? lead(node.value) : node.value;
+      const sub = node.sub ? line(node.sub) : node.sub;
+      return value === node.value && sub === node.sub ? node : { ...node, value, sub };
+    }
+    case 'keyvalue':
+    case 'list':
+    case 'timeline':
+    case 'profile':
+    case 'table':
+    case 'steps':
+    case 'accordion':
+    case 'proscons':
+    case 'badges':
+    case 'actions':
+    case 'choices':
+    case 'links':
+    case 'citations':
+    case 'chart':
+    case 'pricing':
+    case 'scaler':
+    case 'slider':
+    case 'reveal':
+    case 'image':
+    case 'gallery':
+    case 'video':
+    case 'code':
+    case 'divider':
+    case 'progress':
+    case 'rating':
+    case 'diagram':
+    case 'ticker':
+    case 'slot':
+      return node;
+    default: {
+      const unreachable: never = node;
+      return unreachable;
+    }
+  }
+}
+
 /** Move each number's citation onto a page that states it, then fill a missing product price from that page. */
 export function bindClaims(node: CardNode, sources: readonly ClaimSource[], query: string): CardNode {
   if (!sources.length) return node;
   const aimed = retargetNode(node, sources, query);
   const tax = salesTax(query, sources);
-  const taxed = tax ? applyTax(aimed, query, tax, ratesIn(sources.find((source) => source.n === tax.n))) : aimed;
+  const taxed = tax ? alignTax(applyTax(aimed, query, tax, ratesIn(sources.find((source) => source.n === tax.n))), tax.rate) : aimed;
   const lined = TAX_ASK.test(query) ? repairTaxNode(taxed, query, sources) : taxed;
   const fee = officialCharge(query, sources);
-  const charged = fee ? applyCharge(lined, fee, officialAmounts(sources.find((source) => source.n === fee.n))) : lined;
+  const charged = fee ? alignFee(applyCharge(lined, fee, officialAmounts(sources.find((source) => source.n === fee.n))), fee, officialAmounts(sources.find((source) => source.n === fee.n))) : lined;
   if (!shoppingAsk(query)) return charged;
   const ceilings = budgetAmounts(query);
   return dropPriceless(keepBudgetPrices(fillPrices(charged, sources, ceilings), ceilings), ceilings, query);

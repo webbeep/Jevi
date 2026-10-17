@@ -1276,6 +1276,10 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
       }
     }
   }
+  if (compareSides(query).length >= 2 && pattern !== 'compare') {
+    pattern = 'compare';
+    send('plan', { ...plan, pattern, skeleton: skeletonCard(query, pattern) });
+  }
   if (priorBody?.length && compareSides(query).length >= 2) results = await searchNamedSides(query, results, env, scope, send);
   results = { ...results, results: leadMemberRows(query, leadPreprints(query, results.results), hopUrls) };
   const chargeAsk = /\b(?:tax|taxes|fee|fees|fine|fines|toll|tolls|duty|duties|surcharge|levy|levies)\b/i.test(query);

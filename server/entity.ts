@@ -1575,6 +1575,57 @@ function hasWholeWord(text: string, word: string): boolean {
  * EN4: the Wikipedia article a one-token ask means ("Who is Obama" → "Barack Obama").
  * A list/disambiguated/one-word title names no single person, so it never qualifies.
  */
+/** Distinct encyclopedia people whose names contain this one-token name. One person is not a choice. */
+function wellKnownPeople(rows: EntityRow[], token: string): { title: string; index: number }[] {
+  const found: { title: string; index: number }[] = [];
+  const keys: string[] = [];
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]!;
+    if (!enWikiArticleRow(row) || isDisambiguationPage(row)) continue;
+    const raw = plainTitle(row);
+    if (!raw || /\b(?:list of|disambiguation)\b/i.test(raw)) continue;
+    const titleText = raw.replace(/\s*\([^)]*\)\s*$/, '').trim();
+    if (!hasWholeWord(titleText, token)) continue;
+    const words = titleText.split(/\s+/).filter(Boolean);
+    if (words.length < 2 || words.length > 4) continue;
+    const key = titleText.toLowerCase();
+    const samePerson = keys.some((have) => {
+      const left = have.split(' ');
+      const right = key.split(' ');
+      const [shorter, longer] = left.length <= right.length ? [left, right] : [right, left];
+      return shorter.every((word) => longer.includes(word));
+    });
+    if (samePerson) continue;
+    keys.push(key);
+    found.push({ title: titleText, index: i });
+  }
+  return found;
+}
+
+const RELATIVE = /\b(?:wife|husband|spouse|mother|father|son|daughter|brother|sister|family|first lady|parent)\b/i;
+
+/**
+ * Two well-known people share this token when one uses it as a given name and another as a surname,
+ * or when two surnames have different given names and neither page is about the other's family.
+ * "Obama" stays one person: the other articles are his family. "North" in "Ada North" and "North Vega" does not.
+ */
+function differentPeople(rows: EntityRow[], token: string): { title: string; index: number }[] {
+  const people = wellKnownPeople(rows, token);
+  if (people.length < 2) return people;
+  const role = (title: string) => {
+    const words = title.toLowerCase().split(/\s+/);
+    const at = words.indexOf(token.toLowerCase());
+    if (at <= 0) return 'given';
+    if (at === words.length - 1) return 'family';
+    return 'middle';
+  };
+  const roles = new Set(people.map((person) => role(person.title)));
+  const independent = people.filter((person, index) => index === 0 || !RELATIVE.test(`${rows[person.index]?.title ?? ''} ${rows[person.index]?.snippet ?? ''}`));
+  if (roles.size >= 2) return independent;
+  const givens = new Set(independent.filter((person) => role(person.title) === 'family').map((person) => person.title.split(/\s+/)[0]?.toLowerCase()));
+  return givens.size >= 2 ? independent : people.slice(0, 1);
+}
+
 function wikiArticleForToken(rows: EntityRow[], token: string): { title: string; index: number } | undefined {
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i]!;
@@ -1991,7 +2042,18 @@ export function resolveEntity(
   // A one-token famous ask ("Who is Obama"): one Wikipedia article for the token, plus other
   // Wikipedia pages about it, is one dominant identity — resolve that person instead of skipping.
   // The article title has 2+ words, so the follow-up ask can never come back here.
+  // Two well-known people whose names contain the token ("Ada North" and "North Vega") still ask which one.
   if (!/\s/.test(name) && !opts?.prior) {
+    const people = differentPeople(rows, name);
+    if (people.length >= 2) {
+      const choices = people.slice(0, 3).map((person) => {
+        const choice = toChoice(person.title, [person.index], rows);
+        const snippet = (rows[person.index]?.snippet ?? '').split('\n')[0]?.replace(/\s+/g, ' ').trim() ?? '';
+        const descriptor = choice.descriptor || snippet.slice(0, 90);
+        return { ...choice, name: person.title, descriptor, query: `Who is ${person.title}` };
+      }).filter(offerChoice);
+      if (choices.length >= 2) return personDecision(choices, rows);
+    }
     const hit = wikiArticleForToken(rows, name);
     if (hit) {
       const support = rows.filter((r, i) => i !== hit.index && enWikiArticleRow(r) && hasWholeWord(plainTitle(r), name)).length;

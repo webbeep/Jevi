@@ -714,6 +714,20 @@ describe('EN4 live LangSearch fixes (scripts/fixtures/en4/live2.json)', () => {
     assert.equal(cleanCapture('C2 Education'), 'C2 Education');
   });
 
+  test('a bare name shared by two well-known people asks which one', () => {
+    const rows = [
+      { title: 'Ada North - Wikipedia', url: 'https://en.wikipedia.org/wiki/Ada_North', snippet: 'Ada North is a chemist.', domain: 'en.wikipedia.org', engines: ['web' as const] },
+      { title: 'North Vega - Wikipedia', url: 'https://en.wikipedia.org/wiki/North_Vega', snippet: 'North Vega is a novelist.', domain: 'en.wikipedia.org', engines: ['web' as const] },
+      { title: 'North - Wikipedia', url: 'https://en.wikipedia.org/wiki/North', snippet: 'North is a direction.', domain: 'en.wikipedia.org', engines: ['web' as const] },
+    ];
+    const decision = resolveEntity('Who is North?', rows, { pattern: 'profile' });
+    assert.equal(decision.kind, 'choices');
+    if (decision.kind !== 'choices') return;
+    const names = decision.choices.map((choice) => choice.name).join(' ');
+    assert.match(names, /Ada North/);
+    assert.match(names, /North Vega/);
+  });
+
   test('a one-token famous ask resolves to the Wikipedia person, not a skip', () => {
     const fx = live2('ls-obama-single-token');
     const d = resolveEntity(fx.query, fx.results, { pattern: 'profile' });

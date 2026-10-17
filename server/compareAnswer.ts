@@ -107,6 +107,25 @@ export function answersComparison(question: string, nodes: CardNode[]): boolean 
   return sides.filter((side) => mentionsSide(side, text)).length >= 2;
 }
 
+/** Both sides have a tile or a table column. A verdict sentence that names them is not this. */
+export function showsComparison(question: string, nodes: CardNode[]): boolean {
+  const sides = compareSides(question);
+  if (sides.length < 2) return true;
+  const covered = new Set<string>();
+  const note = (label: string) => {
+    for (const side of sides) if (mentionsSide(side, label)) covered.add(side);
+  };
+  const walk = (node: CardNode) => {
+    if (node.type === 'tile') note(node.label);
+    if (node.type === 'section' && node.title) note(node.title);
+    if (node.type === 'table') for (const column of node.columns) note(column);
+    if ('children' in node && Array.isArray(node.children)) node.children.forEach(walk);
+    if (node.type === 'tabs') for (const tab of node.tabs) tab.children.forEach(walk);
+  };
+  nodes.forEach(walk);
+  return covered.size >= Math.min(2, sides.length);
+}
+
 function joinSides(sides: string[]): string {
   if (sides.length === 2) return `${sides[0]} and ${sides[1]}`;
   return `${sides.slice(0, -1).join(', ')} and ${sides[sides.length - 1]}`;
@@ -116,14 +135,61 @@ function joinSides(sides: string[]): string {
  * What the sources actually support for each side, in finished sentences.
  * A side with nothing gets a plain note instead of another subject's biography.
  */
+function moneyIn(text: string): string | undefined {
+  return text.match(/(?:\$|€|£|¥)\s?[\d,]+(?:\.\d{2})?/)?.[0]?.replace(/\s/g, '');
+}
+
+function priceForSide(side: string, rows: { text: string }[]): string | undefined {
+  for (const row of rows) {
+    if (!mentionsSide(side, row.text)) continue;
+    const price = moneyIn(row.text);
+    if (price) return price;
+  }
+  return undefined;
+}
+
+function sideSource(side: string, search: SearchResponse): string | undefined {
+  const row = search.results.find((result) => mentionsSide(side, `${result.title} ${result.snippet ?? ''} ${result.content ?? ''}`));
+  const text = `${row?.snippet ?? ''} ${row?.content ?? ''}`.replace(/\s+/g, ' ').trim();
+  return text || undefined;
+}
+
+function imageForSide(side: string, images: SearchResponse['images']): string | undefined {
+  const hit = images.find((image) => mentionsSide(side, `${image.title} ${image.source}`));
+  return hit?.thumb || undefined;
+}
+
 export function comparisonNodes(question: string, search: SearchResponse): CardNode[] {
   const sides = compareSides(question);
   if (sides.length < 2) return [];
-  const rows = candidates(search);
+  const rows = [
+    ...candidates(search),
+    ...search.results.map((result) => ({ text: `${result.title} ${result.snippet ?? ''} ${result.content ?? ''}`.replace(/\s+/g, ' ').trim() })),
+  ];
   const used = new Set<string>();
   const shared = rows.find((row) => sides.filter((side) => mentionsSide(side, row.text)).length >= 2);
   if (shared) used.add(shared.text);
   const covered = shared ? sides.filter((side) => mentionsSide(side, shared.text)) : [];
+  const tiles: CardNode[] = sides.map((side) => {
+    const title = sideTitle(side);
+    const price = priceForSide(side, rows);
+    const image = imageForSide(side, search.images ?? []);
+    return {
+      type: 'tile',
+      label: title,
+      value: price,
+      imageQuery: title,
+      imageSrc: image,
+    };
+  });
+  const priced = tiles.filter((tile) => tile.type === 'tile' && tile.value);
+  const table: CardNode | undefined = priced.length
+    ? {
+        type: 'table',
+        columns: ['', ...sides.map(sideTitle)],
+        rows: [['Price', ...sides.map((side) => priceForSide(side, rows) ?? '')]],
+      }
+    : undefined;
   const sections: CardNode[] = [];
   for (const side of sides) {
     const hit = rows.find((row) => !used.has(row.text) && mentionsSide(side, row.text));
@@ -139,7 +205,8 @@ export function comparisonNodes(question: string, search: SearchResponse): CardN
   const lead: CardNode = shared
     ? { type: 'text', text: shared.text, size: 'lg' }
     : { type: 'text', text: `Comparing ${joinSides(sides)}.`, size: 'lg' };
-  return [lead, ...sections];
+  const grid: CardNode = { type: 'grid', cols: Math.min(sides.length, 3) as 2 | 3, children: tiles };
+  return [grid, ...(table ? [table] : []), lead, ...sections];
 }
 
 /**
@@ -149,7 +216,7 @@ export function comparisonNodes(question: string, search: SearchResponse): CardN
 export function comparisonRepair(question: string, search: SearchResponse, nodes: Map<number, CardNode>): { index: number; node: CardNode }[] | undefined {
   const body = [...nodes.entries()].filter(([, node]) => node.type !== 'actions' && node.type !== 'citations' && node.type !== 'ticker');
   if (compareSides(question).length < 2) return undefined;
-  if (body.length && answersComparison(question, body.map(([, node]) => node))) return undefined;
+  if (body.length && showsComparison(question, body.map(([, node]) => node))) return undefined;
   const built = comparisonNodes(question, search);
   if (!built.length) return undefined;
   const indexes = body.map(([index]) => index).sort((a, b) => a - b);

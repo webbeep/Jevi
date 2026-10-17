@@ -181,6 +181,35 @@ test('an official snippet beats a commercial combined rate', () => {
   assert.doesNotMatch(next.type === 'text' ? next.text : '', /7\.5%/);
 });
 
+test('the lead rate is the official page, and a sum that misses it leaves', () => {
+  const pages: ClaimSource[] = [
+    { n: 1, domain: 'www.rates.example', text: 'Harbor City sales tax\nThe combined rate is 9.5%.' },
+    { n: 2, domain: 'www.harborcity.gov', text: 'Harbor City sales tax\nThe general merchandise rate is 6.25%.' },
+  ];
+  assert.deepEqual(salesTax('sales tax in Harbor City', pages), { rate: 6.25, n: 2 });
+  const next = bindClaims({
+    type: 'hero',
+    value: '9.5%',
+    label: 'Combined rate',
+    caption: '6.25% state + 1.25% city + 1.25% county',
+  }, pages, 'sales tax in Harbor City');
+  assert.equal(next.type === 'hero' ? next.value : '', '6.25%');
+  assert.equal(next.type === 'hero' ? next.caption : 'kept', '');
+});
+
+test('a fee card does not keep a second amount the official page does not state', () => {
+  const pages: ClaimSource[] = [
+    { n: 1, domain: 'permits.harbor.gov', text: 'Renew a harbor permit by mail\nThe renewal fee for a harbor permit book is $42.' },
+  ];
+  const next = bindClaims({ type: 'stack', gap: 'md', children: [
+    { type: 'hero', value: '$64', label: 'Renewal fee' },
+    { type: 'stat', label: 'Book fee', value: '$42' },
+  ] }, pages, 'What is the renewal fee for a harbor permit book by mail?');
+  const blob = JSON.stringify(next);
+  assert.match(blob, /\$42/);
+  assert.doesNotMatch(blob, /\$64/);
+});
+
 test('a component rate stays and the combined line uses the official rate', () => {
   const pages: ClaimSource[] = [
     { n: 1, domain: 'www.rates.example', text: 'Harbor City sales tax\nThe combined rate is 7.5%.' },

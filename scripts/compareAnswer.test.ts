@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import type { CardNode } from '../shared/card.ts';
 import type { SearchResponse } from '../shared/types.ts';
 import { asksToCompare } from '../server/askGuard.ts';
-import { answersComparison, comparisonNodes, comparisonRepair, comparisonTitle, keepComparedProducts, mentionsSide, missingSideNode, sameProduct } from '../server/compareAnswer.ts';
+import { answersComparison, comparisonNodes, comparisonRepair, comparisonTitle, keepComparedProducts, mentionsSide, missingSideNode, sameProduct, showsComparison } from '../server/compareAnswer.ts';
 import { candidates } from '../server/extract.ts';
 import { compareSideQueries, compareSides } from '../server/patterns.ts';
 import { Polisher, completeSentences, emptyFigure, withoutEmptySlots } from '../server/polish.ts';
@@ -90,6 +90,35 @@ test('a biography of one side is not an answer, and the fallback finishes the se
   assert.equal(patches![0]?.index, 0);
   assert.equal(patches![0]?.node.type, 'stack');
   assert.equal(patches![1]?.node.type, 'citations');
+});
+
+test('a verdict sentence is not the comparison, so both sides become tiles', () => {
+  const ask = 'Northwatch 2 versus Glowband 4';
+  const verdict: CardNode = { type: 'text', text: 'Pick the Northwatch 2 for the brighter screen and the Glowband 4 for the lower price.', size: 'lg' };
+  assert.equal(showsComparison(ask, [verdict]), false);
+  const shown = new Map<number, CardNode>([[0, verdict]]);
+  const search: SearchResponse = {
+    query: ask,
+    freshness: 'any',
+    results: [
+      { title: 'Northwatch 2', url: 'https://example.com/north', snippet: 'The Northwatch 2 costs $90.', domain: 'example.com', engines: ['web'] },
+      { title: 'Glowband 4', url: 'https://example.com/glow', snippet: 'The Glowband 4 costs $40.', domain: 'example.com', engines: ['web'] },
+    ],
+    images: [
+      { url: 'https://example.com/north', thumb: 'https://example.com/north.jpg', title: 'Northwatch 2', source: 'Northwatch 2', license: 'source' },
+      { url: 'https://example.com/glow', thumb: 'https://example.com/glow.jpg', title: 'Glow Band 4', source: 'Glow Band 4', license: 'source' },
+    ],
+    discussions: [],
+    engines: ['web'],
+  };
+  const patches = comparisonRepair(ask, search, shown);
+  assert.ok(patches);
+  const blob = JSON.stringify(patches);
+  assert.match(blob, /Northwatch 2/);
+  assert.match(blob, /Glow Band 4|Glowband 4/);
+  assert.match(blob, /\$90/);
+  assert.match(blob, /\$40/);
+  assert.match(blob, /north\.jpg/);
 });
 
 test('a compound product name is the spaced name, and a filled comparison is not replaced', () => {
