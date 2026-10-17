@@ -20,15 +20,18 @@ export function compareSides(query: string): string[] {
 }
 
 /**
- * Searches for every side except the first. The literal question already leads with that
- * name, and a "vs" page is usually about the first name alone.
+ * Each named side, searched on its own in addition to the full question.
+ * The later sides stay first, so a two-extra cap still runs the searches it used to,
+ * and a two-sided question also searches the first product alone.
  * A league named on another side ("NBA") is added when this side doesn't say it.
  */
 export function compareSideQueries(query: string): string[] {
   const sides = compareSides(query);
   if (sides.length < 2) return [];
   const league = query.match(/\b(?:NBA|NFL|MLB|NHL|WNBA)\b/i)?.[0]?.toUpperCase();
-  return sides.slice(1, 3).map((side) => (league && !new RegExp(`\\b${league}\\b`, 'i').test(side) ? `${league} ${side}` : side));
+  const named = (side: string, addLeague: boolean) =>
+    addLeague && league && !new RegExp(`\\b${league}\\b`, 'i').test(side) ? `${league} ${side}` : side;
+  return [...sides.slice(1, 3).map((side) => named(side, true)), named(sides[0]!, false)];
 }
 
 /** How many sides a comparison names ("renting vs buying" is 2). Two when it doesn't say. */

@@ -17,8 +17,28 @@ function haystack(text: string): string {
   return text.toLowerCase();
 }
 
+/**
+ * A product written as one word is the same side when the card splits it.
+ * "glowband 4" is on the card that says "Glow Band 4". A different model number is not.
+ */
+function mentionsJoined(side: string, text: string): boolean {
+  const target = side.toLowerCase().replace(/[^a-z0-9]+/g, '');
+  if (target.length < 5) return false;
+  const words = text.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  for (let i = 0; i < words.length; i++) {
+    let acc = '';
+    for (let j = i; j < words.length && j < i + 6; j++) {
+      acc += words[j]!;
+      if (acc === target) return true;
+      if (acc.length > target.length) break;
+    }
+  }
+  return false;
+}
+
 /** True when `text` uses this side's own name, not a generic word that merely sits next to it. */
 export function mentionsSide(side: string, text: string): boolean {
+  if (mentionsJoined(side, text)) return true;
   const keys = sideKeys(side);
   const hay = haystack(text);
   if (!keys.length) return hay.includes(side.toLowerCase());

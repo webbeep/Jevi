@@ -1204,6 +1204,9 @@ test('a one-letter brand misspelling is corrected from the pages, and stops bein
   assert.equal(spellingQuery('a near-term plan where you checked the spec', [
     { title: 'NearTerm plan', url: 'https://example.com/nearterm', snippet: 'Look there for the nearterm plan.' },
   ]), '');
+  assert.equal(spellingQuery('Glowband 4 vs Northwatch 2', [
+    { title: 'Glayband 4 review', url: 'https://example.com/glayband-4', snippet: 'The Glayband 4 is a different tracker.' },
+  ]), '');
   assert.equal(personSourceOk('Jensen Huang, Nvidia', pages[0]!), true);
 });
 

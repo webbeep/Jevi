@@ -59,7 +59,7 @@ test('snippet sentences are not stored already cut off', () => {
 test('a comparison follow-up is searched on its own, and a pronoun one is not', () => {
   assert.equal(asksToCompare(ASK), true);
   assert.equal(asksToCompare('compare this with the other one'), false);
-  assert.deepEqual(compareSideQueries(ASK), ['2026 NBA rookies', 'NBA past draft classes']);
+  assert.deepEqual(compareSideQueries(ASK), ['2026 NBA rookies', 'NBA past draft classes', 'AJ Dybantsa']);
 });
 
 test('the card title names the sides being compared, not the previous question', () => {
@@ -90,4 +90,27 @@ test('a biography of one side is not an answer, and the fallback finishes the se
   assert.equal(patches![0]?.index, 0);
   assert.equal(patches![0]?.node.type, 'stack');
   assert.equal(patches![1]?.node.type, 'citations');
+});
+
+test('a compound product name is the spaced name, and a filled comparison is not replaced', () => {
+  const ask = 'Northwatch 2 vs Glowband 4';
+  assert.equal(mentionsSide('Glowband 4', 'The Glow Band 4 costs $40'), true);
+  assert.equal(mentionsSide('Glowband 4', 'The Glow Band 9 costs $40'), false);
+  assert.equal(mentionsSide('past draft classes', 'He is a draft prospect.'), false);
+  const tiles: CardNode = {
+    type: 'grid',
+    cols: 2,
+    children: [
+      { type: 'tile', label: 'Northwatch 2', value: '$90' },
+      { type: 'tile', label: 'Glow Band 4', value: '$40' },
+    ],
+  };
+  const table: CardNode = {
+    type: 'table',
+    columns: ['Factor', 'Northwatch 2', 'Glow Band 4'],
+    rows: [['Price', '$90', '$40'], ['Display', 'OLED', 'AMOLED']],
+  };
+  assert.equal(answersComparison(ask, [tiles, table]), true);
+  const shown = new Map<number, CardNode>([[0, tiles], [1, table]]);
+  assert.equal(comparisonRepair(ask, search('Only one side is discussed here.'), shown), undefined);
 });

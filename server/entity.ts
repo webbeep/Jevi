@@ -1,4 +1,5 @@
 import { NAME_PARTICLE, TOPIC_WORD } from '../shared/askAbout';
+import { compareSides } from './patterns';
 import { boundAsk } from '../shared/queryBound';
 import { nameLike, namesPerson, tokens, type EntityHint } from './imageGate';
 import { hasProductModel } from './productModel';
@@ -468,14 +469,26 @@ export function vowelSwap(term: string): string {
  * A corrected word that had been read as a third personal name is put after a comma, so
  * "Jensen Huang Nvdia" becomes "Jensen Huang, Nvidia" and the company stays a detail.
  */
+/** Tokens of a versus side stay as typed. A one-letter change would name a different product. */
+function comparisonTokens(query: string): Set<string> {
+  const tokens = new Set<string>();
+  for (const side of compareSides(query)) {
+    for (const word of side.toLowerCase().split(/[^a-z0-9]+/)) {
+      if (word.length >= 4) tokens.add(word);
+    }
+  }
+  return tokens;
+}
+
 export function spellingQuery(query: string, rows: readonly { title?: string; snippet?: string; url?: string }[]): string {
   const words = query.trim().split(/\s+/);
+  const kept = comparisonTokens(query);
   let changed = false;
   const next = words.map((word) => {
     const core = word.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, '');
     if (core.length < 5) return word;
     const low = core.toLowerCase();
-    if (FUNCTION_WORD.has(low)) return word;
+    if (FUNCTION_WORD.has(low) || kept.has(low)) return word;
     const spell = nearOrgSpelling(low, rows);
     if (!spell || spell === low || isInflection(low, spell.toLowerCase()) || sameLetters(low, spell)) return word;
     // A snippet often repeats the typed query. The title and the address are the page's own spelling.
