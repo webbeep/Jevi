@@ -93,6 +93,31 @@ function contentStems(text: string): string[] {
   return text.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 3 && !FILLER.has(word)).map(stem);
 }
 
+const COVERED_SKIP = new Set([
+  'what', 'when', 'where', 'which', 'how', 'long', 'much', 'many', 'tell', 'show', 'give', 'about', 'with',
+  'from', 'that', 'this', 'have', 'will', 'would', 'could', 'should', 'your', 'they', 'them', 'their',
+  'there', 'into', 'over', 'than', 'then', 'only', 'very', 'really', 'please', 'come', 'comes', 'coming',
+  'does', 'just', 'also', 'good', 'best', 'better', 'more', 'most', 'less', 'least', 'make', 'need', 'want',
+  'like', 'some', 'used', 'using',
+]);
+
+/**
+ * The pages and card already on screen state the fact this follow-up asks.
+ * A question with no new fact ("tell me more") is covered. "Battery" is not covered
+ * until that word is in the sources.
+ */
+export function sourcesCover(question: string, subject: string, corpus: string): boolean {
+  const skip = new Set(subject.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 3));
+  for (const word of COVERED_SKIP) skip.add(word);
+  const facts = question.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 4 && !skip.has(word));
+  if (!facts.length) return true;
+  const hay = corpus.toLowerCase();
+  return facts.every((word) => {
+    const bare = word.length > 4 && word.endsWith('s') && !word.endsWith('ss') ? word.slice(0, -1) : word;
+    return hay.includes(word) || hay.includes(bare);
+  });
+}
+
 /**
  * A follow-up that names something the card does not, and does not point back at that card.
  * It is searched as written. A related turn (a pronoun, "which", a shared word, or only an

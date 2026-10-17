@@ -1,10 +1,18 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { anchoredFollowup, asksToCompare, cardFollowQuery, comparisonFollow, cryptographyHint, faithfulQuery, followSearchQuery, foreignName, isWritingAsk, lockChainQuery, needsOwnSearch, ownQuestion, personQuestion, pointsAtCard, quoteFollowQuery, sameSubjectQuery, screenSubject, scrubLeak, standsAlone, stripForeignNames, withoutLeakActions, withoutRepeatedCallouts } from '../server/askGuard.ts';
+import { anchoredFollowup, asksToCompare, cardFollowQuery, comparisonFollow, cryptographyHint, faithfulQuery, followSearchQuery, foreignName, isWritingAsk, lockChainQuery, needsOwnSearch, ownQuestion, personQuestion, pointsAtCard, quoteFollowQuery, sameSubjectQuery, screenSubject, scrubLeak, sourcesCover, standsAlone, stripForeignNames, withoutLeakActions, withoutRepeatedCallouts } from '../server/askGuard.ts';
 import { isPersonAsk } from '../server/entity.ts';
 import { planLayout } from '../server/plan.ts';
 import type { CardNode } from '../shared/card.ts';
 import { followupLabel, visibleSpelling } from '../shared/followupLabel.ts';
+
+test('a follow-up the sources do not mention has to be searched', () => {
+  const subject = 'Harbor Phone vs Northwatch 2';
+  const corpus = 'Harbor Phone has a 48MP camera. Northwatch 2 costs $90.';
+  assert.equal(sourcesCover('How long is the battery?', subject, corpus), false);
+  assert.equal(sourcesCover('Tell me more about the camera', subject, corpus), true);
+  assert.equal(sourcesCover('What colors does it come in?', subject, 'The Harbor Phone colors are black and blue.'), true);
+});
 
 test('a follow-up about one compared product does not glue both names', () => {
   assert.equal(comparisonFollow("What is Northwatch Glowband's glowband?", 'Northwatch 2 vs Glowband'), 'What is Glowband?');

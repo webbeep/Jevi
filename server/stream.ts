@@ -68,7 +68,7 @@ import { type LateExtras, normalizeUrl, searchWithLate } from './search';
 import type { WebHit } from './cascade';
 import { domainOf } from './util';
 import { choicesIn, distinctActions, subjectWords } from './chips';
-import { anchoredFollowup, asksToCompare, comparisonFollow, cryptographyHint, faithfulQuery, followSearchQuery, foreignName, isWritingAsk, lockChainQuery, needsOwnSearch, ownQuestion, personQuestion, quickPlan, quoteFollowQuery, sameSubjectQuery, screenSubject, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
+import { anchoredFollowup, asksToCompare, comparisonFollow, cryptographyHint, faithfulQuery, followSearchQuery, foreignName, isWritingAsk, lockChainQuery, needsOwnSearch, ownQuestion, personQuestion, quickPlan, quoteFollowQuery, sameSubjectQuery, screenSubject, scrubLeak, sourcesCover, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
 import { calculationAnswer, isCalculationAsk, rateOnAmount } from './calculate';
 import { comparisonRepair, comparisonTitle, keepComparedProducts, mentionsSide, missingSideNode, nameForms, stickerPrice } from './compareAnswer';
 import { withFinishedSentences } from './polish';
@@ -792,6 +792,8 @@ function applyReview(send: Send, req: DesignRequest, shown: Map<number, CardNode
 async function searchAndDesign(send: Send, env: Env, query: string, freshness: Freshness, context: string | undefined, started: number, scope: AskScope, rewritten = false, seedRows?: SearchResult[], steer?: { avoid: Set<string>; rejected: string }, keepTicker?: CardNode, priorBody?: CardNode[], priorImages?: ImageResult[]) {
   const unglued = withoutGluedPerson(query);
   if (unglued !== query.trim()) query = unglued;
+  // The search the card is about, shown before its sources arrive.
+  send('intent', { intent: query, queries: [query] });
   const located = queryWithPlace(query, scope.place);
   if (located !== query) {
     send('rewrite', { query: located });
@@ -1472,10 +1474,6 @@ function engineErrors(engines: EngineStatus[]): string[] {
 }
 
 async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind: 'followup' }>, started: number, scope: AskScope) {
-  // The same wait as a first search: sources already in hand, then the layout, then the card.
-  // A thinking line is not that wait.
-  const carried = (req.search?.results ?? []).slice(0, 8);
-  if (carried.length) send('peek', carried.map(({ title, url, domain, date }) => ({ title, url, domain, date })));
   const cleaned = plainFollowup(req.question);
   if (cleaned !== req.question) req = { ...req, question: cleaned };
   // "Watch on YouTube" is a search for the video, even when the button was marked ask.
@@ -1656,6 +1654,8 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
   const chart = findTicker(onScreen?.body ?? []);
   const subject = screenSubject(onScreen?.title, req.original);
   const cardText = [covered, onScreen ? `${onScreen.title}\n${onScreen.subtitle ?? ''}\n${JSON.stringify(onScreen.body)}` : ''].filter(Boolean).join('\n');
+  const corpus = `${cardText}\n${(req.search?.results ?? []).map((row) => `${row.title} ${row.snippet ?? ''} ${row.content ?? ''}`).join('\n')}`;
+  const known = req.intent === 'adjust' || sourcesCover(req.question, `${subject}\n${req.original}`, corpus);
   if (req.intent !== 'adjust' && needsOwnSearch(req.question, covered)) {
     const query = personQuestion(req.question);
     send('rewrite', { query });
@@ -1681,7 +1681,7 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
   // A later turn that adds new words ("floors", "the viewing platform") is still about the subject
   // already on screen. A different place or business is searched on its own.
   const stayed = req.intent !== 'adjust' ? sameSubjectQuery(req.question, subject, cardText) : undefined;
-  if (stayed) {
+  if (stayed && !known) {
     const lock = `This follow-up is about ${subject}, the subject already on screen. Search the new words about that subject. Do not switch to a different place or business.`;
     scope.bound = stayed;
     send('rewrite', { query: stayed });
@@ -1716,6 +1716,15 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
   // not a stub cut to fit a shorter check, and not an answer drawn only from the old pages.
   if (req.intent !== 'adjust' && req.question.trim().length > QUOTE_MAX) {
     const query = lockChainQuery(req.question, req.question.trim(), subject, `${onScreen?.title ?? ''}\n${req.original}`);
+    scope.bound = `${subject}\n${req.question}`;
+    send('rewrite', { query });
+    await searchAndDesign(send, env, query, 'any', context, started, scope, true, undefined, undefined, chart);
+    return;
+  }
+
+  // The pages on screen do not state this fact. Search the new words about the subject, and show that search.
+  if (!known) {
+    const query = (stayed || [subject, req.question.trim()].filter(Boolean).join(' ')).replace(/\s+/g, ' ').trim();
     scope.bound = `${subject}\n${req.question}`;
     send('rewrite', { query });
     await searchAndDesign(send, env, query, 'any', context, started, scope, true, undefined, undefined, chart);
@@ -1759,10 +1768,13 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
       return;
     }
     case 'answer':
-    case 'chat':
+    case 'chat': {
+      const rows = (req.search?.results ?? []).slice(0, 8);
+      if (rows.length) send('peek', rows.map(({ title, url, domain, date }) => ({ title, url, domain, date })));
       send('plan', { ...plan, mode });
-      await design(send, env, { query: req.original, pattern: plan.pattern, depth: plan.depth, readPages: plan.readPages, search: req.search, followup: { mode, question: req.question }, context, think: mode === 'chat' && plan.think, ...(chart ? { ticker: chart } : {}) }, started, scope);
+      await design(send, env, { query: req.original, pattern: plan.pattern, depth: plan.depth, readPages: plan.readPages, search: req.search, followup: { mode, question: req.question }, context, ...(chart ? { ticker: chart } : {}) }, started, scope);
       return;
+    }
     default: {
       const unreachable: never = mode;
       throw new Error(`Unknown follow-up mode ${unreachable}`);
