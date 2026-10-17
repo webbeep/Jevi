@@ -135,8 +135,27 @@ function joinSides(sides: string[]): string {
  * What the sources actually support for each side, in finished sentences.
  * A side with nothing gets a plain note instead of another subject's biography.
  */
+const STICKER = /(?:\$|€|£|¥)\s?\d{1,4}(?:,\d{3})*(?:\.\d{2})?/g;
+const RELATIVE_PRICE = /\b(?:cheaper|cost(?:s|ing)? more|more expensive|less expensive|saving|saves|discount|between|than)\b|(?:\$|€|£|¥)\s?\d[\d,]*(?:\.\d{2})?\s*[–-]\s*(?:\$|€|£|¥)?\s?\d/i;
+
+/** One amount the source states for this product. A range or a "cheaper" line is not that price. */
+export function stickerPrice(side: string, search: SearchResponse): string | undefined {
+  for (const result of search.results) {
+    const blob = `${result.title}. ${result.snippet ?? ''} ${result.content ?? ''}`;
+    if (!mentionsSide(side, blob)) continue;
+    for (const sentence of blob.split(/(?<=[.!?])\s+/)) {
+      if (!mentionsSide(side, sentence) || RELATIVE_PRICE.test(sentence)) continue;
+      const amounts = [...sentence.matchAll(STICKER)].map((match) => match[0].replace(/\s/g, ''));
+      if (amounts.length === 1) return amounts[0];
+    }
+  }
+  return undefined;
+}
+
 function moneyIn(text: string): string | undefined {
-  return text.match(/(?:\$|€|£|¥)\s?[\d,]+(?:\.\d{2})?/)?.[0]?.replace(/\s/g, '');
+  if (RELATIVE_PRICE.test(text)) return undefined;
+  const amounts = [...text.matchAll(STICKER)].map((match) => match[0].replace(/\s/g, ''));
+  return amounts.length === 1 ? amounts[0] : undefined;
 }
 
 function priceForSide(side: string, rows: { text: string }[]): string | undefined {
@@ -146,12 +165,6 @@ function priceForSide(side: string, rows: { text: string }[]): string | undefine
     if (price) return price;
   }
   return undefined;
-}
-
-function sideSource(side: string, search: SearchResponse): string | undefined {
-  const row = search.results.find((result) => mentionsSide(side, `${result.title} ${result.snippet ?? ''} ${result.content ?? ''}`));
-  const text = `${row?.snippet ?? ''} ${row?.content ?? ''}`.replace(/\s+/g, ' ').trim();
-  return text || undefined;
 }
 
 function imageForSide(side: string, images: SearchResponse['images']): string | undefined {
@@ -209,6 +222,49 @@ export function comparisonNodes(question: string, search: SearchResponse): CardN
   return [grid, ...(table ? [table] : []), lead, ...sections];
 }
 
+function groundCompareNode(node: CardNode, sides: string[], search: SearchResponse): CardNode {
+  if (node.type === 'tile') {
+    const side = sides.find((item) => mentionsSide(item, node.label));
+    if (!side) return node;
+    const price = stickerPrice(side, search);
+    const image = imageForSide(side, search.images ?? []);
+    const relative = !!node.value && (RELATIVE_PRICE.test(node.value) || !moneyIn(node.value));
+    const value = price && (!node.value || relative) ? price : node.value;
+    const imageSrc = node.imageSrc || image;
+    if (value === node.value && imageSrc === node.imageSrc) return node;
+    return { ...node, value, imageSrc, imageQuery: node.imageQuery ?? sideTitle(side) };
+  }
+  if (node.type === 'table') {
+    const rows = node.rows.map((row) => row.map((cell, index) => {
+      const side = sides.find((item) => mentionsSide(item, node.columns[index] ?? ''));
+      if (!side || moneyIn(cell)) return cell;
+      if (!RELATIVE_PRICE.test(cell)) return cell;
+      return stickerPrice(side, search) ?? '';
+    }));
+    if (rows.every((row, index) => row.every((cell, cellIndex) => cell === node.rows[index]?.[cellIndex]))) return node;
+    return { ...node, rows };
+  }
+  if (node.type === 'tabs') {
+    return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: tab.children.map((child) => groundCompareNode(child, sides, search)) })) };
+  }
+  if ('children' in node && Array.isArray(node.children)) {
+    const children = node.children.map((child) => groundCompareNode(child, sides, search));
+    if (children.every((child, index) => child === node.children[index])) return node;
+    return { ...node, children } as CardNode;
+  }
+  return node;
+}
+
+function groundCompared(question: string, search: SearchResponse, body: [number, CardNode][]): { index: number; node: CardNode }[] | undefined {
+  const sides = compareSides(question);
+  const patches: { index: number; node: CardNode }[] = [];
+  for (const [index, node] of body) {
+    const next = groundCompareNode(node, sides, search);
+    if (next !== node) patches.push({ index, node: next });
+  }
+  return patches.length ? patches : undefined;
+}
+
 /**
  * When a comparison card never names two sides, replace the body with what the
  * sources say about each side. Extra biography nodes are blanked out of the body.
@@ -216,7 +272,7 @@ export function comparisonNodes(question: string, search: SearchResponse): CardN
 export function comparisonRepair(question: string, search: SearchResponse, nodes: Map<number, CardNode>): { index: number; node: CardNode }[] | undefined {
   const body = [...nodes.entries()].filter(([, node]) => node.type !== 'actions' && node.type !== 'citations' && node.type !== 'ticker');
   if (compareSides(question).length < 2) return undefined;
-  if (body.length && showsComparison(question, body.map(([, node]) => node))) return undefined;
+  if (body.length && showsComparison(question, body.map(([, node]) => node))) return groundCompared(question, search, body);
   const built = comparisonNodes(question, search);
   if (!built.length) return undefined;
   const indexes = body.map(([index]) => index).sort((a, b) => a - b);

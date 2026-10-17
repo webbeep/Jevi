@@ -217,9 +217,21 @@ test('a component rate stays and the combined line uses the official rate', () =
   ];
   const next = bindClaims({ type: 'text', text: 'The state rate is 6.25%. The combined rate is 7.5%.' }, pages, 'sales tax in Harbor City');
   const body = next.type === 'text' ? next.text : '';
-  assert.match(body, /state rate is 6\.25%/);
   assert.match(body, /7\.125%/);
+  assert.doesNotMatch(body, /6\.25%/);
   assert.doesNotMatch(body, /7\.5%/);
+});
+
+test('a city rate does not lead when the official page states the broader rate', () => {
+  const pages: ClaimSource[] = [
+    { n: 1, domain: 'www.harborstate.gov', text: 'Harbor State sales tax\nThe general merchandise rate is 6.25%.' },
+    { n: 2, domain: 'www.harborstate.gov', text: 'Harbor State sales tax\nPalatine combined local rate is 2.69%.' },
+  ];
+  assert.deepEqual(salesTax('What is the sales tax on general merchandise in Harbor State?', pages), { rate: 6.25, n: 1 });
+  const next = bindClaims({ type: 'text', text: 'General merchandise sales tax is 2.69%. The state rate is 6.25%.' }, pages, 'What is the sales tax on general merchandise in Harbor State?');
+  const body = next.type === 'text' ? next.text : '';
+  assert.match(body, /6\.25%/);
+  assert.doesNotMatch(body, /2\.69%/);
 });
 
 test('a fee is the amount the official page states', () => {

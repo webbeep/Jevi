@@ -1622,6 +1622,8 @@ function differentPeople(rows: EntityRow[], token: string): { title: string; ind
   const roles = new Set(people.map((person) => role(person.title)));
   const independent = people.filter((person, index) => index === 0 || !RELATIVE.test(`${rows[person.index]?.title ?? ''} ${rows[person.index]?.snippet ?? ''}`));
   if (roles.size >= 2) return independent;
+  const givenSurnames = new Set(independent.filter((person) => role(person.title) === 'given').map((person) => person.title.split(/\s+/).at(-1)?.toLowerCase()).filter((word): word is string => !!word));
+  if (givenSurnames.size >= 2) return independent.filter((person) => role(person.title) === 'given');
   const givens = new Set(independent.filter((person) => role(person.title) === 'family').map((person) => person.title.split(/\s+/)[0]?.toLowerCase()));
   return givens.size >= 2 ? independent : people.slice(0, 1);
 }
@@ -1917,15 +1919,21 @@ function dedupeChoices(choices: EntityChoice[]): EntityChoice[] {
   return out;
 }
 
+const PLACE_ONLY = /^(?:based in|located in|lives in|from|in|at)\b/i;
+
 /**
- * Two choices with the same name and the same descriptor are one person.
- * Different careers that share a name stay a picker.
+ * Two choices with the same full name are one person, including a role plus a place.
+ * Different full names, or two careers under one shared name, stay a picker.
  */
 function onePerson(choices: EntityChoice[], _rows: EntityRow[]): boolean {
   if (choices.length < 2) return true;
   const key = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
   const name = key(choices[0]!.name);
   if (!name || choices.some((choice) => key(choice.name) !== name)) return false;
+  if (name.split(' ').length >= 2) {
+    const careers = choices.map((choice) => key(choice.descriptor)).filter((descriptor) => descriptor && !PLACE_ONLY.test(descriptor));
+    if (new Set(careers).size <= 1) return true;
+  }
   return new Set(choices.map((choice) => key(choice.descriptor))).size < 2;
 }
 

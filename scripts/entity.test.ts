@@ -714,6 +714,27 @@ describe('EN4 live LangSearch fixes (scripts/fixtures/en4/live2.json)', () => {
     assert.equal(cleanCapture('C2 Education'), 'C2 Education');
   });
 
+  test('two rows about one full name are one card, and two famous people stay a picker', () => {
+    const same = resolveEntity('Who is Ada North?', [
+      { title: 'Ada North - Wikipedia', url: 'https://en.wikipedia.org/wiki/Ada_North', snippet: 'Ada North is a chemist.', domain: 'en.wikipedia.org', engines: ['web'] },
+      { title: 'Ada North - Wikipedia', url: 'https://en.wikipedia.org/wiki/Ada_North', snippet: 'Based in Harbor City.', domain: 'en.wikipedia.org', engines: ['web'] },
+    ], { pattern: 'profile' });
+    assert.equal(same.kind, 'single');
+    const drawn = [
+      { name: 'Ada North', descriptor: 'Chemist', query: 'Who is Ada North', id: 'a', seeds: [0] },
+      { name: 'Ada North', descriptor: 'Based in Harbor City', query: 'Who is Ada North', id: 'b', seeds: [1] },
+    ];
+    assert.equal(samePersonChoices(drawn, []), true);
+    const people = resolveEntity('Who is North?', [
+      { title: 'Ada North - Wikipedia', url: 'https://en.wikipedia.org/wiki/Ada_North', snippet: 'Ada North is a chemist.', domain: 'en.wikipedia.org', engines: ['web'] },
+      { title: 'North Vega - Wikipedia', url: 'https://en.wikipedia.org/wiki/North_Vega', snippet: 'North Vega is a novelist.', domain: 'en.wikipedia.org', engines: ['web'] },
+    ], { pattern: 'profile' });
+    assert.equal(people.kind, 'choices');
+    if (people.kind !== 'choices') return;
+    const names = people.choices.map((choice) => choice.name);
+    assert.ok(names.includes('Ada North') && names.includes('North Vega'), names.join(' | '));
+  });
+
   test('a bare name shared by two well-known people asks which one', () => {
     const rows = [
       { title: 'Ada North - Wikipedia', url: 'https://en.wikipedia.org/wiki/Ada_North', snippet: 'Ada North is a chemist.', domain: 'en.wikipedia.org', engines: ['web' as const] },

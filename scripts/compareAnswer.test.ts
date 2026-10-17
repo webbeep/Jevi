@@ -92,6 +92,42 @@ test('a biography of one side is not an answer, and the fallback finishes the se
   assert.equal(patches![1]?.node.type, 'citations');
 });
 
+test('a relative phrase is not a price when the source states one', () => {
+  const ask = 'Northwatch 2 versus Glowband 4';
+  const table: CardNode = {
+    type: 'table',
+    columns: ['Factor', 'Northwatch 2', 'Glowband 4'],
+    rows: [['Price', 'Costs more', '$30–$40 cheaper']],
+  };
+  const tiles: CardNode = {
+    type: 'grid',
+    cols: 2,
+    children: [
+      { type: 'tile', label: 'Northwatch 2', value: 'Costs more' },
+      { type: 'tile', label: 'Glowband 4', value: '$30–$40 cheaper' },
+    ],
+  };
+  const priced: SearchResponse = {
+    query: ask,
+    freshness: 'any',
+    results: [
+      { title: 'Northwatch 2', url: 'https://example.com/north', snippet: 'The Northwatch 2 is $189.99.', domain: 'example.com', engines: ['web'] },
+      { title: 'Glowband 4', url: 'https://example.com/glow', snippet: 'The Glowband 4 is $79.00.', domain: 'example.com', engines: ['web'] },
+    ],
+    images: [
+      { url: 'https://example.com/north', thumb: 'https://example.com/north.jpg', title: 'Northwatch 2', source: 'Northwatch 2', license: 'source' },
+    ],
+    discussions: [],
+    engines: ['web'],
+  };
+  const patches = comparisonRepair(ask, priced, new Map([[0, tiles], [1, table]]));
+  const blob = JSON.stringify(patches);
+  assert.match(blob, /\$189\.99/);
+  assert.match(blob, /\$79\.00/);
+  assert.match(blob, /north\.jpg/);
+  assert.doesNotMatch(blob, /cheaper|Costs more/);
+});
+
 test('a verdict sentence is not the comparison, so both sides become tiles', () => {
   const ask = 'Northwatch 2 versus Glowband 4';
   const verdict: CardNode = { type: 'text', text: 'Pick the Northwatch 2 for the brighter screen and the Glowband 4 for the lower price.', size: 'lg' };

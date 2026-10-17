@@ -658,6 +658,8 @@ export function salesTax(query: string, sources: readonly ClaimSource[]): TaxPic
         else if (official) score += 2;
         if (!aboutPlace) score -= 8;
         if (stateOnly) score -= 3;
+        for (const word of questionWords(query)) if (low.includes(word)) score += 4;
+        if (otherPlace(sentence, query)) score -= 20;
         if (aboveCut && forBelow && !forAbove && !combined) score -= 5;
         if (belowCut && combined && forBelow) score -= 4;
         if (aboveCut && (combined || forAbove)) score += 3;
@@ -678,6 +680,24 @@ export function salesTax(query: string, sources: readonly ClaimSource[]): TaxPic
   }
   if (!best || best.score < 1) return undefined;
   return { rate: best.rate, n: best.n };
+}
+
+const QUESTION_SKIP = new Set(['sales', 'tax', 'taxes', 'rate', 'rates', 'what', 'which', 'where', 'when', 'does', 'apply', 'applies', 'purchase', 'official', 'current', 'state', 'local']);
+
+function questionWords(query: string): string[] {
+  return query.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 5 && !QUESTION_SKIP.has(word));
+}
+
+/** A city or county the question did not name. Its rate is not the answer for the broader place. */
+function otherPlace(sentence: string, query: string): boolean {
+  const asked = query.toLowerCase();
+  const names = sentence.match(/\b[A-Z][a-z]{2,}\b/g) ?? [];
+  return names.some((name) => {
+    const word = name.toLowerCase();
+    if (asked.includes(word)) return false;
+    if (QUESTION_SKIP.has(word)) return false;
+    return word.length >= 5;
+  });
 }
 
 function questionPrice(query: string): number | undefined {
@@ -752,21 +772,16 @@ export function fixTaxLines(text: string, query: string, sources: readonly Claim
   }).join(' ');
 }
 
-function applyTaxText(text: string, query: string, pick: TaxPick, keep: ReadonlySet<number>): string {
+function applyTaxText(text: string, query: string, pick: TaxPick, _keep: ReadonlySet<number>): string {
   const price = query.match(/\$\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)/);
   const amount = price ? Number(price[1]!.replace(/,/g, '')) : undefined;
   const shown = [...text.matchAll(/(\d{1,2}(?:\.\d+)?)\s*(?:%|percent\b)/gi)].map((match) => Number(match[1]));
   const wrong = shown.find((rate) => Math.abs(rate - pick.rate) > 0.001);
   if (wrong === undefined) return text;
-  let out = text.split(SENTENCE_BREAK).map((sentence) => {
-    const component = /\b(?:state|county|city|local|municipal)\b/i.test(sentence) && !/\b(?:combined|total|overall)\b/i.test(sentence);
-    return sentence.replace(/(\d{1,2}(?:\.\d+)?)\s*(?:%|percent\b)/gi, (raw, num) => {
-      const rate = Number(num);
-      if (Math.abs(rate - pick.rate) <= 0.001) return raw;
-      if (component && keep.has(rate)) return raw;
-      return raw.includes('%') ? `${pick.rate}%` : `${pick.rate} percent`;
-    });
-  }).join(' ');
+  let out = text.replace(/(\d{1,2}(?:\.\d+)?)\s*(?:%|percent\b)/gi, (raw, num) => {
+    if (Math.abs(Number(num) - pick.rate) <= 0.001) return raw;
+    return raw.includes('%') ? `${pick.rate}%` : `${pick.rate} percent`;
+  });
   out = out.replace(/\[(\d+)\]/g, `[${pick.n}]`);
   if (amount === undefined) return out;
   const due = amount * pick.rate / 100;
