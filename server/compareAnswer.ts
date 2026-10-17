@@ -160,7 +160,7 @@ export function comparisonRepair(question: string, search: SearchResponse, nodes
 }
 
 const STOP_NAME = new Set(['the', 'and', 'with', 'for', 'vs', 'versus']);
-const MONEY = /\$[\d,]+(?:\.\d{2})?/;
+const MONEY = /(?:\$|€|£|¥)\s?[\d,]+(?:\.\d{2})?/;
 const NOT_STATED = /\bnot stated\b/i;
 
 export interface ShownProduct {
@@ -265,10 +265,8 @@ export function keepComparedProducts(prior: readonly CardNode[], nodes: Map<numb
       const product = kept.find((item) => sameProduct(item.name, node.label));
       if (!product) return node;
       let next = node;
-      const price = money(node.value);
-      if (product.price && price && price !== product.price) next = { ...next, value: withPrice(node.value ?? '', product.price) };
-      if (product.price && !price && (!node.value || NOT_STATED.test(node.value) || /\bno price\b/i.test(node.value ?? ''))) next = { ...next, value: product.price };
-      if (product.imageSrc && next.imageSrc !== product.imageSrc) next = { ...next, imageSrc: product.imageSrc, imageRef: undefined, imageQuery: undefined };
+      if (product.price && money(next.value) !== product.price) next = { ...next, value: money(next.value) ? withPrice(next.value ?? '', product.price) : product.price };
+      if (product.imageSrc) next = { ...next, imageSrc: product.imageSrc, imageRef: undefined, imageQuery: undefined };
       return next;
     }
     if (node.type === 'table' && node.columns.length >= 2) {
