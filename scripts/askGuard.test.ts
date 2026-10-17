@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { anchoredFollowup, asksToCompare, cardFollowQuery, cryptographyHint, faithfulQuery, followSearchQuery, isWritingAsk, needsOwnSearch, ownQuestion, personQuestion, pointsAtCard, quoteFollowQuery, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from '../server/askGuard.ts';
+import { anchoredFollowup, asksToCompare, cardFollowQuery, cryptographyHint, faithfulQuery, followSearchQuery, foreignName, isWritingAsk, lockChainQuery, needsOwnSearch, ownQuestion, personQuestion, pointsAtCard, quoteFollowQuery, sameSubjectQuery, screenSubject, scrubLeak, standsAlone, stripForeignNames, withoutLeakActions, withoutRepeatedCallouts } from '../server/askGuard.ts';
 import { isPersonAsk } from '../server/entity.ts';
 import { planLayout } from '../server/plan.ts';
 import type { CardNode } from '../shared/card.ts';
@@ -86,6 +86,28 @@ test('an unrelated follow-up is its own question, and a related one keeps the su
   assert.equal(ownQuestion('why is it moving today?', 'Btc Usd'), false);
   assert.equal(ownQuestion('Not this', 'who is Ed Chu'), false);
   assert.equal(ownQuestion('Draft the unblock email', 'It Takes Two'), false);
+});
+
+test('a later turn keeps the subject on screen unless it names a different one', () => {
+  const covered = 'When did North Pier open?\nNorth Pier\nNorth Pier opened to visitors after a long build.';
+  assert.equal(screenSubject('North Pier opened to visitors after a long build along the water', 'When did the new waterfront pier welcome its first visitors last decade?'), 'North Pier');
+  assert.match(sameSubjectQuery('what is the viewing platform', 'North Pier', covered) ?? '', /^North Pier what is the viewing platform$/);
+  assert.match(sameSubjectQuery('how many floors are open', 'North Pier', covered) ?? '', /North Pier/);
+  assert.equal(sameSubjectQuery('What is photosynthesis?', 'how do mRNA vaccines work', 'how do mRNA vaccines work'), undefined);
+  assert.equal(sameSubjectQuery('tesla stock price', 'how to make sourdough starter', 'how to make sourdough starter'), undefined);
+  assert.equal(sameSubjectQuery('how many lakes are in Minnesota', 'who is Michael Jordan', 'who is Michael Jordan'), undefined);
+  assert.equal(sameSubjectQuery('how do solar panels work', 'how to make sourdough starter', 'how to make sourdough starter'), undefined);
+  assert.match(sameSubjectQuery('is there a gift shop', 'North Pier', covered) ?? '', /^North Pier /);
+  assert.equal(foreignName('West Market viewing platform', 'North Pier viewing platform'), true);
+  assert.equal(stripForeignNames('West Market Cedar Park viewing platform', 'North Pier viewing platform'), 'viewing platform');
+  assert.equal(
+    lockChainQuery('what is the viewing platform', 'West Market Cedar Park viewing platform', 'North Pier', covered),
+    'North Pier viewing platform',
+  );
+  assert.equal(
+    lockChainQuery('how many lakes are in Minnesota', 'how many lakes are in Minnesota', 'Michael Jordan', 'who is Michael Jordan'),
+    'how many lakes are in Minnesota',
+  );
 });
 
 test('a follow-up that points at the card keeps that subject, and an unrelated one stays its own question', () => {

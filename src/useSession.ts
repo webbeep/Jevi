@@ -189,17 +189,19 @@ export function useSession() {
   const searchOf = useCallback((t: Turn | undefined) => (t ? ref.current.find((x) => x.id === t.searchId) : undefined), []);
 
   /**
-   * Conversation memory for the model: the topic the conversation started with,
-   * short digests of earlier turns, and a fuller digest of the card being acted
-   * on (or the latest one), so follow-ups never lose the subject.
+   * Conversation memory for the model: the topic this chain started with,
+   * short digests of earlier turns in that chain, and a fuller digest of the card
+   * being acted on. Another chain's places and businesses stay out.
    */
-  const memory = (beforeId?: number, focusId?: number) => {
-    const done = ref.current.filter((t) => t.result && (beforeId === undefined || t.id < beforeId));
+  const memory = (beforeId?: number, focusId?: number, rootId?: number) => {
+    const inChain = (t: Turn) => rootId === undefined || t.id === rootId || t.searchId === rootId;
+    const done = ref.current.filter((t) => t.result && inChain(t) && (beforeId === undefined || t.id < beforeId));
     if (!done.length) return '';
     const focus = done.find((t) => t.id === focusId) ?? done[done.length - 1];
     const earlier = done.filter((t) => t !== focus).slice(-7);
+    const root = rootId !== undefined ? ref.current.find((t) => t.id === rootId) : ref.current[0];
     return [
-      `Topic: ${ref.current[0]?.question ?? focus.question}`,
+      `Topic: ${root?.question ?? focus.question}`,
       ...(earlier.length ? ['Earlier turns, oldest first:', ...earlier.map((t) => `- Q: ${t.question} → ${cardDigest(t.result!.card, 260)}`)] : []),
       `${focusId === focus.id ? 'Card they are acting on' : 'Latest card'} (Q: ${focus.question}): ${cardDigest(focus.result!.card, 1100)}`,
     ].join('\n');
@@ -423,7 +425,7 @@ export function useSession() {
     const followup = opts.followup
       ?? (turn.base ? { mode: 'refine' as const, question: turn.question, baseCard: turn.base.card } : turn.kind === 'answer' ? { mode: turn.mode ?? 'answer', question: turn.question } : undefined);
     update(id, { filling: true, status: opts.status, pattern, simple, error: undefined, live: undefined });
-    const context = memory(id, turn.base?.id) || undefined;
+    const context = memory(id, turn.base?.id, ctx.id) || undefined;
     await run(id, { kind: 'design', query: ctx.search.query, pattern, depth: turn.plan.depth, readPages: turn.plan.readPages, search: ctx.search, simple, followup, context }).catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [update, run]);
@@ -519,14 +521,14 @@ export function useSession() {
     const base = intent === 'adjust' && from?.result ? { id: from.id, title: from.result.card.title, card: from.result.card } : undefined;
     const id = add({ kind: intent === 'search' ? 'search' : 'answer', question: q, searchId: ctx.id, filling: true, origin: intent, base, pattern: base ? from?.pattern : undefined, ref: askRef });
     scrollToTurn(id);
-    const cards = ref.current.filter((t) => t.result && t.id !== id).slice(-8).map((t) => ({ id: t.id, title: t.result!.card.title, card: t.result!.card, pattern: t.pattern }));
+    const cards = ref.current.filter((t) => t.result && t.id !== id && (t.id === ctx.id || t.searchId === ctx.id)).slice(-8).map((t) => ({ id: t.id, title: t.result!.card.title, card: t.result!.card, pattern: t.pattern }));
     await run(id, {
       kind: 'followup',
       question: q,
-      original: ref.current[0]?.question ?? ctx.question,
+      original: ctx.question,
       search: ctx.search,
       cards,
-      context: memory(id, from?.id) || undefined,
+      context: memory(id, from?.id, ctx.id) || undefined,
       intent,
       from: from?.id,
       ...(askRef ? { ref: askRef } : {}),

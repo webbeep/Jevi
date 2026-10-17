@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { bindClaims, budgetAmounts, claimSources, groundMembers, priceFor, retargetCites, salesTax, shoppingAsk, type ClaimSource } from '../server/claims.ts';
+import { bindClaims, budgetAmounts, claimSources, groundMembers, officialCharge, priceFor, retargetCites, salesTax, shoppingAsk, type ClaimSource } from '../server/claims.ts';
 import { Grounding, groundNodes } from '../server/ground.ts';
 import { sanitizeNodes } from '../server/sanitize.ts';
 import { finishQuality } from '../server/sourceQuality.ts';
@@ -152,6 +152,40 @@ test('a city sales tax uses the combined rate once the item clears the exemption
   assert.match(body, /\$13\.31/);
   assert.match(body, /\[2\]/);
   assert.doesNotMatch(body, /4%/);
+});
+
+test('a round rate loses to the combined rate the official page states', () => {
+  const pages: ClaimSource[] = [
+    { n: 1, domain: 'tips.example', text: 'Harbor City sales tax\nHarbor City sales tax is 7%.' },
+    { n: 2, domain: 'www.harborcity.gov', text: 'Harbor City sales tax\nThe combined rate is 7.375%.' },
+  ];
+  assert.deepEqual(salesTax('sales tax in Harbor City', pages), { rate: 7.375, n: 2 });
+  const precise: ClaimSource[] = [
+    { n: 1, domain: 'tips.example', text: 'Harbor City sales tax is 7%.' },
+    { n: 2, domain: 'tax.harborcity.gov', text: 'Harbor City sales tax is 7.375%.' },
+  ];
+  assert.deepEqual(salesTax('sales tax in Harbor City', precise), { rate: 7.375, n: 2 });
+  const next = bindClaims({ type: 'text', text: 'Sales tax in Harbor City is 7%.' }, pages, 'sales tax in Harbor City');
+  assert.match(next.type === 'text' ? next.text : '', /7\.375%/);
+  assert.doesNotMatch(next.type === 'text' ? next.text : '', /\b7%/);
+});
+
+test('a fee is the amount the official page states', () => {
+  const pages: ClaimSource[] = [
+    { n: 1, domain: 'travelblog.example', text: 'The renewal fee is $64.' },
+    { n: 2, domain: 'permits.harbor.gov', text: 'Harbor permits\nThe renewal fee for a harbor permit is $42. The application fee is $18.' },
+  ];
+  assert.deepEqual(officialCharge('What is the renewal fee for a harbor permit?', pages), { amount: '$42', value: 42, n: 2 });
+  const next = bindClaims({ type: 'stat', label: 'Renewal fee', value: '$64 [1]' }, pages, 'What is the renewal fee for a harbor permit?');
+  const value = next.type === 'stat' ? next.value : '';
+  assert.match(value, /\$42/);
+  assert.doesNotMatch(value, /\$64/);
+  assert.match(value, /\[2\]/);
+  const listed = bindClaims({ type: 'text', text: 'The renewal fee is $64. The application fee is $18.' }, pages, 'What is the renewal fee for a harbor permit?');
+  const body = listed.type === 'text' ? listed.text : '';
+  assert.match(body, /\$42/);
+  assert.match(body, /\$18/);
+  assert.doesNotMatch(body, /\$64/);
 });
 
 test('an exempt price does not keep a tax dollar from another line', () => {

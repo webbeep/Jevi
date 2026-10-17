@@ -68,7 +68,7 @@ import { type LateExtras, normalizeUrl, searchWithLate } from './search';
 import type { WebHit } from './cascade';
 import { domainOf } from './util';
 import { choicesIn, distinctActions, subjectWords } from './chips';
-import { anchoredFollowup, asksToCompare, cryptographyHint, faithfulQuery, followSearchQuery, isWritingAsk, needsOwnSearch, ownQuestion, personQuestion, quickPlan, quoteFollowQuery, screenSubject, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
+import { anchoredFollowup, asksToCompare, cryptographyHint, faithfulQuery, followSearchQuery, foreignName, isWritingAsk, lockChainQuery, needsOwnSearch, ownQuestion, personQuestion, quickPlan, quoteFollowQuery, sameSubjectQuery, screenSubject, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
 import { calculationAnswer, isCalculationAsk, rateOnAmount } from './calculate';
 import { comparisonRepair, comparisonTitle, keepComparedProducts, missingSideNode } from './compareAnswer';
 import { withFinishedSentences } from './polish';
@@ -847,7 +847,8 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     const literalFresh = freshness === 'any' ? guessFreshness(query) : freshness;
     const later = understood.then((x) => {
       if (x) send('intent', { intent: x.intent, queries: x.queries });
-      return { more: withHops([...sides, ...instant, ...extraQueries(query, x)]), freshness: freshness === 'any' ? x?.freshness ?? literalFresh : freshness };
+      const extras = extraQueries(query, x).filter((item) => !scope.bound || !foreignName(item, `${query}\n${scope.bound}`));
+      return { more: withHops([...sides, ...instant, ...extras]), freshness: freshness === 'any' ? x?.freshness ?? literalFresh : freshness };
     });
     // A price ask is answered by the live quote; the rewrites only add the news around it.
     found = await searchWithLate({ q: queriesForAsk(query, []), more: withHops([...sides, ...instant]), later, freshness: literalFresh, count: 20, waitExtras: deep && !paper, extrasCutMs: quoteAsk(query) ? QUOTE_EXTRAS_MS : extraWait, onLiteral }, env, scope);
@@ -1571,10 +1572,23 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
     return;
   }
 
+  // A later turn that adds new words ("floors", "the viewing platform") is still about the subject
+  // already on screen. A different place or business is searched on its own.
+  const stayed = req.intent !== 'adjust' ? sameSubjectQuery(req.question, subject, cardText) : undefined;
+  if (stayed) {
+    const lock = `This follow-up is about ${subject}, the subject already on screen. Search the new words about that subject. Do not switch to a different place or business.`;
+    scope.bound = stayed;
+    send('rewrite', { query: stayed });
+    await searchAndDesign(send, env, stayed, 'any', [lock, context].filter(Boolean).join('\n') || undefined, started, scope, true, undefined, undefined, chart);
+    return;
+  }
+
   // A new question that does not point at the card is searched on its own. The previous
   // subject stays out of the query and out of the conversation the search is written from.
+  // Expansion still cannot add a place or business the question did not name.
   if (req.intent !== 'adjust' && ownQuestion(req.question, covered)) {
     const query = req.question.trim();
+    scope.bound = query;
     send('rewrite', { query });
     await searchAndDesign(send, env, query, 'any', undefined, started, scope, false);
     return;
@@ -1595,7 +1609,10 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
   // The previous card stays in the conversation. The words they typed are the search,
   // not a stub cut to fit a shorter check, and not an answer drawn only from the old pages.
   if (req.intent !== 'adjust' && req.question.trim().length > QUOTE_MAX) {
-    await searchAndDesign(send, env, req.question.trim(), 'any', context, started, scope, false, undefined, undefined, chart);
+    const query = lockChainQuery(req.question, req.question.trim(), subject, `${onScreen?.title ?? ''}\n${req.original}`);
+    scope.bound = `${subject}\n${req.question}`;
+    send('rewrite', { query });
+    await searchAndDesign(send, env, query, 'any', context, started, scope, true, undefined, undefined, chart);
     return;
   }
 
@@ -1613,7 +1630,9 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
       const host = req.cards.find((c) => c.id === req.from);
       const entity = req.ref?.entity ?? topicOf(host?.card?.title) ?? topicOf(host?.title);
       const ref = req.ref ? { ...req.ref, ...(entity ? { entity } : {}) } : undefined;
-      const query = faithfulQuery(req.question, withRef(await rewritten, ref));
+      const raw = faithfulQuery(req.question, withRef(await rewritten, ref));
+      const query = lockChainQuery(req.question, raw, subject, `${onScreen?.title ?? ''}\n${req.original}`);
+      scope.bound = `${subject}\n${req.question}`;
       send('rewrite', { query });
       await searchAndDesign(send, env, query, 'any', context, started, scope, true, req.ref ? req.search?.results : undefined, undefined, chart);
       return;

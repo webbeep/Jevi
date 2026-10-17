@@ -61,6 +61,11 @@ export interface AskScope {
   served?: string;
   /** Reader's city from the edge, when the network supplied one. */
   place?: string;
+  /**
+   * Follow-up searches may not add a proper name that this text does not already contain.
+   * Unset on a first search, so a comparison can still expand "Pixel" to the company that makes it.
+   */
+  bound?: string;
 }
 
 export function newLedger(): CallLedger {

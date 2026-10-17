@@ -218,6 +218,8 @@ test('a named agency and a state count get an official-site search', () => {
   assert.equal(officialProbe('What did studies find about GLP-1 drugs and weight loss?'), '');
   const count = officialProbe('How many foodborne outbreak cases were confirmed last year?');
   assert.match(count, /site:\.gov/);
+  const fee = officialProbe('What is the renewal fee for a harbor permit?');
+  assert.match(fee, /site:\.gov/);
 });
 
 test('government, a journal of record, and a state page lead a count or a paper ask', () => {

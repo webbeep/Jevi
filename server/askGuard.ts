@@ -16,6 +16,34 @@ const PRONOUN = /\b(it|its|this|that|these|those|he|she|him|her|they|them|their|
 
 const FILLER = new Set(['the', 'and', 'for', 'with', 'about', 'from', 'this', 'that', 'what', 'how', 'who', 'are', 'was', 'were', 'you', 'your', 'into', 'onto']);
 
+/** A capitalised token that starts a question, not a place or a business. */
+const LEAD_NAME = new Set(['what', 'whats', 'who', 'whom', 'whose', 'when', 'where', 'why', 'how', 'which', 'is', 'are', 'was', 'were', 'do', 'does', 'did', 'can', 'could', 'should', 'would', 'will', 'if', 'tell', 'show', 'give', 'the', 'and', 'for', 'from', 'not']);
+
+/**
+ * One new word that asks about the thing already on screen ("floors", "deck").
+ * A single word outside this set is a different subject ("tesla"). Several new words
+ * stay with the subject unless one of them is a different proper name.
+ */
+const ASPECT = new Set([
+  'floor', 'storey', 'storie', 'story', 'level', 'deck', 'observation', 'platform', 'gallery', 'gallerie',
+  'view', 'viewing', 'visitor', 'visit', 'ticket', 'admission', 'hour', 'open', 'clos', 'close',
+  'height', 'tall', 'high', 'elevation', 'spire', 'antenna', 'roof', 'top', 'base', 'inside', 'interior',
+  'outside', 'exterior', 'built', 'build', 'year', 'date', 'address', 'locat', 'locate', 'location',
+  'owner', 'architect', 'designer', 'design', 'engineer', 'elevator', 'lift', 'stair', 'step',
+  'restaurant', 'food', 'shop', 'store', 'public', 'people', 'person', 'wide', 'width', 'area', 'size',
+  'capacity', 'population', 'fee', 'cost', 'tax', 'rate', 'price', 'official', 'current', 'today',
+  'photo', 'picture', 'image', 'history', 'fact', 'info', 'information', 'near', 'nearby', 'around',
+  'within', 'meter', 'metre', 'feet', 'foot', 'mile', 'kilometer', 'kilometre', 'north', 'south', 'east',
+  'west', 'call', 'name', 'known', 'show', 'tell', 'give', 'explain', 'mean', 'there', 'here', 'also',
+  'still', 'just', 'only', 'above', 'below', 'under', 'over', 'part', 'section', 'lobby', 'entrance',
+  'exit', 'tower', 'bridge', 'center', 'centre', 'plaza', 'park', 'museum', 'city', 'state', 'country',
+  'county', 'schedule', 'schedul', 'adult', 'child', 'children', 'free', 'paid', 'site', 'page', 'phone',
+  'number', 'square', 'glass', 'map', 'direction', 'parking', 'time', 'day', 'night', 'access', 'ground',
+  'street', 'hall', 'gate', 'door', 'window', 'overlook', 'lookout', 'terrace', 'keep',
+]);
+
+const NAME_WORD = /^(?:[A-Z]{2,}|[A-Z][a-zA-Z0-9'’.-]{2,})$/;
+
 const contentWords = (text: string) => new Set(
   text.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 3 && !FILLER.has(w)),
 );
@@ -107,14 +135,111 @@ export function pointsAtCard(question: string, covered: string): boolean {
   return false;
 }
 
-/** A short title already on screen. A long sentence is not a subject to paste into the next search. */
+/** A short title already on screen. A long sentence still yields the proper name it opens with. */
 export function screenSubject(title: string | undefined, original: string): string {
   const pick = (value: string) => {
     const text = value.trim();
     if (!text || text.length > 60 || text.split(/\s+/).length > 6) return '';
     return text;
   };
-  return pick(title ?? '') || pick(original);
+  return pick(title ?? '') || pick(original) || namedSubject(title ?? '') || namedSubject(original);
+}
+
+/** The first run of capitalised words, skipping a leading question word. "When did North Pier open?" → "North Pier". */
+function namedSubject(text: string): string {
+  const words = text.replace(/[“”"'’]/g, ' ').split(/\s+/).filter(Boolean);
+  const name: string[] = [];
+  for (const raw of words) {
+    const bare = raw.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, '');
+    const cap = NAME_WORD.test(bare) && !LEAD_NAME.has(bare.toLowerCase());
+    if (!name.length) {
+      if (cap) name.push(bare);
+      continue;
+    }
+    if (cap) name.push(bare);
+    else break;
+  }
+  return name.join(' ');
+}
+
+function bareWord(raw: string): string {
+  return raw.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, '');
+}
+
+/** A capitalised place or business in `text` that `allowed` does not already name. */
+export function foreignName(text: string, allowed: string): boolean {
+  const allow = allowed.toLowerCase();
+  const words = text.replace(/[“”"'’]/g, ' ').split(/\s+/).filter(Boolean);
+  return words.some((raw, index) => {
+    const bare = bareWord(raw);
+    if (!NAME_WORD.test(bare)) return false;
+    if (index === 0 && LEAD_NAME.has(bare.toLowerCase())) return false;
+    return !allow.includes(bare.toLowerCase());
+  });
+}
+
+/** Drops capitalised names `allowed` does not contain. The user's other words stay. */
+export function stripForeignNames(query: string, allowed: string): string {
+  const allow = allowed.toLowerCase();
+  const words = query.split(/\s+/).filter(Boolean);
+  const kept = words.filter((raw, index) => {
+    const bare = bareWord(raw);
+    if (!NAME_WORD.test(bare)) return true;
+    if (index === 0 && LEAD_NAME.has(bare.toLowerCase())) return true;
+    return allow.includes(bare.toLowerCase());
+  });
+  const out = kept.join(' ').replace(/\s+/g, ' ').trim();
+  return out || query.trim();
+}
+
+/**
+ * The follow-up names something other than the subject on screen: a proper name that is not
+ * on the card, a "what is X" lookup, or one new word that is not an attribute of that subject.
+ */
+function namesNewTopic(question: string, allowed: string): boolean {
+  const known = new Set(contentStems(allowed));
+  const lookup = question.trim().match(/^(?:what|who)\s+(?:is|are|was|were)\s+(?!the\b|its\b|their\b|this\b|that\b)(.+)$/i);
+  if (lookup) {
+    const stems = contentStems(lookup[1] ?? '');
+    if (stems.some((word) => word.length >= 4 && !known.has(word) && !ATTRIBUTE.has(word))) return true;
+  }
+  const novel = contentStems(question).filter((word) => word.length >= 4 && !known.has(word) && !ATTRIBUTE.has(word));
+  if (novel.length === 1 && !ASPECT.has(novel[0]!)) return true;
+  if (novel.length >= 2) {
+    const aspects = novel.filter((word) => ASPECT.has(word)).length;
+    if (aspects / novel.length < 0.5) return true;
+  }
+  return false;
+}
+
+/**
+ * A later turn whose new words are still about the subject on screen.
+ * The search is those words plus that subject. Undefined when the follow-up names a different thing.
+ */
+export function sameSubjectQuery(question: string, subject: string, covered: string): string | undefined {
+  const name = subject.trim();
+  const q = question.trim();
+  if (!name || !q || isWritingAsk(q) || isCalculationAsk(q) || asksToCompare(q)) return undefined;
+  const allowed = `${name}\n${covered}`;
+  if (foreignName(q, allowed) || namesNewTopic(q, allowed)) return undefined;
+  // A price follow-up still goes through the quote check, which keeps the chart.
+  if (quoteFollowQuery(q, [name])) return undefined;
+  if (q.toLowerCase().includes(name.toLowerCase())) return undefined;
+  return `${name} ${q}`.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * The search for a follow-up in this chain. Names that are not in the question or the subject
+ * drop out. The subject stays in front unless the question itself names a different thing.
+ */
+export function lockChainQuery(question: string, rewritten: string, subject: string, anchor: string): string {
+  const name = subject.trim();
+  const subjectText = `${anchor}\n${name}`;
+  const switched = foreignName(question, subjectText) || namesNewTopic(question, subjectText);
+  const cleaned = stripForeignNames(rewritten.trim() || question.trim(), switched ? question : `${question}\n${subjectText}`);
+  if (switched || !name) return cleaned;
+  if (cleaned.toLowerCase().includes(name.toLowerCase())) return cleaned;
+  return `${name} ${cleaned}`.replace(/\s+/g, ' ').trim();
 }
 
 /**
