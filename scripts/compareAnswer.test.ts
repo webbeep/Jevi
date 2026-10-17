@@ -3,9 +3,9 @@ import { test } from 'node:test';
 import type { CardNode } from '../shared/card.ts';
 import type { SearchResponse } from '../shared/types.ts';
 import { asksToCompare } from '../server/askGuard.ts';
-import { answersComparison, comparisonNodes, comparisonRepair, comparisonTitle, mentionsSide } from '../server/compareAnswer.ts';
+import { answersComparison, comparisonNodes, comparisonRepair, comparisonTitle, keepComparedProducts, mentionsSide, sameProduct } from '../server/compareAnswer.ts';
 import { candidates } from '../server/extract.ts';
-import { compareSideQueries } from '../server/patterns.ts';
+import { compareSideQueries, compareSides } from '../server/patterns.ts';
 import { Polisher, completeSentences, emptyFigure, withoutEmptySlots } from '../server/polish.ts';
 
 const ASK = 'AJ Dybantsa vs 2026 NBA rookies vs past draft classes';
@@ -113,4 +113,47 @@ test('a compound product name is the spaced name, and a filled comparison is not
   assert.equal(answersComparison(ask, [tiles, table]), true);
   const shown = new Map<number, CardNode>([[0, tiles], [1, table]]);
   assert.equal(comparisonRepair(ask, search('Only one side is discussed here.'), shown), undefined);
+});
+
+test('a list of products is one side each, and a follow-up keeps the price and picture already shown', () => {
+  assert.deepEqual(compareSides('Compare Northwatch 2, Glowband 4 and Harbor Band 8'), ['Northwatch 2', 'Glowband 4', 'Harbor Band 8']);
+  assert.equal(sameProduct('Northwatch 2', 'Northwatch Air'), false);
+  assert.equal(sameProduct('Northwatch 2', 'Northwatch 2'), true);
+  const prior: CardNode[] = [{
+    type: 'grid',
+    cols: 2,
+    children: [
+      { type: 'tile', label: 'Northwatch 2', value: '$179.99', imageSrc: 'https://img.example/north.png' },
+      { type: 'tile', label: 'Glowband 4', value: '$48', imageSrc: 'https://img.example/glow.png' },
+    ],
+  }];
+  const next = new Map<number, CardNode>([[0, {
+    type: 'grid',
+    cols: 2,
+    children: [
+      { type: 'tile', label: 'Northwatch 2', value: '$99' },
+      { type: 'tile', label: 'Northwatch Air', value: '$80' },
+      { type: 'tile', label: 'Glow Band 4', value: '$48' },
+    ],
+  }], [1, {
+    type: 'table',
+    columns: ['Factor', 'Northwatch 2', 'Glow Band 4'],
+    rows: [['Price', '$99', 'Not stated in sources'], ['Display', 'Not stated in sources', 'AMOLED']],
+  }]]);
+  const patches = keepComparedProducts(prior, next, 'Compare Northwatch 2, Northwatch Air and Glowband 4');
+  assert.ok(patches);
+  const grid = patches!.find((patch) => patch.index === 0)?.node;
+  assert.equal(grid?.type, 'grid');
+  if (grid?.type !== 'grid') return;
+  const edge = grid.children.find((node) => node.type === 'tile' && node.label === 'Northwatch 2');
+  const air = grid.children.find((node) => node.type === 'tile' && node.label === 'Northwatch Air');
+  const glow = grid.children.find((node) => node.type === 'tile' && node.label === 'Glow Band 4');
+  assert.equal(edge?.type === 'tile' ? edge.value : '', '$179.99');
+  assert.equal(edge?.type === 'tile' ? edge.imageSrc : '', 'https://img.example/north.png');
+  assert.equal(air?.type === 'tile' ? air.value : '', '$80');
+  assert.equal(glow?.type === 'tile' ? glow.imageSrc : '', 'https://img.example/glow.png');
+  const table = patches!.find((patch) => patch.index === 1)?.node;
+  assert.equal(table?.type, 'table');
+  if (table?.type !== 'table') return;
+  assert.deepEqual(table.rows[0], ['Price', '$179.99', '$48']);
 });

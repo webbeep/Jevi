@@ -158,3 +158,154 @@ export function comparisonRepair(question: string, search: SearchResponse, nodes
   for (const index of indexes.slice(1)) patches.push({ index, node: { type: 'citations', refs: [] } });
   return patches;
 }
+
+const STOP_NAME = new Set(['the', 'and', 'with', 'for', 'vs', 'versus']);
+const MONEY = /\$[\d,]+(?:\.\d{2})?/;
+const NOT_STATED = /\bnot stated\b/i;
+
+export interface ShownProduct {
+  name: string;
+  price?: string;
+  imageSrc?: string;
+  rows: { factor: string; value: string }[];
+}
+
+function nameParts(name: string): string[] {
+  return name.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 2 && !STOP_NAME.has(word));
+}
+
+/** The same product, not a sibling model. "Edge" is not "Air". A shared number has to agree. */
+export function sameProduct(a: string, b: string): boolean {
+  const compact = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '');
+  const leftCompact = compact(a);
+  const rightCompact = compact(b);
+  if (leftCompact.length >= 5 && leftCompact === rightCompact) return true;
+  const left = nameParts(a);
+  const right = nameParts(b);
+  if (!left.length || !right.length) return false;
+  const numbers = (parts: string[]) => parts.filter((word) => /^\d+$/.test(word));
+  const leftNumbers = numbers(left);
+  const rightNumbers = numbers(right);
+  if (leftNumbers.length && rightNumbers.length && !leftNumbers.some((n) => rightNumbers.includes(n))) return false;
+  const strong = (parts: string[]) => parts.filter((word) => word.length >= 4);
+  const leftStrong = strong(left);
+  const rightStrong = strong(right);
+  if (leftStrong.length && rightStrong.length) {
+    const [shorter, longer] = leftStrong.length <= rightStrong.length ? [leftStrong, rightStrong] : [rightStrong, leftStrong];
+    if (!shorter.every((word) => longer.includes(word))) return false;
+  } else if (!left.some((word) => right.includes(word))) {
+    return false;
+  }
+  const weak = (parts: string[]) => parts.filter((word) => word.length < 4 && !/^\d+$/.test(word));
+  const leftWeak = weak(left);
+  const rightWeak = weak(right);
+  if (leftWeak.length && rightWeak.length && !leftWeak.some((word) => rightWeak.includes(word))) return false;
+  if ((leftWeak.length > 0) !== (rightWeak.length > 0)) return false;
+  return leftStrong.length > 0 || leftNumbers.length > 0;
+}
+
+function money(value: string | undefined): string | undefined {
+  return value?.match(MONEY)?.[0];
+}
+
+/** Prices, pictures, and filled rows already shown for each product. */
+export function productsOnCard(nodes: readonly CardNode[], images: readonly { thumb: string }[] = []): ShownProduct[] {
+  const out: ShownProduct[] = [];
+  const find = (name: string) => out.find((product) => sameProduct(product.name, name));
+  const take = (name: string): ShownProduct => {
+    const have = find(name);
+    if (have) return have;
+    const next: ShownProduct = { name, rows: [] };
+    out.push(next);
+    return next;
+  };
+  const picture = (src?: string, ref?: number) => src || (ref !== undefined ? images[ref]?.thumb : undefined);
+  const walk = (node: CardNode) => {
+    if (node.type === 'tile') {
+      const product = take(node.label);
+      const price = money(node.value);
+      if (price && !product.price) product.price = price;
+      const src = picture(node.imageSrc, node.imageRef);
+      if (src && !product.imageSrc) product.imageSrc = src;
+    }
+    if (node.type === 'table' && node.columns.length >= 2) {
+      node.columns.slice(1).forEach((name, column) => {
+        const product = take(name);
+        for (const row of node.rows) {
+          const factor = (row[0] ?? '').trim();
+          const value = (row[column + 1] ?? '').trim();
+          if (!factor || !value || NOT_STATED.test(value)) continue;
+          if (/^price$/i.test(factor) && !product.price) product.price = money(value) ?? value;
+          if (!product.rows.some((have) => have.factor.toLowerCase() === factor.toLowerCase())) product.rows.push({ factor, value });
+        }
+      });
+    }
+    if ('children' in node && Array.isArray(node.children)) node.children.forEach(walk);
+    if (node.type === 'tabs') for (const tab of node.tabs) tab.children.forEach(walk);
+  };
+  nodes.forEach(walk);
+  return out;
+}
+
+function withPrice(value: string, price: string): string {
+  return MONEY.test(value) ? value.replace(MONEY, price) : price;
+}
+
+/**
+ * A follow-up that adds a product keeps the price and picture already shown for a product
+ * that is still in the comparison. A different model's number does not replace that price.
+ * "Not stated" is filled from the row the earlier card already had.
+ */
+export function keepComparedProducts(prior: readonly CardNode[], nodes: Map<number, CardNode>, question: string, images: readonly { thumb: string }[] = []): { index: number; node: CardNode }[] | undefined {
+  const kept = productsOnCard(prior, images);
+  if (!kept.length || compareSides(question).length < 2) return undefined;
+  const patches: { index: number; node: CardNode }[] = [];
+  const visit = (node: CardNode): CardNode => {
+    if (node.type === 'tile') {
+      const product = kept.find((item) => sameProduct(item.name, node.label));
+      if (!product) return node;
+      let next = node;
+      const price = money(node.value);
+      if (product.price && price && price !== product.price) next = { ...next, value: withPrice(node.value ?? '', product.price) };
+      if (product.price && !price && (!node.value || NOT_STATED.test(node.value))) next = { ...next, value: product.price };
+      if (!next.imageSrc && product.imageSrc) next = { ...next, imageSrc: product.imageSrc, imageQuery: undefined };
+      return next;
+    }
+    if (node.type === 'table' && node.columns.length >= 2) {
+      const rows = node.rows.map((row) => {
+        const factor = (row[0] ?? '').trim();
+        return row.map((cell, column) => {
+          if (column === 0) return cell;
+          const product = kept.find((item) => sameProduct(item.name, node.columns[column] ?? ''));
+          if (!product) return cell;
+          if (/^price$/i.test(factor)) {
+            const price = money(cell);
+            if (product.price && price && price !== product.price) return withPrice(cell, product.price);
+            if (product.price && (!cell.trim() || NOT_STATED.test(cell))) return product.price;
+          }
+          if (NOT_STATED.test(cell)) {
+            const earlier = product.rows.find((item) => item.factor.toLowerCase() === factor.toLowerCase());
+            if (earlier) return earlier.value;
+          }
+          return cell;
+        });
+      });
+      return { ...node, rows };
+    }
+    if ('children' in node && Array.isArray(node.children)) {
+      const children = node.children.map(visit);
+      return children.some((child, i) => child !== node.children[i]) ? { ...node, children } as CardNode : node;
+    }
+    if (node.type === 'tabs') {
+      const tabs = node.tabs.map((tab) => ({ ...tab, children: tab.children.map(visit) }));
+      return { ...node, tabs };
+    }
+    return node;
+  };
+  for (const [index, node] of nodes) {
+    if (node.type === 'actions' || node.type === 'citations' || node.type === 'ticker') continue;
+    const next = visit(node);
+    if (next !== node) patches.push({ index, node: next });
+  }
+  return patches.length ? patches : undefined;
+}

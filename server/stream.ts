@@ -58,7 +58,7 @@ import { keepPictures, reviewCard, type Review } from './review';
 import { permitted } from './images';
 import { hasLlm } from './llm';
 import { collectPages, ogImageOf } from './pages';
-import { MADE_PATTERNS, compareSideQueries, heuristicPattern, skeletonCard } from './patterns';
+import { MADE_PATTERNS, compareSideQueries, compareSides, heuristicPattern, skeletonCard } from './patterns';
 import { planLayout } from './plan';
 import type { AskScope, CallLedger } from './budget';
 import { SEARCH_CALL_CAP, extraSearchRoom, logAsk, mark, moreQueries, newLedger, queriesForAsk, searchCalls } from './budget';
@@ -70,7 +70,7 @@ import { domainOf } from './util';
 import { choicesIn, distinctActions, subjectWords } from './chips';
 import { anchoredFollowup, asksToCompare, cryptographyHint, faithfulQuery, followSearchQuery, isWritingAsk, needsOwnSearch, ownQuestion, personQuestion, quickPlan, quoteFollowQuery, screenSubject, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
 import { calculationAnswer, isCalculationAsk, rateOnAmount } from './calculate';
-import { comparisonRepair, comparisonTitle } from './compareAnswer';
+import { comparisonRepair, comparisonTitle, keepComparedProducts } from './compareAnswer';
 import { withFinishedSentences } from './polish';
 import { queryWithPlace, readerPlace, settleReadings } from './readings';
 import { isKeepOnly, keptBody } from './refine';
@@ -157,6 +157,9 @@ interface DesignArgs {
   hopUrls?: string[];
   /** Source number of the person's own website, linked from the profile. */
   website?: number;
+  /** Products already compared. A follow-up that adds one keeps their price and picture. */
+  priorBody?: CardNode[];
+  priorImages?: ImageResult[];
 }
 
 interface EarlyBrief {
@@ -617,16 +620,24 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       ])
     : { ready: true as const, review: undefined };
   const settleComparison = () => {
-    if (designReq.pattern !== 'compare') return;
     const question = designReq.followup?.question ?? designReq.query;
-    const title = comparisonTitle(question, head?.title ?? question);
-    if (head && title !== head.title) {
-      head = { ...head, title };
-      send('head', head);
+    if (designReq.pattern === 'compare') {
+      const title = comparisonTitle(question, head?.title ?? question);
+      if (head && title !== head.title) {
+        head = { ...head, title };
+        send('head', head);
+      }
+      const patches = comparisonRepair(question, designReq.search, shown);
+      if (patches) {
+        for (const patch of patches) {
+          shown.set(patch.index, patch.node);
+          send('node', { index: patch.index, node: patch.node });
+        }
+      }
     }
-    const patches = comparisonRepair(question, designReq.search, shown);
-    if (!patches) return;
-    for (const patch of patches) {
+    const kept = designReq.priorBody?.length ? keepComparedProducts(designReq.priorBody, shown, question, designReq.priorImages) : undefined;
+    if (!kept) return;
+    for (const patch of kept) {
       shown.set(patch.index, patch.node);
       send('node', { index: patch.index, node: patch.node });
     }
@@ -759,7 +770,7 @@ function applyReview(send: Send, req: DesignRequest, shown: Map<number, CardNode
  * inside the three-call cap (two rewrites leave no room for Wikipedia).
  * Rewritten follow-ups already say what they mean, so they skip the understanding step.
  */
-async function searchAndDesign(send: Send, env: Env, query: string, freshness: Freshness, context: string | undefined, started: number, scope: AskScope, rewritten = false, seedRows?: SearchResult[], steer?: { avoid: Set<string>; rejected: string }, keepTicker?: CardNode) {
+async function searchAndDesign(send: Send, env: Env, query: string, freshness: Freshness, context: string | undefined, started: number, scope: AskScope, rewritten = false, seedRows?: SearchResult[], steer?: { avoid: Set<string>; rejected: string }, keepTicker?: CardNode, priorBody?: CardNode[], priorImages?: ImageResult[]) {
   const unglued = withoutGluedPerson(query);
   if (unglued !== query.trim()) query = unglued;
   const located = queryWithPlace(query, scope.place);
@@ -1258,13 +1269,31 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
       }
     }
   }
+  if (priorBody?.length && compareSides(query).length >= 2) results = await searchNamedSides(query, results, env, scope, send);
   results = { ...results, results: leadMemberRows(query, leadPreprints(query, results.results), hopUrls) };
   const official = foldReadyOfficial(query, results, officialEarly);
   if (official !== results) results = official;
   send('search', results);
   const boost = imageBoost(pattern, results, env, scope, boostQuery, portraitAgain);
   const crypto = cryptographyHint(query, results.results);
-  await design(send, env, { query, pattern, depth: plan.depth, readPages: plan.readPages || deep || fromSeeds, search: results, context: [designContext, crypto].filter(Boolean).join('\n') || undefined, intent: u?.intent, deep, boost, entityHint, person, ticker: quote ? tickerNode(quote) : keepTicker, earlyBrief, website, allowRescue: !isPaperAsk(query), hopUrls, fromFollowup: rewritten && !isPersonAsk(query) }, started, scope, late);
+  await design(send, env, { query, pattern, depth: plan.depth, readPages: plan.readPages || deep || fromSeeds, search: results, context: [designContext, crypto].filter(Boolean).join('\n') || undefined, intent: u?.intent, deep, boost, entityHint, person, ticker: quote ? tickerNode(quote) : keepTicker, earlyBrief, website, allowRescue: !isPaperAsk(query), hopUrls, fromFollowup: rewritten && !isPersonAsk(query), priorBody, priorImages }, started, scope, late);
+}
+
+/** Each named product, including ones already on the card. A missing row is searched before the card says it is not stated. */
+async function searchNamedSides(query: string, results: SearchResponse, env: Env, scope: AskScope, send: Send): Promise<SearchResponse> {
+  const sides = compareSides(query).slice(0, 4);
+  if (sides.length < 2) return results;
+  scope.ledger.bonus = (scope.ledger.bonus ?? 0) + sides.length;
+  const found = await Promise.all(sides.map(async (side) => {
+    const again = await searchWithLate({ q: `${side} specs price`, freshness: 'any', count: 6, lite: true }, env, scope);
+    return applyRelevance(side, { ...again.response, query: side }, scope.ledger).results;
+  }));
+  const add = found.flat().filter((row) => row.url && !results.results.some((have) => have.url === row.url)).slice(0, 12);
+  if (!add.length) return results;
+  const next = { ...results, results: [...add, ...results.results] };
+  send('search', next);
+  console.log(JSON.stringify({ zo: 'compare-sides', sides, added: add.length }));
+  return next;
 }
 
 /** The value if the work has already finished, otherwise the fallback. Does not wait. */
@@ -1406,8 +1435,9 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
   // under a "Side by side" label. Search the comparison itself; each other side gets its own query.
   if (req.intent !== 'adjust' && asksToCompare(req.question)) {
     const query = req.question.trim();
+    const priorCard = from?.card ?? [...req.cards].reverse().find((card) => card.card)?.card;
     send('rewrite', { query });
-    await searchAndDesign(send, env, query, 'any', context, started, scope, false);
+    await searchAndDesign(send, env, query, 'any', context, started, scope, false, undefined, undefined, undefined, priorCard?.body, req.search?.images);
     return;
   }
 

@@ -4,7 +4,7 @@ import { anchoredFollowup, asksToCompare, cardFollowQuery, cryptographyHint, fai
 import { isPersonAsk } from '../server/entity.ts';
 import { planLayout } from '../server/plan.ts';
 import type { CardNode } from '../shared/card.ts';
-import { followupLabel } from '../shared/followupLabel.ts';
+import { followupLabel, visibleSpelling } from '../shared/followupLabel.ts';
 
 test('a which-one follow-up stays on the comparison already on screen', () => {
   assert.equal(anchoredFollowup('iphone 17 vs pixel 10', 'which one has better battery life?'), 'iphone 17 vs pixel 10 battery life');
@@ -156,4 +156,7 @@ test('a follow-up label stays the words that were typed', () => {
   assert.equal(followupLabel('What is photosynthesis?', 'What is photosynthesis?'), 'What is photosynthesis?');
   assert.equal(followupLabel('Ricky cheuk', 'Ricky Gervais Ricky Cheuk'), 'Ricky cheuk');
   assert.equal(followupLabel('Ricky Gervais Ricky Cheuk', 'Ricky Cheuk'), 'Ricky Cheuk');
+  assert.equal(visibleSpelling('Glowband 4 vs Northwatch 2', 'Glowband 4 vs Glayband 2'), undefined);
+  assert.equal(visibleSpelling('Glowband 4 vs Northwatch 2', 'Glow Band 4 vs Northwatch 2'), 'Glow Band 4 vs Northwatch 2');
+  assert.equal(visibleSpelling('Jensen Huang Nvdia', 'Jensen Huang, NVIDIA'), 'Jensen Huang, NVIDIA');
 });

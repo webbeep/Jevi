@@ -9,11 +9,27 @@ interface PatternDef extends CardPattern {
 
 const slot = (hint: string, shape: Extract<CardNode, { type: 'slot' }>['shape'] = 'line', size?: { cols?: number; rows?: number }): CardNode => ({ type: 'slot', hint, shape, ...size });
 
+/** "A, B and C" is three sides. "A and B" without a comma stays one phrase for the pair matcher. */
+function listSides(text: string): string[] {
+  if (!text.includes(',')) return [];
+  const parts = text.split(/\s*,\s*/).flatMap((part, i, all) => {
+    const cleaned = part.replace(/^(?:and|with|to)\s+/i, '').trim();
+    if (i === all.length - 1 && /\s+\band\b\s+/i.test(cleaned)) return cleaned.split(/\s+\band\b\s+/i).map((side) => side.trim());
+    return [cleaned];
+  }).filter((part) => part.length >= 2);
+  return parts.length >= 2 ? parts : [];
+}
+
 /** The things a comparison names ("AJ Dybantsa vs 2026 NBA rookies vs past draft classes" is three). */
 export function compareSides(query: string): string[] {
   const stripped = query.replace(/^(?:which is better(?: value)?|compare)\s*:\s*/i, '').trim();
   const versus = stripped.split(/\s+(?:vs\.?|versus)\s+/i).map((p) => p.trim()).filter((p) => p.length >= 2);
   if (versus.length >= 2) return versus;
+  const listed = stripped.match(/^compare\s+(.+)$/i);
+  if (listed) {
+    const sides = listSides(listed[1]!);
+    if (sides.length >= 2) return sides;
+  }
   const compared = stripped.match(/^compare\s+(.+?)\s+(?:and|with|to)\s+(.+)$/i);
   if (!compared) return [];
   return [compared[1]!, compared[2]!].map((p) => p.trim()).filter((p) => p.length >= 2);

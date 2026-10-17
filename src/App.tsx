@@ -16,6 +16,7 @@ import { ArrowUp, CornerDownRight, CornerLeftUp, History, Plus, RotateCw, Search
 import type { AnswerCard, CardNode } from '../shared/card';
 import { packHistorySources, type HistorySource } from '../shared/historyCard';
 import { topicOf, usefulFollowups, type AskRef } from '../shared/askAbout';
+import { visibleSpelling } from '../shared/followupLabel';
 import { boundAsk } from '../shared/queryBound';
 import type { SearchResponse } from '../shared/types';
 import { api } from './api';
@@ -1065,6 +1066,7 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
   // Until Jev's layout can take over, a search shows its queries and then the sources.
   // Once that layout is on screen and the answer has not started, the card shows it instead.
   const searching = turn.kind === 'search' || !!turn.peek?.length || !!turn.search || !!turn.intent?.queries?.length;
+  const spelling = visibleSpelling(turn.question, turn.spelling);
   const waiting = turn.filling && !turn.result && !turn.offline && !turn.error && !answerStarted;
   const trail = waiting && searching ? (
     <ResearchTrail question={turn.question} intent={turn.intent} peek={turn.peek} search={turn.search} />
@@ -1135,9 +1137,9 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
 
       {(offlinePartial || !(turn.error && !turn.result)) && (
         <>
-          {turn.spelling && (
+          {spelling && (
             <p data-testid="spelling-note" className="text-xs text-muted-foreground">
-              Showing results for <span className="font-medium text-foreground">{turn.spelling}</span>
+              Showing results for <span className="font-medium text-foreground">{spelling}</span>
             </p>
           )}
           {turn.fromCache && <p data-testid="cache-note" className="text-xs text-muted-foreground">Saved answer · you're offline</p>}

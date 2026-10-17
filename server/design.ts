@@ -124,6 +124,9 @@ export interface DesignRequest {
   facts?: { lead: string; note: string };
   /** Server-built lead (live price and chart) the card opens with; the model designs what follows. */
   ticker?: CardNode;
+  /** Products already compared. A follow-up that adds one keeps their price and picture. */
+  priorBody?: CardNode[];
+  priorImages?: { thumb: string }[];
 }
 
 export interface DesignEvents {
