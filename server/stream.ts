@@ -90,7 +90,7 @@ import { nwsForecastRow } from './weatherService';
 import { brandPriceProbe, probeHost } from './brandPrice';
 import { cleanSideName } from '../shared/objects';
 import { cardCitesName, citedNames, nameSeekingQuery, namedListNode, wantsNamedList } from './namedList';
-import { addedComparison, followSearchPlan, judgeSources, judgeTurn } from './turnJudge';
+import { addedComparison, fallbackQuery, followSearchPlan, judgeSources, judgeTurn } from './turnJudge';
 import { deniesPrice, findTicker } from '../shared/tickerNotes';
 import { splitPeople } from './peopleSplit';
 import { personSteer, pronounFollow, roleFollow, threadPerson, topicOnly, withoutChosen } from './personSteer';
@@ -1897,7 +1897,7 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
     });
     const decision = judged ?? {
       action: 'search' as const,
-      queries: [[hint, req.question.trim()].filter(Boolean).join(' ')],
+      queries: [fallbackQuery(req.question, hint)],
       subject: hint,
     };
     console.log(JSON.stringify({ zo: 'judge-turn', action: decision.action, subject: decision.subject, queries: decision.queries, model: !!judged }));

@@ -205,6 +205,21 @@ export function parseSourceDecision(raw: unknown): SourceDecision | undefined {
   return { enough: row.enough, query: row.enough ? '' : query };
 }
 
+/**
+ * The search for a follow-up when the turn judge did not answer in time: the pronoun becomes the subject on screen
+ * ("When did it open?" → "When did One World Trade Center open"). A question that already names it is searched as is.
+ */
+export function fallbackQuery(question: string, subject: string): string {
+  const asked = question.trim().replace(/[?!.]+$/, '');
+  const name = subject.trim();
+  if (!name) return asked;
+  if (asked.toLowerCase().includes(name.toLowerCase())) return asked;
+  if (/\bits\b/i.test(asked) && !/\b(?:it|it's)\b/i.test(asked)) return asked.replace(/\bits\b/i, `${name}'s`);
+  if (/\bit's\b/i.test(asked)) return asked.replace(/\bit's\b/i, `${name} is`);
+  if (/\b(?:it|he|she|they|them|him|her)\b/i.test(asked)) return asked.replace(/\b(?:it|he|she|they|them|him|her)\b/i, name);
+  return `${name} ${asked}`;
+}
+
 async function ask<T>(env: Env, system: string, user: string, ms: number): Promise<T | undefined> {
   if (!hasLlm(env)) return undefined;
   const call = llmJson<T>(env, system, user, 180).catch(() => undefined);

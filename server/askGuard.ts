@@ -18,7 +18,9 @@ const PRONOUN = /\b(it|its|this|that|these|those|he|she|him|her|they|them|their|
 const FILLER = new Set(['the', 'and', 'for', 'with', 'about', 'from', 'this', 'that', 'what', 'how', 'who', 'are', 'was', 'were', 'you', 'your', 'into', 'onto']);
 
 /** A capitalised token that starts a question, not a place or a business. */
-const LEAD_NAME = new Set(['what', 'whats', 'who', 'whom', 'whose', 'when', 'where', 'why', 'how', 'which', 'is', 'are', 'was', 'were', 'do', 'does', 'did', 'can', 'could', 'should', 'would', 'will', 'if', 'tell', 'show', 'give', 'the', 'and', 'for', 'from', 'not']);
+const LEAD_NAME = new Set(['what', 'whats', 'who', 'whom', 'whose', 'when', 'where', 'why', 'how', 'which', 'is', 'are', 'was', 'were', 'do', 'does', 'did', 'can', 'could', 'should', 'would', 'will', 'if', 'tell', 'show', 'give', 'the', 'and', 'for', 'from', 'not',
+  // A pushback or a pointer starts a sentence; it is not the name ("That is wrong, it's the Empire State Building").
+  'that', 'this', 'these', 'those', 'it', 'its', 'there', 'here', 'yes', 'no', 'wrong', 'right', 'actually', 'also', 'but', 'okay', 'well', 'really', 'please']);
 
 /**
  * One new word that asks about the thing already on screen ("floors", "deck").

@@ -116,3 +116,13 @@ test('a singular follow-up on a comparison card asks about the side its lead set
   const both = followSearchPlan({ title: 'Harbor Slate vs Northwatch 2', question: 'When did it launch?', queries: [], subject: '', lead: 'Two smartwatches, side by side' });
   assert.equal(both.query, 'Harbor Slate vs Northwatch 2');
 });
+
+test('without the turn judge, a pronoun becomes the subject on screen', async () => {
+  const { fallbackQuery } = await import('../server/turnJudge.ts');
+  assert.equal(fallbackQuery('When did it open?', 'One World Trade Center'), 'When did One World Trade Center open');
+  assert.equal(fallbackQuery('How far from Earth is it?', 'James Webb Space Telescope'), 'How far from Earth is James Webb Space Telescope');
+  assert.equal(fallbackQuery('How big is its main mirror?', 'James Webb Space Telescope'), "How big is James Webb Space Telescope's main mirror");
+  assert.equal(fallbackQuery('Who nominated him?', 'John Roberts'), 'Who nominated John Roberts');
+  assert.equal(fallbackQuery('What are the hours?', 'Met Museum'), 'Met Museum What are the hours');
+  assert.equal(fallbackQuery('Is the Met Museum open Monday?', 'Met Museum'), 'Is the Met Museum open Monday');
+});
