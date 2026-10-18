@@ -73,6 +73,7 @@ import { anchoredFollowup, asksToCompare, comparisonFollow, cryptographyHint, fa
 import { calculationAnswer, isCalculationAsk, rateOnAmount } from './calculate';
 import { acceptProductPhoto, comparisonRepair, comparisonTitle, keepComparedProducts, mentionsSide, missingSideNode, nameForms, stickerPrice } from './compareAnswer';
 import { cardGaps, citeForGap, gapSearchQuery, markGap, settleGap, type PieceGap } from './gapFill';
+import { keptCardNodes } from '../shared/gap';
 import { withFinishedSentences } from './polish';
 import { queryWithPlace, readerPlace, settleReadings } from './readings';
 import { isKeepOnly, keptBody } from './refine';
@@ -920,6 +921,12 @@ function applyReview(send: Send, req: DesignRequest, shown: Map<number, CardNode
  * Rewritten follow-ups already say what they mean, so they skip the understanding step.
  */
 async function searchAndDesign(send: Send, env: Env, query: string, freshness: Freshness, context: string | undefined, started: number, scope: AskScope, rewritten = false, seedRows?: SearchResult[], steer?: { avoid: Set<string>; rejected: string }, keepTicker?: CardNode, priorBody?: CardNode[], priorImages?: ImageResult[], fanout: string[] = []) {
+  const kept = priorBody?.length ? keptCardNodes(priorBody) : [];
+  if (kept.length) {
+    kept.forEach((node, index) => send('node', { index, node }));
+    send('node', { index: kept.length, node: { type: 'slot', hint: query, shape: 'line' } });
+    send('intent', { intent: query, queries: [query] });
+  }
   const unglued = withoutGluedPerson(query);
   if (unglued !== query.trim()) query = unglued;
   const extra = fanout.map((item) => item.trim()).filter((item) => item && item.toLowerCase() !== query.toLowerCase());

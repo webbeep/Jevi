@@ -9,6 +9,7 @@ import { MAX_AUTO_RECONNECTS, OFFLINE_MESSAGE, friendlyError, isConnectionError,
 import { billingFromSources, settleCardPrices } from '../shared/pricing';
 import { followupLabel } from '../shared/followupLabel';
 import { emptyDoneState } from '../shared/sse-parse';
+import { keptCardNodes } from '../shared/gap';
 import { isBlankLayout, liveBody } from '../shared/liveBody';
 import type { NoSourcesNotice, SearchResponse, SearchResult } from '../shared/types';
 import { api } from './api';
@@ -538,7 +539,31 @@ export function useSession() {
     const ctx = searchOf(from) ?? [...ref.current].reverse().find((t) => t.search);
     if (!ctx?.search) return;
     const base = intent === 'adjust' && from?.result ? { id: from.id, title: from.result.card.title, card: from.result.card } : undefined;
-    const id = add({ kind: 'search', question: q, searchId: ctx.id, filling: true, origin: intent, base, pattern: base ? from?.pattern : undefined, ref: askRef });
+    const priorCard = from?.result?.card;
+    const kept = priorCard ? keptCardNodes(priorCard.body) : [];
+    const seeded = kept.length
+      ? [...kept, { type: 'slot' as const, hint: q, shape: 'line' as const }]
+      : undefined;
+    const id = add({
+      kind: 'search',
+      question: q,
+      searchId: ctx.id,
+      filling: true,
+      origin: intent,
+      base,
+      pattern: base ? from?.pattern : undefined,
+      ref: askRef,
+      ...(seeded ? {
+        live: {
+          regions: [],
+          nodes: seeded,
+          raw: seeded,
+          followups: [],
+          credits: priorCard?.credits ?? [],
+          head: { title: priorCard!.title, subtitle: priorCard!.subtitle, icon: priorCard!.icon },
+        },
+      } : {}),
+    });
     scrollToTurn(id);
     const root = chainOf(from?.id);
     const found = [...ref.current].reverse().find((t) => root && t.id >= root.id && (!from || t.id <= from.id) && t.search);

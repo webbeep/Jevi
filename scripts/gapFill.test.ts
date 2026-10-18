@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { CardNode } from '../shared/card.ts';
-import { GAP_MARK } from '../shared/gap.ts';
+import { GAP_MARK, keptCardNodes } from '../shared/gap.ts';
 import { cardGaps, citeForGap, gapSearchQuery, markGap, settleGap } from '../server/gapFill.ts';
 
 const table: CardNode = {
@@ -13,6 +13,18 @@ const table: CardNode = {
     ['Price', '$179.99 [1]', '$34.99 [3]'],
   ],
 };
+
+test('a follow-up keeps cited components and adds one placeholder for the new fact', () => {
+  const kept = keptCardNodes([
+    { type: 'tile', label: 'Harbor Slate', value: '$179.99', source: 1 },
+    { type: 'tile', label: 'Northwatch 2', value: '$34.99 [2]' },
+    { type: 'actions', items: [] },
+    { type: 'text', text: 'A slogan with no source.' },
+  ]);
+  assert.equal(kept.length, 2);
+  assert.equal(kept[0]?.type === 'tile' ? kept[0].label : '', 'Harbor Slate');
+  assert.equal(kept[1]?.type === 'tile' ? kept[1].value : '', '$34.99 [2]');
+});
 
 test('a blank cell is the only placeholder, and a cited price stays', () => {
   const gaps = cardGaps(new Map([[0, table]]));
