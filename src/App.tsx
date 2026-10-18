@@ -30,7 +30,8 @@ import { WhichOne } from './card/WhichOne';
 import { LogoMark, Wordmark } from './Logo';
 import { buildLibrary } from './library';
 import { FaviconStack, SourcesRail, SourcesSheet } from './Sources';
-import { type SessionActions, type Turn, liveBody, scrollToTurn, useSession } from './useSession';
+import { isBlankLayout, liveBody } from '../shared/liveBody';
+import { type SessionActions, type Turn, scrollToTurn, useSession } from './useSession';
 import { readChoices } from '../shared/choices';
 import { loadSnapshot, normalizeAnswerQuery, purgeDegradedSnapshots, saveSnapshot } from '../shared/answerKey';
 import { answerSlug } from '../shared/publicPage';
@@ -1050,7 +1051,9 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
     if (layoutReady) base = { ...skeleton, ...live?.head, body: chosenLayout };
     else if (live && (streaming || offlinePartial)) {
       const fillingNow = offlinePartial ? false : turn.filling;
-      base = { ...skeleton, ...live.head, body: liveBody(live, fillingNow) };
+      const streamed = liveBody(live, fillingNow);
+      const visible = streamed.length ? streamed : live.nodes.filter((node): node is CardNode => !!node && !isBlankLayout(node));
+      base = { ...skeleton, ...live.head, body: visible };
     } else if (turn.result) base = turn.result.card;
     else base = { ...skeleton, ...live?.head, body: [] };
     if (!turn.result && !live?.head && turn.kind !== 'search') base = { ...base, title: turn.question };
@@ -1064,7 +1067,8 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
   const searching = turn.kind === 'search' || !!turn.peek?.length || !!turn.search || !!turn.intent?.queries?.length;
   const spelling = visibleSpelling(turn.question, turn.spelling);
   const waiting = turn.filling && !turn.result && !turn.offline && !turn.error && !answerStarted;
-  const trail = waiting && searching ? (
+  const keptOnScreen = (turn.live?.nodes ?? []).some((node) => !!node && node.type !== 'slot' && node.type !== 'citations' && node.type !== 'actions');
+  const trail = waiting && searching && !keptOnScreen ? (
     <ResearchTrail question={turn.question} intent={turn.intent} peek={turn.peek} search={turn.search} />
   ) : undefined;
   const gapTrail = turn.filling && answerStarted && card.body.some(hasGap) ? (
@@ -1122,7 +1126,7 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
   const choicesOnly = Boolean(choices && !turn.filling && turn.result && !turn.result.card.body.length);
 
   return (
-    <section id={`turn-${turn.id}`} data-turn={turn.id} data-degraded={degraded} className="scroll-mt-20 space-y-3 animate-in fade-in duration-500">
+    <section id={`turn-${turn.id}`} data-turn={turn.id} data-degraded={degraded} data-seed={(turn.live?.nodes ?? []).filter((node): node is CardNode => !!node).map((node) => node.type).join(',') || '0'} className="scroll-mt-20 space-y-3 animate-in fade-in duration-500">
       <div className="flex flex-col items-end gap-1.5">
         {!first && turn.base && (
           <button onClick={() => scrollToTurn(turn.base!.id)} className="inline-flex max-w-[85%] items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground">
