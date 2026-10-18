@@ -62,6 +62,19 @@ test('the official page is fetched when its snippet has no amount, and skipped w
   assert.equal(thinPlan('US passport book renewal fee', [priced]).fetches.length, 0);
   assert.equal(thinPlan('US passport book renewal fee', [priced]).search, false);
   assert.equal(snippetSupports('levy', priced.snippet), true);
+  const schedule = row({
+    title: 'Passport fees',
+    url: 'https://travel.state.gov/fees',
+    domain: 'travel.state.gov',
+    snippet: 'Passport book DS-82 $130. Expedited service add $60. Passport card $30.',
+  });
+  const other = row({ title: 'Fee guide', url: 'https://example.com/fees', snippet: 'The renewal fee is $60.' });
+  const split = thinPlan('US passport book renewal fee', [other, schedule]);
+  assert.deepEqual(split.fetches, [schedule.url]);
+  assert.equal(split.search, false);
+  const line = focusFact('levy', 'Expedited service, add $60.\n\nPassport book renewal DS-82 is $130.\n\nPassport card is $30.', 'US passport book renewal fee');
+  assert.match(line, /\$130/);
+  assert.doesNotMatch(line, /\$60/);
 });
 
 test('a product spec page is read when the snippet has no measurement, not when the measurement is already in a snippet', () => {
@@ -85,8 +98,13 @@ test('a product spec page is read when the snippet has no measurement, not when 
   });
   assert.deepEqual(thinPlan('iPhone 16 battery capacity', [roundup, official]).fetches, [official.url]);
   const covered = thinPlan('iPhone 16 battery capacity', [measured, official]);
-  assert.deepEqual(covered.fetches, []);
+  assert.deepEqual(covered.fetches, [official.url]);
   assert.equal(covered.search, false);
+  const agreed = { ...official, snippet: 'Battery capacity is 3,561 mAh.' };
+  const sameReview = { ...measured, snippet: 'The iPhone 16 battery is 3,561 mAh.' };
+  const same = thinPlan('iPhone 16 battery capacity', [sameReview, agreed]);
+  assert.equal(same.fetches.length, 0);
+  assert.equal(same.search, false);
   assert.equal(thinPlan('iPhone 16 battery capacity', [measured]).search, false);
 });
 

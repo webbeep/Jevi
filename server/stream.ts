@@ -419,7 +419,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   const skip = new Set(thin.fetches.map((url) => normalizeUrl(url)));
   if (thin.fetches.length || thin.search) console.log(JSON.stringify({ zo: 'deepseek', plan: thin.kind, fetch: thin.fetches.length, search: thin.search }));
   const citeFetch: Promise<FetchedPage[]> = thin.fetches.length && thin.kind
-    ? fetchCitePages(env, scope, thin.kind, thin.fetches).catch(() => [])
+    ? fetchCitePages(env, scope, thin.kind, thin.fetches, undefined, asked).catch(() => [])
     : Promise.resolve([]);
   // Page reads overlap the source check. A rescue throws those pages away and reads the new rows.
   const reading = collectPages(req.search.results, env, { ...budget, skip }, late, scope, req.query);
@@ -475,7 +475,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   // A fetch already started stays the only fetch. Search runs only when nothing was fetched.
   if (thin.kind && !thin.fetches.length && (rescued || reread || thin.search)) {
     const again = thinPlan(asked, req.search.results, thinOpts);
-    if (again.fetches.length && again.kind) citeWait = fetchCitePages(env, scope, again.kind, again.fetches).catch(() => []);
+    if (again.fetches.length && again.kind) citeWait = fetchCitePages(env, scope, again.kind, again.fetches, undefined, asked).catch(() => []);
     else if (again.search && again.kind) gapFill = fillFromSearch(asked, req.search, env, scope, again.kind, again.site).catch(() => undefined);
   }
   const pageBudgetNow = { ...budget, skip };

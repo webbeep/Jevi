@@ -405,3 +405,45 @@ test('a promo page is not a product photo, and a stated spec fills a blank cell'
   const mixedCell = mixedTable?.type === 'table' ? mixedTable.rows[0]?.[1] : 'Vibrant, glanceable';
   assert.equal(mixedCell, 'Vibrant, glanceable');
 });
+
+test('a verdict does not deny a price the card already shows', () => {
+  const ask = 'Fitbit Edge vs Mi Band 10';
+  const tiles: CardNode = {
+    type: 'grid',
+    cols: 2,
+    children: [
+      { type: 'tile', label: 'Fitbit Edge', value: '$179' },
+      { type: 'tile', label: 'Mi Band 10', value: '$34.99' },
+    ],
+  };
+  const table: CardNode = {
+    type: 'table',
+    columns: ['Factor', 'Fitbit Edge', 'Mi Band 10'],
+    rows: [
+      ['Price', '$179', '$34.99'],
+      ['Display', 'Glanceable display', '1.72 AMOLED, 212 x 520 px, 1,500 nits'],
+    ],
+  };
+  const verdict: CardNode = {
+    type: 'callout',
+    tone: 'muted',
+    title: 'Verdict',
+    text: 'Pick the Mi Band 10 for a 1.72 AMOLED screen and 21-day battery. Sources state no Fitbit Edge price.',
+  };
+  const search: SearchResponse = {
+    query: ask,
+    freshness: 'any',
+    results: [
+      { title: 'Fitbit Edge', url: 'https://store.google.com/edge', snippet: 'A fitness tracker with coaching.', domain: 'store.google.com', engines: ['web'] },
+      { title: 'Mi Band 10', url: 'https://www.mi.com/band-10', snippet: 'A 1.72 AMOLED display and 21 days of battery.', domain: 'mi.com', engines: ['web'] },
+    ],
+    images: [],
+    discussions: [],
+    engines: [],
+  };
+  const patches = comparisonRepair(ask, search, new Map([[0, tiles], [1, table], [2, verdict]]));
+  const verdictPatch = patches?.find((patch) => patch.index === 2)?.node;
+  const verdictText = verdictPatch?.type === 'callout' ? verdictPatch.text : '';
+  assert.equal(verdictText, 'Pick the Mi Band 10 for a 1.72 AMOLED screen and 21-day battery.');
+  assert.equal(patches?.some((patch) => patch.index === 0 || patch.index === 1), false);
+});

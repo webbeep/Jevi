@@ -57,6 +57,11 @@ export interface FetchedPage {
 const LEVY_FACT = /(?:\$|£|€|¥)\s?\d|\b\d+(?:\.\d+)?\s*(?:%|percent\b|usd\b|dollars?\b)/i;
 const SPEC_FACT = /\d+(?:\.\d+)?\s*-?\s*(?:mAh|Wh|kHz|MHz|GHz|Hz|mm|cm|inches|inch|gb|tb|mp|megapixels?|kg|lbs?|oz|hours?|hrs?|nits?|watts?|days?|in|g)\b/i;
 const QUOTE_FACT = /[“”«»„]|"[^"\n]{12,}"|‘[^’]{12,}’/;
+const MONEY_RE = /[$£€¥]\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?/g;
+const PERCENT_RE = /\d+(?:\.\d+)?\s*(?:%|percent\b)/gi;
+const MEASURE_RE = /(\d{1,3}(?:,\d{3})*(?:\.\d+)?)\s*-?\s*(mAh|Wh|kHz|MHz|GHz|Hz|mm|cm|inches|inch|gb|tb|mp|megapixels?|kg|lbs?|oz|hours?|hrs?|nits?|watts?|days?|in|g)\b/gi;
+/** An optional add-on. It is not the charge the question asked for unless the question names it. */
+const ADDON = /\b(?:expedit(?:e|ed|ing|ion)?|optional|additional|surcharge|add-on|addon)\b/i;
 
 export function factKind(query: string): FactKind | undefined {
   if (QUOTE.test(query)) return 'quote';
@@ -122,6 +127,101 @@ function officialRank(domain: string): 0 | 1 | 2 {
   return 2;
 }
 
+type FigureWant = 'money' | 'percent' | 'measure';
+
+function wantFor(kind: FactKind, question: string): FigureWant {
+  if (kind === 'spec') return 'measure';
+  if (/\b(?:tax|taxes|vat|gst|rate|percent)\b/i.test(question) && !/\b(?:fee|fees|fine|fines|toll|duty|surcharge|levy)\b/i.test(question)) return 'percent';
+  return 'money';
+}
+
+function figurePattern(want: FigureWant): RegExp {
+  if (want === 'money') return new RegExp(MONEY_RE.source, 'g');
+  if (want === 'percent') return new RegExp(PERCENT_RE.source, 'gi');
+  return new RegExp(MEASURE_RE.source, 'gi');
+}
+
+function figureKey(want: FigureWant, raw: string): string {
+  if (want === 'money') return String(Number(raw.replace(/[^\d.]/g, '')));
+  if (want === 'percent') return `${Number(raw.match(/\d+(?:\.\d+)?/)?.[0] ?? raw)}%`;
+  const number = raw.match(/\d{1,3}(?:,\d{3})*(?:\.\d+)?/)?.[0]?.replace(/,/g, '') ?? '';
+  const unit = raw.match(/[a-z]+/i)?.[0]?.toLowerCase() ?? '';
+  return `${number}${unit}`;
+}
+
+/** Distinct figures in `text`. $130 and $130.00 are one figure. An add-on and the base charge are not. */
+export function figureKeys(kind: FactKind, question: string, text: string): string[] {
+  const want = wantFor(kind, question);
+  const keys = new Set<string>();
+  for (const match of text.matchAll(figurePattern(want))) {
+    const key = figureKey(want, match[0]);
+    if (key && key !== 'NaN' && !key.startsWith('NaN')) keys.add(key);
+  }
+  return [...keys];
+}
+
+export interface LeadFigure {
+  /** The amount as written, without a space after the currency sign. */
+  figure: string;
+  value: number;
+  /** The clause that states this figure, ending at the figure. */
+  line: string;
+  score: number;
+  key: string;
+}
+
+function clauseAt(text: string, index: number, length: number): string {
+  const breaks = ['\n', '|', '.'].map((mark) => text.lastIndexOf(mark, index - 1));
+  const before = Math.max(...breaks);
+  const start = before >= 0 && index - before < 180 ? before + 1 : Math.max(0, index - 80);
+  return text.slice(start, index + length).replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * The figure the question is about. A different amount in the same snippet, including an
+ * optional add-on, does not win just because it is a number.
+ */
+export function leadFigure(kind: FactKind, question: string, text: string): LeadFigure | undefined {
+  if (kind === 'quote') return undefined;
+  const want = wantFor(kind, question);
+  const tokens = subjectTokens(question);
+  let best: LeadFigure | undefined;
+  for (const match of text.matchAll(figurePattern(want))) {
+    const at = match.index ?? 0;
+    const line = clauseAt(text, at, match[0].length);
+    const near = text.slice(Math.max(0, at - 28), at);
+    let score = 1;
+    const low = line.toLowerCase();
+    const close = near.toLowerCase();
+    for (const token of tokens) {
+      if (low.includes(token)) score += 3;
+      if (close.includes(token)) score += 2;
+    }
+    if (!ADDON.test(question) && ADDON.test(line)) score -= 8;
+    if (score < 4) continue;
+    if (best && score <= best.score) continue;
+    const figure = match[0].replace(/\s/g, '');
+    const value = Number(figure.replace(/[^\d.]/g, ''));
+    if (!Number.isFinite(value)) continue;
+    best = { figure, value, line, score, key: figureKey(want, match[0]) };
+  }
+  return best;
+}
+
+function rowText(row: SearchResult): string {
+  return `${row.title ?? ''}\n${row.snippet ?? ''}\n${row.content ?? ''}`;
+}
+
+/** One figure, and it is the same figure the question is already pointing at. */
+function rowSettled(kind: FactKind, question: string, row: SearchResult, shown: LeadFigure | undefined): boolean {
+  const text = rowText(row);
+  const keys = figureKeys(kind, question, text);
+  if (keys.length !== 1) return false;
+  const lead = leadFigure(kind, question, text);
+  const key = lead?.key ?? keys[0];
+  return !shown || key === shown.key;
+}
+
 function thinSnippet(kind: FactKind, row: SearchResult): boolean {
   if (row.content && row.content.length >= 300 && snippetSupports(kind, row.content) && !isBlockPage(row.content)) return false;
   return !snippetSupports(kind, `${row.title} ${row.snippet}`);
@@ -151,6 +251,30 @@ function citeUrls(kind: FactKind, question: string, rows: readonly SearchResult[
   return pool.slice(0, cap).map((item) => item.row.url);
 }
 
+/** Official pages for a fee or tax, or the subject's own spec page. A roundup is not this. */
+function authorityUrls(kind: FactKind, question: string, rows: readonly SearchResult[]): string[] {
+  const usable = rows.slice(0, 8).filter((row) => {
+    if (!row.url || !isFetchable(row.url)) return false;
+    const domain = row.domain || domainOf(row.url);
+    return !isVideoHost(domain) && !isSocialHost(domain);
+  });
+  if (kind === 'spec') {
+    const tokens = subjectTokens(question);
+    return usable
+      .filter((row) => !ROUNDUP.test(`${row.title} ${row.url}`) && namesSubject(row, tokens))
+      .slice(0, FETCH_CAP)
+      .map((row) => row.url);
+  }
+  const ranked = usable
+    .map((row) => ({ row, rank: officialRank(row.domain || domainOf(row.url)) }))
+    .filter((item) => item.rank < 2)
+    .sort((a, b) => a.rank - b.rank || subjectTokens(question).filter((token) => `${b.row.title} ${b.row.url}`.toLowerCase().includes(token)).length - subjectTokens(question).filter((token) => `${a.row.title} ${a.row.url}`.toLowerCase().includes(token)).length);
+  const gov = ranked.filter((item) => item.rank === 0);
+  const pool = gov.length ? gov : ranked;
+  const cap = kind === 'quote' ? 1 : FETCH_CAP;
+  return pool.slice(0, cap).map((item) => item.row.url);
+}
+
 export function thinPlan(question: string, rows: readonly SearchResult[], opts: ThinOpts = {}): ThinPlan {
   const empty: ThinPlan = { fetches: [], search: false };
   if (!rows.length || opts.mode === 'refine' || opts.quote) return empty;
@@ -158,13 +282,31 @@ export function thinPlan(question: string, rows: readonly SearchResult[], opts: 
   if (rows[0]?.engines.includes('quote')) return empty;
   const kind = factKind(question);
   if (!kind) return empty;
-  const corpus = rows.slice(0, 12).map((row) => `${row.title} ${row.snippet} ${row.content ?? ''}`).join('\n');
-  // A snippet that already states the fact is enough. Reading or searching again would only slow the card.
-  if (snippetSupports(kind, corpus)) return { kind, fetches: [], search: false };
-  const fetches = citeUrls(kind, question, rows);
-  const search = fetches.length === 0;
-  const site = search ? namedSite(question, rows) : undefined;
-  return { kind, fetches, search, ...(site ? { site } : {}) };
+  const kept = rows.slice(0, 12);
+  const corpus = kept.map((row) => rowText(row)).join('\n');
+  // A quotation is one string. Any other fact is not "already answered" by a stray number.
+  if (kind === 'quote') {
+    if (snippetSupports(kind, corpus)) return { kind, fetches: [], search: false };
+    const fetches = citeUrls(kind, question, rows);
+    const search = fetches.length === 0;
+    const site = search ? namedSite(question, rows) : undefined;
+    return { kind, fetches, search, ...(site ? { site } : {}) };
+  }
+  const shown = leadFigure(kind, question, corpus);
+  const disagree = figureKeys(kind, question, corpus).length > 1;
+  const authority = authorityUrls(kind, question, kept);
+  const tied = authority.some((url) => {
+    const row = kept.find((item) => item.url === url);
+    return !!row && rowSettled(kind, question, row, shown);
+  });
+  // Disagreeing amounts, or a lead that is not the authoritative page's own line, need that page.
+  if (authority.length && (disagree || !tied)) return { kind, fetches: authority, search: false };
+  const keys = figureKeys(kind, question, corpus);
+  if (keys.length === 0 || (disagree && authority.length === 0)) {
+    const site = namedSite(question, kept);
+    return { kind, fetches: [], search: true, ...(site ? { site } : {}) };
+  }
+  return { kind, fetches: [], search: false };
 }
 
 function factPattern(kind: FactKind): RegExp {
@@ -182,10 +324,14 @@ function factPattern(kind: FactKind): RegExp {
   }
 }
 
-/** Keeps the passages that state the fact. A page of navigation does not become the answer. */
-export function focusFact(kind: FactKind, markdown: string): string {
+/** Keeps the line that states the fact. A different amount on the same page does not come along. */
+export function focusFact(kind: FactKind, markdown: string, question = ''): string {
   const raw = markdown.replace(/\r/g, '').trim();
   if (!raw || isBlockPage(raw)) return '';
+  if (question && kind !== 'quote') {
+    const lead = leadFigure(kind, question, raw);
+    if (lead && !isBlockPage(lead.line)) return lead.line.length > 500 ? `${lead.line.slice(0, 500)}…` : lead.line;
+  }
   const parts = raw.split(/\n{2,}/);
   const re = factPattern(kind);
   const kept: string[] = [];
@@ -200,11 +346,11 @@ export function focusFact(kind: FactKind, markdown: string): string {
   return text.length > 2800 ? `${text.slice(0, 2800)}…` : text;
 }
 
-export async function fetchCitePages(env: Env, scope: AskScope, kind: FactKind, urls: readonly string[], timeoutMs = READ_MS): Promise<FetchedPage[]> {
+export async function fetchCitePages(env: Env, scope: AskScope, kind: FactKind, urls: readonly string[], timeoutMs = READ_MS, question = ''): Promise<FetchedPage[]> {
   const jobs = urls.slice(0, FETCH_CAP).map(async (url) => {
     try {
       const doc = await deepseekFetch(env, url, scope.ledger, scope.ledger, timeoutMs);
-      const text = doc ? focusFact(kind, doc.content) : '';
+      const text = doc ? focusFact(kind, doc.content, question) : '';
       if (!text || !snippetSupports(kind, text)) return undefined;
       return { url, text };
     } catch (err) {

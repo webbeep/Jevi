@@ -212,6 +212,7 @@ function specFromSources(label: string, side: string, search: SearchResponse): s
 }
 const RELATIVE_PRICE = /\b(?:cheaper|cost(?:s|ing)? more|more expensive|less expensive|saving|saves|discount|between|than)\b|(?:\$|€|£|¥)\s?\d[\d,]*(?:\.\d{2})?\s*[–-]\s*(?:\$|€|£|¥)?\s?\d/i;
 const NO_PRICE = /\bno price stated\b|\bprice (?:is )?not stated\b|\bno specs or price\b/i;
+const DENIES_PRICE = /\b(?:no|not|n't|without)\b(?:\s+\w+){0,8}\s+price\b/i;
 
 /** One amount the source states for this product. A range or a "cheaper" line is not that price. */
 export function stickerPrice(side: string, search: SearchResponse): string | undefined {
@@ -309,12 +310,35 @@ export function comparisonNodes(question: string, search: SearchResponse): CardN
   return [grid, ...(table ? [table] : []), lead, ...sections];
 }
 
-function groundCompareNode(node: CardNode, sides: string[], search: SearchResponse): CardNode {
+function shownPrices(nodes: readonly CardNode[], sides: string[]): Map<string, string> {
+  const prices = new Map<string, string>();
+  const note = (label: string, text: string) => {
+    const amount = text.match(STICKER)?.[0]?.replace(/\s/g, '');
+    if (!amount) return;
+    const side = sides.find((item) => mentionsSide(item, label) || mentionsSide(item, text));
+    if (side && !prices.has(side)) prices.set(side, amount);
+  };
+  const walk = (node: CardNode) => {
+    if (node.type === 'tile' && node.value) note(node.label, node.value);
+    if (node.type === 'table') {
+      for (const row of node.rows) {
+        if (!priceRow(row[0] ?? '')) continue;
+        row.forEach((cell, index) => note(node.columns[index] ?? '', cell));
+      }
+    }
+    if ('children' in node && Array.isArray(node.children)) node.children.forEach(walk);
+    if (node.type === 'tabs') for (const tab of node.tabs) tab.children.forEach(walk);
+  };
+  nodes.forEach(walk);
+  return prices;
+}
+
+function groundCompareNode(node: CardNode, sides: string[], search: SearchResponse, shown: ReadonlyMap<string, string>): CardNode {
   if (node.type === 'text' || node.type === 'callout' || node.type === 'heading') {
     const text = node.text.split(/(?<=[.!?])\s+/).map((sentence) => {
       const side = sides.find((item) => mentionsSide(item, sentence));
-      const price = side ? stickerPrice(side, search) : undefined;
-      if (price && NO_PRICE.test(sentence)) return '';
+      const price = side ? shown.get(side) || stickerPrice(side, search) : undefined;
+      if (price && (NO_PRICE.test(sentence) || DENIES_PRICE.test(sentence))) return '';
       if (!RELATIVE_PRICE.test(sentence)) return sentence;
       if (!price) return sentence.replace(RELATIVE_PRICE, '').replace(/\s{2,}/g, ' ').trim();
       return sentence.replace(RELATIVE_PRICE, price);
@@ -343,10 +367,10 @@ function groundCompareNode(node: CardNode, sides: string[], search: SearchRespon
     return { ...node, rows };
   }
   if (node.type === 'tabs') {
-    return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: tab.children.map((child) => groundCompareNode(child, sides, search)) })) };
+    return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: tab.children.map((child) => groundCompareNode(child, sides, search, shown)) })) };
   }
   if ('children' in node && Array.isArray(node.children)) {
-    const children = node.children.map((child) => groundCompareNode(child, sides, search));
+    const children = node.children.map((child) => groundCompareNode(child, sides, search, shown));
     if (children.every((child, index) => child === node.children[index])) return node;
     return { ...node, children } as CardNode;
   }
@@ -450,7 +474,8 @@ function agreeSidePrices(nodes: CardNode[], sides: string[]): CardNode[] {
 
 function groundCompared(question: string, search: SearchResponse, body: [number, CardNode][]): { index: number; node: CardNode }[] | undefined {
   const sides = compareSides(question);
-  const grounded = body.map(([, node]) => groundCompareNode(node, sides, search));
+  const shown = shownPrices(body.map(([, node]) => node), sides);
+  const grounded = body.map(([, node]) => groundCompareNode(node, sides, search, shown));
   const agreed = agreeSidePrices(grounded, sides);
   const patches: { index: number; node: CardNode }[] = [];
   agreed.forEach((node, at) => {

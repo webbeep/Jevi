@@ -4,6 +4,7 @@ import { factAnswer } from './hops';
 import { numberTokens } from './ground';
 import { completeCutDecimal, withoutEmptySlots } from './polish';
 import { dropInventedTitles, finishQuotedText, honestHero, honestStudyText, peerPaperItems, peerPaperSource } from './cardAgree';
+import { leadFigure } from './thinSource';
 
 /** One search result, numbered the way the card cites it, with the text the card was allowed to use. */
 export interface ClaimSource {
@@ -1703,41 +1704,18 @@ function repairTaxNode(node: CardNode, query: string, sources: readonly ClaimSou
 
 interface ChargePick { amount: string; value: number; n: number }
 
-function feeWords(query: string): string[] {
-  return query.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 4 && !FEE_GENERIC.has(word));
-}
-
-function labeledFee(sentence: string): { raw: string; value: number } | undefined {
-  const labeled = sentence.match(/(?:fee|fees|fine|fines|toll|tolls|duty|duties|surcharge|levy|cost|charge|total|price|costs?|is|of)\s*(?:is|of|:)?\s*(\$\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?)/i);
-  const raw = labeled?.[1] ?? sentence.match(MONEY)?.[0];
-  if (!raw) return undefined;
-  return { raw: raw.replace(/\s/g, ''), value: moneyValue(raw) };
-}
-
 /**
  * The dollar amount an official page states for this fee. A different amount on another site,
- * including a remembered round number, is not the charge.
+ * or an optional add-on on the same page, is not the charge.
  */
 export function officialCharge(query: string, sources: readonly ClaimSource[]): ChargePick | undefined {
   if (!FEE_ASK.test(query) || TAX_ASK.test(query)) return undefined;
-  const want = feeWords(query);
   let best: ChargePick & { score: number } | undefined;
   for (const source of sources) {
     if (!officialDomain(source.domain)) continue;
-    for (const sentence of `${source.text}\n${source.stated ?? ''}`.split(SENTENCE_BREAK)) {
-      const money = labeledFee(sentence);
-      if (!money) continue;
-      const low = sentence.toLowerCase();
-      const title = (source.text.split('\n')[0] ?? '').toLowerCase();
-      let score = 1;
-      for (const word of want) {
-        if (low.includes(word)) score += 3;
-        if (title.includes(word)) score += 2;
-      }
-      if (/\btotal\b/i.test(sentence)) score += 2;
-      if (/\bcard\b/i.test(low) && !/\bcard\b/i.test(query)) score -= 4;
-      if (!best || score > best.score) best = { amount: money.raw, value: money.value, n: source.n, score };
-    }
+    const lead = leadFigure('levy', query, `${source.text}\n${source.stated ?? ''}`);
+    if (!lead) continue;
+    if (!best || lead.score > best.score) best = { amount: lead.figure, value: lead.value, n: source.n, score: lead.score };
   }
   if (!best) return undefined;
   return { amount: best.amount, value: best.value, n: best.n };
@@ -1954,23 +1932,36 @@ function statedMoney(text: string, fee: ChargePick, allowed: (value: number) => 
   }).replace(/\s{2,}/g, ' ').replace(/\s+([,.;:])/g, '$1').trim();
 }
 
-/** The lead amount is the official charge. A different amount the official page does not state goes. */
-function alignFee(node: CardNode, fee: ChargePick, allowed: (value: number) => boolean): CardNode {
+const ADDON_LINE = /\b(?:expedit(?:e|ed|ing|ion)?|optional|additional|surcharge|add-on|addon)\b/i;
+
+/** The row is the charge the question asked for, not a different add-on listed beside it. */
+function asksForCharge(label: string, query: string): boolean {
+  const tokens = query.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 4 && !FEE_GENERIC.has(word));
+  if (!tokens.length) return false;
+  if (ADDON_LINE.test(label) && !ADDON_LINE.test(query)) return false;
+  const low = label.toLowerCase();
+  const hits = tokens.filter((token) => low.includes(token)).length;
+  return hits >= Math.min(2, tokens.length);
+}
+
+/** The lead amount is the official charge. The hero is that charge even when the page also lists an add-on. */
+function alignFee(node: CardNode, fee: ChargePick, allowed: (value: number) => boolean, query: string): CardNode {
   const line = (text: string) => statedMoney(text, fee, allowed);
   const lead = (text: string) => {
-    if (!MONEY.test(text)) return line(text);
+    if (!MONEY.test(text)) return fee.amount;
     const value = moneyValue(text.match(MONEY)?.[0] ?? '');
-    if (Math.abs(value - fee.value) < 0.001 || allowed(value)) return line(text);
-    return fee.amount;
+    if (Math.abs(value - fee.value) < 0.001) return line(text);
+    return text.replace(MONEY, fee.amount);
   };
+  const charged = (label: string, text: string) => (asksForCharge(label, query) && MONEY.test(text) ? text.replace(MONEY, fee.amount) : line(text));
   switch (node.type) {
     case 'stack':
     case 'grid':
     case 'section':
     case 'scroller':
-      return { ...node, children: node.children.map((child) => alignFee(child, fee, allowed)) };
+      return { ...node, children: node.children.map((child) => alignFee(child, fee, allowed, query)) };
     case 'tabs':
-      return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: tab.children.map((child) => alignFee(child, fee, allowed)) })) };
+      return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: tab.children.map((child) => alignFee(child, fee, allowed, query)) })) };
     case 'text':
     case 'callout':
     case 'quote':
@@ -1985,15 +1976,21 @@ function alignFee(node: CardNode, fee: ChargePick, allowed: (value: number) => b
       return value === (node.type === 'hero' ? node.value : node.value) ? node : { ...node, value };
     }
     case 'tile': {
-      const value = node.value ? lead(node.value) : node.value;
+      const value = node.value ? (asksForCharge(node.label, query) ? lead(node.value) : line(node.value)) : node.value;
       const sub = node.sub ? line(node.sub) : node.sub;
       return value === node.value && sub === node.sub ? node : { ...node, value, sub };
     }
     case 'keyvalue':
+      return { ...node, items: node.items.map((item) => ({ ...item, value: charged(item.label, item.value) })) };
     case 'list':
+      return {
+        ...node,
+        items: node.items.map((item) => ({ ...item, text: charged(item.text, item.text), meta: item.meta ? line(item.meta) : item.meta })),
+      };
+    case 'table':
+      return { ...node, rows: node.rows.map((row) => row.map((cell, index) => (index === 0 ? cell : charged(row[0] ?? '', cell)))) };
     case 'timeline':
     case 'profile':
-    case 'table':
     case 'steps':
     case 'accordion':
     case 'proscons':
@@ -2040,7 +2037,7 @@ export function bindClaims(node: CardNode, sources: readonly ClaimSource[], quer
   const taxed = tax ? alignTax(applyTax(aimed, query, tax, ratesIn(sources.find((source) => source.n === tax.n))), tax.rate) : aimed;
   const lined = TAX_ASK.test(query) ? repairTaxNode(taxed, query, sources) : taxed;
   const fee = officialCharge(query, sources);
-  const charged = fee ? alignFee(applyCharge(lined, fee, officialAmounts(sources.find((source) => source.n === fee.n))), fee, officialAmounts(sources.find((source) => source.n === fee.n))) : lined;
+  const charged = fee ? alignFee(applyCharge(lined, fee, officialAmounts(sources.find((source) => source.n === fee.n))), fee, officialAmounts(sources.find((source) => source.n === fee.n)), query) : lined;
   if (!shoppingAsk(query)) return charged;
   const ceilings = budgetAmounts(query);
   return dropPriceless(keepBudgetPrices(fillPrices(charged, sources, ceilings), ceilings), ceilings, query);

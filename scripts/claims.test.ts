@@ -313,6 +313,16 @@ test('a fee is the amount the official page states', () => {
     { n: 2, domain: 'permits.harbor.gov', text: 'Renew a harbor permit by mail\nThe renewal fee for a harbor permit book is $42. A book and card is $80.' },
   ];
   assert.equal(officialCharge('What is the renewal fee for a harbor permit book by mail?', split)?.amount, '$42');
+  const addon: ClaimSource[] = [
+    { n: 1, domain: 'notes.example', text: 'People remember the renewal fee as $64.' },
+    { n: 2, domain: 'permits.harbor.gov', text: 'Renew a harbor permit book by mail\nThe renewal fee for a harbor permit book is $42.\nExpedited service, add $15.' },
+  ];
+  assert.equal(officialCharge('What is the renewal fee for a harbor permit book by mail?', addon)?.amount, '$42');
+  const hero = bindClaims({ type: 'hero', value: '$15', label: 'Harbor permit book renewal' }, addon, 'What is the renewal fee for a harbor permit book by mail?');
+  assert.match(hero.type === 'hero' ? hero.value : '', /\$42/);
+  const extra = bindClaims({ type: 'text', text: 'Expedited service is $15.' }, addon, 'What is the renewal fee for a harbor permit book by mail?');
+  assert.match(extra.type === 'text' ? extra.text : '', /\$15/);
+  assert.doesNotMatch(extra.type === 'text' ? extra.text : '', /\$42/);
   const lead = bindClaims({ type: 'stat', label: 'Renewal fee', value: '$64' }, split, 'What is the renewal fee for a harbor permit book by mail?');
   assert.match(lead.type === 'stat' ? lead.value : '', /\$42/);
   const pair = bindClaims({ type: 'text', text: 'A book and card is $80.' }, split, 'What is the renewal fee for a harbor permit book by mail?');
