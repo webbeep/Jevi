@@ -241,3 +241,45 @@ test('a list of products is one side each, and a follow-up keeps the price and p
   assert.equal(harbor?.type === 'tile' ? harbor.label : '', 'Harbor Band 8');
   assert.equal(harbor?.type === 'tile' ? harbor.value : '', '$60');
 });
+
+test('two figures for one product are the same price, or the other is a labeled offer', () => {
+  const ask = 'Harbor Slate versus Northwatch 2';
+  const tiles: CardNode = {
+    type: 'grid',
+    cols: 2,
+    children: [
+      { type: 'tile', label: 'Harbor Slate', value: '$299.99' },
+      { type: 'tile', label: 'Northwatch 2', value: '$549' },
+    ],
+  };
+  const table: CardNode = {
+    type: 'table',
+    columns: ['Factor', 'Harbor Slate', 'Northwatch 2'],
+    rows: [['Starting price', '$549.99 (5G, Verizon)', '$549']],
+  };
+  const search: SearchResponse = {
+    query: ask,
+    freshness: 'any',
+    results: [],
+    images: [],
+    discussions: [],
+    engines: [],
+  };
+  const patches = comparisonRepair(ask, search, new Map([[0, tiles], [1, table]]));
+  const nextTable = patches?.find((patch) => patch.index === 1)?.node;
+  assert.equal(nextTable?.type, 'table');
+  if (nextTable?.type !== 'table') return;
+  assert.equal(nextTable.rows[0]?.[1], '$299.99');
+  assert.equal(nextTable.rows[0]?.[2], '$549');
+  const offer = nextTable.rows.find((row) => row[0] === 'Verizon price');
+  assert.deepEqual(offer, ['Verizon price', '$549.99', '']);
+  const plain: CardNode = {
+    type: 'table',
+    columns: ['Factor', 'Harbor Slate', 'Northwatch 2'],
+    rows: [['Starting price', '$549.99', '$549']],
+  };
+  const collapsed = comparisonRepair(ask, search, new Map([[0, tiles], [1, plain]]));
+  const collapsedTable = collapsed?.find((patch) => patch.index === 1)?.node;
+  assert.equal(collapsedTable?.type === 'table' ? collapsedTable.rows.length : 0, 1);
+  assert.equal(collapsedTable?.type === 'table' ? collapsedTable.rows[0]?.[1] : '', '$299.99');
+});

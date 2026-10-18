@@ -300,13 +300,109 @@ function groundCompareNode(node: CardNode, sides: string[], search: SearchRespon
   return node;
 }
 
+const OFFER_WORD = /\b(?:carrier|verizon|at&t|t-mobile|tmobile|sprint|monthly|per month|a month|\/mo\b|with service|on contract|installment|with a plan|cellular plan|financing)\b/i;
+
+function moneyAmounts(text: string): string[] {
+  return [...text.matchAll(STICKER)].map((match) => match[0].replace(/\s/g, ''));
+}
+
+function sameMoney(a: string, b: string): boolean {
+  const value = (raw: string) => Number(raw.replace(/[^0-9.]/g, ''));
+  return Math.abs(value(a) - value(b)) < 0.001;
+}
+
+/** A carrier plan, a monthly bill, or a contract is a different offer from the product's own price. */
+function offerName(text: string): string | undefined {
+  const carrier = text.match(/\b(Verizon|AT&T|T-Mobile|Sprint)\b/i);
+  if (carrier) {
+    const word = carrier[1]!;
+    const label = /[A-Z]/.test(word) ? word : `${word.charAt(0).toUpperCase()}${word.slice(1)}`;
+    return `${label} price`;
+  }
+  if (/\b(?:per month|\/mo|monthly|a month|installment)\b/i.test(text)) return 'Monthly price';
+  if (OFFER_WORD.test(text)) return 'Carrier price';
+  return undefined;
+}
+
+function priceRow(label: string): boolean {
+  return label.length < 48 && /\b(?:price|msrp|cost|retail)\b/i.test(label);
+}
+
+/**
+ * Two amounts for one product have to be the same amount where the card presents
+ * them as its price. A second amount stays only with a label that names the other offer.
+ */
+function agreeSidePrices(nodes: CardNode[], sides: string[]): CardNode[] {
+  const copy = nodes.map((node) => structuredClone(node));
+  const lead = new Map<string, string>();
+  const note = (side: string, text: string) => {
+    const amount = moneyAmounts(text)[0];
+    if (!amount || lead.has(side) || offerName(text)) return;
+    lead.set(side, amount);
+  };
+  const collect = (node: CardNode) => {
+    if (node.type === 'tile') {
+      const side = sides.find((item) => mentionsSide(item, node.label));
+      if (side && node.value) note(side, `${node.value} ${node.sub ?? ''}`);
+    }
+    if (node.type === 'table') {
+      for (const row of node.rows) {
+        if (!priceRow(row[0] ?? '')) continue;
+        row.forEach((cell, index) => {
+          const side = sides.find((item) => mentionsSide(item, node.columns[index] ?? ''));
+          if (side) note(side, cell);
+        });
+      }
+    }
+    if ('children' in node && Array.isArray(node.children)) node.children.forEach(collect);
+    if (node.type === 'tabs') for (const tab of node.tabs) tab.children.forEach(collect);
+  };
+  copy.forEach(collect);
+  if (!lead.size) return nodes;
+  const rewrite = (node: CardNode) => {
+    if (node.type === 'tile') {
+      const side = sides.find((item) => mentionsSide(item, node.label));
+      const headline = side ? lead.get(side) : undefined;
+      const amount = node.value ? moneyAmounts(node.value)[0] : undefined;
+      if (!headline || !amount || sameMoney(amount, headline)) return;
+      const offer = offerName(`${node.value ?? ''} ${node.sub ?? ''}`);
+      node.value = headline;
+      if (offer && !(node.sub && node.sub.includes(amount))) node.sub = node.sub ? `${offer} ${amount}. ${node.sub}` : `${offer} ${amount}`;
+    }
+    if (node.type === 'table') {
+      const extras = new Map<string, string[]>();
+      for (const row of node.rows) {
+        if (!priceRow(row[0] ?? '')) continue;
+        row.forEach((cell, index) => {
+          const side = sides.find((item) => mentionsSide(item, node.columns[index] ?? ''));
+          const headline = side ? lead.get(side) : undefined;
+          const amount = moneyAmounts(cell)[0];
+          if (!headline || !amount || sameMoney(amount, headline)) return;
+          const offer = offerName(cell);
+          row[index] = headline;
+          if (!offer) return;
+          const cells = extras.get(offer) ?? node.columns.map((_, at) => (at === 0 ? offer : ''));
+          cells[index] = amount;
+          extras.set(offer, cells);
+        });
+      }
+      for (const cells of extras.values()) node.rows.push(cells);
+    }
+    if ('children' in node && Array.isArray(node.children)) node.children.forEach(rewrite);
+    if (node.type === 'tabs') for (const tab of node.tabs) tab.children.forEach(rewrite);
+  };
+  copy.forEach(rewrite);
+  return JSON.stringify(copy) === JSON.stringify(nodes) ? nodes : copy;
+}
+
 function groundCompared(question: string, search: SearchResponse, body: [number, CardNode][]): { index: number; node: CardNode }[] | undefined {
   const sides = compareSides(question);
+  const grounded = body.map(([, node]) => groundCompareNode(node, sides, search));
+  const agreed = agreeSidePrices(grounded, sides);
   const patches: { index: number; node: CardNode }[] = [];
-  for (const [index, node] of body) {
-    const next = groundCompareNode(node, sides, search);
-    if (next !== node) patches.push({ index, node: next });
-  }
+  agreed.forEach((node, at) => {
+    if (node !== body[at]![1]) patches.push({ index: body[at]![0], node });
+  });
   return patches.length ? patches : undefined;
 }
 
