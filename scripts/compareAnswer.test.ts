@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import type { CardNode } from '../shared/card.ts';
 import type { SearchResponse } from '../shared/types.ts';
 import { asksToCompare } from '../server/askGuard.ts';
-import { acceptProductPhoto, answersComparison, appendAskedFact, comparisonNodes, comparisonRepair, comparisonTitle, dropShownDenials, keepComparedProducts, mentionsSide, missingSideNode, nameForms, placeSidePhotos, restoreSideTiles, sameProduct, showsComparison } from '../server/compareAnswer.ts';
+import { acceptProductPhoto, answersComparison, appendAskedFact, breakdownStays, comparisonNodes, comparisonRepair, comparisonTitle, dropShownDenials, keepComparedProducts, mentionsSide, missingSideNode, nameForms, placeSidePhotos, restoreSideTiles, sameProduct, showsComparison } from '../server/compareAnswer.ts';
 import { candidates } from '../server/extract.ts';
 import { compareSideQueries, compareSides, withoutLeadVerb } from '../server/patterns.ts';
 import { Polisher, completeSentences, emptyFigure, withoutEmptySlots } from '../server/polish.ts';
@@ -571,4 +571,52 @@ test('a measured cell and a denial of that fact do not both stay, and the empty 
   assert.doesNotMatch(next.text, /either|none of the sources/i);
   assert.equal(table.type === 'table' ? table.rows[0]?.[1] : '', '16 days');
   assert.equal(table.type === 'table' ? table.rows[0]?.[2] : '', '');
+});
+
+test('a head-to-head table that names each side in a row stays, instead of being rebuilt', () => {
+  const ask = 'Northwatch vs Glowband';
+  const table: CardNode = {
+    type: 'table',
+    columns: ['', 'Points', 'Rebounds'],
+    rows: [
+      ['Northwatch', '18.4', '10.2'],
+      ['Glowband', '12.1', '8.4'],
+    ],
+  };
+  assert.equal(showsComparison(ask, [table]), false);
+  assert.equal(breakdownStays(ask, [table]), true);
+  const found: SearchResponse = {
+    query: ask,
+    freshness: 'any',
+    results: [
+      { title: 'Northwatch', url: 'https://example.com/north', snippet: 'The Northwatch costs $90.', domain: 'example.com', engines: ['web'] },
+      { title: 'Glowband', url: 'https://example.com/glow', snippet: 'The Glowband costs $40.', domain: 'example.com', engines: ['web'] },
+    ],
+    images: [],
+    discussions: [],
+    engines: ['web'],
+  };
+  assert.ok(comparisonNodes(ask, found).length > 0);
+  assert.equal(comparisonRepair(ask, found, new Map([[0, table]])), undefined);
+});
+
+test('a measured breakdown does not gain the previous card’s rows when the factors are different', () => {
+  const prior: CardNode[] = [{
+    type: 'table',
+    columns: ['Factor', 'Northwatch', 'Glowband'],
+    rows: [
+      ['Price', '$90', '$40'],
+      ['Display', '1.43 inch', '1.2 inch'],
+    ],
+  }];
+  const table: CardNode = {
+    type: 'table',
+    columns: ['Factor', 'Northwatch', 'Glowband'],
+    rows: [
+      ['Points', '18.4', '12.1'],
+      ['Rebounds', '10.2', '8.4'],
+    ],
+  };
+  assert.equal(keepComparedProducts(prior, new Map([[0, table]]), 'Northwatch vs Glowband'), undefined);
+  assert.deepEqual(table.rows.map((row) => row[0]), ['Points', 'Rebounds']);
 });

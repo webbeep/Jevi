@@ -9,6 +9,7 @@ import { MAX_AUTO_RECONNECTS, OFFLINE_MESSAGE, friendlyError, isConnectionError,
 import { billingFromSources, settleCardPrices } from '../shared/pricing';
 import { followupLabel } from '../shared/followupLabel';
 import { emptyDoneState } from '../shared/sse-parse';
+import { keepShownComponent } from '../shared/keepShown';
 import { isBlankLayout, liveBody } from '../shared/liveBody';
 import { objectContext } from '../shared/objects';
 import type { NoSourcesNotice, SearchResponse, SearchResult } from '../shared/types';
@@ -317,14 +318,18 @@ export function useSession() {
             if (t.result && slots) {
               // The review corrects a node that is already showing. Keep the tree mounted: a version
               // bump remounts every section, replays the entrance, and resets a video already playing.
-              const placed = placeNode({ regions: [], nodes: slots, raw: slots, followups: t.result.followups, credits: t.result.card.credits ?? [] }, e.data.index, e.data.node, t.question, results);
+              // A breakdown already on screen is not swapped for a different card.
+              const node = keepShownComponent(slots[e.data.index], e.data.node);
+              if (slots[e.data.index] && node === slots[e.data.index]) return {};
+              const placed = placeNode({ regions: [], nodes: slots, raw: slots, followups: t.result.followups, credits: t.result.card.credits ?? [] }, e.data.index, node, t.question, results);
               settledSlots.current.set(route, placed.raw);
               const body = placed.nodes.filter((n): n is CardNode => !!n && !isBlankLayout(n));
               const result: CardResponse = { ...t.result, card: { ...t.result.card, body } };
               return { result, variants: { ...t.variants, [variantKey(t.pattern, t.simple)]: result }, live: undefined, filling: false, thinking: false };
             }
             const live = takeLive(t);
-            return { live: placeNode(live, e.data.index, e.data.node, t.question, results), thinking: false, version: live.nodes.some(Boolean) ? t.version : t.version + 1 };
+            const node = keepShownComponent(live.raw[e.data.index], e.data.node);
+            return { live: placeNode(live, e.data.index, node, t.question, results), thinking: false, version: live.nodes.some(Boolean) ? t.version : t.version + 1 };
           });
         case 'followups':
           return update(route, (t) => {

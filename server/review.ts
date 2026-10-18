@@ -1,5 +1,6 @@
 import { boundAsk } from '../shared/queryBound';
 import type { AnswerCard, CardNode } from '../shared/card';
+import { keepShownComponent } from '../shared/keepShown';
 import type { SearchResult } from '../shared/types';
 import { BRIEF_ROWS, rowLine, type SourceBrief } from './brief';
 import { hasLlm, llmJson } from './llm';
@@ -150,4 +151,133 @@ export async function reviewCard(
   });
   const timeout = new Promise<undefined>((r) => setTimeout(() => r(undefined), timeoutMs));
   return readReview(await Promise.race([call, timeout]), new Set(args.nodes.keys()));
+}
+
+const PRECISION = `You check one finished answer card against the sources. Flag only a real inconsistency:
+- a denial ("not stated", "no source", "unavailable") next to a number the card already shows for that fact
+- a fact copied onto the wrong person or product
+- a component that does not answer the question
+Reply as JSON: {"verdict":"ok"} or {"verdict":"fix","index":number,"find":string,"replace":string,"search":string}
+- index: the node number that is wrong
+- find: a short exact substring of that one component (one cell or one sentence), never the whole card
+- replace: the corrected substring only. Keep every other word. Use a number only when a source states it.
+- search: one web query when the sources do not contain the fact the fix needs. Otherwise "".
+Style and missing nice-to-haves are not errors. verdict "ok" when the card is consistent.`;
+
+const SKIP_FIELDS = new Set(['imageSrc', 'imageQuery', 'imageRef', 'src', 'url', 'href', 'link', 'thumb', 'icon', 'id', 'type', 'lang', 'mermaid', 'website']);
+
+export interface PrecisionFix {
+  index: number;
+  find: string;
+  replace: string;
+  search?: string;
+}
+
+interface RawPrecision {
+  verdict?: unknown;
+  index?: unknown;
+  find?: unknown;
+  replace?: unknown;
+  search?: unknown;
+}
+
+export function readPrecision(raw: RawPrecision | undefined, indices: Set<number>): PrecisionFix | undefined {
+  if (!raw || raw.verdict === 'ok') return undefined;
+  if (raw.verdict !== 'fix' || !Number.isInteger(raw.index) || !indices.has(raw.index as number)) return undefined;
+  const find = typeof raw.find === 'string' ? raw.find.trim() : '';
+  const replace = typeof raw.replace === 'string' ? raw.replace.replace(/\s+/g, ' ').trim() : '';
+  if (find.length < 2 || find.length > 240 || replace.length > 400 || find === replace) return undefined;
+  const search = typeof raw.search === 'string' ? raw.search.replace(/\s+/g, ' ').trim().slice(0, 180) : '';
+  return { index: raw.index as number, find, replace, ...(search.length > 2 ? { search } : {}) };
+}
+
+/** The first exact substring in one component. Picture URLs and other machine fields stay. */
+export function applyTextEdit(node: CardNode, find: string, replace: string): CardNode | undefined {
+  const needle = find.trim();
+  if (needle.length < 2 || needle === replace) return undefined;
+  let used = false;
+  const edit = (value: unknown, key?: string): unknown => {
+    if (key && SKIP_FIELDS.has(key)) return value;
+    if (typeof value === 'string') {
+      if (used || !value.includes(needle)) return value;
+      used = true;
+      return value.replace(needle, replace);
+    }
+    if (Array.isArray(value)) return value.map((item) => edit(item));
+    if (value && typeof value === 'object') {
+      const out: Record<string, unknown> = {};
+      for (const [field, item] of Object.entries(value as Record<string, unknown>)) out[field] = edit(item, field);
+      return out;
+    }
+    return value;
+  };
+  const next = edit(node) as CardNode;
+  if (!used || next.type !== node.type) return undefined;
+  return keepShownComponent(node, next) === node ? undefined : next;
+}
+
+function statedNumbers(text: string): string[] {
+  const bare = text.replace(/\s*\[(?:\d+\s*,\s*)*\d+\]/g, ' ');
+  return [...bare.matchAll(/\d+(?:\.\d+)?/g)].map((match) => match[0]);
+}
+
+/** A new number in the edit has to be one the sources or the card already state. */
+export function editIsGrounded(replace: string, corpus: string): boolean {
+  return statedNumbers(replace).every((num) => corpus.includes(num));
+}
+
+/**
+ * After the card is on screen: one model read, then a substring edit of the one wrong component.
+ * A missing fact gets one search, then the same edit. Any failure leaves the card as it was shown.
+ */
+export async function reviewComponents(
+  args: {
+    query: string;
+    results: SearchResult[];
+    pages?: { n: number; text: string }[];
+    head?: Omit<AnswerCard, 'body'>;
+    nodes: Map<number, CardNode>;
+  },
+  env: Env,
+  search?: (query: string) => Promise<SearchResult[]>,
+  timeoutMs = 3500,
+): Promise<{ index: number; node: CardNode } | undefined> {
+  if (!hasLlm(env) || !args.nodes.size) return undefined;
+  const indices = new Set(args.nodes.keys());
+  const corpusOf = (extra: SearchResult[] = []) => [
+    ...args.results.map((row) => `${row.title ?? ''} ${row.snippet ?? ''} ${row.content ?? ''}`),
+    ...(args.pages ?? []).map((page) => page.text),
+    ...extra.map((row) => `${row.title ?? ''} ${row.snippet ?? ''} ${row.content ?? ''}`),
+    ...[...args.nodes.values()].map((node) => JSON.stringify(node)),
+  ].join('\n');
+  const ask = async (extra: SearchResult[] = []) => {
+    const user = [
+      `Asked: ${args.query}`,
+      `Results:\n${[...args.results, ...extra].slice(0, BRIEF_ROWS).map((row, index) => rowLine(row, index, false)).join('\n')}`,
+      args.pages?.length ? `Page text:\n${args.pages.slice(0, 4).map((page) => `[${page.n}] ${page.text.replace(/\s+/g, ' ').slice(0, 900)}`).join('\n')}` : '',
+      `CARD\n${cardText(args.head, args.nodes)}`,
+    ].filter(Boolean).join('\n');
+    const call = llmJson<RawPrecision>(env, PRECISION, user, 500).catch(() => undefined);
+    const timeout = new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), timeoutMs));
+    return readPrecision(await Promise.race([call, timeout]), indices);
+  };
+  try {
+    let fix = await ask();
+    if (!fix) return undefined;
+    let extra: SearchResult[] = [];
+    if (fix.search && search) {
+      extra = (await search(fix.search).catch(() => [])).slice(0, 4);
+      const again = await ask(extra);
+      if (again && !again.search) fix = again;
+    }
+    const node = args.nodes.get(fix.index);
+    if (!node) return undefined;
+    if (!editIsGrounded(fix.replace, corpusOf(extra))) return undefined;
+    const next = applyTextEdit(node, fix.find, fix.replace);
+    if (!next) return undefined;
+    return { index: fix.index, node: next };
+  } catch (err) {
+    console.log(JSON.stringify({ zo: 'precision-review', failed: String(err).slice(0, 120) }));
+    return undefined;
+  }
 }

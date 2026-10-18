@@ -619,13 +619,50 @@ function groundCompared(question: string, search: SearchResponse, body: [number,
 }
 
 /**
+ * A head-to-head table names each side in a row, not only in a column.
+ * That breakdown already answers the comparison, so it is not rebuilt.
+ */
+export function breakdownStays(question: string, nodes: readonly CardNode[]): boolean {
+  const sides = compareSides(question);
+  if (sides.length < 2) return false;
+  const named = new Set<string>();
+  let measured = false;
+  const note = (label: string) => {
+    for (const side of sides) if (mentionsSide(side, label)) named.add(side);
+  };
+  const see = (node: CardNode) => {
+    if (node.type === 'table') {
+      node.columns.forEach(note);
+      for (const row of node.rows) {
+        note(row[0] ?? '');
+        if (row.slice(1).some((cell) => measureNumbers(cell).length)) measured = true;
+      }
+    }
+    if (node.type === 'tile') {
+      note(node.label);
+      if (measureNumbers(`${node.value ?? ''} ${node.sub ?? ''}`).length) measured = true;
+    }
+    if (node.type === 'stat') {
+      note(node.label);
+      if (measureNumbers(node.value).length) measured = true;
+    }
+    if ('children' in node && Array.isArray(node.children)) node.children.forEach(see);
+    if (node.type === 'tabs') node.tabs.forEach((tab) => tab.children.forEach(see));
+  };
+  nodes.forEach(see);
+  return named.size >= 2 && measured;
+}
+
+/**
  * When a comparison card never names two sides, replace the body with what the
  * sources say about each side. Extra biography nodes are blanked out of the body.
+ * A breakdown that already names each side and states a number stays as it is.
  */
 export function comparisonRepair(question: string, search: SearchResponse, nodes: Map<number, CardNode>): { index: number; node: CardNode }[] | undefined {
   const body = [...nodes.entries()].filter(([, node]) => node.type !== 'actions' && node.type !== 'citations' && node.type !== 'ticker');
   if (compareSides(question).length < 2) return undefined;
   if (body.length && showsComparison(question, body.map(([, node]) => node))) return groundCompared(question, search, body);
+  if (body.length && breakdownStays(question, body.map(([, node]) => node))) return undefined;
   const built = comparisonNodes(question, search);
   if (!built.length) return undefined;
   const indexes = body.map(([index]) => index).sort((a, b) => a - b);
@@ -795,6 +832,9 @@ export function keepComparedProducts(prior: readonly CardNode[], nodes: Map<numb
         });
       });
       const present = new Set(rows.map((row) => (row[0] ?? '').trim().toLowerCase()).filter(Boolean));
+      const priorFactors = new Set(kept.flatMap((product) => product.rows.map((row) => row.factor.toLowerCase())));
+      const sharesFactor = [...present].some((factor) => priorFactors.has(factor));
+      const measuredHere = rows.some((row) => row.slice(1).some((cell) => hasMeasure(cell)));
       const pending = new Map<string, string[]>();
       columns.forEach((name, column) => {
         if (column === 0 || !name.trim()) return;
@@ -812,7 +852,8 @@ export function keepComparedProducts(prior: readonly CardNode[], nodes: Map<numb
           pending.set(key, extra);
         }
       });
-      const nextRows = [...rows, ...pending.values()];
+      // A different breakdown already has its own numbers. The previous card's rows are not pasted back on.
+      const nextRows = !sharesFactor && measuredHere ? rows : [...rows, ...pending.values()];
       const sameColumns = columns.length === node.columns.length && columns.every((name, index) => name === node.columns[index]);
       const sameRows = nextRows.length === node.rows.length && nextRows.every((row, index) => row.length === node.rows[index]?.length && row.every((cell, cellIndex) => cell === node.rows[index]?.[cellIndex]));
       if (sameColumns && sameRows) return node;

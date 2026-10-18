@@ -54,7 +54,8 @@ import { dropDisputedBio, type BioSource } from './bioFacts';
 import { withoutGluedPerson } from './peopleSplit';
 import { abstainComputed, alignFactProse, cardFacts, factAnswer, hasMemberWork, hopQueries, leadMemberRows, placeFactLead, unsupportedYear } from './hops';
 import { gapQuery, onTopicCount, rescueQuery, sourcesMiss } from './rescue';
-import { keepPictures, reviewCard, type Review } from './review';
+import { keepShownComponent } from '../shared/keepShown';
+import { keepPictures, reviewCard, reviewComponents, type Review } from './review';
 import { permitted } from './images';
 import { hasLlm } from './llm';
 import { BROWSER_UA, collectPages, ogImageOf } from './pages';
@@ -955,6 +956,29 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   } else if (pendingReview) {
     mark(scope.ledger, 'reviewed');
   }
+  if (!chat) {
+    try {
+      const patch = await reviewComponents({
+        query: designReq.followup?.question ?? designReq.query,
+        results: designReq.search.results,
+        pages: designReq.pages,
+        head,
+        nodes: shown,
+      }, env, async (query) => {
+        const found = await Promise.race([
+          searchWithLate({ q: query, freshness: 'any', count: 4, lite: true }, env, scope),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
+        ]);
+        return found?.response.results ?? [];
+      });
+      if (patch) {
+        shown.set(patch.index, patch.node);
+        send('node', { index: patch.index, node: patch.node });
+      }
+    } catch (err) {
+      console.log(JSON.stringify({ zo: 'precision-review', failed: String(err).slice(0, 120) }));
+    }
+  }
 }
 
 /** The finished card, read once against the goal: wrong nodes are corrected in place. */
@@ -964,9 +988,12 @@ function applyReview(send: Send, req: DesignRequest, shown: Map<number, CardNode
   let fixed = 0;
   for (const fix of review.fixes) {
     if (shown.get(fix.index)?.type === 'ticker') continue;
+    const before = shown.get(fix.index);
     const gated = gateNode(fix.node, req);
     if (!gated) continue;
-    const node = keepPictures(shown.get(fix.index), gated) as CardNode;
+    const accepted = keepShownComponent(before, gated);
+    if (before && accepted === before) continue;
+    const node = keepPictures(before, accepted) as CardNode;
     shown.set(fix.index, node);
     send('node', { index: fix.index, node });
     fixed++;
@@ -977,7 +1004,12 @@ function applyReview(send: Send, req: DesignRequest, shown: Map<number, CardNode
   const isCallout = (node: CardNode | undefined) => node?.type === 'callout' || (node?.type === 'stack' && node.children.some((child) => child.type === 'callout'));
   const leadWarns = isCallout(lead);
   if (warning && leadIndex !== undefined && !leadWarns) {
-    send('node', { index: leadIndex, node: { type: 'stack', direction: 'col', gap: 'sm', children: [warning, shown.get(leadIndex)!] } });
+    const lead = shown.get(leadIndex)!;
+    const wrapped: CardNode = { type: 'stack', direction: 'col', gap: 'sm', children: [warning, lead] };
+    if (keepShownComponent(lead, wrapped) !== lead) {
+      shown.set(leadIndex, wrapped);
+      send('node', { index: leadIndex, node: wrapped });
+    }
   }
   console.log(JSON.stringify({ zo: 'review', ok: review.ok, problems: review.problems, fixed, followups: !!review.followups, warned: !!warning, ms: Date.now() - at, total: Date.now() - started }));
 }
