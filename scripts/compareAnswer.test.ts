@@ -371,6 +371,24 @@ test('a promo page is not a product photo, and a stated spec fills a blank cell'
   };
   const patches = comparisonRepair(ask, search, new Map([[0, tiles], [1, table]]));
   const next = patches?.find((patch) => patch.index === 1)?.node;
-  assert.equal(next?.type === 'table' ? next.rows[0]?.[1] : '', 'The Harbor Slate battery lasts 16 days.');
+  assert.equal(next?.type === 'table' ? next.rows[0]?.[1] : '', '16 days');
   assert.equal(next?.type === 'table' ? next.rows[0]?.[2] : '', 'Ten days');
+  const slogan: CardNode = {
+    type: 'table',
+    columns: ['Factor', 'Harbor Slate', 'Northwatch 2'],
+    rows: [['Display', 'Vibrant, glanceable', '1.72 AMOLED']],
+  };
+  const sized = comparisonRepair(ask, {
+    ...search,
+    results: [{
+      title: 'Harbor Slate specs',
+      url: 'https://example.com/slate',
+      snippet: 'The Harbor Slate display is a 1.34-inch AMOLED.',
+      domain: 'example.com',
+      engines: ['web'],
+    }],
+  }, new Map([[0, slogan]]));
+  const sizedTable = sized?.find((patch) => patch.index === 0)?.node;
+  assert.equal(sizedTable?.type === 'table' ? sizedTable.rows[0]?.[1] : '', '1.34-inch');
+  assert.equal(sizedTable?.type === 'table' ? sizedTable.rows[0]?.[2] : '', '1.72 AMOLED');
 });

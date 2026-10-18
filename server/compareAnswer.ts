@@ -171,19 +171,37 @@ function joinSides(sides: string[]): string {
 const STICKER = /(?:\$|€|£|¥)\s?\d{1,4}(?:,\d{3})*(?:\.\d{2})?/g;
 const BLANK_CELL = /^[\s—–\-−~]*$/;
 
-/** A blank spec cell takes the sentence where this product's sources state that spec. */
+function labelKeys(label: string): string[] {
+  return label.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 5).map((word) => word.slice(0, 5));
+}
+
+function mentionsLabel(label: string, sentence: string): boolean {
+  const keys = labelKeys(label);
+  if (!keys.length) return false;
+  const words = sentence.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  return keys.some((key) => words.some((word) => word.startsWith(key)));
+}
+
+/** The number and unit in a sentence ("1.34-inch", "17.7 g", "16 days"). A bare year is not a spec. */
+function measuredPhrase(sentence: string): string | undefined {
+  const match = sentence.match(/\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*[x×]\s*\d{1,3}(?:,\d{3})*(?:\.\d+)?)*(?:\s*[-–]?\s*(?:inch(?:es)?|["″]|mm|cm|kg|oz|mah|nits?|atm|px|hours?|days?|grams?|g\b))/i);
+  if (!match) return undefined;
+  const phrase = match[0].replace(/\s+/g, ' ').trim();
+  return measureNumbers(phrase).length ? phrase : undefined;
+}
+
+/** A spec cell with no measurement takes the number the source states for that row. */
 function specFromSources(label: string, side: string, search: SearchResponse): string | undefined {
-  const keys = label.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 5);
-  if (!keys.length) return undefined;
+  if (!labelKeys(label).length) return undefined;
   for (const result of search.results) {
     const blob = `${result.title ?? ''}. ${result.snippet ?? ''} ${result.content ?? ''}`;
     if (!mentionsSide(side, `${result.title ?? ''} ${result.snippet ?? ''}`)) continue;
     for (const sentence of blob.split(/(?<=[.!?])\s+/)) {
-      const low = sentence.toLowerCase();
-      if (!keys.some((key) => low.includes(key))) continue;
+      if (!mentionsLabel(label, sentence)) continue;
       const clean = sentence.replace(/\s+/g, ' ').trim();
-      if (clean.length < 8 || clean.length > 110) continue;
-      return clean;
+      if (clean.length < 8 || clean.length > 240) continue;
+      const phrase = measuredPhrase(clean);
+      if (phrase) return phrase;
     }
   }
   return undefined;
@@ -313,13 +331,9 @@ function groundCompareNode(node: CardNode, sides: string[], search: SearchRespon
   if (node.type === 'table') {
     const rows = node.rows.map((row) => row.map((cell, index) => {
       const side = sides.find((item) => mentionsSide(item, node.columns[index] ?? ''));
-      if (!side || moneyIn(cell)) return cell;
-      if (BLANK_CELL.test(cell)) {
-        if (priceRow(row[0] ?? '')) return stickerPrice(side, search) ?? cell;
-        return specFromSources(row[0] ?? '', side, search) ?? cell;
-      }
-      if (!RELATIVE_PRICE.test(cell)) return cell;
-      return stickerPrice(side, search) ?? '';
+      if (!side || moneyIn(cell) || hasMeasure(cell)) return cell;
+      if (priceRow(row[0] ?? '') || RELATIVE_PRICE.test(cell)) return stickerPrice(side, search) ?? (BLANK_CELL.test(cell) ? cell : '');
+      return specFromSources(row[0] ?? '', side, search) ?? cell;
     }));
     if (rows.every((row, index) => row.every((cell, cellIndex) => cell === node.rows[index]?.[cellIndex]))) return node;
     return { ...node, rows };

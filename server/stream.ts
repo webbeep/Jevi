@@ -639,7 +639,14 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
         head = { ...head, title };
         send('head', head);
       }
-      const patches = comparisonRepair(question, designReq.search, shown);
+      const withPages = {
+        ...designReq.search,
+        results: designReq.search.results.map((row, index) => {
+          const page = designReq.pages.find((item) => item.n === index + 1);
+          return page?.text && !row.content ? { ...row, content: page.text.slice(0, 4000) } : row;
+        }),
+      };
+      const patches = comparisonRepair(question, withPages, shown);
       if (patches) {
         for (const patch of patches) {
           shown.set(patch.index, patch.node);
