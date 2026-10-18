@@ -28,6 +28,36 @@ enough is true when these snippets can answer, including the steps of a how-to, 
 enough is false when that fact, the official page, or one side of a comparison is missing. query is the one search that would find it, or "" when enough.
 A variant (Pro, Plus, Max, Mini, Ultra) the question did not name is not the product asked.`;
 
+/** The place or business the card title names. "Art Institute of Chicago Illinois Resident…" → "Art Institute of Chicago". */
+export function placeOnScreen(title: string | undefined): string {
+  if (!title) return '';
+  const words = title.replace(/[“”"'’?—–-]/g, ' ').split(/\s+/).filter(Boolean);
+  const skip = /^(?:No|Yes|The|How|What|When|Where|Who|It|Its)$/i;
+  const out: string[] = [];
+  for (const word of words) {
+    const bare = word.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, '');
+    if (!bare) continue;
+    const cap = /^[A-Z]/.test(bare);
+    const of = /^of$/i.test(bare);
+    if (!out.length) {
+      if (cap && !skip.test(bare)) out.push(bare);
+      continue;
+    }
+    if (of) {
+      out.push('of');
+      continue;
+    }
+    if (cap) {
+      out.push(bare);
+      continue;
+    }
+    break;
+  }
+  const ofAt = out.indexOf('of');
+  const name = ofAt >= 0 && out.length > ofAt + 1 ? out.slice(0, ofAt + 2) : out.slice(0, 4);
+  return name.join(' ');
+}
+
 export function parseDecision(raw: unknown): TurnDecision | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const row = raw as { action?: unknown; queries?: unknown; subject?: unknown };

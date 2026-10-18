@@ -82,7 +82,7 @@ import { variantChoices, variantConflict } from './productModel';
 import { recallClips, wantsVideo, withProductClips, withVideos } from './videoSearch';
 import { guessFreshness, preferFresh, staleComplaint, stricter } from './freshness';
 import { isQuoteRow, liveQuote, quoteRow, tickerNode } from './liveQuote';
-import { judgeSources, judgeTurn } from './turnJudge';
+import { judgeSources, judgeTurn, placeOnScreen } from './turnJudge';
 import { findTicker } from '../shared/tickerNotes';
 import { splitPeople } from './peopleSplit';
 import { personSteer, pronounFollow, roleFollow, threadPerson, topicOnly, withoutChosen } from './personSteer';
@@ -1617,7 +1617,10 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
       ? `This turn is about ${decision.subject}, the subject already on screen. Answer the new question about that subject.`
       : '';
     if (decision.action === 'search') {
-      const query = decision.queries[0] ?? req.question.trim();
+      const place = placeOnScreen(onScreen?.title) || decision.subject;
+      const asked = req.question.replace(/^(?:and|so)\s+/i, '').trim();
+      const written = decision.queries[0] ?? asked;
+      const query = place && !written.toLowerCase().includes(place.toLowerCase()) ? `${place} ${asked}` : written;
       scope.bound = `${decision.subject}\n${req.question}`;
       send('rewrite', { query });
       await searchAndDesign(send, env, query, 'any', [lock, context].filter(Boolean).join('\n') || undefined, started, scope, true);
