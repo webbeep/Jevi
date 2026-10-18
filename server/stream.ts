@@ -1560,15 +1560,25 @@ async function imageLoads(url: string): Promise<boolean> {
   }
 }
 
+function previewOf(side: string, row: SearchResult): ImageResult | undefined {
+  if (!row.url || !row.image || !/^https:\/\//i.test(row.image)) return undefined;
+  if (!acceptProductPhoto(side, row.title ?? '', `${row.snippet ?? ''} ${row.domain ?? ''}`)) return undefined;
+  return { url: row.url, thumb: row.image, title: row.title || side, source: row.domain || side, license: 'source' };
+}
+
 /** The preview picture on a page about this product. A promo or another product's page is skipped. */
 async function productPhoto(side: string, rows: readonly SearchResult[]): Promise<ImageResult | undefined> {
   const matches = rows.filter((row) => row.url && acceptProductPhoto(side, row.title ?? '', `${row.snippet ?? ''} ${row.domain ?? ''}`)).slice(0, 5);
-  const found = await Promise.all(matches.map(async (row) => {
+  const found = (await Promise.all(matches.map(async (row) => {
     const thumb = await ogImageOf(row.url, 1600);
-    if (!thumb || !(await imageLoads(thumb))) return undefined;
-    return { url: row.url, thumb, title: row.title || side, source: row.domain || side, license: 'source' as const };
-  }));
-  return found.find((image) => image !== undefined);
+    if (!thumb) return previewOf(side, row);
+    const loaded = await imageLoads(thumb);
+    return { url: row.url, thumb, title: row.title || side, source: row.domain || side, license: 'source' as const, loaded };
+  }))).filter((image) => image !== undefined);
+  const ready = found.find((image) => !('loaded' in image) || image.loaded);
+  const pick = ready ?? found[0];
+  if (!pick) return undefined;
+  return { url: pick.url, thumb: pick.thumb, title: pick.title, source: pick.source, license: 'source' };
 }
 
 function searchRoom(scope: AskScope) {
@@ -1612,19 +1622,29 @@ async function searchNamedSides(query: string, results: SearchResponse, env: Env
       }
     }
     rows = [...rows, ...(await specSearch)];
-    // A price already on the card does not answer which page shows this product. One search of the name does.
-    const named = [...rows, ...results.results].some((row) => acceptProductPhoto(side, row.title ?? '', `${row.snippet ?? ''} ${row.domain ?? ''}`));
-    if (!named) {
+    const ownImage = (image: ImageResult) => acceptProductPhoto(side, `${image.title} ${image.source}`);
+    images = [...[...rows, ...results.results].flatMap((row) => {
+      const preview = previewOf(side, row);
+      return preview ? [preview] : [];
+    }), ...images.filter(ownImage)];
+    // A price already found does not supply this product's photo. Search the name when none is in hand.
+    if (!images.some(ownImage)) {
       const form = forms[0] ?? side;
       searchRoom(scope);
       const again = await searchWithLate({ q: form, freshness: 'any', count: 5, lite: true }, env, scope);
       const about = again.response.results.filter((row) => acceptProductPhoto(side, row.title ?? '', `${row.snippet ?? ''} ${row.domain ?? ''}`));
       rows = [...rows, ...about];
-      images = [...(again.response.images ?? []).filter((image) => acceptProductPhoto(side, `${image.title} ${image.source}`)), ...images];
+      images = [
+        ...about.flatMap((row) => {
+          const preview = previewOf(side, row);
+          return preview ? [preview] : [];
+        }),
+        ...(again.response.images ?? []).filter(ownImage),
+        ...images,
+      ];
     }
     const photo = await productPhoto(side, [...rows, ...results.results]);
-    images = images.filter((image) => acceptProductPhoto(side, `${image.title} ${image.source}`));
-    if (photo) images = [photo, ...images];
+    if (photo) images = [photo, ...images.filter((image) => image.thumb !== photo.thumb)];
     return { results: rows, images };
   }));
   const add = found.flatMap((item) => item.results).filter((row) => row.url && !results.results.some((have) => have.url === row.url)).slice(0, 12);
