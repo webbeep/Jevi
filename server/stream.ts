@@ -48,7 +48,7 @@ import type { EngineStatus, Freshness, ImageResult, SearchResponse, SearchResult
 import { rewriteQuery } from './ai';
 import { type DesignRequest, designParallel, designStream, gateNode } from './design';
 import { BRIEF_ROWS, briefSources, remapBrief, type SourceBrief } from './brief';
-import { agreeOfficialRate, claimSources, groundMembers } from './claims';
+import { agreeOfficialRate, claimSources, groundMembers, presentNamedCharges } from './claims';
 import { answerTitle, fillPaperCard, keepAnswerBody, restoreKeptPapers, wantsNamedQuote } from './cardAgree';
 import { dropDisputedBio, type BioSource } from './bioFacts';
 import { withoutGluedPerson } from './peopleSplit';
@@ -574,7 +574,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     const knowledge = designReq.search.knowledge;
     if (knowledge?.extract) bioSources.unshift({ title: knowledge.title, url: knowledge.url, domain: 'wikipedia.org', text: `${knowledge.title}\n${knowledge.extract}` });
     const agreed = dropDisputedBio(
-      fillPaperCard(question, keepAnswerBody(question, restoreKeptPapers(question, finishQuality(question, settled.nodes, head?.subtitle ?? ''), designReq.followup?.baseCard?.body, claimSources(designReq.search.results, designReq.pages)), recovered), paperSources),
+      fillPaperCard(question, keepAnswerBody(question, restoreKeptPapers(question, presentNamedCharges(question, finishQuality(question, settled.nodes, head?.subtitle ?? ''), claimSources(designReq.search.results, designReq.pages)), designReq.followup?.baseCard?.body, claimSources(designReq.search.results, designReq.pages)), recovered), paperSources),
       bioSources,
       { person: designReq.person?.name, question, followup: !!designReq.followup || !!designReq.fromFollowup },
     );

@@ -214,6 +214,7 @@ RULES
 - When the person asks for a quote, quote the sentence that answers the question, including the numbers that sentence states. A nearby sentence is not a substitute, and a sentence cut off mid-way is not the quote.
 - A how-to is a steps node: the ordered steps the official page states, each with its title and the sentence that page uses. A short paragraph is not the steps.
 - A live price, tax, or fee leads with the figure the current official source states. Every other number on the card agrees with that figure or with a component that same page states. Do not label every component with the combined figure.
+- A fee lists each other charge a source names once. The amount on that row is the one on the line that names the charge. Do not add a second row for the same charge.
 - A health answer leads with the official figure or verdict. A line under it does not state a different figure or the opposite advice.
 - A comparison stays a visual table with one column per product. Search and show each product the question named. Do not say a side has no specs, or is not in the sources, when that product was not searched. A variant the question did not name (Pro, Plus, Max, Mini, Ultra) is a different product.
 - A line under a verdict has to agree with it. Do not add a claim the verdict rejects. If a page does not say whether a paper is a review or an original study, say that, and do not assert either one.

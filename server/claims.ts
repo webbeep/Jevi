@@ -2007,11 +2007,17 @@ function chargeForLabel(label: string, sub: string, query: string, charges: read
     if (score < 2) continue;
     const leadCopy = Math.abs(charge.value - lead.value) < 0.001;
     const bestCopy = best ? Math.abs(best.charge.value - lead.value) < 0.001 : false;
+    // "$42 Harbor card" names the next item. "Harbor card: $11" names this one.
+    // An add-on keeps the line that says so, including when that line leads with the amount.
+    const namedFirst = !/^[$£€¥]/.test(charge.line.trim());
+    const bestNamed = best ? !/^[$£€¥]/.test(best.charge.line.trim()) : false;
+    const sameOrder = !best || addonLabel || namedFirst === bestNamed;
     const closer = !best
       || score > best.score
       || (score === best.score && hits > best.hits)
-      || (score === best.score && hits === best.hits && charge.official && !best.charge.official)
-      || (score === best.score && hits === best.hits && charge.official === best.charge.official && addonLabel && !questionAddon && !leadCopy && bestCopy);
+      || (score === best.score && hits === best.hits && !addonLabel && namedFirst && !bestNamed)
+      || (score === best.score && hits === best.hits && sameOrder && charge.official && !best.charge.official)
+      || (score === best.score && hits === best.hits && sameOrder && charge.official === best.charge.official && addonLabel && !questionAddon && !leadCopy && bestCopy);
     if (closer) best = { charge, score, hits };
   }
   return best?.charge;
@@ -2277,6 +2283,123 @@ export function oneNamedCharge(query: string, nodes: readonly (CardNode | undefi
   if (!FEE_ASK.test(query) || TAX_ASK.test(query)) return [...nodes];
   const seen = new Set<string>();
   return nodes.map((node) => (node ? dropRepeatCharge(node, seen) : node));
+}
+
+function questionTokens(query: string): string[] {
+  return query.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 4 && !FEE_GENERIC.has(word) && !CHARGE_GENERIC.has(word));
+}
+
+/** Words that sit in front of the amount. A figure that leads the clause has not named its item yet. */
+function labelBeforeAmount(line: string): string | undefined {
+  const money = line.match(MONEY);
+  if (!money || money.index === undefined || money.index === 0 || /^[$£€¥]/.test(line.trim())) return undefined;
+  const words = line.slice(0, money.index).replace(/[^A-Za-z0-9\s+-]/g, ' ').replace(/\s+/g, ' ').trim().split(' ').filter((word) => word.length >= 3);
+  const kept = words.slice(-5);
+  return kept.length ? kept.join(' ') : undefined;
+}
+
+/** An add-on written after its amount ("$15—Expedited") still names that add-on. */
+function addonAfterAmount(line: string): string | undefined {
+  const money = line.match(MONEY);
+  if (!money || money.index === undefined) return undefined;
+  const words = line.slice(money.index + money[0].length).replace(/[^A-Za-z0-9\s+-]/g, ' ').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean).slice(0, 3);
+  const label = words.join(' ');
+  return label && ADDON_LINE.test(label) ? label : undefined;
+}
+
+function recordCharges(node: CardNode, seen: Set<string>): void {
+  if (node.type === 'stack' || node.type === 'grid' || node.type === 'section' || node.type === 'scroller') {
+    for (const child of node.children) recordCharges(child, seen);
+    return;
+  }
+  if (node.type === 'tabs') {
+    for (const tab of node.tabs) for (const child of tab.children) recordCharges(child, seen);
+    return;
+  }
+  if (node.type === 'tile' || node.type === 'stat') {
+    keepCharge(node.label, `${node.value ?? ''} ${node.type === 'tile' ? node.sub ?? '' : ''}`, seen);
+    return;
+  }
+  if (node.type === 'keyvalue') {
+    for (const item of node.items) keepCharge(item.label, item.value, seen);
+    return;
+  }
+  if (node.type === 'table') {
+    for (const row of node.rows) keepCharge(row[0] ?? '', row.slice(1).join(' '), seen);
+    return;
+  }
+  if (node.type === 'list') {
+    for (const item of node.items) keepCharge(item.text, `${item.text} ${item.meta ?? ''}`, seen);
+  }
+}
+
+function placeCharge(node: CardNode, tile: CardNode): CardNode | undefined {
+  if (node.type === 'grid') return { ...node, children: [...node.children, tile] };
+  if (node.type === 'keyvalue' && tile.type === 'tile') return { ...node, items: [...node.items, { label: tile.label, value: tile.value ?? '' }] };
+  if (node.type === 'stack' || node.type === 'section' || node.type === 'scroller') {
+    for (let i = 0; i < node.children.length; i++) {
+      const child = node.children[i];
+      if (!child) continue;
+      const placed = placeCharge(child, tile);
+      if (!placed) continue;
+      const children = node.children.slice();
+      children[i] = placed;
+      return { ...node, children };
+    }
+    return { ...node, children: [...node.children, tile] };
+  }
+  return undefined;
+}
+
+/**
+ * A fee card shows each distinct charge a source names, once.
+ * The lead amount stays the hero. A second row for that same charge is not added.
+ */
+export function presentNamedCharges(query: string, nodes: readonly (CardNode | undefined)[], sources: readonly ClaimSource[]): (CardNode | undefined)[] {
+  if (!FEE_ASK.test(query) || TAX_ASK.test(query)) return [...nodes];
+  const lead = officialCharge(query, sources);
+  if (!lead) return [...nodes];
+  const charges = namedCharges(sources);
+  const asked = questionTokens(query);
+  const labels: string[] = [];
+  const seenLabels = new Set<string>();
+  const consider = (label: string | undefined, line: string) => {
+    if (!label) return;
+    const name = chargeName(label);
+    if (!name || seenLabels.has(name)) return;
+    const shares = asked.some((token) => wordHit(label, token) || wordHit(line, token));
+    if (!shares && !ADDON_LINE.test(label)) return;
+    seenLabels.add(name);
+    labels.push(label);
+  };
+  for (const charge of charges) consider(labelBeforeAmount(charge.line), charge.line);
+  for (const charge of charges) consider(addonAfterAmount(charge.line), charge.line);
+  const seen = new Set<string>();
+  for (const node of nodes) if (node) recordCharges(node, seen);
+  const tiles: CardNode[] = [];
+  for (const label of labels) {
+    if (tiles.length >= 6) break;
+    const named = chargeForLabel(label, '', query, charges, lead);
+    if (!named || Math.abs(named.value - lead.value) < 0.001) continue;
+    if (!keepCharge(label, named.figure, seen)) continue;
+    tiles.push({ type: 'tile', label, value: named.figure, source: named.n });
+  }
+  if (!tiles.length) return [...nodes];
+  const next = nodes.map((node) => node);
+  for (const tile of tiles) {
+    let placed = false;
+    for (let i = 0; i < next.length; i++) {
+      const node = next[i];
+      if (!node) continue;
+      const host = placeCharge(node, tile);
+      if (!host) continue;
+      next[i] = host;
+      placed = true;
+      break;
+    }
+    if (!placed) break;
+  }
+  return next;
 }
 
 /** The last pass: every percent on a tax card is the official rate, including nodes added after the first bind. */

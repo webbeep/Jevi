@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { bindClaims, budgetAmounts, claimSources, groundMembers, officialCharge, oneNamedCharge, priceFor, retargetCites, salesTax, shoppingAsk, type ClaimSource } from '../server/claims.ts';
+import { bindClaims, budgetAmounts, claimSources, groundMembers, officialCharge, oneNamedCharge, presentNamedCharges, priceFor, retargetCites, salesTax, shoppingAsk, type ClaimSource } from '../server/claims.ts';
 import { Grounding, groundNodes } from '../server/ground.ts';
 import { sanitizeNodes } from '../server/sanitize.ts';
 import { finishQuality } from '../server/sourceQuality.ts';
@@ -433,6 +433,37 @@ test('a second row for the same named charge is dropped', () => {
   const rows = nodes.flatMap((node) => (node?.type === 'grid' ? node.children : []));
   const labels = rows.map((node) => (node.type === 'tile' ? node.label : ''));
   assert.deepEqual(labels, ['Harbor book', 'Expedited add-on', 'Book + card', 'Minor book']);
+  const shifted: ClaimSource[] = [
+    { n: 1, domain: 'permits.harbor.gov', text: 'Renew by mail\nYour fee depends on the document. $42 Harbor card ・ $18 Harbor book and card' },
+    { n: 2, domain: 'notes.example', text: 'Harbor book renewal fees\nHarbor book: $42. Harbor card: $11. Harbor book and card: $80. $15—Expedited' },
+  ];
+  assert.equal(officialCharge(query, shifted)?.amount, '$42');
+  const bound = bindClaims({
+    type: 'stack',
+    gap: 'md',
+    children: [
+      { type: 'hero', value: '$18', label: 'Harbor book renewal' },
+      { type: 'keyvalue', items: [{ label: 'Harbor card', value: '$42' }, { label: 'Book + card', value: '$18' }] },
+      { type: 'grid', cols: 2, children: [
+        { type: 'tile', label: 'Expedited', value: '$42', sub: 'Extra fee' },
+        { type: 'tile', label: 'Expedited add-on', value: '$15' },
+      ] },
+    ],
+  }, shifted, query);
+  const once = oneNamedCharge(query, bound.type === 'stack' ? bound.children : []);
+  const cardRow = once[1]?.type === 'keyvalue' ? once[1].items[0]?.value ?? '' : '';
+  const pairRow = once[1]?.type === 'keyvalue' ? once[1].items[1]?.value ?? '' : '';
+  const expediteRows = once[2]?.type === 'grid' ? once[2].children : [];
+  assert.match(cardRow, /^\$11\b/);
+  assert.match(pairRow, /^\$80\b/);
+  assert.equal(expediteRows.length, 1);
+  assert.match(expediteRows[0]?.type === 'tile' ? expediteRows[0].value ?? '' : '', /^\$15\b/);
+  const filled = presentNamedCharges(query, [
+    { type: 'stack', gap: 'md', children: [{ type: 'hero', value: '$42', label: 'Harbor book renewal' }] },
+  ], shifted);
+  const added = filled[0]?.type === 'stack' ? filled[0].children.flatMap((node) => (node.type === 'tile' ? [node] : [])) : [];
+  assert.deepEqual(added.map((node) => node.label), ['Harbor card', 'Harbor book and card', 'Expedited']);
+  assert.deepEqual(added.map((node) => node.value), ['$11', '$80', '$15']);
   const compared = oneNamedCharge('Fitbit Edge vs Mi Band 10', [
     { type: 'grid', cols: 2, children: [
       { type: 'tile', label: 'Fitbit Edge', value: '$179' },
