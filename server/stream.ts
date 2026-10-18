@@ -73,7 +73,7 @@ import { anchoredFollowup, asksToCompare, comparisonFollow, cryptographyHint, fa
 import { calculationAnswer, isCalculationAsk, rateOnAmount } from './calculate';
 import { acceptProductPhoto, comparisonRepair, comparisonTitle, keepComparedProducts, mentionsSide, missingSideNode, nameForms, stickerPrice } from './compareAnswer';
 import { cardGaps, citeForGap, gapSearchQuery, markGap, settleGap, type PieceGap } from './gapFill';
-import { keptCardNodes } from '../shared/gap';
+import { unblendObjects } from './objectFacts';
 import { withFinishedSentences } from './polish';
 import { queryWithPlace, readerPlace, settleReadings } from './readings';
 import { isKeepOnly, keptBody } from './refine';
@@ -668,6 +668,14 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
         new Promise<{ ready: false; review: undefined }>((resolve) => setTimeout(() => resolve({ ready: false, review: undefined }), 1200)),
       ])
     : { ready: true as const, review: undefined };
+  const separateObjects = () => {
+    const patches = unblendObjects(shown, designReq.priorBody ?? [], designReq.search.results);
+    if (!patches) return;
+    for (const patch of patches) {
+      shown.set(patch.index, patch.node);
+      send('node', { index: patch.index, node: patch.node });
+    }
+  };
   const searchGaps = async () => {
     const question = designReq.followup?.question ?? designReq.query;
     const gaps = cardGaps(shown);
@@ -890,6 +898,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   alignRates();
   restoreKeptProducts();
   if (!chat) await searchGaps();
+  separateObjects();
   republishFees();
   send('done', { ...summary, pagesRead: pages.length, ms: Date.now() - started });
   if (pendingReview && !arrived.ready) {
@@ -901,6 +910,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     publishReadings();
     alignRates();
     restoreKeptProducts();
+    separateObjects();
     republishFees();
     mark(scope.ledger, 'reviewed');
   } else if (pendingReview) {
@@ -939,12 +949,6 @@ function applyReview(send: Send, req: DesignRequest, shown: Map<number, CardNode
  * Rewritten follow-ups already say what they mean, so they skip the understanding step.
  */
 async function searchAndDesign(send: Send, env: Env, query: string, freshness: Freshness, context: string | undefined, started: number, scope: AskScope, rewritten = false, seedRows?: SearchResult[], steer?: { avoid: Set<string>; rejected: string }, keepTicker?: CardNode, priorBody?: CardNode[], priorImages?: ImageResult[], fanout: string[] = []) {
-  const kept = priorBody?.length ? keptCardNodes(priorBody) : [];
-  if (kept.length) {
-    kept.forEach((node, index) => send('node', { index, node }));
-    send('node', { index: kept.length, node: { type: 'slot', hint: query, shape: 'line' } });
-    send('intent', { intent: query, queries: [query] });
-  }
   const unglued = withoutGluedPerson(query);
   if (unglued !== query.trim()) query = unglued;
   const extra = fanout.map((item) => item.trim()).filter((item) => item && item.toLowerCase() !== query.toLowerCase());

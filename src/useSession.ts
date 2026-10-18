@@ -9,8 +9,8 @@ import { MAX_AUTO_RECONNECTS, OFFLINE_MESSAGE, friendlyError, isConnectionError,
 import { billingFromSources, settleCardPrices } from '../shared/pricing';
 import { followupLabel } from '../shared/followupLabel';
 import { emptyDoneState } from '../shared/sse-parse';
-import { keptCardNodes } from '../shared/gap';
 import { isBlankLayout, liveBody } from '../shared/liveBody';
+import { objectContext } from '../shared/objects';
 import type { NoSourcesNotice, SearchResponse, SearchResult } from '../shared/types';
 import { api } from './api';
 import { withBrowserFallback } from './fallback';
@@ -213,6 +213,7 @@ export function useSession() {
       `Topic: ${root?.question ?? focus.question}`,
       ...(earlier.length ? ['Earlier turns, oldest first:', ...earlier.map((t) => `- Q: ${t.question} → ${cardDigest(t.result!.card, 260)}`)] : []),
       `${focusId === focus.id ? 'Card they are acting on' : 'Latest card'} (Q: ${focus.question}): ${cardDigest(focus.result!.card, 1100)}`,
+      objectContext(done.map((turn) => turn.result!.card)),
     ].join('\n');
   };
 
@@ -539,31 +540,7 @@ export function useSession() {
     const ctx = searchOf(from) ?? [...ref.current].reverse().find((t) => t.search);
     if (!ctx?.search) return;
     const base = intent === 'adjust' && from?.result ? { id: from.id, title: from.result.card.title, card: from.result.card } : undefined;
-    const priorCard = from?.result?.card;
-    const kept = priorCard ? keptCardNodes(priorCard.body) : [];
-    const seeded = kept.length
-      ? [...kept, { type: 'slot' as const, hint: q, shape: 'line' as const }]
-      : undefined;
-    const id = add({
-      kind: 'search',
-      question: q,
-      searchId: ctx.id,
-      filling: true,
-      origin: intent,
-      base,
-      pattern: base ? from?.pattern : undefined,
-      ref: askRef,
-      ...(seeded ? {
-        live: {
-          regions: [],
-          nodes: seeded,
-          raw: seeded,
-          followups: [],
-          credits: priorCard?.credits ?? [],
-          head: { title: priorCard!.title, subtitle: priorCard!.subtitle, icon: priorCard!.icon },
-        },
-      } : {}),
-    });
+    const id = add({ kind: 'search', question: q, searchId: ctx.id, filling: true, origin: intent, base, pattern: base ? from?.pattern : undefined, ref: askRef });
     scrollToTurn(id);
     const root = chainOf(from?.id);
     const found = [...ref.current].reverse().find((t) => root && t.id >= root.id && (!from || t.id <= from.id) && t.search);
