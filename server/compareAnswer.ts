@@ -182,9 +182,11 @@ function mentionsLabel(label: string, sentence: string): boolean {
   return keys.some((key) => words.some((word) => word.startsWith(key)));
 }
 
+const MEASURE = /\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*[x×]\s*\d{1,3}(?:,\d{3})*(?:\.\d+)?)*(?:\s*[-–]?\s*(?:inch(?:es)?|["″]|mm|cm|kg|oz|mah|nits?|atm|px|hours?|days?|grams?|g\b))/i;
+
 /** The number and unit in a sentence ("1.34-inch", "17.7 g", "16 days"). A bare year is not a spec. */
 function measuredPhrase(sentence: string): string | undefined {
-  const match = sentence.match(/\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*[x×]\s*\d{1,3}(?:,\d{3})*(?:\.\d+)?)*(?:\s*[-–]?\s*(?:inch(?:es)?|["″]|mm|cm|kg|oz|mah|nits?|atm|px|hours?|days?|grams?|g\b))/i);
+  const match = sentence.match(MEASURE);
   if (!match) return undefined;
   const phrase = match[0].replace(/\s+/g, ' ').trim();
   return measureNumbers(phrase).length ? phrase : undefined;
@@ -197,11 +199,13 @@ function specFromSources(label: string, side: string, search: SearchResponse): s
     const blob = `${result.title ?? ''}. ${result.snippet ?? ''} ${result.content ?? ''}`;
     if (!mentionsSide(side, `${result.title ?? ''} ${result.snippet ?? ''}`)) continue;
     for (const sentence of blob.split(/(?<=[.!?])\s+/)) {
-      if (!mentionsLabel(label, sentence)) continue;
       const clean = sentence.replace(/\s+/g, ' ').trim();
-      if (clean.length < 8 || clean.length > 240) continue;
-      const phrase = measuredPhrase(clean);
-      if (phrase) return phrase;
+      if (clean.length < 8 || clean.length > 400) continue;
+      for (const clause of clean.split(/\s*(?:,|;|\band\b|\bwith\b)\s*/i)) {
+        if (!mentionsLabel(label, clause)) continue;
+        const phrase = measuredPhrase(clause);
+        if (phrase) return phrase;
+      }
     }
   }
   return undefined;

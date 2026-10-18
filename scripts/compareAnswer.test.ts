@@ -391,4 +391,17 @@ test('a promo page is not a product photo, and a stated spec fills a blank cell'
   const sizedTable = sized?.find((patch) => patch.index === 0)?.node;
   assert.equal(sizedTable?.type === 'table' ? sizedTable.rows[0]?.[1] : '', '1.34-inch');
   assert.equal(sizedTable?.type === 'table' ? sizedTable.rows[0]?.[2] : '', '1.72 AMOLED');
+  const mixed = comparisonRepair(ask, {
+    ...search,
+    results: [{
+      title: 'Harbor Slate specs',
+      url: 'https://example.com/slate',
+      snippet: 'The Harbor Slate has a 7-day battery and a glanceable display.',
+      domain: 'example.com',
+      engines: ['web'],
+    }],
+  }, new Map([[0, slogan]]));
+  const mixedTable = mixed?.find((patch) => patch.index === 0)?.node;
+  const mixedCell = mixedTable?.type === 'table' ? mixedTable.rows[0]?.[1] : 'Vibrant, glanceable';
+  assert.equal(mixedCell, 'Vibrant, glanceable');
 });
