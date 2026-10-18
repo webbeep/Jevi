@@ -35,7 +35,7 @@ A variant (Pro, Plus, Max, Mini, Ultra) the question did not name is not the pro
 export function placeOnScreen(title: string | undefined): string {
   if (!title) return '';
   const words = title.replace(/[“”"'’?—–-]/g, ' ').split(/\s+/).filter(Boolean);
-  const skip = /^(?:No|Yes|The|How|What|When|Where|Who|It|Its)$/i;
+  const skip = /^(?:No|Yes|The|How|What|When|Where|Who|Why|Which|It|Its|That|This|These|Those|There|Here|Is|Are|Was|Did|Does|Do)$/i;
   const out: string[] = [];
   for (const word of words) {
     const bare = word.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, '');
@@ -178,7 +178,8 @@ export function followSearchPlan(input: { title?: string; question: string; quer
   }
   const place = placeOnScreen(title) || input.subject;
   const written = withoutLeadVerb(input.queries[0] ?? asked);
-  const query = place && !written.toLowerCase().includes(place.toLowerCase()) ? `${place} ${withoutLeadVerb(asked)}` : written;
+  // "When did it open?" names the place in the pronoun's spot, not glued in front.
+  const query = place && !written.toLowerCase().includes(place.toLowerCase()) ? fallbackQuery(withoutLeadVerb(asked), place) : written;
   return { query, fanout: input.queries.slice(1).map(withoutLeadVerb) };
 }
 
