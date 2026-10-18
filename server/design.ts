@@ -26,6 +26,7 @@ import { guessFreshness, stricter } from './freshness';
 import { isQuoteRow } from './liveQuote';
 import { BRIEF_ROWS, rejectedSources, type SourceBrief } from './brief';
 import { CHART_TALK, withoutCharts } from '../shared/tickerNotes';
+import { brandPriceProbe } from './brandPrice';
 import { diagramIntent, diagramRegionIndex, diagramSlotAt, diagramsEnabled, dropModelDiagram, layoutWithDiagram } from '../shared/diagram';
 import { requestDiagram } from './diagramAsk';
 
@@ -220,7 +221,8 @@ RULES
 - A how-to is a steps node: the ordered steps the official page states, each with its title and the sentence that page uses. A short paragraph is not the steps.
 - A live price, tax, or fee leads with the figure the current official source states. Every other number on the card agrees with that figure or with a component that same page states. Do not label every component with the combined figure.
 - A fee lists each other charge a source names once. The amount on that row is the one on the line that names the charge. Do not add a second row for the same charge.
-- A health answer leads with the official figure or verdict. A line under it does not state a different figure or the opposite advice.
+- A health answer leads with the official figure or verdict and names the body that set it (USPSTF, CDC, ACOG, USDA, WHO, FDA) with its grade, classification or limit when a source states it. It then gives who it applies to, the threshold that keeps it safe (a cooking temperature, a daily limit, an acceptable daily intake), and the main risk the source names. Advice not to start a medicine says to ask a clinician and not to stop one already prescribed on your own. A line under it does not state a different figure or the opposite advice.
+- A fee is the one for the route asked: renewing by mail shows the application fee. A fee for another route (in person, expedited, a facility or acceptance fee) is labeled with that route, never shown as the fee.
 - A comparison stays a visual table with one column per product. Search and show each product the question named. Do not say a side has no specs, or is not in the sources, when that product was not searched. A variant the question did not name (Pro, Plus, Max, Mini, Ultra) is a different product.
 - A line under a verdict has to agree with it. Do not add a claim the verdict rejects. If a page does not say whether a paper is a review or an original study, say that, and do not assert either one.
 - A request for peer-reviewed papers lists the papers a source identifies, each with its title and an open link. An empty list is not an answer. Do not invent a title. A count such as "of the three" matches how many picks the card shows, a headline price is the price on that pick's row, and a pick stays inside the stated budget and spec.
@@ -252,6 +254,12 @@ const SYSTEM_REGION = `${DESIGNER}
 - Output only what the TASK asks for, as JSON Lines: one complete compact JSON object per line. Every node carries a \"type\" field, e.g. {\"type\":\"hero\",...}. No code fences, no prose, no blank lines, no line breaks inside a JSON object.`;
 
 /** Today's date always; for "today"/"latest" asks, what current means and that every number stays on the subject. */
+/** A product's price is what its maker charges now. A resale listing is not. */
+function productPriceRule(asked: string): string {
+  if (!brandPriceProbe(asked) && !/\bhow much (?:does|do|is|are) (?:a|an|the)\b/i.test(asked)) return '';
+  return "- A product's price is its maker's current list price (MSRP): from the maker's own page, or a dated report of a price change (say when it changed and from what). A resale, used, refurbished or auction listing, a bid, or a trade-in offer is never the price; at most one line labeled resale.";
+}
+
 function liveQuoteRule(req: DesignRequest): string {
   const row = req.search.results[0];
   if (!isQuoteRow(row)) return '';
@@ -322,6 +330,7 @@ function taskBlock(req: DesignRequest): string {
     req.simple ? '- Write for a 10-year-old: plain words and a friendly analogy.' : '',
     req.facts ? `- The sources already imply the answer. Lead with ${req.facts.lead}. ${req.facts.note}` : '',
     timeRules(req),
+    productPriceRule(asked),
     liveQuoteRule(req),
     seasonStatRule(req),
     briefRules(req),

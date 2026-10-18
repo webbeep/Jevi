@@ -88,3 +88,11 @@ test('a currency question in words is a live exchange-rate quote, in the directi
   assert.equal(quoteAsk('How much does a Nintendo Switch 2 cost in the US right now?'), undefined);
   assert.equal(quoteAsk('How much is a subway ride in New York City?'), undefined);
 });
+
+test('a product price ask also searches the maker’s own store', async () => {
+  const { brandPriceProbe } = await import('../server/brandPrice.ts');
+  assert.equal(brandPriceProbe('How much does a Nintendo Switch 2 cost in the US right now?'), 'Nintendo Switch 2 price site:nintendo.com');
+  assert.equal(brandPriceProbe('What does Apple charge for AirPods Pro 3 in the US?'), 'Apple AirPods Pro 3 price site:apple.com');
+  assert.equal(brandPriceProbe('Who founded Nintendo?'), undefined);
+  assert.equal(brandPriceProbe('How much is a subway ride in New York City?'), undefined);
+});

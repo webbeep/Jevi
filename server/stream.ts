@@ -87,6 +87,7 @@ import { recallClips, wantsVideo, withProductClips, withVideos } from './videoSe
 import { guessFreshness, preferFresh, staleComplaint, stricter } from './freshness';
 import { isQuoteRow, liveQuote, quoteRow, tickerNode } from './liveQuote';
 import { nwsForecastRow } from './weatherService';
+import { brandPriceProbe, probeHost } from './brandPrice';
 import { cleanSideName } from '../shared/objects';
 import { cardCitesName, citedNames, nameSeekingQuery, namedListNode, wantsNamedList } from './namedList';
 import { addedComparison, followSearchPlan, judgeSources, judgeTurn } from './turnJudge';
@@ -302,7 +303,10 @@ interface EarlyOfficial {
 
 /** The agency or place search, started with the literal one so the card does not wait for it after the main search. */
 function startOfficial(query: string, env: Env, scope: AskScope): EarlyOfficial | undefined {
-  const probe = officialProbe(query);
+  return startProbe(officialProbe(query), env, scope);
+}
+
+function startProbe(probe: string | undefined, env: Env, scope: AskScope): EarlyOfficial | undefined {
   if (!probe) return undefined;
   // Its own call slot, so the rewrites keep theirs.
   scope.ledger.bonus = (scope.ledger.bonus ?? 0) + 1;
@@ -342,6 +346,21 @@ async function attachOfficial(query: string, results: SearchResponse, env: Env, 
   if (!add.length) return results;
   console.log(JSON.stringify({ zo: 'official', added: add.length, lead: add[0]?.domain }));
   return { ...results, results: preferSources(query, [...add, ...results.results]) };
+}
+
+/**
+ * The maker's own pages for a product price ask lead the sources. The probe ran beside the main
+ * search; it gets a short grace, since a resale listing is what the card leads with without it.
+ */
+async function foldBrandPrice(results: SearchResponse, early: (EarlyOfficial & { host: string }) | undefined): Promise<SearchResponse> {
+  if (!early) return results;
+  const found = early.ready() ?? await Promise.race([early.promise, new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 700))]);
+  const own = (found?.response.results ?? []).filter((row) => row.domain.replace(/^www\./, '').endsWith(early.host.replace(/^store\./, '')));
+  if (!own.length) return results;
+  const add = own.slice(0, 3).filter((row) => !results.results.some((have) => normalizeUrl(have.url) === normalizeUrl(row.url)));
+  const rest = results.results.filter((row) => !add.some((item) => normalizeUrl(item.url) === normalizeUrl(row.url)));
+  console.log(JSON.stringify({ zo: 'brand-price', host: early.host, added: add.length }));
+  return { ...results, results: [...add, ...rest] };
 }
 
 /** Merges a public-page search that has already finished. Never waits. */
@@ -973,6 +992,9 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   // Keyless, in parallel with the web search: a price ask is answered from the live quote, not old articles.
   const quoting = liveQuote(query).finally(() => mark(scope.ledger, 'quote'));
   const officialEarly = paper ? undefined : startOfficial(query, env, scope);
+  // A product price ask also reads the maker's own store page ("Nintendo Switch 2 price site:nintendo.com").
+  const brandProbe = paper ? undefined : brandPriceProbe(query);
+  const brandEarly = brandProbe ? Object.assign(startProbe(brandProbe, env, scope)!, { host: probeHost(brandProbe) }) : undefined;
   // A person named with what they do ("Jessica Hamrick DeepMind", a tapped Which-one? choice) is often too
   // little-known for the engines to surface their own website, so guess it from the name while the search runs.
   const siteLookup = !steer && isPersonAsk(query) && contextTerms(query).length ? lookupOwnSite(query) : undefined;
@@ -1056,6 +1078,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   results = { ...results, results: leadPreprints(query, results.results) };
   results = { ...results, results: dropClinicPages(query, dropStrayDois(query, results.results)) };
   results = foldReadyOfficial(query, results, officialEarly);
+  results = await foldBrandPrice(results, brandEarly);
   const clips = await ifReady(videos, [] as Awaited<typeof videos>);
   const onModel = clips.filter((clip) => !variantConflict(query, clip));
   if (onModel.length) results = { ...results, results: wantsVideo(query) ? withVideos(onModel, results.results) : withProductClips(onModel, results.results) };
