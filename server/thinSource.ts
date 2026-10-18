@@ -170,11 +170,38 @@ export interface LeadFigure {
   key: string;
 }
 
+/** A period in "U.S." is not the end of the item. */
+function breakIndex(text: string, from: number, step: 1 | -1): number {
+  for (let i = from; i >= 0 && i < text.length; i += step) {
+    const ch = text[i] ?? '';
+    if (ch === '\n' || ch === '|' || ch === ';' || ch === '•' || ch === '·' || ch === '・') return i;
+    if (ch !== '.') continue;
+    const next = text[i + 1] ?? '';
+    if (next && !/\s/.test(next)) continue;
+    const prev = text[i - 1] ?? '';
+    if (/[A-Za-z]/.test(prev) && text[i - 2] === '.') continue;
+    return i;
+  }
+  return -1;
+}
+
+/** The words that belong to this figure: after the previous amount, and up to the next one. */
 function clauseAt(text: string, index: number, length: number): string {
-  const breaks = ['\n', '|', '.'].map((mark) => text.lastIndexOf(mark, index - 1));
-  const before = Math.max(...breaks);
-  const start = before >= 0 && index - before < 180 ? before + 1 : Math.max(0, index - 80);
-  return text.slice(start, index + length).replace(/\s+/g, ' ').trim();
+  const prev = [...text.slice(0, index).matchAll(/[$£€¥]\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?|\d+(?:\.\d+)?\s*(?:%|percent\b)/gi)].at(-1);
+  const prevEnd = prev ? (prev.index ?? 0) + prev[0].length : 0;
+  const prevBreak = breakIndex(text, index - 1, -1);
+  // A label after the previous amount stays with that amount. This figure starts at itself, or after a break.
+  const start = prev
+    ? (prevBreak > prevEnd ? prevBreak + 1 : index)
+    : (prevBreak >= 0 && index - prevBreak < 180 ? prevBreak + 1 : Math.max(0, index - 80));
+  const after = text.slice(index + length);
+  const nextFigure = after.search(/[$£€¥]\s?\d|\d+(?:\.\d+)?\s*(?:%|percent\b)/i);
+  const nextBreak = breakIndex(after, 0, 1);
+  let tail = after.length;
+  if (nextFigure >= 0) tail = Math.min(tail, nextFigure);
+  if (nextBreak >= 0) tail = Math.min(tail, nextBreak);
+  tail = Math.min(tail, 48);
+  return text.slice(start, index + length + tail).replace(/\s+/g, ' ').trim();
 }
 
 /**
@@ -189,7 +216,7 @@ export function leadFigure(kind: FactKind, question: string, text: string): Lead
   for (const match of text.matchAll(figurePattern(want))) {
     const at = match.index ?? 0;
     const line = clauseAt(text, at, match[0].length);
-    const near = text.slice(Math.max(0, at - 28), at);
+    const near = `${text.slice(Math.max(0, at - 28), at)} ${text.slice(at + match[0].length, at + match[0].length + 28)}`;
     let score = 1;
     const low = line.toLowerCase();
     const close = near.toLowerCase();
@@ -198,6 +225,8 @@ export function leadFigure(kind: FactKind, question: string, text: string): Lead
       if (close.includes(token)) score += 2;
     }
     if (!ADDON.test(question) && ADDON.test(line)) score -= 8;
+    // "book and card" is a different item from the book, unless the question asks for both.
+    if (/\band\s+[a-z]/i.test(line) && !/\band\b/i.test(question)) score -= 6;
     if (score < 4) continue;
     if (best && score <= best.score) continue;
     const figure = match[0].replace(/\s/g, '');

@@ -170,6 +170,31 @@ test('a round rate loses to the combined rate the official page states', () => {
   assert.doesNotMatch(next.type === 'text' ? next.text : '', /\b7%/);
 });
 
+test('a combined city rate leads when the official page only states the state piece', () => {
+  const pages: ClaimSource[] = [
+    { n: 1, domain: 'www.harborstate.gov', text: 'Harbor State sales tax\nHarbor State imposes a 6.25 percent state sales and use tax.' },
+    { n: 2, domain: 'www.harborstate.gov', text: 'City tax\nHarbor City total includes the state\'s sales and use tax rate of 6.25%.' },
+    { n: 3, domain: 'www.rates.example', text: 'Harbor City sales tax\nThe minimum combined sales tax rate for Harbor City is 8.25%.' },
+  ];
+  assert.deepEqual(salesTax('Harbor City combined sales tax', pages), { rate: 8.25, n: 3 });
+});
+
+test('the state written after the city does not hide the combined rate', () => {
+  const pages: ClaimSource[] = [
+    { n: 1, domain: 'www.harborstate.gov', text: 'Harbor State sales tax\nHarbor State imposes a 6.25 percent state sales and use tax.' },
+    { n: 2, domain: 'www.rates.example', text: 'Harbor City sales tax\nThe minimum combined sales tax rate for Harbor City, Eastland is 8.25%. The Harbor City sales tax rate is 1.00%.' },
+  ];
+  assert.deepEqual(salesTax('Harbor City combined sales tax', pages), { rate: 8.25, n: 2 });
+});
+
+test('an official combined rate still beats a commercial one when the question asks for combined', () => {
+  const pages: ClaimSource[] = [
+    { n: 1, domain: 'www.rates.example', text: 'Harbor City sales tax\nThe combined rate is 9%.' },
+    { n: 2, domain: 'www.harborcity.gov', text: 'Harbor City sales tax\nThe combined sales tax rate in Harbor City is 8.25%.' },
+  ];
+  assert.deepEqual(salesTax('Harbor City combined sales tax', pages), { rate: 8.25, n: 2 });
+});
+
 test('an official snippet beats a commercial combined rate', () => {
   const pages: ClaimSource[] = [
     { n: 1, domain: 'www.rates.example', text: 'Harbor City sales tax\nThe combined rate is 7.5%.' },
@@ -323,6 +348,11 @@ test('a fee is the amount the official page states', () => {
   const extra = bindClaims({ type: 'text', text: 'Expedited service is $15.' }, addon, 'What is the renewal fee for a harbor permit book by mail?');
   assert.match(extra.type === 'text' ? extra.text : '', /\$15/);
   assert.doesNotMatch(extra.type === 'text' ? extra.text : '', /\$42/);
+  const shifted: ClaimSource[] = [
+    { n: 1, domain: 'permits.harbor.gov', text: 'Renew by mail\nYour fee depends on the document. $42 Harbor card ・ $15 Harbor book and card' },
+    { n: 2, domain: 'notes.example', text: 'Harbor book renewal fees\nHarbor book: $42. Harbor card: $15. Harbor book and card: $80.' },
+  ];
+  assert.equal(officialCharge('What is the harbor book renewal fee?', shifted)?.amount, '$42');
   const lead = bindClaims({ type: 'stat', label: 'Renewal fee', value: '$64' }, split, 'What is the renewal fee for a harbor permit book by mail?');
   assert.match(lead.type === 'stat' ? lead.value : '', /\$42/);
   const pair = bindClaims({ type: 'text', text: 'A book and card is $80.' }, split, 'What is the renewal fee for a harbor permit book by mail?');

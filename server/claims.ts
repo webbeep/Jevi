@@ -701,8 +701,11 @@ export function salesTax(query: string, sources: readonly ClaimSource[]): TaxPic
       const namesPlace = place.length > 0 && (place.every((word) => blob.includes(word)) || (place.includes('nyc') && blob.includes('new york')));
       const aboutPlace = place.length === 0 || namesPlace;
       const aboutRevenue = /\b(?:total\s+(?:general\s+)?revenue|percentage of)\b/i.test(sentence);
-      const combined = !aboutRevenue && (/\b(?:combined|overall)\b/i.test(sentence) || /\btotal\b/i.test(sentence));
-      const stateOnly = /\bstate\b/i.test(sentence) && !combined;
+      // "The total includes the state's rate of 6.25%" states the state piece, not the combined rate.
+      const statePiece = /\bstate(?:'s)?\b/i.test(sentence) && /\b(?:includes?|included|portion|of which|component)\b/i.test(sentence);
+      const combined = !aboutRevenue && !statePiece && (/\b(?:combined|overall)\b/i.test(sentence) || (/\btotal\b/i.test(sentence) && !/\bstate(?:'s)?\s+(?:sales|use|tax)/i.test(sentence)));
+      const stateOnly = statePiece || (/\bstate\b/i.test(sentence) && !combined);
+      if (/\b(?:mixed beverage|gross receipts|property tax|income tax|franchise tax)\b/i.test(sentence) && !/\b(?:beverage|gross receipts|property tax|income tax|franchise)\b/i.test(query)) continue;
       const threshold = sentence.match(/(?:under|below|less than)\s+\$\s?(\d{1,3}(?:,\d{3})*)/i);
       const cut = threshold ? Number(threshold[1]!.replace(/,/g, '')) : undefined;
       const aboveCut = cut !== undefined && amount !== undefined && amount >= cut;
@@ -721,6 +724,9 @@ export function salesTax(query: string, sources: readonly ClaimSource[]): TaxPic
         else if (official) score += 2;
         if (!aboutPlace) score -= 8;
         if (stateOnly) score -= 3;
+        // A question that asks for the combined rate does not lead with the state piece when a source states the combined rate.
+        if (/\bcombined\b/i.test(query) && stateOnly) score -= 16;
+        if (/\bcombined\b/i.test(query) && combined && aboutPlace) score += 6;
         for (const word of questionWords(query)) if (sentenceHasAskWord(low, word)) score += 4;
         if (otherPlace(sentence, query)) score -= 20;
         if (percents.length > 1 && !combined) score -= 6;
@@ -765,6 +771,9 @@ function otherPlace(sentence: string, query: string): boolean {
     const word = name.toLowerCase();
     if (asked.includes(word)) return false;
     if (QUESTION_SKIP.has(word) || NOT_A_PLACE.has(word)) return false;
+    // "Austin, Texas" names the state after the city. It is not some other city's rate.
+    const askedWords = asked.split(/[^a-z0-9]+/).filter((part) => part.length > 3).join('|');
+    if (askedWords && new RegExp(`\\b(?:${askedWords}),\\s+${name}\\b`, 'i').test(sentence)) return false;
     return word.length >= 5;
   });
 }
@@ -1710,12 +1719,17 @@ interface ChargePick { amount: string; value: number; n: number }
  */
 export function officialCharge(query: string, sources: readonly ClaimSource[]): ChargePick | undefined {
   if (!FEE_ASK.test(query) || TAX_ASK.test(query)) return undefined;
-  let best: ChargePick & { score: number } | undefined;
+  let best: ChargePick & { score: number; official: boolean } | undefined;
   for (const source of sources) {
-    if (!officialDomain(source.domain)) continue;
+    const official = officialDomain(source.domain);
     const lead = leadFigure('levy', query, `${source.text}\n${source.stated ?? ''}`);
     if (!lead) continue;
-    if (!best || lead.score > best.score) best = { amount: lead.figure, value: lead.value, n: source.n, score: lead.score };
+    // A tied score stays with the official page. A line that names the subject more clearly wins
+    // when that page's snippet pairs the amount with a different item.
+    const closer = !best
+      || lead.score > best.score
+      || (lead.score === best.score && official && !best.official);
+    if (closer) best = { amount: lead.figure, value: lead.value, n: source.n, score: lead.score, official };
   }
   if (!best) return undefined;
   return { amount: best.amount, value: best.value, n: best.n };
