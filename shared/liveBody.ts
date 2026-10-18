@@ -27,20 +27,33 @@ function showsAnswer(node: CardNode | undefined): node is CardNode {
  * When designing is over, every node that arrived is shown and gaps are dropped.
  */
 export function liveBody(live: { nodes: (CardNode | undefined)[]; regions: CardNode[] }, stillDesigning: boolean): CardNode[] {
-  if (!stillDesigning) return live.nodes.filter((n): n is CardNode => !!n && !isBlankLayout(n));
+  return liveSlots(live, stillDesigning).map((slot) => live.nodes[slot]!);
+}
+
+/**
+ * The slots `liveBody` shows, in order. A slot number is the component's identity on screen,
+ * so a component that arrives above it later does not remount it or take its place.
+ */
+export function liveSlots(live: { nodes: (CardNode | undefined)[]; regions: CardNode[] }, stillDesigning: boolean): number[] {
+  const filled = (i: number) => !!live.nodes[i] && !isBlankLayout(live.nodes[i]);
+  if (!stillDesigning) return [...live.nodes.keys()].filter(filled);
   if (!live.nodes.some(showsAnswer)) return [];
-  const out: CardNode[] = [];
-  for (let i = 0; i < live.regions.length; i++) {
-    const node = live.nodes[i];
-    if (!node || isBlankLayout(node)) continue;
-    // A slot here is one missing piece the server is searching, not the empty layout.
-    out.push(node);
-  }
+  const out: number[] = [];
+  // A slot here is one missing piece the server is searching, not the empty layout.
+  for (let i = 0; i < live.regions.length; i++) if (filled(i)) out.push(i);
   for (let i = live.regions.length; i < live.nodes.length; i++) {
-    const node = live.nodes[i];
-    if (!node) break;
-    if (isBlankLayout(node)) continue;
-    out.push(node);
+    if (!live.nodes[i]) break;
+    if (filled(i)) out.push(i);
   }
   return out;
+}
+
+/**
+ * What a stream that failed before `done` already put on screen, so the card stays instead of an
+ * error replacing it. A gap still waiting on its search is left out. Undefined when no component
+ * with an answer had arrived (citations or next-step buttons alone are not a card).
+ */
+export function partialSlots(live: { nodes: (CardNode | undefined)[]; regions: CardNode[] }): number[] | undefined {
+  const slots = liveSlots(live, false).filter((slot) => live.nodes[slot]!.type !== 'slot');
+  return slots.some((slot) => showsAnswer(live.nodes[slot]) && live.nodes[slot]!.type !== 'actions') ? slots : undefined;
 }

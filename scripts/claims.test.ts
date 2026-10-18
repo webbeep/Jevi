@@ -860,3 +860,12 @@ test('a month abbreviation is not a sentence break, so no citation lands inside 
   assert.doesNotMatch(text, /Oct\.\s*\[\d+\]/);
   assert.match(text, /Oct\. 1, 2021/);
 });
+
+test('a citation written after the full stop stays on its sentence and is not added again', () => {
+  const pages: ClaimSource[] = [
+    { n: 1, title: 'Apple pie recipe', text: 'Bake the pie at 425F for about 42 minutes until golden.' },
+    { n: 2, title: 'Crust tips', text: 'Use cold butter for a flaky crust.' },
+  ];
+  assert.equal(retargetCites('Bake the pie at 425F for about 42 minutes until golden. [1]', pages), 'Bake the pie at 425F for about 42 minutes until golden. [1]');
+  assert.equal(retargetCites('Bake at 425F for about 42 minutes. [2]', pages), 'Bake at 425F for about 42 minutes. [1]');
+});

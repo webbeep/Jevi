@@ -321,9 +321,16 @@ function take(node: CardNode, seen: Seen): CardNode | undefined {
 }
 
 /** Drops a later tile, stat, key-value row, or scroller child that repeats a reading already on the card. */
-export function collapseReadings(nodes: readonly (CardNode | undefined)[]): (CardNode | undefined)[] {
+/** `order` is the order the components reached the screen: a hero is the reference, then the one shown first keeps a reading. */
+export function collapseReadings(nodes: readonly (CardNode | undefined)[], order?: readonly number[]): (CardNode | undefined)[] {
   const seen = fresh();
-  return nodes.map((node) => (node ? take(node, seen) : node));
+  const visit = [...(order ?? nodes.keys())].sort((a, b) => Number(nodes[b]?.type === 'hero') - Number(nodes[a]?.type === 'hero'));
+  const out = [...nodes];
+  for (const i of visit) {
+    const node = nodes[i];
+    if (node) out[i] = take(node, seen);
+  }
+  return out;
 }
 
 /** A conditions question, not a definition or a history of climate. */
@@ -434,8 +441,9 @@ export function settleReadings(
   nodes: readonly (CardNode | undefined)[],
   head: { title: string; subtitle?: string } | undefined,
   query: string,
+  order?: readonly number[],
 ): { nodes: (CardNode | undefined)[]; head?: { title: string; subtitle?: string } } {
-  const collapsed = collapseReadings(nodes);
+  const collapsed = collapseReadings(nodes, order);
   if (!head) return { nodes: collapsed };
   const local = asksLocalConditions(query) || GENERIC_TITLE.test(head.title.trim());
   const place = local ? preferPlace([heroPlace(collapsed), asPlace(head.subtitle), placeFromQuery(query)]) : undefined;

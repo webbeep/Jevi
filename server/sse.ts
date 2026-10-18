@@ -21,7 +21,9 @@ export function sseResponse(work: (send: Send) => Promise<void>, opts?: { header
       await work(send);
       if (!terminal) send('error', { message: 'The answer stopped early. Please retry.', retryable: true });
     } catch (err) {
-      send('error', { message: err instanceof Error ? err.message : String(err), retryable: true });
+      // After `done` the card is complete; a failure in a later correction only ends the corrections.
+      if (terminal) console.error('stream work failed after done', err instanceof Error ? err.message : err);
+      else send('error', { message: err instanceof Error ? err.message : String(err), retryable: true });
     } finally {
       open = false;
       await writer.close().catch(() => undefined);

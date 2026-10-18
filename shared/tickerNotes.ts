@@ -43,16 +43,26 @@ export function findTicker(nodes: readonly CardNode[]): Extract<CardNode, { type
 
 const hasTicker = (nodes: readonly CardNode[]): boolean => findTicker(nodes) !== undefined;
 
+function keepBesideTicker(n: CardNode): CardNode | undefined {
+  if (n.type === 'ticker') return n;
+  if ('children' in n && hasTicker(n.children)) {
+    const children = n.children.map(keepBesideTicker).filter((c): c is CardNode => !!c);
+    return { ...n, children } as CardNode;
+  }
+  return withoutCharts(n);
+}
+
 /** A card body with the ticker kept and everything that contradicts it removed. */
 export function tickerBody(body: CardNode[]): CardNode[] {
   if (!hasTicker(body)) return body;
-  const keep = (n: CardNode): CardNode | undefined => {
-    if (n.type === 'ticker') return n;
-    if ('children' in n && hasTicker(n.children)) {
-      const children = n.children.map(keep).filter((c): c is CardNode => !!c);
-      return { ...n, children } as CardNode;
-    }
-    return withoutCharts(n);
-  };
-  return body.map(keep).filter((n): n is CardNode => !!n);
+  return tickerRows(body.map((node) => ({ node }))).map((row) => row.node);
+}
+
+/** `tickerBody` over rows that carry something beside each node (its key on screen). */
+export function tickerRows<R extends { node: CardNode }>(rows: R[]): R[] {
+  if (!hasTicker(rows.map((row) => row.node))) return rows;
+  return rows.flatMap((row) => {
+    const node = keepBesideTicker(row.node);
+    return node ? [{ ...row, node }] : [];
+  });
 }

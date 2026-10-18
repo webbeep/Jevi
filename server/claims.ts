@@ -1,5 +1,5 @@
 import type { CardNode } from '../shared/card';
-import { SENTENCE_BREAK, joinSpacedDecimals } from '../shared/text';
+import { SENTENCE_BREAK, citedSentences, joinSpacedDecimals } from '../shared/text';
 import { factAnswer } from './hops';
 import { numberTokens } from './ground';
 import { completeCutDecimal, withoutEmptySlots } from './polish';
@@ -246,7 +246,7 @@ export function retargetCites(text: string, sources: readonly ClaimSource[], que
   const joined = repairCutQuote(finishQuotedText(query, joinSpacedDecimals(text), sources), sources);
   if (!sources.length) return withoutEmptySlots(joined);
   if (!/\d/.test(joined)) return withoutEmptySlots(joined);
-  const parts = joined.split(SENTENCE_BREAK);
+  const parts = citedSentences(joined);
   return parts.flatMap((sentence) => {
     const asked = new Set(numberTokens(query));
     // A number inside a quotation stays, even when the rest of the sentence loses a figure the page does not state.

@@ -22,7 +22,6 @@ import type { SearchResponse } from '../shared/types';
 import { api } from './api';
 import { AnswerCardView } from './card/AnswerCardView';
 import { ResearchTrail } from './card/ResearchTrail';
-import { showWaitingLayout } from './card/waitingLayout';
 import { hasGap } from '../shared/gap';
 import { CardContext, type CardContextValue } from './card/context';
 import { Icon } from './card/Icon';
@@ -30,7 +29,7 @@ import { WhichOne } from './card/WhichOne';
 import { LogoMark, Wordmark } from './Logo';
 import { buildLibrary } from './library';
 import { FaviconStack, SourcesRail, SourcesSheet } from './Sources';
-import { isBlankLayout, liveBody } from '../shared/liveBody';
+import { liveBody, liveSlots } from '../shared/liveBody';
 import { type SessionActions, type Turn, scrollToTurn, useSession } from './useSession';
 import { readChoices } from '../shared/choices';
 import { loadSnapshot, normalizeAnswerQuery, purgeDegradedSnapshots, saveSnapshot } from '../shared/answerKey';
@@ -49,6 +48,8 @@ import { Input } from '@/components/ui/input';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 
 const LOADING: CardNode[] = [{ type: 'slot', hint: 'answer', shape: 'hero' }, { type: 'slot', hint: 'details', shape: 'block' }];
+/** A streamed component's identity on screen: its slot on the card, not its position or type. */
+const slotKey = (slot: number) => `s${slot}`;
 
 /** What to do with highlighted text. */
 const QUOTE_MODES = [
@@ -1033,32 +1034,27 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
   // A slot that does not have its component yet is left out, so its skeleton does not sit beside the sentence.
   const answerStarted = !!turn.live && liveBody(turn.live, true).some((n) => n.type !== 'citations' && n.type !== 'slot');
   const offlinePartial = Boolean(turn.offline && (turn.live?.head || streaming));
-  // Jev's plan already names the layout. Once the sources have landed, that skeleton is the placeholder —
-  // its hero, tiles, grid and section titles — not a generic pair of shimmer blocks. A later `layout`
-  // event (a profile override, a video lead) replaces it with the skeleton the card will actually fill.
-  const chosenLayout = turn.live?.regions.length ? turn.live.regions : turn.plan?.skeleton.body ?? [];
-  // The trail stays up until a real component arrives. An empty layout is not shown in its place.
-  const layoutReady = showWaitingLayout({
-    filling: turn.filling,
-    hasResult: !!turn.result,
-    answerStarted,
-    layoutCount: chosenLayout.length,
-  });
-  const card: AnswerCard = useMemo(() => {
-    const skeleton = { title: turn.question, body: LOADING };
+  // The research trail stays up until a real component arrives; there is no empty layout in its place.
+  // Each component is keyed by its slot, so one that lands above it never remounts or displaces it.
+  const { card, keys } = useMemo((): { card: AnswerCard; keys?: string[] } => {
+    const skeleton = { title: turn.question };
     const live = turn.live;
     let base: AnswerCard;
-    if (layoutReady) base = { ...skeleton, ...live?.head, body: chosenLayout };
-    else if (live && (streaming || offlinePartial)) {
+    let keys: string[] | undefined;
+    if (live && (streaming || offlinePartial)) {
       const fillingNow = offlinePartial ? false : turn.filling;
-      const streamed = liveBody(live, fillingNow);
-      const visible = streamed.length ? streamed : live.nodes.filter((node): node is CardNode => !!node && !isBlankLayout(node));
-      base = { ...skeleton, ...live.head, body: visible };
-    } else if (turn.result) base = turn.result.card;
-    else base = { ...skeleton, ...live?.head, body: [] };
+      const streamed = liveSlots(live, fillingNow);
+      const slots = streamed.length ? streamed : liveSlots(live, false);
+      base = { ...skeleton, ...live.head, body: slots.map((slot) => live.nodes[slot]!) };
+      keys = slots.map(slotKey);
+    } else if (turn.result) {
+      base = turn.result.card;
+      keys = turn.slots?.length === base.body.length ? turn.slots.map(slotKey) : undefined;
+    } else base = { ...skeleton, ...live?.head, body: [] };
     if (!turn.result && !live?.head && turn.kind !== 'search') base = { ...base, title: turn.question };
-    return turn.pins.length ? { ...base, body: [...base.body, { type: 'section', title: 'Pinned by you', icon: 'pin', children: turn.pins }] } : base;
-  }, [streaming, offlinePartial, answerStarted, layoutReady, chosenLayout, turn.live, turn.result, turn.question, turn.kind, turn.pins, turn.filling]);
+    if (!turn.pins.length) return { card: base, keys };
+    return { card: { ...base, body: [...base.body, { type: 'section', title: 'Pinned by you', icon: 'pin', children: turn.pins }] }, keys: keys && [...keys, 'pins'] };
+  }, [streaming, offlinePartial, turn.live, turn.result, turn.slots, turn.question, turn.kind, turn.pins, turn.filling]);
 
   // The header is showing the question / plan skeleton, not the final title.
   const provisional = !turn.result && !turn.live?.head;
@@ -1156,6 +1152,7 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
           {!choicesOnly && <CardContext.Provider value={context}>
             <AnswerCardView
               card={card}
+              keys={keys}
               ask={turn.question}
               version={`${turn.id}-${turn.version}`}
               filling={offlinePartial ? false : turn.filling}
@@ -1172,7 +1169,6 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
               provisional={provisional}
               trail={trail}
               gapTrail={gapTrail}
-              revealLayout={layoutReady}
             />
           </CardContext.Provider>}
           {choices && !turn.filling && <WhichOne choices={choices} onPick={(text) => void actions.followup(text, id, 'search')} />}
@@ -1180,6 +1176,17 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
       )}
       {turn.offline ? (
         <OfflineNotice filling={turn.filling} partial={Boolean(turn.live?.head || turn.live?.nodes.some(Boolean))} reconnects={turn.reconnects} onRetry={() => actions.retry(id)} />
+      ) : turn.error && turn.result && !turn.filling ? (
+        // The card above stays as it was when the stream stopped; only the missing part is retried.
+        <div data-testid="stopped-note" role="status" className="flex flex-wrap items-center gap-3 px-1 text-xs text-muted-foreground">
+          <span>{turn.error}</span>
+          {turn.retryable && (
+            <button type="button" data-testid="retry" onClick={() => actions.retry(id)} className="inline-flex min-h-11 items-center gap-1.5 rounded-md px-2 text-foreground transition-colors hover:bg-foreground/5">
+              <RotateCw className="size-3.5" />
+              Retry
+            </button>
+          )}
+        </div>
       ) : turn.error && !turn.result ? (
         <div className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
           <p>{turn.error}</p>

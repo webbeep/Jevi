@@ -133,7 +133,15 @@ export async function stream(body: StreamBody, onEvent: (e: StreamEvent) => void
       buffer = parsed.rest;
       if (!parsed.cut) cut = false;
       for (const frame of parsed.events) {
-        onEvent({ event: frame.event, data: JSON.parse(frame.data) } as StreamEvent);
+        let data: unknown;
+        try {
+          data = JSON.parse(frame.data);
+        } catch {
+          // One garbled frame costs only that event, not the components already on screen.
+          console.warn('Skipped an unreadable stream event', frame.event);
+          continue;
+        }
+        onEvent({ event: frame.event, data } as StreamEvent);
       }
     }
   } finally {

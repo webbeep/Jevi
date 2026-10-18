@@ -29,6 +29,16 @@ test('sseResponse does not append an error after done', async () => {
   assert.equal(text.includes('event: error'), false);
 });
 
+test('a late correction that fails after done does not turn the finished card into an error', async () => {
+  const text = await body(sseResponse(async (send) => {
+    send('done', { engine: 'composed' });
+    send('node', { index: 0, node: { type: 'text', text: 'corrected' } });
+    throw new Error('review failed');
+  }));
+  assert.match(text, /event: node/);
+  assert.equal(text.includes('event: error'), false);
+});
+
 test('frame parser marks a body that ends without done as cut', () => {
   const open = 'event: head\ndata: {"title":"Hi"}\n\n';
   assert.equal(parseSseFrames(open).cut, true);

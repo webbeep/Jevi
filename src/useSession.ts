@@ -10,7 +10,7 @@ import { billingFromSources, settleCardPrices } from '../shared/pricing';
 import { followupLabel } from '../shared/followupLabel';
 import { emptyDoneState } from '../shared/sse-parse';
 import { keepShownComponent } from '../shared/keepShown';
-import { isBlankLayout, liveBody } from '../shared/liveBody';
+import { liveSlots, partialSlots } from '../shared/liveBody';
 import { objectContext } from '../shared/objects';
 import type { NoSourcesNotice, SearchResponse, SearchResult } from '../shared/types';
 import { api } from './api';
@@ -18,7 +18,6 @@ import { withBrowserFallback } from './fallback';
 import { reportNeedSignin } from './auth/gatebus';
 import { NeedSigninError, StreamError, type StreamBody, type PeekRow, type StreamEvent, shouldAutoRetry, stream } from './sse';
 
-export { liveBody } from '../shared/liveBody';
 
 export type TurnKind = 'search' | 'answer' | 'digest';
 
@@ -61,6 +60,8 @@ export interface Turn {
   /** The card as it streams in; replaced by `result` when complete. */
   live?: LiveCard;
   result?: CardResponse;
+  /** The streamed slot of each node in `result.card.body`, so finishing the stream does not remount them. */
+  slots?: number[];
   /** Finished designs by layout + simple, so switching views back and forth is instant. */
   variants: Record<string, CardResponse>;
   version: number;
@@ -87,6 +88,30 @@ export interface Turn {
 }
 
 const emptyLive = (): LiveCard => ({ regions: [], nodes: [], raw: [], followups: [], credits: [] });
+/** The finished body of a streamed card, with the slot each node came from. */
+const settledBody = (nodes: (CardNode | undefined)[], slots: number[]) => ({ body: slots.map((slot) => nodes[slot]!), slots });
+
+/**
+ * A stream that fails after components are on screen keeps them as the card, marked as cut short,
+ * with the error and Retry beside it. Nothing already shown is wiped.
+ */
+function keepPartial(t: Turn, error: string, retryable: boolean): Partial<Turn> {
+  const cleared = { filling: false, status: undefined, live: undefined, thinking: false, offline: undefined, reconnects: undefined, error, retryable };
+  const slots = !t.result && t.live ? partialSlots(t.live) : undefined;
+  if (!t.live || !slots) return cleared;
+  const { body } = settledBody(t.live.nodes, slots);
+  const result: CardResponse = {
+    card: { title: t.live.head?.title ?? t.question, ...t.live.head, body, credits: t.live.credits },
+    followups: t.live.followups,
+    engine: 'composed',
+    pagesRead: t.designing?.pagesRead ?? 0,
+    removed: 0,
+    ms: 0,
+    degraded: true,
+    degradedReason: 'stopped early',
+  };
+  return { ...cleared, result, slots };
+}
 const variantKey = (pattern: string | undefined, simple: boolean) => `${pattern ?? ''}|${simple ? 1 : 0}`;
 
 function browserOffline(): boolean {
@@ -235,13 +260,15 @@ export function useSession() {
       const turn = get(id);
       if (!turn?.filling || turn.result) return;
       controller.abort();
-      update(id, { filling: false, thinking: false, status: undefined, live: undefined, error: "This didn't finish. Please retry.", retryable: true });
+      update(id, (t) => keepPartial(t, "This didn't finish. Please retry.", true));
     }, 50_000);
     const alive = () => mine === epoch.current && !controller.signal.aborted;
     let route = id;
     const prior = get(id);
     let sawContent = Boolean(opts?.retry && prior?.live && (prior.live.head || prior.live.nodes.some(Boolean)));
     let resetLive = Boolean(opts?.retry);
+    /** `done` arrived: the card is complete, and only late corrections can still come. */
+    let finished = false;
 
     const takeLive = (t: Turn): LiveCard => {
       if (!resetLive) return t.live ?? emptyLive();
@@ -249,8 +276,19 @@ export function useSession() {
       return emptyLive();
     };
 
+    // One event that cannot be applied is skipped. The components already on screen stay,
+    // and the next event for that slot can still correct it. Only an `error` event ends the stream.
     const onEvent = (e: StreamEvent) => {
-      if (!alive()) return;
+      if (!alive() || (finished && e.event === 'error')) return;
+      try {
+        apply(e);
+      } catch (err) {
+        if (err instanceof StreamError) throw err;
+        console.error('Skipped a stream event that could not be applied', e.event, err);
+      }
+    };
+
+    const apply = (e: StreamEvent) => {
       switch (e.event) {
         case 'plan':
           return update(route, (t) => (t.result ? {} : { plan: e.data, pattern: e.data.pattern, mode: e.data.mode === 'answer' || e.data.mode === 'chat' ? e.data.mode : t.mode }));
@@ -323,9 +361,9 @@ export function useSession() {
               if (slots[e.data.index] && node === slots[e.data.index]) return {};
               const placed = placeNode({ regions: [], nodes: slots, raw: slots, followups: t.result.followups, credits: t.result.card.credits ?? [] }, e.data.index, node, t.question, results);
               settledSlots.current.set(route, placed.raw);
-              const body = placed.nodes.filter((n): n is CardNode => !!n && !isBlankLayout(n));
-              const result: CardResponse = { ...t.result, card: { ...t.result.card, body } };
-              return { result, variants: { ...t.variants, [variantKey(t.pattern, t.simple)]: result }, live: undefined, filling: false, thinking: false };
+              const settled = settledBody(placed.nodes, liveSlots(placed, false));
+              const result: CardResponse = { ...t.result, card: { ...t.result.card, body: settled.body } };
+              return { result, slots: settled.slots, variants: { ...t.variants, [variantKey(t.pattern, t.simple)]: result }, live: undefined, filling: false, thinking: false };
             }
             const live = takeLive(t);
             const node = keepShownComponent(live.raw[e.data.index], e.data.node);
@@ -338,20 +376,22 @@ export function useSession() {
             return { result, variants: { ...t.variants, [variantKey(t.pattern, t.simple)]: result } };
           });
         case 'done':
+          finished = true;
           return update(route, (t) => {
             if (!t.live?.nodes.some(Boolean)) {
               // An ambiguous name ends with only "Which one?" options and no card body.
               const only = readChoices(e.data, t.live?.head);
               if (only) {
                 const result: CardResponse = { card: { title: t.live?.head?.title ?? t.question, body: [] }, followups: [], engine: e.data.engine, pagesRead: e.data.pagesRead, removed: e.data.removed, ms: e.data.ms, choices: only };
-                return { result, live: undefined, filling: false, status: undefined, thinking: false, error: undefined, retryable: undefined, offline: undefined, reconnects: undefined };
+                return { result, slots: [], live: undefined, filling: false, status: undefined, thinking: false, error: undefined, retryable: undefined, offline: undefined, reconnects: undefined };
               }
               return { live: undefined, filling: false, status: undefined, thinking: false, offline: undefined, reconnects: undefined, ...emptyDoneState(Boolean(t.result)) };
             }
             settledSlots.current.set(route, t.live.raw);
             const choices = readChoices(e.data, t.live.head);
+            const settled = settledBody(t.live.nodes, liveSlots(t.live, false));
             const result: CardResponse = {
-              card: { title: t.live.head?.title ?? t.question, ...t.live.head, body: liveBody(t.live, false), credits: t.live.credits },
+              card: { title: t.live.head?.title ?? t.question, ...t.live.head, body: settled.body, credits: t.live.credits },
               followups: t.live.followups,
               engine: e.data.engine,
               pagesRead: e.data.pagesRead,
@@ -361,7 +401,7 @@ export function useSession() {
               ...(choices ? { choices } : {}),
               ...(e.data.degraded ? { degraded: true as const, degradedReason: e.data.degradedReason } : {}),
             };
-            return { result, variants: { ...t.variants, [variantKey(t.pattern, t.simple)]: result }, live: undefined, filling: false, status: undefined, thinking: false, error: undefined, retryable: undefined, offline: undefined, reconnects: undefined };
+            return { result, slots: settled.slots, variants: { ...t.variants, [variantKey(t.pattern, t.simple)]: result }, live: undefined, filling: false, status: undefined, thinking: false, error: undefined, retryable: undefined, offline: undefined, reconnects: undefined };
           });
         case 'error':
           throw new StreamError(e.data.message, 'server', e.data.retryable ?? true);
@@ -390,6 +430,8 @@ export function useSession() {
         }
       }
     } catch (err) {
+      // A dropped connection after `done` only loses late corrections; the finished card stays as it is.
+      if (finished) return;
       if (err instanceof NeedSigninError) {
         if (alive()) {
           const turn = get(route);
@@ -429,7 +471,7 @@ export function useSession() {
           }));
         }
       } else if (alive()) {
-        update(route, { filling: false, status: undefined, live: undefined, thinking: false, offline: undefined, reconnects: undefined, error: friendlyError(err), retryable: err instanceof StreamError ? err.retryable : false });
+        update(route, (t) => keepPartial(t, friendlyError(err), err instanceof StreamError ? err.retryable : false));
       }
       if (!restored) throw err;
     } finally {
@@ -459,7 +501,7 @@ export function useSession() {
   const runSearchTurn = useCallback(async (id: number, query: string, opts?: { retry?: boolean; refresh?: boolean }) => {
     const keep = Boolean(opts?.retry && get(id)?.offline);
     if (keep) update(id, { kind: 'search', question: query, searchId: id, filling: true, thinking: false, status: undefined });
-    else update(id, { kind: 'search', question: query, searchId: id, filling: true, plan: undefined, search: undefined, result: undefined, live: undefined, error: undefined, offline: undefined, reconnects: undefined });
+    else update(id, { kind: 'search', question: query, searchId: id, filling: true, plan: undefined, search: undefined, result: undefined, slots: undefined, live: undefined, error: undefined, offline: undefined, reconnects: undefined });
     try {
       await run(id, { kind: 'search', query, freshness: 'any', context: memory(id) || undefined }, opts);
     } catch {
@@ -569,7 +611,7 @@ export function useSession() {
   const switchView = useCallback((id: number, pattern: string, simple: boolean) => {
     const cached = get(id)?.variants[variantKey(pattern, simple)];
     if (cached) {
-      update(id, (t) => ({ pattern, simple, result: cached, version: t.version + 1, live: undefined, error: undefined }));
+      update(id, (t) => ({ pattern, simple, result: cached, slots: undefined, version: t.version + 1, live: undefined, error: undefined }));
       return;
     }
     void design(id, { pattern, simple });
@@ -591,7 +633,7 @@ export function useSession() {
       void run(id, body, { retry: true }).catch(() => undefined);
       return;
     }
-    update(id, { error: undefined, result: undefined, live: undefined, filling: true, status: undefined, thinking: false, retryable: undefined, offline: undefined, reconnects: undefined });
+    update(id, { error: undefined, result: undefined, slots: undefined, live: undefined, filling: true, status: undefined, thinking: false, retryable: undefined, offline: undefined, reconnects: undefined });
     void run(id, body, { refresh: true }).catch(() => undefined);
   }, [run, runSearchTurn, update]);
   retryRef.current = retry;

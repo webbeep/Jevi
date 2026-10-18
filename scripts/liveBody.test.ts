@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { liveBody } from '../shared/liveBody.ts';
+import { liveBody, liveSlots, partialSlots } from '../shared/liveBody.ts';
 import type { CardNode } from '../shared/card.ts';
 
 const text = (t: string): CardNode => ({ type: 'text', text: t });
@@ -78,4 +78,23 @@ test('every node arrived while designing shows them all, no skeleton', () => {
   const nodes: (CardNode | undefined)[] = [text('0'), text('1'), text('2')];
   assert.deepEqual(liveBody({ nodes, regions }, true), [text('0'), text('1'), text('2')]);
   assert.deepEqual(liveBody({ nodes, regions: [] }, true), [text('0'), text('1'), text('2')]);
+});
+
+test('each shown component keeps its slot as its identity while others land above it', () => {
+  const regions = [slot('0'), slot('1'), slot('2')];
+  const nodes: (CardNode | undefined)[] = [undefined, undefined, text('third')];
+  assert.deepEqual(liveSlots({ nodes, regions }, true), [2]);
+  nodes[0] = text('first');
+  assert.deepEqual(liveSlots({ nodes, regions }, true), [0, 2]);
+  nodes[1] = { type: 'stack', children: [] };
+  assert.deepEqual(liveSlots({ nodes, regions }, false), [0, 2]);
+});
+
+test('a stream that stops early keeps the components that have an answer', () => {
+  const regions = [slot('0'), slot('1'), slot('2')];
+  const gap: CardNode = { type: 'slot', hint: 'Weight', shape: 'line' };
+  const actions: CardNode = { type: 'actions', items: [{ label: 'Simpler', query: 'simpler', kind: 'refine' }] };
+  assert.deepEqual(partialSlots({ nodes: [undefined, text('why'), gap, undefined, actions], regions }), [1, 4]);
+  assert.equal(partialSlots({ nodes: [undefined, undefined, gap, undefined, actions, citations([1])], regions }), undefined);
+  assert.equal(partialSlots({ nodes: [], regions }), undefined);
 });

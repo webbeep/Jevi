@@ -1036,10 +1036,16 @@ function sayOnceNode(node: CardNode, shown: string[][]): CardNode | undefined {
 }
 
 /** The same long clause is said once, including a line the subtitle already used. */
-export function sayOnce(nodes: readonly (CardNode | undefined)[], lead = ''): (CardNode | undefined)[] {
+/** `order` is the order the components reached the screen: the one shown first keeps a repeated line. */
+export function sayOnce(nodes: readonly (CardNode | undefined)[], lead = '', order?: readonly number[]): (CardNode | undefined)[] {
   const shown: string[][] = [];
   if (lead.trim()) remember(lead, shown);
-  return nodes.map((node) => (node ? sayOnceNode(node, shown) : node));
+  const out = [...nodes];
+  for (const i of order ?? nodes.keys()) {
+    const node = nodes[i];
+    if (node) out[i] = sayOnceNode(node, shown);
+  }
+  return out;
 }
 
 const UNNAMED_PERSON = /\bno (?:source|page)s?\s+(?:that\s+)?names?\b|\b(?:does not|doesn't|do not)\s+name\s+(?:a\s+|the\s+)?(?:person|anyone)\b/i;
@@ -1115,8 +1121,8 @@ function dropUnnamedFacts(nodes: readonly (CardNode | undefined)[]): (CardNode |
   return nodes.map((node) => (node ? dropRoleNode(node) : node));
 }
 
-export function finishQuality(query: string, nodes: readonly (CardNode | undefined)[], lead = ''): (CardNode | undefined)[] {
+export function finishQuality(query: string, nodes: readonly (CardNode | undefined)[], lead = '', order?: readonly number[]): (CardNode | undefined)[] {
   const cleaned = nodes.map((node) => (node ? cleanNode(query, node) : node));
   const settled = agreeShopping(shoppingAsk(query), budgetAmounts(query), restoreCutDecimals(alignVerdicts(withoutSettledDisputes(dropSpecMissLead(query, dropUnpricedProductLead(query, cleaned))))));
-  return oneNamedCharge(query, dropUnnamedFacts(sayOnce(settled, lead)));
+  return oneNamedCharge(query, dropUnnamedFacts(sayOnce(settled, lead, order)));
 }

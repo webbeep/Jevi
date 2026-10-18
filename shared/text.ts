@@ -16,6 +16,15 @@ export function decodeEntities(s: string): string {
 /** Where one sentence ends. "Oct. 1", "Dr. Lee", "Michael I. Jordan" and "U.S. law" are not breaks. A digit after the space is a decimal ("1. 5"), not a new sentence. */
 export const SENTENCE_BREAK = /(?<=[.!?])(?<!\b(?:Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec|Mr|Mrs|Ms|Dr|Prof|St|Jr|Sr|vs|No|Gen|Gov|Sen|Rep|Mt|Ft)\.)(?<!\b(?:U\.S|U\.K|e\.g|i\.e)\.)(?<!(?:^|\s)[A-Z]\.)\s+(?!\d)/;
 
+/** Sentences of `text`, with a citation written after the full stop ("golden. [1]") kept on its sentence. */
+export function citedSentences(text: string): string[] {
+  return text.split(SENTENCE_BREAK).reduce<string[]>((out, part) => {
+    if (out.length && /^(?:\[\d+\]\s*)+$/.test(part.trim())) out[out.length - 1] = `${out[out.length - 1]} ${part.trim()}`;
+    else out.push(part);
+    return out;
+  }, []);
+}
+
 /** "1. 5°C" is the number 1.5. The space is a line wrap, not a sentence boundary. */
 export function joinSpacedDecimals(text: string): string {
   return text.replace(/(\d{1,3})\.\s+(?=\d{1,3}\b)/g, '$1.');

@@ -89,19 +89,21 @@ function EnterRow({ play, delayMs, children }: { play: boolean; delayMs?: number
   );
 }
 
-export function Nodes({ nodes, className, stagger = false }: { nodes: CardNode[]; className?: string; stagger?: boolean }) {
-  // Real nodes are keyed by type and occurrence, not position: parallel regions arrive out of order and
-  // leave gaps, and a positional key would remount (and reset) every node after a gap that fills in.
+export function Nodes({ nodes, keys, className, stagger = false }: { nodes: CardNode[]; keys?: readonly string[]; className?: string; stagger?: boolean }) {
+  // A streamed card passes each node's slot as its key, so a component that lands above another
+  // never remounts it or swaps places with it. Without keys, real nodes are keyed by type and
+  // occurrence, not position, so a gap that fills in does not remount every node after it.
   // A placeholder is keyed by the number of real nodes before it, so the skeleton trailing the revealed
   // prefix is a NEW element each time one lands — a moved skeleton would count as a layout shift.
   const seen: Record<string, number> = {};
   let real = 0;
+  const rows = nodes.flatMap((node, at) => (node.type === 'citations' ? [] : [{ node, slot: keys?.[at] }]));
   return (
     <div className={cn('flex w-full min-w-0 flex-col gap-4', className)}>
-      {nodes.filter((n) => n.type !== 'citations').map((n, i) => {
+      {rows.map(({ node: n, slot }, i) => {
         const placeholder = hasSlot(n);
         if (!placeholder) seen[n.type] = (seen[n.type] ?? 0) + 1;
-        const key = placeholder ? `placeholder-${i}-${real}` : `${n.type}-${seen[n.type]}`;
+        const key = slot ?? (placeholder ? `placeholder-${i}-${real}` : `${n.type}-${seen[n.type]}`);
         if (!placeholder) real += 1;
         const enter = (!placeholder || stagger) && !hasVideo(n);
         return (

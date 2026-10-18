@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ChevronRight, Copy, Loader2, MoreHorizontal, RefreshCw, RotateCw, Share2 } from 'lucide-react';
-import { withoutRepeatedLead, type AnswerCard, type CardNode, type CardPattern } from '../../shared/card';
+import { withoutRepeatedLead, type AnswerCard, type CardPattern } from '../../shared/card';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -18,7 +18,7 @@ import {
 import { cardPlainText } from '../../shared/cardText';
 import { publicShareUrl } from '../../shared/publicUrl';
 import { fitNode } from '../../shared/fitChart';
-import { tickerBody } from '../../shared/tickerNotes';
+import { tickerRows } from '../../shared/tickerNotes';
 import { citedRefs } from '../library';
 import { LogoMark } from '../Logo';
 import { FaviconStack } from '../Sources';
@@ -27,8 +27,10 @@ import { Icon } from './Icon';
 import { hasVideo, Nodes } from './render';
 import { CardTitle } from './primitives';
 
-export function AnswerCardView({ card, ask = '', version, filling, streaming, status, pattern, alternatives, onPattern, simple, onSimple, onRegenerate, onRetry, toolbar, provisional = false, trail, gapTrail, revealLayout = false }: {
+export function AnswerCardView({ card, keys, ask = '', version, filling, streaming, status, pattern, alternatives, onPattern, simple, onSimple, onRegenerate, onRetry, toolbar, provisional = false, trail, gapTrail }: {
   card: AnswerCard;
+  /** Each body node's identity on screen (its slot on the streamed card), aligned with `card.body`. */
+  keys?: readonly string[];
   /** The question this card answers, so a saved chart can be refit without a new search. */
   ask?: string;
   /** Changes whenever a fresh design starts, replaying the entrance animation. */
@@ -52,8 +54,6 @@ export function AnswerCardView({ card, ask = '', version, filling, streaming, st
   trail?: ReactNode;
   /** A search for one missing piece, shown under the components that already have data. */
   gapTrail?: ReactNode;
-  /** The chosen layout is on screen and the answer has not been written yet, so its pieces animate in. */
-  revealLayout?: boolean;
 }) {
   const { results, onSources } = useCard();
   const [toast, setToast] = useState<string | null>(null);
@@ -63,33 +63,14 @@ export function AnswerCardView({ card, ask = '', version, filling, streaming, st
     return () => clearTimeout(timer);
   }, [toast]);
   // Cards saved before the server dropped them can still carry a "no chart" note beside the live chart.
-  const body = useMemo(() => tickerBody(card.body).map((node) => fitNode(node, ask)), [card.body, ask]);
+  const rows = useMemo(
+    () => tickerRows(card.body.map((node, i) => ({ node, key: keys?.[i] ?? `n${i}` }))).map((row) => ({ ...row, node: fitNode(row.node, ask) })),
+    [card.body, keys, ask],
+  );
+  const body = useMemo(() => rows.map((row) => row.node), [rows]);
+  const bodyKeys = useMemo(() => (keys ? rows.map((row) => row.key) : undefined), [rows, keys]);
   // A rounded overflow clip on an ancestor snapshots a cross-origin player, so its frames arrive late.
   const embed = body.some(hasVideo);
-  // The layout that was just on screen, kept for one beat so the answer can arrive over it
-  // instead of the skeleton vanishing first.
-  const layoutSnap = useRef<CardNode[]>([]);
-  const frameRef = useRef<HTMLDivElement>(null);
-  const [seenLayout, setSeenLayout] = useState(revealLayout);
-  const [handoff, setHandoff] = useState<CardNode[] | null>(null);
-  const [heldHeight, setHeldHeight] = useState(0);
-  if (revealLayout) layoutSnap.current = body;
-  if (revealLayout !== seenLayout) {
-    setSeenLayout(revealLayout);
-    setHandoff(!revealLayout && layoutSnap.current.length ? layoutSnap.current : null);
-  }
-  useEffect(() => {
-    if (!revealLayout || !frameRef.current) return;
-    setHeldHeight(frameRef.current.offsetHeight);
-  }, [revealLayout, body, trail]);
-  useEffect(() => {
-    if (!handoff) return;
-    const timer = window.setTimeout(() => {
-      setHandoff(null);
-      setHeldHeight(0);
-    }, 760);
-    return () => window.clearTimeout(timer);
-  }, [handoff]);
   const cited = useMemo(() => (filling ? [] : citedRefs(card).flatMap((n) => (results[n - 1] ? [results[n - 1]] : []))), [filling, card, results]);
   const copyAnswer = () => {
     navigator.clipboard.writeText(cardPlainText(card, results)).then(() => setToast('Copied'), () => setToast("Couldn't copy"));
@@ -169,23 +150,7 @@ export function AnswerCardView({ card, ask = '', version, filling, streaming, st
 
       <div className={cn('min-w-0 px-4 pb-5 pt-3.5 transition-[opacity] duration-500 sm:px-6 sm:pb-6 sm:pt-4', status && !streaming && 'pointer-events-none opacity-50', cited.length && 'pb-4 sm:pb-5')}>
         <CardTitle.Provider value={card.title}>
-          <div ref={frameRef} className="grid w-full min-w-0 [&>*]:col-start-1 [&>*]:row-start-1 [&>*]:min-w-0" style={!revealLayout && heldHeight ? { minHeight: heldHeight } : undefined}>
-            {trail && (
-              <div aria-hidden={revealLayout || undefined} className={cn(revealLayout && 'pointer-events-none')}>
-                {trail}
-              </div>
-            )}
-            {handoff && (
-              <div aria-hidden className="zo-veil zo-layout pointer-events-none bg-card">
-                <Nodes nodes={handoff} className="gap-5" />
-              </div>
-            )}
-            {(!trail || revealLayout || handoff) && (
-              <div className={cn(revealLayout && 'zo-cover zo-layout bg-card')}>
-                <Nodes key={version} nodes={body} className="gap-5" stagger={!revealLayout && (!streaming || !!handoff)} />
-              </div>
-            )}
-          </div>
+          {trail ?? <Nodes key={version} nodes={body} keys={bodyKeys} className="gap-5" stagger={!streaming} />}
           {gapTrail && <div className="mt-4">{gapTrail}</div>}
         </CardTitle.Provider>
       </div>

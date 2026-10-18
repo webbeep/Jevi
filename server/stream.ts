@@ -381,6 +381,11 @@ function pagesCanWait(req: DesignArgs): boolean {
   return req.search.results.slice(0, 5).some((row) => hostTier(row.domain) === 0 && /\d/.test(`${row.title} ${row.snippet}`));
 }
 
+/** Puts one component in its slot on the card. */
+type Publish = (index: number, node: CardNode) => void;
+/** A slot whose component was dropped. The client draws nothing for it. */
+const EMPTY_STACK: CardNode = { type: 'stack', children: [] };
+
 async function design(send: Send, env: Env, req: DesignArgs, started: number, scope: AskScope, late?: Promise<LateExtras>) {
   // Follow-ups keep the sources already gated for the original question.
   if (!req.followup) {
@@ -552,13 +557,37 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   let followups: string[] = [];
   let pendingReview: Promise<Review | undefined> | undefined;
   const sentNode = new Map<number, string>();
+  /** Slots in the order their first component reached the screen. */
+  const arrival: number[] = [];
   let sentHead = '';
+  /**
+   * Every component reaches the client through here. A fix replaces only its own slot;
+   * a repeat of what is already on screen is not sent again.
+   */
+  const publish: Publish = (index, node) => {
+    shown.set(index, node);
+    if (!arrival.includes(index)) arrival.push(index);
+    const key = JSON.stringify(node);
+    if (sentNode.get(index) === key) return;
+    sentNode.set(index, key);
+    send('node', { index, node });
+  };
+  const publishAll = (patches: readonly { index: number; node: CardNode }[] | undefined) => {
+    for (const patch of patches ?? []) publish(patch.index, patch.node);
+  };
+  /** Positions in `indexes` by when each slot was first shown; a slot not yet shown comes last. */
+  const shownOrder = (indexes: readonly number[]) => {
+    const rank = (index: number) => (arrival.includes(index) ? arrival.indexOf(index) : Infinity);
+    return indexes.map((_, i) => i).sort((a, b) => rank(indexes[a]!) - rank(indexes[b]!));
+  };
   const questionOf = () => designReq.followup?.question ?? designReq.query;
   // Regions are designed in parallel and cannot see each other, so a reading shows up
   // in every region. Publish the collapsed card, and retitle a local reading with its place.
+  // A repeat is dropped from the component that arrived later, so nothing already on screen loses it.
   const publishReadings = () => {
     const indexes = [...shown.keys()].sort((a, b) => a - b);
-    const settled = settleReadings(indexes.map((index) => shown.get(index)), head, questionOf());
+    const order = shownOrder(indexes);
+    const settled = settleReadings(indexes.map((index) => shown.get(index)), head, questionOf(), order);
     const recovered = [
       ...settled.nodes.map((node) => (node ? JSON.stringify(node) : '')),
       ...designReq.pages.map((page) => page.text),
@@ -577,7 +606,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     const knowledge = designReq.search.knowledge;
     if (knowledge?.extract) bioSources.unshift({ title: knowledge.title, url: knowledge.url, domain: 'wikipedia.org', text: `${knowledge.title}\n${knowledge.extract}` });
     const agreed = dropDisputedBio(
-      fillPaperCard(question, keepAnswerBody(question, restoreKeptPapers(question, presentNamedCharges(question, finishQuality(question, settled.nodes, head?.subtitle ?? ''), claimSources(designReq.search.results, designReq.pages)), designReq.followup?.baseCard?.body, claimSources(designReq.search.results, designReq.pages)), recovered), paperSources),
+      fillPaperCard(question, keepAnswerBody(question, restoreKeptPapers(question, presentNamedCharges(question, finishQuality(question, settled.nodes, head?.subtitle ?? '', order), claimSources(designReq.search.results, designReq.pages)), designReq.followup?.baseCard?.body, claimSources(designReq.search.results, designReq.pages)), recovered), paperSources),
       bioSources,
       { person: designReq.person?.name, question, followup: !!designReq.followup || !!designReq.fromFollowup },
     );
@@ -592,14 +621,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
         send('head', head);
       }
     }
-    indexes.forEach((index, i) => {
-      const node = quality[i] ?? { type: 'stack' as const, children: [] };
-      shown.set(index, node);
-      const key = JSON.stringify(node);
-      if (sentNode.get(index) === key) return;
-      sentNode.set(index, key);
-      send('node', { index, node });
-    });
+    indexes.forEach((index, i) => publish(index, quality[i] ?? EMPTY_STACK));
   };
   const summary = await designer(designReq, env, {
     thinking: () => send('thinking', {}),
@@ -680,12 +702,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       ])
     : { ready: true as const, review: undefined };
   const separateObjects = () => {
-    const patches = unblendObjects(shown, designReq.priorBody ?? [], designReq.search.results);
-    if (!patches) return;
-    for (const patch of patches) {
-      shown.set(patch.index, patch.node);
-      send('node', { index: patch.index, node: patch.node });
-    }
+    publishAll(unblendObjects(shown, designReq.priorBody ?? [], designReq.search.results));
   };
   const searchGaps = async () => {
     const question = designReq.followup?.question ?? designReq.query;
@@ -728,8 +745,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
           next = settleGap(next, gap, text);
         }
         if (JSON.stringify(next) === JSON.stringify(original)) continue;
-        shown.set(index, next);
-        send('node', { index, node: next });
+        publish(index, next);
       }
     } catch (err) {
       console.log(JSON.stringify({ zo: 'gap-search', error: err instanceof Error ? err.message : 'failed' }));
@@ -738,12 +754,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   const restoreKeptProducts = () => {
     if (!designReq.priorBody?.length) return;
     const question = compareSides(designReq.query).length >= 2 ? designReq.query : (designReq.followup?.question ?? designReq.query);
-    const kept = keepComparedProducts(designReq.priorBody, shown, question, designReq.priorImages);
-    if (!kept) return;
-    for (const patch of kept) {
-      shown.set(patch.index, patch.node);
-      send('node', { index: patch.index, node: patch.node });
-    }
+    publishAll(keepComparedProducts(designReq.priorBody, shown, question, designReq.priorImages));
   };
   const settleComparison = () => {
     const question = compareSides(designReq.query).length >= 2 ? designReq.query : (designReq.followup?.question ?? designReq.query);
@@ -760,45 +771,16 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
           return page?.text && !row.content ? { ...row, content: page.text.slice(0, 4000) } : row;
         }),
       };
-      const patches = comparisonRepair(question, withPages, shown);
-      if (patches) {
-        for (const patch of patches) {
-          shown.set(patch.index, patch.node);
-          send('node', { index: patch.index, node: patch.node });
-        }
-      }
+      publishAll(comparisonRepair(question, withPages, shown));
     }
     restoreKeptProducts();
-    if (designReq.priorBody?.length && compareSides(question).length >= 2) {
-      const photos = restoreSideTiles(designReq.priorBody, shown, question);
-      if (photos) {
-        for (const patch of photos) {
-          shown.set(patch.index, patch.node);
-          send('node', { index: patch.index, node: patch.node });
-        }
-      }
-    }
+    if (designReq.priorBody?.length && compareSides(question).length >= 2) publishAll(restoreSideTiles(designReq.priorBody, shown, question));
     if (designReq.followup?.question && compareSides(designReq.query).length >= 2) {
-      const asked = appendAskedFact(designReq.followup.question, designReq.query, shown, designReq.search);
-      if (asked) {
-        for (const patch of asked) {
-          shown.set(patch.index, patch.node);
-          send('node', { index: patch.index, node: patch.node });
-        }
-      }
+      publishAll(appendAskedFact(designReq.followup.question, designReq.query, shown, designReq.search));
     }
-    const denied = dropShownDenials(shown);
-    if (denied) {
-      for (const patch of denied) {
-        shown.set(patch.index, patch.node);
-        send('node', { index: patch.index, node: patch.node });
-      }
-    }
+    publishAll(dropShownDenials(shown));
     const extra = missingSideNode(question, [...shown.values()], designReq.search);
-    if (!extra) return;
-    const index = Math.max(-1, ...shown.keys()) + 1;
-    shown.set(index, extra);
-    send('node', { index, node: extra });
+    if (extra) publish(Math.max(-1, ...shown.keys()) + 1, extra);
   };
   const memberSources = () => req.search.results.map((row, i) => {
     const page = pages.find((item) => item.n === i + 1);
@@ -812,20 +794,13 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     const grounded = cardFacts(req.query, nodes);
     if (!grounded) {
       const abstained = abstainComputed(req.query, nodes);
-      if (abstained) {
-        abstained.forEach((node, i) => {
-          if (node === nodes[i]) return;
-          const index = indexes[i]!;
-          shown.set(index, node);
-          send('node', { index, node });
-        });
-      }
+      abstained?.forEach((node, i) => {
+        if (node !== nodes[i]) publish(indexes[i]!, node);
+      });
       for (const index of indexes) {
         const node = shown.get(index);
         if (!node || node.type !== 'hero' || !unsupportedYear(req.query, factCorpus, node.value)) continue;
-        const next = { ...node, value: 'Not stated' };
-        shown.set(index, next);
-        send('node', { index, node: next });
+        publish(index, { ...node, value: 'Not stated' });
         break;
       }
       return;
@@ -833,32 +808,12 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     const led = placeFactLead(nodes, grounded) ?? nodes;
     const next = alignFactProse(led, grounded) ?? led;
     if (next === nodes) return;
-    if (next.length === nodes.length) {
-      next.forEach((node, i) => {
-        const index = indexes[i]!;
-        if (node === nodes[i]) return;
-        shown.set(index, node);
-        send('node', { index, node });
-      });
-      return;
-    }
-    const hero = next[0]!;
-    const rest = next.slice(1);
-    if (indexes[0] === 0 && shown.has(0)) {
-      const free = Math.max(...indexes) + 1;
-      const displaced = rest[0] ?? shown.get(0)!;
-      shown.set(free, displaced);
-      send('node', { index: free, node: displaced });
-    }
-    rest.forEach((node, i) => {
-      if (i === 0 && indexes[0] === 0 && shown.has(0)) return;
-      const index = indexes[i];
-      if (index === undefined || node === nodes[i]) return;
-      shown.set(index, node);
-      send('node', { index, node });
+    // A new lead goes above the first component in that same slot. Nothing below moves.
+    const placed = next.length === nodes.length + 1 && nodes.length ? [{ type: 'stack' as const, direction: 'col' as const, gap: 'md' as const, children: [next[0]!, next[1]!] }, ...next.slice(2)] : next;
+    if (placed.length !== nodes.length) return;
+    placed.forEach((node, i) => {
+      if (node !== nodes[i]) publish(indexes[i]!, node);
     });
-    shown.set(0, hero);
-    send('node', { index: 0, node: hero });
   };
   const settleMembers = () => {
     const indexes = [...shown.keys()].sort((a, b) => a - b);
@@ -868,15 +823,8 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     let extra = Math.max(...indexes, -1);
     next.forEach((node, i) => {
       const index = indexes[i];
-      if (index === undefined) {
-        extra += 1;
-        shown.set(extra, node);
-        send('node', { index: extra, node });
-        return;
-      }
-      if (node === nodes[i]) return;
-      shown.set(index, node);
-      send('node', { index, node });
+      if (index === undefined) publish((extra += 1), node);
+      else if (node !== nodes[i]) publish(index, node);
     });
   };
   const alignRates = () => {
@@ -884,9 +832,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     const sources = claimSources(designReq.search.results, pages);
     for (const [index, node] of [...shown.entries()]) {
       const next = agreeOfficialRate(node, asked, sources);
-      if (next === node) continue;
-      shown.set(index, next);
-      send('node', { index, node: next });
+      if (next !== node) publish(index, next);
     }
   };
   // A review fix or a gap search sends its own node after the collapsed card. Publish the
@@ -896,16 +842,9 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     const indexes = [...shown.keys()].sort((a, b) => a - b);
     const sources = claimSources(designReq.search.results, designReq.pages);
     const next = presentNamedCharges(question, oneNamedCharge(question, indexes.map((index) => shown.get(index))), sources);
-    indexes.forEach((index, i) => {
-      const node = next[i] ?? { type: 'stack' as const, children: [] };
-      shown.set(index, node);
-      const key = JSON.stringify(node);
-      if (sentNode.get(index) === key) return;
-      sentNode.set(index, key);
-      send('node', { index, node });
-    });
+    indexes.forEach((index, i) => publish(index, next[i] ?? EMPTY_STACK));
   };
-  if (arrived.ready && arrived.review) applyReview(send, designReq, shown, arrived.review, started);
+  if (arrived.ready && arrived.review) applyReview(send, publish, designReq, shown, arrived.review, started);
   settleComparison();
   settleFacts();
   settleMembers();
@@ -916,18 +855,9 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     ? designReq.followup.question
     : designReq.query;
   if (wantsNamedList(askedNames) && !cardCitesName(askedNames, [...shown.values()], designReq.search.results)) {
-    const node = namedListNode(askedNames, designReq.search.results);
-    const content = [...shown.entries()].filter(([, item]) => item.type !== 'citations' && item.type !== 'actions' && item.type !== 'ticker');
-    const [first, ...rest] = content;
-    if (first) {
-      shown.set(first[0], node);
-      send('node', { index: first[0], node });
-      const empty = { type: 'stack' as const, children: [] as CardNode[] };
-      for (const [index] of rest) {
-        shown.set(index, empty);
-        send('node', { index, node: empty });
-      }
-    }
+    // The names take the lead slot. The other components stay where they are.
+    const lead = [...shown.keys()].sort((a, b) => a - b).find((index) => !['citations', 'actions', 'ticker'].includes(shown.get(index)!.type));
+    if (lead !== undefined) publish(lead, namedListNode(askedNames, designReq.search.results));
   }
   if (!chat) await searchGaps();
   separateObjects();
@@ -935,7 +865,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   send('done', { ...summary, pagesRead: pages.length, ms: Date.now() - started });
   if (pendingReview && !arrived.ready) {
     const review = await pendingReview;
-    if (review) applyReview(send, designReq, shown, review, started);
+    if (review) applyReview(send, publish, designReq, shown, review, started);
     settleComparison();
     settleFacts();
     settleMembers();
@@ -944,13 +874,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     restoreKeptProducts();
     separateObjects();
     const question = compareSides(designReq.query).length >= 2 ? designReq.query : (designReq.followup?.question ?? designReq.query);
-    const photos = placeSidePhotos(question, shown, designReq.search.images);
-    if (photos) {
-      for (const patch of photos) {
-        shown.set(patch.index, patch.node);
-        send('node', { index: patch.index, node: patch.node });
-      }
-    }
+    publishAll(placeSidePhotos(question, shown, designReq.search.images));
     republishFees();
     mark(scope.ledger, 'reviewed');
   } else if (pendingReview) {
@@ -971,10 +895,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
         ]);
         return found?.response.results ?? [];
       });
-      if (patch) {
-        shown.set(patch.index, patch.node);
-        send('node', { index: patch.index, node: patch.node });
-      }
+      if (patch) publish(patch.index, patch.node);
     } catch (err) {
       console.log(JSON.stringify({ zo: 'precision-review', failed: String(err).slice(0, 120) }));
     }
@@ -982,7 +903,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
 }
 
 /** The finished card, read once against the goal: wrong nodes are corrected in place. */
-function applyReview(send: Send, req: DesignRequest, shown: Map<number, CardNode>, review: Review, started: number) {
+function applyReview(send: Send, publish: Publish, req: DesignRequest, shown: Map<number, CardNode>, review: Review, started: number) {
   const at = Date.now();
   if (review.followups) send('followups', review.followups);
   let fixed = 0;
@@ -993,9 +914,7 @@ function applyReview(send: Send, req: DesignRequest, shown: Map<number, CardNode
     if (!gated) continue;
     const accepted = keepShownComponent(before, gated);
     if (before && accepted === before) continue;
-    const node = keepPictures(before, accepted) as CardNode;
-    shown.set(fix.index, node);
-    send('node', { index: fix.index, node });
+    publish(fix.index, keepPictures(before, accepted) as CardNode);
     fixed++;
   }
   const warning = review.note ? gateNode({ type: 'callout', tone: 'warning', icon: 'triangle-alert', text: review.note }, req) : undefined;
@@ -1006,10 +925,7 @@ function applyReview(send: Send, req: DesignRequest, shown: Map<number, CardNode
   if (warning && leadIndex !== undefined && !leadWarns) {
     const lead = shown.get(leadIndex)!;
     const wrapped: CardNode = { type: 'stack', direction: 'col', gap: 'sm', children: [warning, lead] };
-    if (keepShownComponent(lead, wrapped) !== lead) {
-      shown.set(leadIndex, wrapped);
-      send('node', { index: leadIndex, node: wrapped });
-    }
+    if (keepShownComponent(lead, wrapped) !== lead) publish(leadIndex, wrapped);
   }
   console.log(JSON.stringify({ zo: 'review', ok: review.ok, problems: review.problems, fixed, followups: !!review.followups, warned: !!warning, ms: Date.now() - at, total: Date.now() - started }));
 }
