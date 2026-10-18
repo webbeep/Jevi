@@ -869,3 +869,24 @@ test('a citation written after the full stop stays on its sentence and is not ad
   assert.equal(retargetCites('Bake the pie at 425F for about 42 minutes until golden. [1]', pages), 'Bake the pie at 425F for about 42 minutes until golden. [1]');
   assert.equal(retargetCites('Bake at 425F for about 42 minutes. [2]', pages), 'Bake at 425F for about 42 minutes. [1]');
 });
+
+test('a quotation is the source sentence, whole, and a paraphrase loses its quote marks', async () => {
+  const { wholeQuotes } = await import('../server/claims.ts');
+  const pages: ClaimSource[] = [{ n: 1, text: 'Physical activity is key. According to the Physical Activity Guidelines for Americans, adults need at least 150 to 300 minutes of moderate-intensity aerobic activity a week. They also need muscle-strengthening activity.' }];
+  assert.equal(
+    wholeQuotes('"Americans, adults need at least 150 to 300 minutes of moderate-intensity aerobic activity a week." [1]', pages),
+    '"According to the Physical Activity Guidelines for Americans, adults need at least 150 to 300 minutes of moderate-intensity aerobic activity a week." [1]',
+  );
+  assert.equal(wholeQuotes('The guideline says "adults should move a lot more every single day of the week".', pages), 'The guideline says adults should move a lot more every single day of the week.');
+  const exact = 'WHO says "They also need muscle-strengthening activity."';
+  assert.equal(wholeQuotes(exact, pages), exact);
+});
+
+test('a slightly reworded quote becomes the sentence the source wrote', async () => {
+  const { wholeQuotes } = await import('../server/claims.ts');
+  const who: ClaimSource[] = [{ n: 1, text: 'WHO recommends adults and children reduce their daily intake of free sugars to less than 10% of their total energy intake. A further reduction to below 5% would provide additional health benefits.' }];
+  assert.equal(
+    wholeQuotes('"WHO guideline recommends adults and children reduce their daily intake of free sugars to less than 10% of their total energy intake." 1', who),
+    '"WHO recommends adults and children reduce their daily intake of free sugars to less than 10% of their total energy intake." 1',
+  );
+});

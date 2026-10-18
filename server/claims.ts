@@ -409,6 +409,84 @@ function fillPrices(node: CardNode, sources: readonly ClaimSource[], ceilings: r
   }
 }
 
+const QUOTED = /"([^"]{12,400})"|“([^”]{12,400})”/g;
+const escapeRe = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** Where `span` sits in a source, matched word by word so spacing and curly quotes do not matter. */
+function findSpan(span: string, sources: readonly ClaimSource[]): { text: string; start: number; end: number } | undefined {
+  const words = span.replace(/[‘’]/g, "'").replace(/[^\p{L}\p{N}'%$.,;:-]+/gu, ' ').trim().split(/\s+/).filter(Boolean);
+  if (words.length < 4) return undefined;
+  const re = new RegExp(words.map((word) => escapeRe(word.replace(/[.,;:]+$/, ''))).join('[^\\p{L}\\p{N}]+'), 'iu');
+  for (const source of sources) {
+    const text = source.text.replace(/[‘’]/g, "'");
+    const hit = re.exec(text);
+    if (hit) return { text, start: hit.index, end: hit.index + hit[0].length };
+  }
+  return undefined;
+}
+
+/** The sentence of `text` around [start, end), or undefined when it runs too long to be one quoted line. */
+function sentenceAround(text: string, start: number, end: number): string | undefined {
+  const reach = 220;
+  const lo = Math.max(0, start - reach);
+  const last = [...text.slice(lo, start).matchAll(/[.!?]\s+|\n/g)].at(-1);
+  const from = last ? lo + last.index! + last[0].length : lo === 0 ? 0 : undefined;
+  if (from === undefined) return undefined;
+  const after = text.slice(end, end + reach);
+  const stop = after.search(/[.!?](?=\s|$)/);
+  const to = stop >= 0 ? end + stop + 1 : end + reach >= text.length ? text.length : undefined;
+  if (to === undefined) return undefined;
+  return text.slice(from, to).replace(/\s+/g, ' ').trim();
+}
+
+const quoteWords = (text: string) => text.toLowerCase().replace(/[‘’]/g, "'").split(/[^\p{L}\p{N}%$'.]+/u).map((w) => w.replace(/\.$/, '')).filter((w) => w.length > 2);
+
+/** The source sentence a slightly reworded quote came from: nearly all its words, in a sentence not much longer. */
+function nearestSentence(span: string, sources: readonly ClaimSource[]): string | undefined {
+  const want = quoteWords(span);
+  if (want.length < 6) return undefined;
+  let best: { sentence: string; score: number } | undefined;
+  for (const source of sources) {
+    for (const raw of source.text.split(/(?<=[.!?])\s+|\n+/)) {
+      const sentence = raw.replace(/\s+/g, ' ').trim();
+      if (sentence.length > span.length * 1.6 + 20 || sentence.length > 400) continue;
+      const have = new Set(quoteWords(sentence));
+      const score = want.filter((word) => have.has(word)).length / want.length;
+      if (score >= 0.85 && (!best || score > best.score)) best = { sentence, score };
+    }
+  }
+  return best?.sentence;
+}
+
+/**
+ * A quotation is the source's own whole sentence. A quoted fragment found in a source becomes that full
+ * sentence ("Americans, adults need…" → the guideline's line). Words in quote marks that no source states
+ * are a paraphrase, so the marks go. A quote node keeps its text when no source can be checked.
+ */
+export function wholeQuotes(text: string, sources: readonly ClaimSource[], quoteNode = false): string {
+  if (!sources.length) return text;
+  if (quoteNode) {
+    const bare = text.replace(/^["“]|["”]$/g, '');
+    const at = findSpan(bare, sources);
+    const whole = at && sentenceAround(at.text, at.start, at.end);
+    return whole && whole.length < 400 && whole.length >= bare.length ? whole : text;
+  }
+  return text.replace(QUOTED, (all, plain: string | undefined, curly: string | undefined) => {
+    const span = (plain ?? curly ?? '').trim();
+    if (/\.\.\.|…/.test(span)) return all;
+    const at = findSpan(span, sources);
+    if (!at) {
+      // A reworded line becomes the sentence the source wrote; words no source states lose their quote marks.
+      const near = nearestSentence(span, sources);
+      if (near) return all[0] === '"' ? `"${near}"` : `“${near}”`;
+      return span.split(/\s+/).length >= 6 ? span : all;
+    }
+    const whole = sentenceAround(at.text, at.start, at.end);
+    if (!whole || whole.length > 400 || whole.length <= span.length) return all;
+    return all[0] === '"' ? `"${whole}"` : `“${whole}”`;
+  });
+}
+
 function retargetNode(node: CardNode, sources: readonly ClaimSource[], query = ''): CardNode {
   switch (node.type) {
     case 'stack':
@@ -422,7 +500,7 @@ function retargetNode(node: CardNode, sources: readonly ClaimSource[], query = '
     case 'callout':
     case 'quote':
     case 'draft': {
-      const cited = retargetCites(node.text, sources, query);
+      const cited = retargetCites(node.type === 'draft' ? node.text : wholeQuotes(node.text, sources, node.type === 'quote'), sources, query);
       const cleaned = cited.split(SENTENCE_BREAK).map((sentence) => {
         const n = [...sentence.matchAll(/\[(\d+)\]/g)].map((match) => Number(match[1])).at(-1);
         return withoutForeignAgency(sentence, byNumber(sources, n ?? 0));
