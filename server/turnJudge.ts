@@ -28,6 +28,7 @@ const TURN = `You decide the next action for a follow-up in a search conversatio
 const SOURCES = `You have a question and the first search snippets. Reply as JSON: {"enough":boolean,"query":string}
 enough is true when these snippets can answer, including the steps of a how-to, the sentence of a requested quote, the official price or fee, or the health verdict.
 enough is false when that fact, the official page, or one side of a comparison is missing. query is the one search that would find it, or "" when enough.
+When the question asks for people, products, or other named things, enough is false unless the snippets name them. query searches for those names. A paraphrase of what to look for is not that search.
 A variant (Pro, Plus, Max, Mini, Ultra) the question did not name is not the product asked.`;
 
 /** The place or business the card title names. "Art Institute of Chicago Illinois Resident…" → "Art Institute of Chicago". */

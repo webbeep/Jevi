@@ -86,6 +86,7 @@ import { recallClips, wantsVideo, withProductClips, withVideos } from './videoSe
 import { guessFreshness, preferFresh, staleComplaint, stricter } from './freshness';
 import { isQuoteRow, liveQuote, quoteRow, tickerNode } from './liveQuote';
 import { cleanSideName } from '../shared/objects';
+import { cardCitesName, citedNames, nameSeekingQuery, namedListNode, wantsNamedList } from './namedList';
 import { followSearchPlan, judgeSources, judgeTurn } from './turnJudge';
 import { findTicker } from '../shared/tickerNotes';
 import { splitPeople } from './peopleSplit';
@@ -910,6 +911,23 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   publishReadings();
   alignRates();
   restoreKeptProducts();
+  const askedNames = designReq.followup?.question && wantsNamedList(designReq.followup.question)
+    ? designReq.followup.question
+    : designReq.query;
+  if (wantsNamedList(askedNames) && !cardCitesName(askedNames, [...shown.values()], designReq.search.results)) {
+    const node = namedListNode(askedNames, designReq.search.results);
+    const content = [...shown.entries()].filter(([, item]) => item.type !== 'citations' && item.type !== 'actions' && item.type !== 'ticker');
+    const [first, ...rest] = content;
+    if (first) {
+      shown.set(first[0], node);
+      send('node', { index: first[0], node });
+      const empty = { type: 'stack' as const, children: [] as CardNode[] };
+      for (const [index] of rest) {
+        shown.set(index, empty);
+        send('node', { index, node: empty });
+      }
+    }
+  }
   if (!chat) await searchGaps();
   separateObjects();
   republishFees();
@@ -1079,23 +1097,29 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   // The model says whether these snippets are enough. One more search when they are not.
   // It does not wait out a second round: the call started with the first results.
   const hopUrls: string[] = [];
-  if (!paper && results.results.length && sourceJudge) {
-    const judged = await Promise.race([
-      sourceJudge,
-      new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 400)),
-    ]);
-    if (judged && !judged.enough) {
+  if (!paper && results.results.length && (sourceJudge || wantsNamedList(query))) {
+    const judged = sourceJudge
+      ? await Promise.race([
+          sourceJudge,
+          new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), wantsNamedList(query) ? 1200 : 400)),
+        ])
+      : undefined;
+    const needNames = wantsNamedList(query) && citedNames(query, results.results.map((row) => `${row.title ?? ''} ${row.snippet ?? ''}`)).length === 0;
+    const againQuery = needNames
+      ? nameSeekingQuery(query, judged && !judged.enough ? judged.query : undefined)
+      : judged && !judged.enough ? judged.query : '';
+    if (againQuery && againQuery.toLowerCase() !== query.trim().toLowerCase()) {
       const room = SEARCH_CALL_CAP + (scope.ledger.bonus ?? 0) - searchCalls(scope.ledger);
       if (room < 1) scope.ledger.bonus = (scope.ledger.bonus ?? 0) + (1 - room);
-      const again = await searchWithLate({ q: judged.query, freshness: guessFreshness(query), count: 8, lite: true }, env, scope);
-      const gated = applyRelevance(judged.query, { ...again.response, query: judged.query }, scope.ledger);
+      const again = await searchWithLate({ q: againQuery, freshness: guessFreshness(query), count: 8, lite: true }, env, scope);
+      const gated = applyRelevance(againQuery, { ...again.response, query: againQuery }, scope.ledger);
       const add = gated.results.filter((row) => !results.results.some((have) => have.url === row.url)).slice(0, 6);
       if (add.length) {
         for (const row of add) hopUrls.push(row.url);
         results = { ...results, results: leadMemberRows(query, [...add, ...results.results], add.map((row) => row.url)) };
         send('peek', add.slice(0, PEEK_ROWS).map(({ title, url, domain, date }) => ({ title, url, domain, date })));
         send('search', results);
-        console.log(JSON.stringify({ zo: 'judge-sources', query: judged.query, added: add.length }));
+        console.log(JSON.stringify({ zo: 'judge-sources', query: againQuery, added: add.length, names: needNames }));
       }
     }
   }
