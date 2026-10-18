@@ -12,23 +12,26 @@ import { UsageLine } from './auth/UsageLine';
 import { bootAuthOnce, claimBoot } from './auth/resume';
 import { flushPendingSave } from './auth/saves';
 import { clearSyncedHistory, noteDeviceAsk } from './auth/sync';
-import { ArrowUp, CornerDownRight, CornerLeftUp, History, Plus, RotateCw, Search, SlidersHorizontal, WifiOff, X } from 'lucide-react';
+import { ArrowUp, CornerDownRight, CornerLeftUp, History, Plus, RotateCw, Search, WifiOff, X } from 'lucide-react';
 import type { AnswerCard, CardNode } from '../shared/card';
 import { packHistorySources, type HistorySource } from '../shared/historyCard';
 import { topicOf, usefulFollowups, type AskRef } from '../shared/askAbout';
+import { visibleSpelling } from '../shared/followupLabel';
 import { boundAsk } from '../shared/queryBound';
 import type { SearchResponse } from '../shared/types';
 import { api } from './api';
 import { AnswerCardView } from './card/AnswerCardView';
 import { ResearchTrail } from './card/ResearchTrail';
 import { showWaitingLayout } from './card/waitingLayout';
+import { hasGap } from '../shared/gap';
 import { CardContext, type CardContextValue } from './card/context';
 import { Icon } from './card/Icon';
 import { WhichOne } from './card/WhichOne';
 import { LogoMark, Wordmark } from './Logo';
 import { buildLibrary } from './library';
 import { FaviconStack, SourcesRail, SourcesSheet } from './Sources';
-import { type SessionActions, type Turn, liveBody, scrollToTurn, useSession } from './useSession';
+import { isBlankLayout, liveBody } from '../shared/liveBody';
+import { type SessionActions, type Turn, scrollToTurn, useSession } from './useSession';
 import { readChoices } from '../shared/choices';
 import { loadSnapshot, normalizeAnswerQuery, purgeDegradedSnapshots, saveSnapshot } from '../shared/answerKey';
 import { answerSlug } from '../shared/publicPage';
@@ -279,7 +282,7 @@ export default function App() {
     setChat((n) => n + 1);
   };
 
-  const startSearch = (q: string) => {
+  const startSearch = (q: string, refresh = false) => {
     const query = q.trim();
     if (!query) return;
     openGen.current += 1;
@@ -291,7 +294,7 @@ export default function App() {
     setHistRev((n) => n + 1);
     typeahead.close();
     history.pushState(null, '', `/a/${answerSlug(query)}?${new URLSearchParams({ q: query })}`);
-    session.search(query, { reset: true });
+    session.search(query, { reset: true, refresh });
   };
   startSearchRef.current = startSearch;
 
@@ -656,10 +659,6 @@ export default function App() {
                     <span className="zo-meta">{library.length}</span>
                   </Button>
                 )}
-                <Button variant="ghost" size="sm" className="h-8 shrink-0 gap-1.5 rounded-lg px-2.5 text-muted-foreground hover:text-foreground" onClick={newChat}>
-                  <Plus className="size-4" />
-                  <span className="hidden sm:inline">New chat</span>
-                </Button>
                 <AuthHeader theme={choice} onTheme={choose} />
               </div>
             </header>
@@ -681,7 +680,7 @@ export default function App() {
                     provisional
                   />
                 )}
-                {turns.map((t, i) => <TurnView key={t.id} turn={t} first={i === 0} search={session.searchOf(t)?.search} actions={session} onSources={openSources} threadBusy={threadBusy} pendingItem={queued?.item} onQueue={setQueued} />)}
+                {turns.map((t, i) => <TurnView key={t.id} turn={t} first={i === 0} search={session.searchOf(t)?.search} actions={session} onSources={openSources} threadBusy={threadBusy} pendingItem={queued?.item} onQueue={setQueued} onResend={(text) => startSearch(text, true)} />)}
 
                 {related.length > 0 && !busy && (
                   <section className="-mt-2 px-4 animate-in fade-in sm:-mt-4 sm:px-6">
@@ -959,7 +958,63 @@ function OfflineNotice({ filling, partial, reconnects, onRetry }: { filling: boo
 /** t447 double-submit guard: a second item tap within this window is ignored even before `filling` flips. */
 let lastItemTap = 0;
 
-const TurnView = memo(function TurnView({ turn, first, search, actions, onSources, threadBusy, pendingItem, onQueue }: {
+const MESSAGE = 'max-w-[85%] rounded-2xl rounded-br-md bg-foreground/[0.06] px-4 py-2.5 text-left text-[15px] leading-snug dark:bg-foreground/[0.09]';
+
+/** The sent query is a message. Tapping it edits that text; resend runs a fresh search, cancel leaves it. */
+function QueryMessage({ question, onResend }: { question: string; onResend: (text: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(question);
+  const field = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (!editing) setDraft(question);
+  }, [question, editing]);
+  useEffect(() => {
+    if (!editing) return;
+    const el = field.current;
+    if (!el) return;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, [editing]);
+  if (editing) {
+    return (
+      <form
+        data-testid="query-editor"
+        className="flex w-full max-w-[85%] flex-col items-end gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const next = draft.trim();
+          if (!next) return;
+          setEditing(false);
+          onResend(next);
+        }}
+      >
+        <textarea
+          ref={field}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          aria-label="Edit message"
+          rows={Math.min(4, Math.max(1, draft.split('\n').length))}
+          className={cn(MESSAGE, 'w-full resize-none border-0 bg-foreground/[0.06] text-base outline-none focus:ring-0')}
+        />
+        <div className="flex gap-1.5">
+          <Button type="button" variant="ghost" size="icon" className="size-9 shrink-0 rounded-xl" aria-label="Cancel" onClick={() => { setDraft(question); setEditing(false); }}>
+            <X className="size-4" />
+          </Button>
+          <Button type="submit" size="icon" className="size-9 shrink-0 rounded-xl" disabled={!draft.trim()} aria-label="Resend">
+            <ArrowUp className="size-4" />
+          </Button>
+        </div>
+      </form>
+    );
+  }
+  return (
+    <button type="button" data-testid="query-message" onClick={() => setEditing(true)} className={cn(MESSAGE, 'cursor-text')} aria-label="Edit message">
+      {question}
+    </button>
+  );
+}
+
+const TurnView = memo(function TurnView({ turn, first, search, actions, onSources, threadBusy, pendingItem, onQueue, onResend }: {
   turn: Turn;
   first: boolean;
   /** Results of the search this turn builds on. */
@@ -971,26 +1026,23 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
   pendingItem?: string;
   /** T455: queues a tap made while the thread is busy. */
   onQueue: (queued: { q: string; ref?: AskRef; from: number; item?: string }) => void;
+  onResend: (text: string) => void;
 }) {
   const streaming = !!turn.live?.nodes.some(Boolean);
-  // Parallel region calls finish out of order. The first real section replaces the full-card wait;
-  // sections still running keep their own skeletons inside the streamed body.
+  // Parallel region calls finish out of order. The first real section replaces the full-card wait.
+  // A slot that does not have its component yet is left out, so its skeleton does not sit beside the sentence.
   const answerStarted = !!turn.live && liveBody(turn.live, true).some((n) => n.type !== 'citations' && n.type !== 'slot');
   const offlinePartial = Boolean(turn.offline && (turn.live?.head || streaming));
   // Jev's plan already names the layout. Once the sources have landed, that skeleton is the placeholder —
   // its hero, tiles, grid and section titles — not a generic pair of shimmer blocks. A later `layout`
   // event (a profile override, a video lead) replaces it with the skeleton the card will actually fill.
   const chosenLayout = turn.live?.regions.length ? turn.live.regions : turn.plan?.skeleton.body ?? [];
-  const sourcesSettled = !!turn.search;
-  // The skeleton is the wait only. A finished card clears `live`, which used to make this true again
-  // and put the placeholder back on top of the result.
+  // The trail stays up until a real component arrives. An empty layout is not shown in its place.
   const layoutReady = showWaitingLayout({
     filling: turn.filling,
     hasResult: !!turn.result,
     answerStarted,
     layoutCount: chosenLayout.length,
-    needsSources: turn.kind === 'search',
-    sourcesSettled,
   });
   const card: AnswerCard = useMemo(() => {
     const skeleton = { title: turn.question, body: LOADING };
@@ -999,7 +1051,9 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
     if (layoutReady) base = { ...skeleton, ...live?.head, body: chosenLayout };
     else if (live && (streaming || offlinePartial)) {
       const fillingNow = offlinePartial ? false : turn.filling;
-      base = { ...skeleton, ...live.head, body: liveBody(live, fillingNow) };
+      const streamed = liveBody(live, fillingNow);
+      const visible = streamed.length ? streamed : live.nodes.filter((node): node is CardNode => !!node && !isBlankLayout(node));
+      base = { ...skeleton, ...live.head, body: visible };
     } else if (turn.result) base = turn.result.card;
     else base = { ...skeleton, ...live?.head, body: [] };
     if (!turn.result && !live?.head && turn.kind !== 'search') base = { ...base, title: turn.question };
@@ -1011,8 +1065,13 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
   // Until Jev's layout can take over, a search shows its queries and then the sources.
   // Once that layout is on screen and the answer has not started, the card shows it instead.
   const searching = turn.kind === 'search' || !!turn.peek?.length || !!turn.search || !!turn.intent?.queries?.length;
+  const spelling = visibleSpelling(turn.question, turn.spelling);
   const waiting = turn.filling && !turn.result && !turn.offline && !turn.error && !answerStarted;
-  const trail = waiting && searching ? (
+  const keptOnScreen = (turn.live?.nodes ?? []).some((node) => !!node && node.type !== 'slot' && node.type !== 'citations' && node.type !== 'actions');
+  const trail = waiting && searching && !keptOnScreen ? (
+    <ResearchTrail question={turn.question} intent={turn.intent} peek={turn.peek} search={turn.search} />
+  ) : undefined;
+  const gapTrail = turn.filling && answerStarted && card.body.some(hasGap) ? (
     <ResearchTrail question={turn.question} intent={turn.intent} peek={turn.peek} search={turn.search} />
   ) : undefined;
 
@@ -1067,29 +1126,23 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
   const choicesOnly = Boolean(choices && !turn.filling && turn.result && !turn.result.card.body.length);
 
   return (
-    <section id={`turn-${turn.id}`} data-turn={turn.id} data-degraded={degraded} className="scroll-mt-20 space-y-3 animate-in fade-in duration-500">
-      {!first && (
-        <div className="flex flex-col items-end gap-1.5">
-          {turn.base && (
-            <button onClick={() => scrollToTurn(turn.base!.id)} className="inline-flex max-w-[85%] items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground">
-              <CornerLeftUp className="size-3.5 shrink-0" />
-              <span className="truncate">From “{turn.base.title}”</span>
-            </button>
-          )}
-          {turn.ref && <RefChip askRef={turn.ref} />}
-          <div className="flex max-w-[85%] items-center gap-2 rounded-2xl rounded-br-md bg-foreground/[0.06] px-4 py-2.5 text-[15px] leading-snug dark:bg-foreground/[0.09]">
-            {turn.kind === 'search' && <Search className="size-3.5 shrink-0 text-muted-foreground" />}
-            {turn.origin === 'adjust' && <SlidersHorizontal className="size-3.5 shrink-0 text-muted-foreground" />}
-            {turn.question}
-          </div>
-        </div>
-      )}
+    <section id={`turn-${turn.id}`} data-turn={turn.id} data-degraded={degraded} data-seed={(turn.live?.nodes ?? []).filter((node): node is CardNode => !!node).map((node) => node.type).join(',') || '0'} className="scroll-mt-20 space-y-3 animate-in fade-in duration-500">
+      <div className="flex flex-col items-end gap-1.5">
+        {!first && turn.base && (
+          <button onClick={() => scrollToTurn(turn.base!.id)} className="inline-flex max-w-[85%] items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground">
+            <CornerLeftUp className="size-3.5 shrink-0" />
+            <span className="truncate">From “{turn.base.title}”</span>
+          </button>
+        )}
+        {!first && turn.ref && <RefChip askRef={turn.ref} />}
+        <QueryMessage question={turn.question} onResend={onResend} />
+      </div>
 
       {(offlinePartial || !(turn.error && !turn.result)) && (
         <>
-          {turn.spelling && (
+          {spelling && (
             <p data-testid="spelling-note" className="text-xs text-muted-foreground">
-              Showing results for <span className="font-medium text-foreground">{turn.spelling}</span>
+              Showing results for <span className="font-medium text-foreground">{spelling}</span>
             </p>
           )}
           {turn.fromCache && <p data-testid="cache-note" className="text-xs text-muted-foreground">Saved answer · you're offline</p>}
@@ -1100,7 +1153,6 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
                 : 'No fresh sources found — answered from general knowledge, may be out of date.'}
             </p>
           )}
-          {choicesOnly && first && <h2 className="text-balance text-[16.5px] font-semibold leading-[1.3] tracking-[-0.02em] sm:text-[17px]">{turn.question}</h2>}
           {!choicesOnly && <CardContext.Provider value={context}>
             <AnswerCardView
               card={card}
@@ -1108,7 +1160,7 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
               version={`${turn.id}-${turn.version}`}
               filling={offlinePartial ? false : turn.filling}
               streaming={offlinePartial ? false : streaming}
-              status={offlinePartial ? undefined : (turn.status ?? (turn.thinking && !streaming ? 'Thinking it through…' : undefined))}
+              status={offlinePartial ? undefined : turn.status}
               pattern={turn.pattern}
               alternatives={turn.kind === 'digest' ? [] : turn.plan?.alternatives ?? []}
               onPattern={(p) => actions.setPattern(id, p)}
@@ -1119,6 +1171,7 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
               toolbar={!turn.filling && !offlinePartial && turn.result ? <SaveButton query={turn.question} title={card.title} card={card} /> : undefined}
               provisional={provisional}
               trail={trail}
+              gapTrail={gapTrail}
               revealLayout={layoutReady}
             />
           </CardContext.Provider>}

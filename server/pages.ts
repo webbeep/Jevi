@@ -200,7 +200,7 @@ export async function pageText(url: string, env: Env, timeoutMs = 9000, maxChars
 export async function collectPages(
   results: SearchResult[],
   env: Env,
-  opts: { count: number; need: number; budgetMs: number },
+  opts: { count: number; need: number; budgetMs: number; skip?: ReadonlySet<string> },
   late?: Promise<LateExtras>,
   scope?: AskScope,
   focus?: string,
@@ -217,7 +217,7 @@ export async function collectPages(
 
   const have = new Set(ready.map((p) => p.n));
   const seen = new Set<string>();
-  const missing = numbered.filter(({ r, n }) => !have.has(n) && !seen.has(r.domain) && seen.add(r.domain)).slice(0, count - ready.length);
+  const missing = numbered.filter(({ r, n }) => !have.has(n) && !opts.skip?.has(normalizeUrl(r.url)) && !seen.has(r.domain) && seen.add(r.domain)).slice(0, count - ready.length);
   const fromLate = async (url: string) => {
     const text = (await late)?.content.get(normalizeUrl(url));
     if (!text || text.length < MIN_TEXT || isBlockPage(text)) throw new Error('no late content');

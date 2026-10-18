@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, test } from 'node:test';
 import { parseDdgLite } from '../server/backup.ts';
-import { callCap, clearDeadEngines, engineDead, moreQueries, newLedger, queriesForAsk, rememberDead, searchCalls, SEARCH_CALL_CAP } from '../server/budget.ts';
+import { callCap, clearDeadEngines, engineDead, extraSearchRoom, moreQueries, newLedger, queriesForAsk, rememberDead, searchCalls, SEARCH_CALL_CAP } from '../server/budget.ts';
 import { packSearch, readSearchCache, searchCacheKey, writeSearchCache, type CacheDb } from '../server/cache.ts';
 import { cascadeWeb } from '../server/cascade.ts';
 import { search } from '../server/search.ts';
@@ -171,6 +171,9 @@ describe('runway', { concurrency: 1 }, () => {
     assert.notEqual(searchCacheKey('foo', 'day', 20), searchCacheKey('foo', 'day', 8));
     assert.equal(queriesForAsk('news tldr today', ['top headlines today', 'tldr news site']), 'news tldr today');
     assert.deepEqual(moreQueries('news tldr today', ['top headlines today', 'tldr news site']), ['top headlines today', 'tldr news site']);
+    assert.equal(extraSearchRoom('quick', 0, 0), 1);
+    assert.equal(extraSearchRoom('quick', 0, 2), 2);
+    assert.equal(extraSearchRoom('deep', 0, 0), 2);
     assert.equal(queriesForAsk('  Foo   Bar ', []), 'Foo Bar');
     assert.equal(queriesForAsk('foo', ['foo', 'FOO']), 'foo');
     const longAsk = Array.from({ length: 70 }, (_, i) => `word${i}`).join(' ');

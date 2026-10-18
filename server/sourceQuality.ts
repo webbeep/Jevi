@@ -4,7 +4,8 @@
  */
 import type { CardNode } from '../shared/card';
 import { joinSpacedDecimals } from '../shared/text';
-import { shoppingAsk } from './claims';
+import { budgetAmounts, oneNamedCharge, shoppingAsk } from './claims';
+import { agreeShopping } from './cardAgree';
 import { restoreCutDecimals } from './polish';
 import { isPaperAsk, isPreprintAsk, leadPreprints } from './scholarly';
 
@@ -170,7 +171,7 @@ export interface RankedHit {
 const LEAGUE = new Set(['nba', 'nfl', 'mlb', 'nhl', 'ncaa', 'wnba', 'mls', 'ufc', 'pga', 'wwe']);
 const STATES = 'alabama:al,alaska:ak,arizona:az,arkansas:ar,california:ca,colorado:co,connecticut:ct,delaware:de,florida:fl,georgia:ga,hawaii:hi,idaho:id,illinois:il,indiana:in,iowa:ia,kansas:ks,kentucky:ky,louisiana:la,maine:me,maryland:md,massachusetts:ma,michigan:mi,minnesota:mn,mississippi:ms,missouri:mo,montana:mt,nebraska:ne,nevada:nv,new hampshire:nh,new jersey:nj,new mexico:nm,new york:ny,north carolina:nc,north dakota:nd,ohio:oh,oklahoma:ok,oregon:or,pennsylvania:pa,rhode island:ri,south carolina:sc,south dakota:sd,tennessee:tn,texas:tx,utah:ut,vermont:vt,virginia:va,washington:wa,west virginia:wv,wisconsin:wi,wyoming:wy';
 /** A count, outbreak, or official figure — government and journal-of-record pages outrank blogs. */
-const OFFICIAL_ASK = /\b(?:how many|number of|population|tax|taxes|law|laws|legal|illegal|ban|banned|regulation|statute|official|census|outbreak|incidence|prevalence)\b/i;
+const OFFICIAL_ASK = /\b(?:how many|number of|population|tax|taxes|fee|fees|fine|fines|toll|tolls|duty|duties|surcharge|law|laws|legal|illegal|ban|banned|regulation|statute|official|census|outbreak|incidence|prevalence)\b/i;
 const PLACE_FACT = /\b(?:how many|number of|population|census|outbreak|lakes?|count)\b/i;
 
 /** Journals of record the question names. Bare "nature" or "science" are too common to count. */
@@ -323,6 +324,27 @@ function specFamily(unit: string): string {
   if (/^cores?$/.test(u)) return 'core';
   if (/^slots?$/.test(u)) return 'slot';
   return u;
+}
+
+/** A feature the person stated ("hot-swappable", "that is dimmable"). A number-and-unit is a separate requirement. */
+function askedFeatures(query: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const add = (raw: string) => {
+    const feature = raw.toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (feature.length < 4 || seen.has(feature)) return;
+    if (/^(?:under|below|cheap|best|with|that|this|only)$/.test(feature)) return;
+    seen.add(feature);
+    out.push(feature);
+  };
+  for (const match of query.matchAll(/\b([a-z0-9]{2,}(?:-[a-z0-9]{2,})+)\b/gi)) add(match[1]!);
+  for (const match of query.matchAll(/\b(?:that (?:is|are|has|have)|which (?:is|are|has|have)|with(?: a| an)?|including|includes)\s+([a-z0-9][a-z0-9-][a-z0-9 -]{1,40}?)(?=\s+(?:under|below|for|and)\b|[?.!,]|$)/gi)) add(match[1]!);
+  return out;
+}
+
+function hasFeature(text: string, feature: string): boolean {
+  const blob = text.toLowerCase().replace(/[^a-z0-9]+/g, ' ');
+  return blob.includes(feature);
 }
 
 /** A number-and-unit the person stated ("3-port", "for 3 devices"). Those are requirements. */
@@ -743,11 +765,23 @@ function alignVerdicts(nodes: readonly (CardNode | undefined)[]): (CardNode | un
   return nodes.map((node) => (node ? walk(node) : node));
 }
 
+/** A priced pick's words. A note with no price is not a pick. */
+function pricedPickText(node: CardNode): string | undefined {
+  const text = node.type === 'tile'
+    ? `${node.label} ${node.value ?? ''} ${node.sub ?? ''}`
+    : node.type === 'hero'
+      ? `${node.value} ${node.caption ?? ''} ${node.label}`
+      : '';
+  return /\$\s?\d/.test(text) ? text : undefined;
+}
+
+function featureMiss(text: string, features: readonly string[]): boolean {
+  return features.some((feature) => !hasFeature(text, feature));
+}
+
 /** Language, repeated rows, and a disagreement the card has already settled. Holes stay holes. */
-/** A stated spec is a requirement. A pick that states a different one does not lead a pick that meets it. */
-function dropSpecMissLead(query: string, nodes: readonly (CardNode | undefined)[]): (CardNode | undefined)[] {
-  const specs = askedSpecs(query);
-  if (!specs.length || !shoppingAsk(query)) return [...nodes];
+/** A stated spec is a requirement. A pick that states a different one, or that lacks a stated feature another pick has, does not lead. */
+function reorderNumericSpecs(nodes: readonly (CardNode | undefined)[], specs: readonly { n: string; family: string }[]): (CardNode | undefined)[] {
   const texts = (node: CardNode): string[] => (
     node.type === 'list' ? node.items.map((item) => `${item.text} ${item.meta ?? ''}`) : [JSON.stringify(node)]
   );
@@ -769,19 +803,320 @@ function dropSpecMissLead(query: string, nodes: readonly (CardNode | undefined)[
   });
 }
 
-/** On a shopping card, a product hero with no price does not lead once another pick states one. */
+function someFeatureMatch(nodes: readonly (CardNode | undefined)[], features: readonly string[]): boolean {
+  const see = (node: CardNode): boolean => {
+    if (node.type === 'list') return node.items.some((item) => /\$\s?\d/.test(`${item.meta ?? ''} ${item.text}`) && !featureMiss(`${item.meta ?? ''} ${item.text}`, features));
+    const priced = pricedPickText(node);
+    if (priced && !featureMiss(priced, features)) return true;
+    if (node.type === 'stack' || node.type === 'grid' || node.type === 'section' || node.type === 'scroller') return node.children.some(see);
+    if (node.type === 'tabs') return node.tabs.some((tab) => tab.children.some(see));
+    return false;
+  };
+  return nodes.some((node) => !!node && see(node));
+}
+
+function dropFeatureNode(node: CardNode, features: readonly string[]): CardNode | undefined {
+  switch (node.type) {
+    case 'tile':
+    case 'hero': {
+      const priced = pricedPickText(node);
+      return priced && featureMiss(priced, features) ? undefined : node;
+    }
+    case 'list': {
+      const items = node.items.filter((item) => {
+        const text = `${item.meta ?? ''} ${item.text}`;
+        return !(/\$\s?\d/.test(text) && featureMiss(text, features));
+      });
+      if (!items.length) return node;
+      return items.length === node.items.length ? node : { ...node, items };
+    }
+    case 'stack':
+    case 'grid':
+    case 'section':
+    case 'scroller': {
+      const children = node.children.flatMap((child) => {
+        const next = dropFeatureNode(child, features);
+        return next ? [next] : [];
+      });
+      if (!children.length) return undefined;
+      return children.length === node.children.length && children.every((child, index) => child === node.children[index]) ? node : { ...node, children };
+    }
+    case 'tabs':
+      return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: tab.children.flatMap((child) => {
+        const next = dropFeatureNode(child, features);
+        return next ? [next] : [];
+      }) })) };
+    case 'text':
+    case 'callout':
+    case 'quote':
+    case 'draft':
+    case 'heading':
+    case 'stat':
+    case 'keyvalue':
+    case 'timeline':
+    case 'profile':
+    case 'table':
+    case 'steps':
+    case 'accordion':
+    case 'proscons':
+    case 'badges':
+    case 'actions':
+    case 'choices':
+    case 'links':
+    case 'citations':
+    case 'chart':
+    case 'pricing':
+    case 'scaler':
+    case 'slider':
+    case 'reveal':
+    case 'image':
+    case 'gallery':
+    case 'video':
+    case 'code':
+    case 'divider':
+    case 'progress':
+    case 'rating':
+    case 'diagram':
+    case 'ticker':
+    case 'slot':
+      return node;
+    default: {
+      const unreachable: never = node;
+      return unreachable;
+    }
+  }
+}
+
+function dropSpecMissLead(query: string, nodes: readonly (CardNode | undefined)[]): (CardNode | undefined)[] {
+  const specs = askedSpecs(query);
+  const features = askedFeatures(query);
+  if ((!specs.length && !features.length) || !shoppingAsk(query)) return [...nodes];
+  const numbered = specs.length ? reorderNumericSpecs(nodes, specs) : [...nodes];
+  if (!features.length || !someFeatureMatch(numbered, features)) return numbered;
+  return numbered.map((node) => (node ? dropFeatureNode(node, features) : node));
+}
+
+function statesProductPrice(text: string, ceilings: readonly number[]): boolean {
+  for (const match of text.matchAll(/\$\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?/g)) {
+    const value = Number(match[0].replace(/[^\d.]/g, ''));
+    if (!ceilings.includes(value)) return true;
+  }
+  return false;
+}
+
+/** Dollars on a pick. A follow-up chip or a choice prompt is not a pick. */
+function productPriceTexts(node: CardNode): string[] {
+  if (node.type === 'hero') return [`${node.value} ${node.caption ?? ''}`];
+  if (node.type === 'tile') return [`${node.value ?? ''} ${node.sub ?? ''}`];
+  if (node.type === 'list') return node.items.map((item) => `${item.meta ?? ''} ${item.text}`);
+  if (node.type === 'table') return node.rows.map((row) => row.join(' '));
+  if (node.type === 'pricing') return node.plans.map((plan) => plan.prices.map((price) => (price.amount === undefined ? '' : `$${price.amount}`)).join(' '));
+  if (node.type === 'stack' || node.type === 'grid' || node.type === 'section' || node.type === 'scroller') return node.children.flatMap(productPriceTexts);
+  if (node.type === 'tabs') return node.tabs.flatMap((tab) => tab.children.flatMap(productPriceTexts));
+  return [];
+}
+
+/** On a shopping card, a product hero with no price does not lead once another pick states one. The budget in the label, and a dollar in a follow-up chip, are not that price. */
 function dropUnpricedProductLead(query: string, nodes: readonly (CardNode | undefined)[]): (CardNode | undefined)[] {
   if (!shoppingAsk(query)) return [...nodes];
-  const priced = nodes.some((node) => !!node && /\$\s?\d/.test(JSON.stringify(node)));
+  const ceilings = budgetAmounts(query);
+  const priced = nodes.some((node) => !!node && productPriceTexts(node).some((text) => statesProductPrice(text, ceilings)));
   if (!priced) return [...nodes];
   return nodes.map((node) => {
     if (!node || node.type !== 'hero') return node;
-    if (/\$\s?\d/.test(`${node.value} ${node.caption ?? ''} ${node.label}`)) return node;
+    if (productPriceTexts(node).some((text) => statesProductPrice(text, ceilings))) return node;
     return undefined;
   });
 }
 
-export function finishQuality(query: string, nodes: readonly (CardNode | undefined)[]): (CardNode | undefined)[] {
+function contentWords(sentence: string): string[] {
+  return sentence.toLowerCase().replace(/\[[0-9]+\]/g, ' ').replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter((word) => word.length > 2);
+}
+
+/** How many words in a row the two sentences share. */
+function sharedRun(left: string[], right: string[]): number {
+  let best = 0;
+  for (let i = 0; i < left.length; i++) {
+    for (let j = 0; j < right.length; j++) {
+      let n = 0;
+      while (i + n < left.length && j + n < right.length && left[i + n] === right[j + n]) n += 1;
+      if (n > best) best = n;
+    }
+  }
+  return best;
+}
+
+const REPEAT_RUN = 8;
+
+function remember(text: string, shown: string[][]) {
+  for (const part of text.split(/(?<=[.!?])\s+/)) {
+    const words = contentWords(part);
+    if (words.length >= REPEAT_RUN) shown.push(words);
+  }
+}
+
+/** Drop a sentence whose long clause is already on the card. The first copy stays. */
+function onceText(text: string, shown: string[][]): string {
+  const kept = text.split(/(?<=[.!?])\s+/).filter((part) => {
+    const words = contentWords(part);
+    if (words.length < REPEAT_RUN) return true;
+    if (shown.some((prior) => sharedRun(words, prior) >= REPEAT_RUN)) return false;
+    shown.push(words);
+    return true;
+  });
+  return kept.join(' ').replace(/\s+/g, ' ').trim();
+}
+
+function sayOnceNode(node: CardNode, shown: string[][]): CardNode | undefined {
+  switch (node.type) {
+    case 'text':
+    case 'callout':
+    case 'quote':
+    case 'draft':
+    case 'heading': {
+      const text = onceText(node.text, shown);
+      if (!text) return undefined;
+      return text === node.text ? node : { ...node, text };
+    }
+    case 'hero': {
+      const caption = node.caption ? onceText(node.caption, shown) : node.caption;
+      return caption === node.caption ? node : { ...node, caption: caption || undefined };
+    }
+    case 'stack':
+    case 'grid':
+    case 'section':
+    case 'scroller': {
+      const children = node.children.flatMap((child) => {
+        const next = sayOnceNode(child, shown);
+        return next ? [next] : [];
+      });
+      return children.length ? { ...node, children } : undefined;
+    }
+    case 'tabs':
+      return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: tab.children.flatMap((child) => {
+        const next = sayOnceNode(child, shown);
+        return next ? [next] : [];
+      }) })) };
+    case 'tile':
+    case 'stat':
+    case 'keyvalue':
+    case 'timeline':
+    case 'profile':
+    case 'table':
+    case 'list':
+    case 'steps':
+    case 'accordion':
+    case 'proscons':
+    case 'badges':
+    case 'actions':
+    case 'choices':
+    case 'links':
+    case 'citations':
+    case 'chart':
+    case 'pricing':
+    case 'scaler':
+    case 'slider':
+    case 'reveal':
+    case 'image':
+    case 'gallery':
+    case 'video':
+    case 'code':
+    case 'divider':
+    case 'progress':
+    case 'rating':
+    case 'diagram':
+    case 'ticker':
+    case 'slot':
+      return node;
+    default: {
+      const unreachable: never = node;
+      return unreachable;
+    }
+  }
+}
+
+/** The same long clause is said once, including a line the subtitle already used. */
+export function sayOnce(nodes: readonly (CardNode | undefined)[], lead = ''): (CardNode | undefined)[] {
+  const shown: string[][] = [];
+  if (lead.trim()) remember(lead, shown);
+  return nodes.map((node) => (node ? sayOnceNode(node, shown) : node));
+}
+
+const UNNAMED_PERSON = /\bno (?:source|page)s?\s+(?:that\s+)?names?\b|\b(?:does not|doesn't|do not)\s+name\s+(?:a\s+|the\s+)?(?:person|anyone)\b/i;
+
+function dropRoleNode(node: CardNode): CardNode | undefined {
+  switch (node.type) {
+    case 'tile':
+    case 'stat':
+    case 'profile':
+      return undefined;
+    case 'stack':
+    case 'grid':
+    case 'section':
+    case 'scroller': {
+      const children = node.children.flatMap((child) => {
+        const next = dropRoleNode(child);
+        return next ? [next] : [];
+      });
+      return children.length ? { ...node, children } : undefined;
+    }
+    case 'tabs':
+      return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: tab.children.flatMap((child) => {
+        const next = dropRoleNode(child);
+        return next ? [next] : [];
+      }) })) };
+    case 'text':
+    case 'callout':
+    case 'quote':
+    case 'draft':
+    case 'heading':
+    case 'hero':
+    case 'keyvalue':
+    case 'timeline':
+    case 'table':
+    case 'list':
+    case 'steps':
+    case 'accordion':
+    case 'proscons':
+    case 'badges':
+    case 'actions':
+    case 'choices':
+    case 'links':
+    case 'citations':
+    case 'chart':
+    case 'pricing':
+    case 'scaler':
+    case 'slider':
+    case 'reveal':
+    case 'image':
+    case 'gallery':
+    case 'video':
+    case 'code':
+    case 'divider':
+    case 'progress':
+    case 'rating':
+    case 'diagram':
+    case 'ticker':
+    case 'slot':
+      return node;
+    default: {
+      const unreachable: never = node;
+      return unreachable;
+    }
+  }
+}
+
+/**
+ * A paragraph that says the sources do not name the person cannot sit beside
+ * another person's role, credential, or portrait.
+ */
+function dropUnnamedFacts(nodes: readonly (CardNode | undefined)[]): (CardNode | undefined)[] {
+  if (!nodes.some((node) => node && UNNAMED_PERSON.test(JSON.stringify(node)))) return [...nodes];
+  return nodes.map((node) => (node ? dropRoleNode(node) : node));
+}
+
+export function finishQuality(query: string, nodes: readonly (CardNode | undefined)[], lead = ''): (CardNode | undefined)[] {
   const cleaned = nodes.map((node) => (node ? cleanNode(query, node) : node));
-  return restoreCutDecimals(alignVerdicts(withoutSettledDisputes(dropSpecMissLead(query, dropUnpricedProductLead(query, cleaned)))));
+  const settled = agreeShopping(shoppingAsk(query), budgetAmounts(query), restoreCutDecimals(alignVerdicts(withoutSettledDisputes(dropSpecMissLead(query, dropUnpricedProductLead(query, cleaned))))));
+  return oneNamedCharge(query, dropUnnamedFacts(sayOnce(settled, lead)));
 }

@@ -1,6 +1,6 @@
 import { boundAsk } from '../shared/queryBound';
 import type { SearchResult } from '../shared/types';
-import type { EntityChoice } from './entity';
+import { firstNameForms, type EntityChoice } from './entity';
 import { hasLlm, llmJson } from './llm';
 import type { Env } from './util';
 
@@ -9,7 +9,7 @@ Reply as JSON: {"people":[{"name": string, "who": string, "rows": number[], "que
 - name: the person's full name as the results write it (e.g. "Ricky Gervais" for the name "Ricky").
 - who: 3-8 words that tell this person apart at a glance: field or role plus employer, place or best-known work, e.g. "Oncologist, Montefiore cancer center director" or "EPA regional deputy administrator". No name, no filler.
 - rows: the result numbers about this person. A result belongs to one person at most; leave out results that name nobody clearly.
-- query: a web search that finds this person: their name as the results write it plus 1-3 distinguishing words.
+- query: a web search for this person only: their own name plus 1-3 words that are about them. Never include another person's name.
 - Results about the same person (same field and employer, or one page calling them by a nickname) are one entry. Different fields, employers or countries are different people unless a result links them.
 - A directory, a people-search page, or "professionals named X" is not a person. A company is not a person. Leave those out.
 - Most covered first. At most 5 people.`;
@@ -23,10 +23,79 @@ function fullName(raw: unknown, asked: string): string {
   const full = typeof raw === 'string' ? raw.trim().replace(/\s+/g, ' ').slice(0, 60) : '';
   const has = new Set(full.toLowerCase().split(/[^a-z0-9'-]+/));
   const nameLike = full.split(' ').length <= 5 && !/\b(who|whos|who's|what|is|was|the)\b/i.test(full);
-  return nameLike && asked.toLowerCase().split(/\s+/).every((w) => has.has(w)) ? full : asked;
+  if (!nameLike) return asked;
+  if (asked.toLowerCase().split(/\s+/).every((word) => has.has(word))) return full;
+  // A different person's full name is that person. The nickname they were filed under is not.
+  return full.split(' ').length >= 2 ? full : asked;
 }
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+
+const wordKey = (word: string) => word.toLowerCase().replace(/[^a-z0-9']/g, '');
+
+/**
+ * The search for one choice. Words that belong to a different person's name are dropped.
+ * What remains has to still name this person; otherwise the search is just their name.
+ */
+function namesSomeoneElse(query: string, name: string, others: readonly string[]): boolean {
+  const mine = new Set(name.split(/\s+/).map(wordKey).filter(Boolean));
+  const keys = new Set(query.split(/\s+/).map(wordKey).filter(Boolean));
+  return others.some((other) => {
+    const extra = other.split(/\s+/).map(wordKey).filter((word) => word.length >= 3 && !mine.has(word));
+    return extra.length > 0 && extra.every((word) => keys.has(word));
+  });
+}
+
+export function choiceOnlyQuery(name: string, query: string, others: readonly string[]): string {
+  if (namesSomeoneElse(query, name, others)) return boundAsk(name);
+  query = withoutGluedPerson(query);
+  const mine = new Set(name.split(/\s+/).map(wordKey).filter(Boolean));
+  if (namesSomeoneElse(query, name, others)) return boundAsk(name);
+  const foreign = new Set<string>();
+  for (const other of others) {
+    for (const word of other.split(/\s+/)) {
+      const key = wordKey(word);
+      if (key.length >= 3 && !mine.has(key)) foreign.add(key);
+    }
+  }
+  const kept: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of query.split(/\s+/)) {
+    const key = wordKey(raw);
+    if (!key || foreign.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    kept.push(raw);
+  }
+  const next = kept.join(' ').trim();
+  const hasName = [...mine].every((word) => seen.has(word));
+  return boundAsk(withoutGluedPerson(hasName && next ? next : name));
+}
+
+/**
+ * "Other Person Chosen Name …" is two people. The search is the later person,
+ * the one the choice named. A single name plus a role is left as written.
+ */
+export function withoutGluedPerson(query: string): string {
+  const words = query.trim().split(/\s+/).filter(Boolean);
+  if (words.length < 3) return words.join(' ');
+  const cap = (word: string) => /^[A-Z][a-z]{1,}/.test(word);
+  const given = (word: string) => cap(word) && firstNameForms(word.toLowerCase()).length > 1;
+  let cut = 0;
+  const anchor = wordKey(words[0] ?? '');
+  const seen = new Map<string, number>();
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i]!;
+    if (!cap(word)) continue;
+    const key = wordKey(word);
+    // A repeated surname is still the chosen person. Only a repeated given name starts another one.
+    if (key !== anchor && !given(word)) continue;
+    const prev = seen.get(key);
+    if (prev !== undefined) cut = i;
+    seen.set(key, i);
+  }
+  if (cut === 0 && words.length >= 4 && given(words[0]!) && cap(words[1]!) && given(words[2]!) && wordKey(words[0]!) !== wordKey(words[2]!)) cut = 2;
+  return words.slice(cut).join(' ');
+}
 
 /**
  * Parses the model's grouping into choices over `rows` (1-based in the reply, 0-based seeds).
@@ -50,7 +119,12 @@ export function readPeople(raw: Raw | undefined, name: string, count: number, mi
     out.push({ name: full, descriptor, query, id: slug(`${full} ${descriptor}`), seeds });
     if (out.length === 5) break;
   }
-  return out.length >= min ? out : undefined;
+  if (out.length < min) return undefined;
+  const names = out.map((choice) => choice.name);
+  return out.map((choice, index) => ({
+    ...choice,
+    query: choiceOnlyQuery(choice.name, choice.query, names.filter((_, at) => at !== index)),
+  }));
 }
 
 /**

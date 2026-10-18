@@ -1,9 +1,24 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { anchoredFollowup, asksToCompare, cardFollowQuery, cryptographyHint, faithfulQuery, followSearchQuery, isWritingAsk, needsOwnSearch, ownQuestion, personQuestion, pointsAtCard, quoteFollowQuery, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from '../server/askGuard.ts';
+import { anchoredFollowup, asksToCompare, cardFollowQuery, comparisonFollow, cryptographyHint, faithfulQuery, followSearchQuery, foreignName, isWritingAsk, lockChainQuery, needsOwnSearch, ownQuestion, personQuestion, pointsAtCard, quoteFollowQuery, sameSubjectQuery, screenSubject, scrubLeak, sourcesCover, standsAlone, stripForeignNames, withoutLeakActions, withoutRepeatedCallouts } from '../server/askGuard.ts';
 import { isPersonAsk } from '../server/entity.ts';
 import { planLayout } from '../server/plan.ts';
 import type { CardNode } from '../shared/card.ts';
+import { followupLabel, visibleSpelling } from '../shared/followupLabel.ts';
+
+test('a follow-up the sources do not mention has to be searched', () => {
+  const subject = 'Harbor Phone vs Northwatch 2';
+  const corpus = 'Harbor Phone has a 48MP camera. Northwatch 2 costs $90.';
+  assert.equal(sourcesCover('How long is the battery?', subject, corpus), false);
+  assert.equal(sourcesCover('Tell me more about the camera', subject, corpus), true);
+  assert.equal(sourcesCover('What colors does it come in?', subject, 'The Harbor Phone colors are black and blue.'), true);
+});
+
+test('a follow-up about one compared product does not glue both names', () => {
+  assert.equal(comparisonFollow("What is Northwatch Glowband's glowband?", 'Northwatch 2 vs Glowband'), 'What is Glowband?');
+  assert.equal(comparisonFollow('What is Glowband?', 'Northwatch 2 vs Glowband'), 'What is Glowband?');
+  assert.equal(comparisonFollow('which one has better battery life?', 'Northwatch 2 vs Glowband'), undefined);
+});
 
 test('a which-one follow-up stays on the comparison already on screen', () => {
   assert.equal(anchoredFollowup('iphone 17 vs pixel 10', 'which one has better battery life?'), 'iphone 17 vs pixel 10 battery life');
@@ -87,6 +102,33 @@ test('an unrelated follow-up is its own question, and a related one keeps the su
   assert.equal(ownQuestion('Draft the unblock email', 'It Takes Two'), false);
 });
 
+test('a later turn keeps the subject on screen unless it names a different one', () => {
+  const covered = 'When did North Pier open?\nNorth Pier\nNorth Pier opened to visitors after a long build.';
+  assert.equal(screenSubject('North Pier opened to visitors after a long build along the water', 'When did the new waterfront pier welcome its first visitors last decade?'), 'North Pier');
+  assert.match(sameSubjectQuery('what is the viewing platform', 'North Pier', covered) ?? '', /^North Pier what is the viewing platform$/);
+  assert.match(sameSubjectQuery('how many floors are open', 'North Pier', covered) ?? '', /North Pier/);
+  assert.equal(sameSubjectQuery('What is photosynthesis?', 'how do mRNA vaccines work', 'how do mRNA vaccines work'), undefined);
+  assert.equal(sameSubjectQuery('tesla stock price', 'how to make sourdough starter', 'how to make sourdough starter'), undefined);
+  assert.equal(sameSubjectQuery('how many lakes are in Minnesota', 'who is Michael Jordan', 'who is Michael Jordan'), undefined);
+  assert.match(sameSubjectQuery('how do solar panels work', 'Sourdough', 'how to make sourdough starter') ?? '', /^Sourdough /);
+  assert.match(sameSubjectQuery('is there a gift shop', 'North Pier', covered) ?? '', /^North Pier /);
+  assert.equal(foreignName('West Market viewing platform', 'North Pier viewing platform'), true);
+  assert.equal(stripForeignNames('West Market Cedar Park viewing platform', 'North Pier viewing platform'), 'viewing platform');
+  assert.equal(
+    lockChainQuery('what is the viewing platform', 'West Market Cedar Park viewing platform', 'North Pier', covered),
+    'North Pier viewing platform',
+  );
+  assert.equal(
+    lockChainQuery('how many lakes are in Minnesota', 'how many lakes are in Minnesota', 'Michael Jordan', 'who is Michael Jordan'),
+    'how many lakes are in Minnesota',
+  );
+  assert.equal(screenSubject('How tall is it?', 'When did the Gateway Arch open to visitors?'), 'Gateway Arch');
+  assert.equal(
+    lockChainQuery('What is the tram ride to the top like?', 'Gateway Arch Open What is the tram ride to the top like?', 'Gateway Arch', 'When did the Gateway Arch open to visitors?'),
+    'Gateway Arch What is the tram ride to the top like?',
+  );
+});
+
 test('a follow-up that points at the card keeps that subject, and an unrelated one stays its own question', () => {
   const card = 'Moderna\nShares fell 9.2% in morning trading, hitting a session low of $214.30 after the trial update.';
   const explain = 'Explain "Shares fell 9.2% in morning trading, hitting a session low of $214.30"';
@@ -148,4 +190,14 @@ test('"crypto" beside cryptography papers means the field', () => {
   const rows = [{ title: 'Proofs of Work for Fiat–Shamir', snippet: 'cryptography, New York University', url: 'https://eprint.iacr.org/2026/2326' }];
   assert.match(cryptographyHint('latest on Jessica Chen nyu crypto', rows) ?? '', /cryptography/);
   assert.equal(cryptographyHint('bitcoin price today', rows), undefined);
+});
+
+test('a follow-up label stays the words that were typed', () => {
+  assert.equal(followupLabel('what does this company make', 'Moderna Stock Price what does this company make'), 'what does this company make');
+  assert.equal(followupLabel('What is photosynthesis?', 'What is photosynthesis?'), 'What is photosynthesis?');
+  assert.equal(followupLabel('Ricky cheuk', 'Ricky Gervais Ricky Cheuk'), 'Ricky cheuk');
+  assert.equal(followupLabel('Ricky Gervais Ricky Cheuk', 'Ricky Cheuk'), 'Ricky Cheuk');
+  assert.equal(visibleSpelling('Glowband 4 vs Northwatch 2', 'Glowband 4 vs Glayband 2'), undefined);
+  assert.equal(visibleSpelling('Glowband 4 vs Northwatch 2', 'Glow Band 4 vs Northwatch 2'), 'Glow Band 4 vs Northwatch 2');
+  assert.equal(visibleSpelling('Jensen Huang Nvdia', 'Jensen Huang, NVIDIA'), 'Jensen Huang, NVIDIA');
 });

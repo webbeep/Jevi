@@ -95,6 +95,18 @@ test('a numbered product drops the previous model and keeps the one that was ask
   assert.deepEqual(gateResults(asked, [old, iphone]).kept.map((r) => r.title), [iphone.title]);
 });
 
+test('a variant the question did not name is a different product', () => {
+  const q = 'Harbor Band 8 vs Northwatch 2';
+  const base = hit('Harbor Band 8 specs', 'The Harbor Band 8 has a 1.6 inch screen and a 14 day battery.', 'https://harbor.example/band-8');
+  const pro = hit('Harbor Band 8 Pro review', 'The Harbor Band 8 Pro review: a brighter screen.', 'https://www.youtube.com/watch?v=abcdefghijk');
+  const other = hit('Northwatch 2 specs', 'Northwatch 2 costs $90.', 'https://north.example/watch');
+  const gated = gateResults(q, [pro, other, base]);
+  assert.ok(gated.kept.some((row) => row.title === base.title));
+  assert.equal(gated.kept.some((row) => row.title === pro.title), false);
+  assert.equal(gateResults('Harbor Band 8', [pro, base]).kept.map((row) => row.title).join('|'), base.title);
+  assert.equal(gateResults('Harbor Band 8 Pro', [pro, base]).kept.map((row) => row.title).join('|'), pro.title);
+});
+
 test('a price and a stat line are not model numbers', () => {
   const phones = hit('Best wireless headphones under $80', 'These wireless headphones stay under $80.', 'https://www.rtings.com/headphones/under-80');
   assert.deepEqual(gateResults('best wireless headphones under $100', [phones]).kept.map((r) => r.title), [phones.title]);

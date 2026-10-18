@@ -1,0 +1,213 @@
+import { cleanSideName, sameObject } from '../shared/objects';
+import { hasLlm, llmJson } from './llm';
+import { compareSides, withoutLeadVerb } from './patterns';
+import type { Env } from './util';
+
+/**
+ * One model call decides the next action. The card templates and the loading
+ * animation stay fixed. This call does not choose a layout.
+ */
+export interface TurnDecision {
+  action: 'search' | 'answer' | 'calculate';
+  queries: string[];
+  subject: string;
+}
+
+export interface SourceDecision {
+  enough: boolean;
+  query: string;
+}
+
+const TURN = `You decide the next action for a follow-up in a search conversation. Reply as JSON: {"action":"search"|"answer"|"calculate","queries":string[],"subject":string}
+- subject: the thing this turn is about. Keep the subject already on screen unless the person clearly changes topic. A place or business named only as a qualifier (from X, in X, for a visitor) is not a new subject. If they challenge the subject and the card rejected that name, keep the subject the card affirmed, not the name they proposed.
+- action "answer" when the card and the sources already state the fact this turn asks. queries is empty. A different case of the same subject (another visitor, another city, another option) is not answered by the previous case's figure. If that case is not already stated, action is "search" and the query names it.
+- action "search" when they do not. queries is 1 to 4 web searches, the new words plus that subject, each 3-12 words. When the card is a comparison and the follow-up asks for specs, prices, or a table, return one query per product already named on the card: that product's name plus the new words. Do not drop a side, and do not glue the names into one token. When they add an object or switch to a different one, one query is that object's name alone. Do not append the follow-up sentence onto a product name. A variant (Pro, Plus, Max, Mini, Ultra) is a different product: search the exact model asked, not a different variant. A how-to, a requested quote, a live price, a tax, a fee, or a health question searches the official page for that subject.
+- action "calculate" when they ask to split, multiply, or apply a rate or price already on the card. queries is empty. The figure on the card is the figure to use.
+- Do not add a person, place, or business that the follow-up and the subject do not name.`;
+
+const SOURCES = `You have a question and the first search snippets. Reply as JSON: {"enough":boolean,"query":string}
+enough is true when these snippets can answer, including the steps of a how-to, the sentence of a requested quote, the official price or fee, or the health verdict.
+enough is false when that fact, the official page, or one side of a comparison is missing. query is the one search that would find it, or "" when enough.
+When the question asks for people, products, or other named things, enough is false unless the snippets name them. query searches for those names. A paraphrase of what to look for is not that search.
+A variant (Pro, Plus, Max, Mini, Ultra) the question did not name is not the product asked.`;
+
+/** The place or business the card title names. "Art Institute of Chicago Illinois Resident…" → "Art Institute of Chicago". */
+export function placeOnScreen(title: string | undefined): string {
+  if (!title) return '';
+  const words = title.replace(/[“”"'’?—–-]/g, ' ').split(/\s+/).filter(Boolean);
+  const skip = /^(?:No|Yes|The|How|What|When|Where|Who|It|Its)$/i;
+  const out: string[] = [];
+  for (const word of words) {
+    const bare = word.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, '');
+    if (!bare) continue;
+    const cap = /^[A-Z]/.test(bare);
+    const of = /^of$/i.test(bare);
+    if (!out.length) {
+      if (cap && !skip.test(bare)) out.push(bare);
+      continue;
+    }
+    if (of) {
+      out.push('of');
+      continue;
+    }
+    if (cap) {
+      out.push(bare);
+      continue;
+    }
+    break;
+  }
+  const ofAt = out.indexOf('of');
+  const name = ofAt >= 0 && out.length > ofAt + 1 ? out.slice(0, ofAt + 2) : out.slice(0, 4);
+  return name.join(' ');
+}
+
+const ADD_LEAD = /^(?:please\s+)?(?:add|include|also(?:\s+add)?|plus)\b[\s,:.-]*/i;
+const SWITCH_LEAD = /^(?:please\s+)?(?:switch to|instead(?:\s+of)?|what about|how about)\b[\s,:.-]*/i;
+const ATTR_STOP = new Set([
+  'what', 'whats', 'how', 'why', 'when', 'where', 'who', 'which', 'the', 'of', 'each', 'both',
+  'these', 'those', 'this', 'that', 'camera', 'cameras', 'product', 'products', 'model', 'models',
+  'one', 'ones', 'their', 'its', 'for', 'and', 'with', 'from', 'about', 'long', 'does', 'did',
+  'many', 'much', 'are', 'tell', 'please', 'can', 'could', 'should', 'would', 'per', 'all',
+  'them', 'they', 'you', 'your', 'into', 'onto', 'also', 'add', 'include', 'plus', 'show',
+  'find', 'list', 'explain', 'describe', 'summarize', 'watch', 'compare', 'versus', 'have',
+  'has', 'had', 'was', 'were', 'will',
+]);
+
+function uniqueSides(sides: string[]): string[] {
+  const out: string[] = [];
+  for (const side of sides) {
+    if (side.length < 2 || out.some((have) => sameObject(have, side))) continue;
+    out.push(side);
+  }
+  return out;
+}
+
+/** Words that name the fact, not the objects already on the card. */
+function attributeWords(question: string, sides: string[]): string {
+  const known = new Set(sides.flatMap((side) => side.toLowerCase().split(/[^a-z0-9]+/)).filter((word) => word.length > 1));
+  return question
+    .split(/\s+/)
+    .map((word) => word.toLowerCase().replace(/[^a-z0-9]+/g, ''))
+    .filter((word) => word.length > 2 && !ATTR_STOP.has(word) && !known.has(word))
+    .join(' ');
+}
+
+/** A name the follow-up introduces. "Add the Glowband 4" is Glowband 4. "What is the battery life" is not a name. */
+function objectPhrase(question: string, sides: string[]): { name: string; kind: 'add' | 'switch' } | undefined {
+  const asked = question.trim();
+  let kind: 'add' | 'switch' | undefined;
+  let rest = asked;
+  if (SWITCH_LEAD.test(asked)) {
+    kind = 'switch';
+    rest = asked.replace(SWITCH_LEAD, '');
+  } else if (ADD_LEAD.test(asked)) {
+    kind = 'add';
+    rest = asked.replace(ADD_LEAD, '');
+  } else {
+    const versus = asked.match(/\b(?:vs\.?|versus)\s+(.+)$/i);
+    if (!versus?.[1]) return undefined;
+    kind = 'add';
+    rest = versus[1];
+  }
+  rest = rest.split(/\s+(?:vs\.?|versus)\s+/i)[0] ?? rest;
+  const name = cleanSideName(rest).replace(/[.?!]+$/g, '').trim();
+  if (name.length < 2 || /^(?:what|how|why|when|where|who|which)\b/i.test(name)) return undefined;
+  if (sides.some((side) => sameObject(side, name))) return undefined;
+  if (!/\d/.test(name) && !/[A-Z]/.test(rest)) return undefined;
+  return { name, kind };
+}
+
+/**
+ * "Add X" on a comparison keeps every side and adds X.
+ * The card title or the original question can name the sides. Undefined when this is not an add.
+ */
+export function addedComparison(question: string, titles: readonly string[]): { query: string; fanout: string[]; added: string } | undefined {
+  if (!ADD_LEAD.test(question.trim())) return undefined;
+  let sides: string[] = [];
+  for (const title of titles) {
+    const found = uniqueSides(compareSides(title).map((side) => cleanSideName(side)));
+    if (found.length >= 2) {
+      sides = found;
+      break;
+    }
+  }
+  if (sides.length < 2) return undefined;
+  const intro = objectPhrase(question, sides);
+  if (!intro || intro.kind !== 'add') return undefined;
+  const next = [...sides, intro.name];
+  return { query: next.join(' vs '), fanout: [intro.name, ...sides], added: intro.name };
+}
+
+/** The searches for this follow-up. A comparison keeps every product in the query and in the fan-out. */
+export function followSearchPlan(input: { title?: string; question: string; queries: string[]; subject: string }): { query: string; fanout: string[]; added?: string } {
+  const title = input.title?.replace(/\s+/g, ' ').trim() ?? '';
+  const asked = input.question.replace(/^(?:and|so)\s+/i, '').trim();
+  const sides = uniqueSides(compareSides(title).map((side) => cleanSideName(side)));
+  if (sides.length >= 2) {
+    const intro = objectPhrase(asked, sides);
+    if (intro?.kind === 'switch') return { query: intro.name, fanout: [intro.name], added: intro.name };
+    const next = intro ? [...sides, intro.name] : sides;
+    const attribute = intro ? '' : attributeWords(asked, sides);
+    const query = next.join(' vs ');
+    const fanout = intro ? [intro.name, ...sides] : next.map((side) => (attribute ? `${side} ${attribute}` : side));
+    return { query, fanout, added: intro?.name };
+  }
+  const place = placeOnScreen(title) || input.subject;
+  const written = withoutLeadVerb(input.queries[0] ?? asked);
+  const query = place && !written.toLowerCase().includes(place.toLowerCase()) ? `${place} ${withoutLeadVerb(asked)}` : written;
+  return { query, fanout: input.queries.slice(1).map(withoutLeadVerb) };
+}
+
+export function parseDecision(raw: unknown): TurnDecision | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const row = raw as { action?: unknown; queries?: unknown; subject?: unknown };
+  const action = row.action === 'search' || row.action === 'answer' || row.action === 'calculate' ? row.action : undefined;
+  if (!action) return undefined;
+  const queries = (Array.isArray(row.queries) ? row.queries : [])
+    .filter((query): query is string => typeof query === 'string' && query.trim().length > 1)
+    .map((query) => query.replace(/\s+/g, ' ').trim())
+    .slice(0, 4);
+  const subject = typeof row.subject === 'string' ? row.subject.replace(/\s+/g, ' ').trim().slice(0, 120) : '';
+  if (action === 'search' && !queries.length) return undefined;
+  return { action, queries: action === 'search' ? queries : [], subject };
+}
+
+export function parseSourceDecision(raw: unknown): SourceDecision | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const row = raw as { enough?: unknown; query?: unknown };
+  if (typeof row.enough !== 'boolean') return undefined;
+  const query = typeof row.query === 'string' ? row.query.replace(/\s+/g, ' ').trim().slice(0, 180) : '';
+  if (!row.enough && query.length < 2) return undefined;
+  return { enough: row.enough, query: row.enough ? '' : query };
+}
+
+async function ask<T>(env: Env, system: string, user: string, ms: number): Promise<T | undefined> {
+  if (!hasLlm(env)) return undefined;
+  const call = llmJson<T>(env, system, user, 180).catch(() => undefined);
+  const timeout = new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), ms));
+  return Promise.race([call, timeout]);
+}
+
+export async function judgeTurn(env: Env, input: {
+  question: string;
+  original: string;
+  context?: string;
+  title?: string;
+  card?: string;
+  sources?: string;
+}): Promise<TurnDecision | undefined> {
+  const user = [
+    `Conversation started with: ${input.original}`,
+    input.title ? `Card on screen: ${input.title}` : '',
+    input.card ? `Card text:\n${input.card.slice(0, 900)}` : '',
+    input.context ? `Conversation:\n${input.context.slice(0, 1200)}` : '',
+    input.sources ? `Sources already in hand:\n${input.sources.slice(0, 900)}` : '',
+    `Follow-up: ${input.question}`,
+  ].filter(Boolean).join('\n');
+  return parseDecision(await ask<unknown>(env, TURN, user, 1200));
+}
+
+export async function judgeSources(env: Env, query: string, snippets: string): Promise<SourceDecision | undefined> {
+  const user = `Question: ${query}\n\nSnippets:\n${snippets.slice(0, 1400)}`;
+  return parseSourceDecision(await ask<unknown>(env, SOURCES, user, 1000));
+}

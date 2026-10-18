@@ -17,6 +17,7 @@ import {
   entityHintFor,
   formalNameQueries,
   workplaceQueries,
+  nameWithWorkplace,
   isDisambiguationPage,
   isPersonAsk,
   personCardTitle,
@@ -34,9 +35,11 @@ import {
   priorEntity,
   publicChoices,
   resolveEntity,
+  mixedIdentities,
+  samePersonChoices,
 } from './entity';
 import { fetchWikiArticle, fetchWikiDisambiguation, fetchWikiLeadImage } from './wikiSearch';
-import { type EntityHint, mentionsAny } from './imageGate';
+import { type EntityHint, mentionsAny, personPage, portraitMarks, portraitMatches, portraitSearchQuery, portraitWorkplace } from './imageGate';
 import type { RowImagePlan } from './pictures';
 import type { AnswerCard, CardNode, FollowupContext, FollowupIntent, LayoutPlan } from '../shared/card';
 import { type AskRef, cardSearchQuery, plainFollowup, refContext, topicOf, usefulFollowups, withRef } from '../shared/askAbout';
@@ -45,26 +48,33 @@ import type { EngineStatus, Freshness, ImageResult, SearchResponse, SearchResult
 import { rewriteQuery } from './ai';
 import { type DesignRequest, designParallel, designStream, gateNode } from './design';
 import { BRIEF_ROWS, briefSources, remapBrief, type SourceBrief } from './brief';
-import { groundMembers } from './claims';
-import { abstainComputed, alignFactProse, cardFacts, factAnswer, hasMemberWork, hopQueries, leadMemberRows, nextHop, placeFactLead, unsupportedYear } from './hops';
+import { agreeOfficialRate, claimSources, groundMembers, oneNamedCharge, presentNamedCharges } from './claims';
+import { answerTitle, fillPaperCard, keepAnswerBody, restoreKeptPapers, wantsNamedQuote } from './cardAgree';
+import { dropDisputedBio, type BioSource } from './bioFacts';
+import { withoutGluedPerson } from './peopleSplit';
+import { abstainComputed, alignFactProse, cardFacts, factAnswer, hasMemberWork, hopQueries, leadMemberRows, placeFactLead, unsupportedYear } from './hops';
 import { gapQuery, onTopicCount, rescueQuery, sourcesMiss } from './rescue';
-import { keepPictures, reviewCard, type Review } from './review';
+import { keepShownComponent } from '../shared/keepShown';
+import { keepPictures, reviewCard, reviewComponents, type Review } from './review';
 import { permitted } from './images';
 import { hasLlm } from './llm';
-import { collectPages, ogImageOf } from './pages';
-import { MADE_PATTERNS, compareSideQueries, heuristicPattern, skeletonCard } from './patterns';
+import { BROWSER_UA, collectPages, ogImageOf } from './pages';
+import { applyFetched, fetchCitePages, fillFromSearch, pagesFromContent, renumberPages, shiftBrief, snippetSupports, thinPlan, type FetchedPage } from './thinSource';
+import { MADE_PATTERNS, compareSideQueries, compareSides, heuristicPattern, skeletonCard } from './patterns';
 import { planLayout } from './plan';
 import type { AskScope, CallLedger } from './budget';
-import { SEARCH_CALL_CAP, logAsk, mark, moreQueries, newLedger, queriesForAsk, searchCalls } from './budget';
+import { SEARCH_CALL_CAP, extraSearchRoom, logAsk, mark, moreQueries, newLedger, queriesForAsk, searchCalls } from './budget';
 import { gateResults } from './relevanceGate';
 import { entityQuery, plainQuotes, relaxQuery, tickerQueries } from './queryClean';
 import { type LateExtras, normalizeUrl, searchWithLate } from './search';
 import type { WebHit } from './cascade';
 import { domainOf } from './util';
 import { choicesIn, distinctActions, subjectWords } from './chips';
-import { anchoredFollowup, asksToCompare, cryptographyHint, faithfulQuery, followSearchQuery, isWritingAsk, needsOwnSearch, ownQuestion, personQuestion, quickPlan, quoteFollowQuery, screenSubject, scrubLeak, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
-import { calculationAnswer, isCalculationAsk } from './calculate';
-import { comparisonRepair, comparisonTitle } from './compareAnswer';
+import { anchoredFollowup, asksToCompare, comparisonFollow, cryptographyHint, faithfulQuery, followSearchQuery, foreignName, isWritingAsk, lockChainQuery, needsOwnSearch, ownQuestion, personQuestion, quickPlan, quoteFollowQuery, sameSubjectQuery, screenSubject, scrubLeak, sourcesCover, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
+import { calculationAnswer, isCalculationAsk, rateOnAmount } from './calculate';
+import { acceptProductPhoto, appendAskedFact, comparisonRepair, comparisonTitle, dropShownDenials, keepComparedProducts, mentionsSide, missingSideNode, nameForms, placeSidePhotos, restoreSideTiles, stickerPrice } from './compareAnswer';
+import { cardGaps, citeForGap, gapSearchQuery, settleGap, type PieceGap } from './gapFill';
+import { unblendObjects } from './objectFacts';
 import { withFinishedSentences } from './polish';
 import { queryWithPlace, readerPlace, settleReadings } from './readings';
 import { isKeepOnly, keptBody } from './refine';
@@ -72,9 +82,13 @@ import { finishQuality, hasOfficialHit, hostTier, officialProbe, preferSources, 
 import { isOwnSite, orcidSite, pickOwnSite, probeOwnSite, RESEARCH_ASK, withOwnSite } from './ownSite';
 import { quoteAsk } from '../shared/quoteAsk';
 import { dropClinicPages, dropStrayDois, isPaperAsk, leadPreprints, scholarlyResults, withScholarly } from './scholarly';
+import { variantChoices, variantConflict } from './productModel';
 import { recallClips, wantsVideo, withProductClips, withVideos } from './videoSearch';
 import { guessFreshness, preferFresh, staleComplaint, stricter } from './freshness';
 import { isQuoteRow, liveQuote, quoteRow, tickerNode } from './liveQuote';
+import { cleanSideName } from '../shared/objects';
+import { cardCitesName, citedNames, nameSeekingQuery, namedListNode, wantsNamedList } from './namedList';
+import { addedComparison, followSearchPlan, judgeSources, judgeTurn } from './turnJudge';
 import { findTicker } from '../shared/tickerNotes';
 import { splitPeople } from './peopleSplit';
 import { personSteer, pronounFollow, roleFollow, threadPerson, topicOnly, withoutChosen } from './personSteer';
@@ -128,6 +142,8 @@ interface DesignArgs {
   search: SearchResponse;
   simple?: boolean;
   followup?: FollowupContext;
+  /** A follow-up search. A precise bio fact the new question does not ask for is not copied onto the card. */
+  fromFollowup?: boolean;
   context?: string;
   think?: boolean;
   intent?: string;
@@ -149,6 +165,9 @@ interface DesignArgs {
   hopUrls?: string[];
   /** Source number of the person's own website, linked from the profile. */
   website?: number;
+  /** Products already compared. A follow-up that adds one keeps their price and picture. */
+  priorBody?: CardNode[];
+  priorImages?: ImageResult[];
 }
 
 interface EarlyBrief {
@@ -186,9 +205,11 @@ function rowImagePlan(req: DesignArgs, env: Env, scope: AskScope): RowImagePlan 
 /** Card types that show pictures. Only these may spend the extra Serper /images call. */
 const PICTURE_PATTERNS = new Set(['visual', 'profile', 'spotlight', 'ranked', 'briefing']);
 
-function imageBoost(pattern: string, search: SearchResponse, env: Env, scope: AskScope, query: string): Promise<ImageResult[]> | undefined {
+function imageBoost(pattern: string, search: SearchResponse, env: Env, scope: AskScope, query: string, again = false): Promise<ImageResult[]> | undefined {
   if (!PICTURE_PATTERNS.has(pattern) || scope.ledger.force) return undefined;
-  if (search.images.some((i) => i.license === 'source') || !search.results.length) return undefined;
+  if (!search.results.length) return undefined;
+  // A resolved person gets a new portrait search. Pictures already on the original results are not that search.
+  if (!again && search.images.some((i) => i.license === 'source')) return undefined;
   // Only when Serper served this search. Cap reached (or Serper skipped/dead): no /images call and no other image provider; og:image or nothing.
   if (!search.engines.some((e) => e.name === 'serper' && e.ok)) return undefined;
   // T443: card-level pictures must mention the subject; a wrong picture is worse than none.
@@ -256,16 +277,18 @@ function noteSpelling(send: Send, typed: string, rows: readonly { title?: string
 /** Words already on the card that tell this person from someone else with the same name. */
 function personCue(card: AnswerCard | undefined): string {
   if (!card) return '';
-  const bits: string[] = [];
-  if (card.subtitle) bits.push(card.subtitle);
-  const walk = (nodes: readonly CardNode[]): void => {
+  if (card.subtitle?.trim()) return card.subtitle.replace(/\s+/g, ' ').trim().slice(0, 80);
+  const walk = (nodes: readonly CardNode[]): string => {
     for (const node of nodes) {
-      if (node.type === 'profile' && node.subtitle) bits.push(node.subtitle);
-      if ('children' in node && Array.isArray(node.children)) walk(node.children);
+      if (node.type === 'profile' && node.subtitle?.trim()) return node.subtitle.replace(/\s+/g, ' ').trim().slice(0, 80);
+      if ('children' in node && Array.isArray(node.children)) {
+        const nested = walk(node.children);
+        if (nested) return nested;
+      }
     }
+    return '';
   };
-  walk(card.body);
-  return bits.join(' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+  return walk(card.body);
 }
 
 type OfficialSearch = Awaited<ReturnType<typeof searchWithLate>>;
@@ -391,12 +414,26 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   const briefing = !newSearch || chat || isPaperAsk(req.query) ? undefined
     : req.earlyBrief ? req.earlyBrief.then((early) => early ? remapBrief(early.brief, early.judged, req.search.results) : undefined)
     : briefSources({ query: req.query, intent: req.intent, context: req.context, results: req.search.results, isLive: isQuoteRow, shown: req.ticker ? TICKER_SHOWN : undefined }, env);
+  // A fee, tax, spec, or quote whose kept page has a thin snippet is read with DeepSeek
+  // while the usual page budget runs. This does not start during the Serper fan-out.
+  const asked = req.followup?.question ?? req.query;
+  const thinOpts = { mode: req.followup?.mode, pattern: req.pattern, quote: isQuoteRow(req.search.results[0]) };
+  const thin = thinPlan(asked, req.search.results, thinOpts);
+  const skip = new Set(thin.fetches.map((url) => normalizeUrl(url)));
+  if (thin.fetches.length || thin.search) console.log(JSON.stringify({ zo: 'deepseek', plan: thin.kind, fetch: thin.fetches.length, search: thin.search }));
+  const citeFetch: Promise<FetchedPage[]> = thin.fetches.length && thin.kind
+    ? fetchCitePages(env, scope, thin.kind, thin.fetches, undefined, asked).catch(() => [])
+    : Promise.resolve([]);
   // Page reads overlap the source check. A rescue throws those pages away and reads the new rows.
-  const reading = collectPages(req.search.results, env, budget, late, scope, req.query);
+  const reading = collectPages(req.search.results, env, { ...budget, skip }, late, scope, req.query);
   const briefWait = skipReads && briefing
     ? Promise.race([briefing, new Promise<SourceBrief | undefined>((resolve) => setTimeout(() => resolve(undefined), 400))])
     : briefing;
-  let brief = await briefWait?.finally(() => mark(scope.ledger, 'brief'));
+  // Sources are already in. The layout does not wait on a source check that has not finished.
+  let brief = await Promise.race([
+    briefWait ?? Promise.resolve(undefined),
+    new Promise<SourceBrief | undefined>((resolve) => setTimeout(() => resolve(undefined), 0)),
+  ]).finally(() => mark(scope.ledger, 'brief'));
   if (brief) console.log(JSON.stringify({ zo: 'brief', use: brief.use.length, stale: brief.stale, offTopic: brief.offTopic, conflicts: brief.conflicts.length, missing: !!brief.missing }));
   let rescued = false;
   let reread = false;
@@ -432,9 +469,47 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       }
     }
   }
-  const pages = reread ? await collectPages(req.search.results, env, budget, undefined, scope, req.query) : await reading;
+  // Serper has finished, including a rescue. One DeepSeek search only if the fact is still missing
+  // and no kept page was the one to read. A fetch of a page Serper already found stays a fetch.
+  const serperCorpus = req.search.results.map((row) => `${row.title} ${row.snippet} ${row.content ?? ''}`).join('\n');
+  const priorContent = new Set(req.search.results.flatMap((row) => (row.content ? [normalizeUrl(row.url)] : [])));
+  let gapFill: ReturnType<typeof fillFromSearch> | undefined;
+  let citeWait = citeFetch;
+  // A fetch already started stays the only fetch. Search runs only when nothing was fetched.
+  if (thin.kind && !thin.fetches.length && (rescued || reread || thin.search)) {
+    const again = thinPlan(asked, req.search.results, thinOpts);
+    if (again.fetches.length && again.kind) citeWait = fetchCitePages(env, scope, again.kind, again.fetches, undefined, asked).catch(() => []);
+    else if (again.search && again.kind) gapFill = fillFromSearch(asked, req.search, env, scope, again.kind, again.site).catch(() => undefined);
+  }
+  const pageBudgetNow = { ...budget, skip };
+  const pagesReady = reread ? collectPages(req.search.results, env, pageBudgetNow, undefined, scope, req.query) : reading;
+  const [pagesRaw, fetched, filled] = await Promise.all([
+    wantsNamedQuote(req.query) ? pagesReady : Promise.race([pagesReady, new Promise<Awaited<typeof pagesReady>>((resolve) => setTimeout(() => resolve([]), 0))]),
+    citeWait,
+    gapFill ?? Promise.resolve(undefined),
+  ]);
+  let pages = pagesRaw;
+  if (filled?.search) {
+    if (filled.shifted && brief) brief = shiftBrief(brief, filled.shifted.after, filled.shifted.by);
+    if (filled.shifted) pages = renumberPages(pages, filled.shifted.after, filled.shifted.by);
+    req = { ...req, search: filled.search };
+    if (filled.added) {
+      send('peek', filled.search.results.slice(0, PEEK_ROWS).map(({ title, url, domain, date }) => ({ title, url, domain, date })));
+      send('search', req.search);
+    }
+  }
+  if (fetched.length) {
+    const applied = applyFetched(req.search, pages, fetched);
+    req = { ...req, search: applied.search };
+    pages = applied.pages;
+  }
+  pages = pagesFromContent(req.search.results, pages);
+  const addedText = [...fetched.map((page) => page.text), ...(filled?.search ? [filled.search.results.map((row) => row.content ?? '').join('\n')] : [])].join('\n');
+  if (brief?.missing && thin.kind && (snippetSupports(thin.kind, serperCorpus) || (addedText.trim() && snippetSupports(thin.kind, addedText)))) {
+    brief = { ...brief, missing: undefined };
+  }
   mark(scope.ledger, 'pages');
-  const fresh = pages.filter((p) => !req.search.results[p.n - 1]?.content);
+  const fresh = pages.filter((page) => !priorContent.has(normalizeUrl(page.url)));
   if (fresh.length) send('pages', fresh.map(({ n, url, text }) => ({ n, url, text })));
 
   // Page preview images and images from engines that answered late are often the most relevant ones.
@@ -484,9 +559,33 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   const publishReadings = () => {
     const indexes = [...shown.keys()].sort((a, b) => a - b);
     const settled = settleReadings(indexes.map((index) => shown.get(index)), head, questionOf());
-    const quality = finishQuality(questionOf(), settled.nodes);
+    const recovered = [
+      ...settled.nodes.map((node) => (node ? JSON.stringify(node) : '')),
+      ...designReq.pages.map((page) => page.text),
+      ...designReq.search.results.map((row) => `${row.title ?? ''} ${row.snippet ?? ''}`),
+    ].join('\n');
+    const question = questionOf();
+    const paperSources = designReq.search.results.map((row, index) => {
+      const page = designReq.pages.find((item) => item.n === index + 1);
+      return { title: row.title, url: row.url, domain: row.domain, text: `${row.title ?? ''} ${row.snippet ?? ''} ${row.content ?? ''} ${page?.text ?? ''}` };
+    });
+    const bioSources: BioSource[] = designReq.search.results.map((row, index) => {
+      const page = designReq.pages.find((item) => item.n === index + 1);
+      const stated = `${row.title ?? ''} ${row.snippet ?? ''}`.trim();
+      return { title: row.title, url: row.url, domain: row.domain, text: page ? `${row.title ?? ''}\n${page.text}` : `${stated} ${row.content ?? ''}`, ...(page ? { stated } : {}) };
+    });
+    const knowledge = designReq.search.knowledge;
+    if (knowledge?.extract) bioSources.unshift({ title: knowledge.title, url: knowledge.url, domain: 'wikipedia.org', text: `${knowledge.title}\n${knowledge.extract}` });
+    const agreed = dropDisputedBio(
+      fillPaperCard(question, keepAnswerBody(question, restoreKeptPapers(question, presentNamedCharges(question, finishQuality(question, settled.nodes, head?.subtitle ?? ''), claimSources(designReq.search.results, designReq.pages)), designReq.followup?.baseCard?.body, claimSources(designReq.search.results, designReq.pages)), recovered), paperSources),
+      bioSources,
+      { person: designReq.person?.name, question, followup: !!designReq.followup || !!designReq.fromFollowup },
+    );
+    const quality = agreed;
     if (head) {
       if (settled.head) head = { ...head, title: settled.head.title, subtitle: settled.head.subtitle };
+      const title = answerTitle(questionOf(), head.title, quality.map((node) => (node ? JSON.stringify(node) : '')).join('\n'));
+      if (title !== head.title) head = { ...head, title };
       const key = JSON.stringify(head);
       if (key !== sentHead) {
         sentHead = key;
@@ -506,7 +605,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     thinking: () => send('thinking', {}),
     layout: (regions) => send('layout', regions),
     head: (h) => {
-      const question = questionOf();
+      const question = compareSides(designReq.query).length >= 2 ? designReq.query : questionOf();
       const locked = designReq.person?.name || priorEntity(designReq.context)?.name;
       // A picked person is titled with their name even when the layout is not already a profile.
       // An ask about something of theirs ("Jensen Huang net worth") keeps that in the title.
@@ -524,6 +623,10 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       const keptNode = withoutRepeatedCallouts(node, priorNodes);
       if (!keptNode) return;
       node = keptNode;
+      if (designReq.priorBody?.length && compareSides(designReq.query).length >= 2) {
+        const named = keepComparedProducts(designReq.priorBody, new Map([[index, node]]), designReq.query, designReq.priorImages);
+        if (named?.[0]) node = named[0].node;
+      }
       if (node.type === 'actions') {
         const clean = withoutLeakActions(node);
         if (!clean) return;
@@ -532,6 +635,10 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
         node = kept;
       }
       shown.set(index, node);
+      const denied = dropShownDenials(shown);
+      if (denied) {
+        for (const patch of denied) shown.set(patch.index, patch.node);
+      }
       const choices = choicesIn([node]);
       if (choices.length) {
         for (const [at, prior] of shown) {
@@ -569,23 +676,129 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   const arrived = pendingReview
     ? await Promise.race([
         pendingReview.then((review) => ({ ready: true as const, review })),
-        Promise.resolve({ ready: false as const, review: undefined }),
+        new Promise<{ ready: false; review: undefined }>((resolve) => setTimeout(() => resolve({ ready: false, review: undefined }), 1200)),
       ])
     : { ready: true as const, review: undefined };
-  const settleComparison = () => {
-    if (designReq.pattern !== 'compare') return;
-    const question = designReq.followup?.question ?? designReq.query;
-    const title = comparisonTitle(question, head?.title ?? question);
-    if (head && title !== head.title) {
-      head = { ...head, title };
-      send('head', head);
-    }
-    const patches = comparisonRepair(question, designReq.search, shown);
+  const separateObjects = () => {
+    const patches = unblendObjects(shown, designReq.priorBody ?? [], designReq.search.results);
     if (!patches) return;
     for (const patch of patches) {
       shown.set(patch.index, patch.node);
       send('node', { index: patch.index, node: patch.node });
     }
+  };
+  const searchGaps = async () => {
+    const question = designReq.followup?.question ?? designReq.query;
+    // Finished cells stay on screen. A placeholder is the wait, before those cells exist.
+    const gaps = cardGaps(shown).filter((gap) => gap.missing);
+    if (!gaps.length) return;
+    const originals = new Map<number, CardNode>();
+    for (const gap of gaps) {
+      const node = shown.get(gap.index);
+      if (node && !originals.has(gap.index)) originals.set(gap.index, node);
+    }
+    const query = gapSearchQuery(question, gaps);
+    try {
+      const found = await Promise.race([
+        searchWithLate({ q: query, freshness: 'any', count: 6, lite: true }, env, scope),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
+      ]);
+      const rows = found?.response.results ?? [];
+      if (!rows.length) return;
+      const have = new Set(designReq.search.results.map((row) => row.url));
+      const add = rows.filter((row) => row.url && !have.has(row.url)).slice(0, 4);
+      if (add.length) {
+        send('search', { ...designReq.search, results: [...designReq.search.results, ...add] });
+        send('peek', add.slice(0, 4).map(({ title, url, domain, date }) => ({ title, url, domain, date })));
+      }
+      const base = designReq.search.results.length;
+      const byIndex = new Map<number, PieceGap[]>();
+      for (const gap of gaps) {
+        const list = byIndex.get(gap.index) ?? [];
+        list.push(gap);
+        byIndex.set(gap.index, list);
+      }
+      for (const [index, pieces] of byIndex) {
+        const original = originals.get(index);
+        if (!original) continue;
+        let next = original;
+        for (const gap of pieces) {
+          const cited = add.length ? citeForGap(gap, add) : undefined;
+          const text = cited?.replace(/\[(\d+)\]$/, (_match, n: string) => `[${base + Number(n)}]`);
+          next = settleGap(next, gap, text);
+        }
+        if (JSON.stringify(next) === JSON.stringify(original)) continue;
+        shown.set(index, next);
+        send('node', { index, node: next });
+      }
+    } catch (err) {
+      console.log(JSON.stringify({ zo: 'gap-search', error: err instanceof Error ? err.message : 'failed' }));
+    }
+  };
+  const restoreKeptProducts = () => {
+    if (!designReq.priorBody?.length) return;
+    const question = compareSides(designReq.query).length >= 2 ? designReq.query : (designReq.followup?.question ?? designReq.query);
+    const kept = keepComparedProducts(designReq.priorBody, shown, question, designReq.priorImages);
+    if (!kept) return;
+    for (const patch of kept) {
+      shown.set(patch.index, patch.node);
+      send('node', { index: patch.index, node: patch.node });
+    }
+  };
+  const settleComparison = () => {
+    const question = compareSides(designReq.query).length >= 2 ? designReq.query : (designReq.followup?.question ?? designReq.query);
+    if (designReq.pattern === 'compare') {
+      const title = comparisonTitle(question, head?.title ?? question);
+      if (head && title !== head.title) {
+        head = { ...head, title };
+        send('head', head);
+      }
+      const withPages = {
+        ...designReq.search,
+        results: designReq.search.results.map((row, index) => {
+          const page = designReq.pages.find((item) => item.n === index + 1);
+          return page?.text && !row.content ? { ...row, content: page.text.slice(0, 4000) } : row;
+        }),
+      };
+      const patches = comparisonRepair(question, withPages, shown);
+      if (patches) {
+        for (const patch of patches) {
+          shown.set(patch.index, patch.node);
+          send('node', { index: patch.index, node: patch.node });
+        }
+      }
+    }
+    restoreKeptProducts();
+    if (designReq.priorBody?.length && compareSides(question).length >= 2) {
+      const photos = restoreSideTiles(designReq.priorBody, shown, question);
+      if (photos) {
+        for (const patch of photos) {
+          shown.set(patch.index, patch.node);
+          send('node', { index: patch.index, node: patch.node });
+        }
+      }
+    }
+    if (designReq.followup?.question && compareSides(designReq.query).length >= 2) {
+      const asked = appendAskedFact(designReq.followup.question, designReq.query, shown, designReq.search);
+      if (asked) {
+        for (const patch of asked) {
+          shown.set(patch.index, patch.node);
+          send('node', { index: patch.index, node: patch.node });
+        }
+      }
+    }
+    const denied = dropShownDenials(shown);
+    if (denied) {
+      for (const patch of denied) {
+        shown.set(patch.index, patch.node);
+        send('node', { index: patch.index, node: patch.node });
+      }
+    }
+    const extra = missingSideNode(question, [...shown.values()], designReq.search);
+    if (!extra) return;
+    const index = Math.max(-1, ...shown.keys()) + 1;
+    shown.set(index, extra);
+    send('node', { index, node: extra });
   };
   const memberSources = () => req.search.results.map((row, i) => {
     const page = pages.find((item) => item.n === i + 1);
@@ -666,11 +879,59 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       send('node', { index, node });
     });
   };
+  const alignRates = () => {
+    const asked = designReq.followup?.question ?? designReq.query;
+    const sources = claimSources(designReq.search.results, pages);
+    for (const [index, node] of [...shown.entries()]) {
+      const next = agreeOfficialRate(node, asked, sources);
+      if (next === node) continue;
+      shown.set(index, next);
+      send('node', { index, node: next });
+    }
+  };
+  // A review fix or a gap search sends its own node after the collapsed card. Publish the
+  // fee rows again so that send is not the one left on screen.
+  const republishFees = () => {
+    const question = questionOf();
+    const indexes = [...shown.keys()].sort((a, b) => a - b);
+    const sources = claimSources(designReq.search.results, designReq.pages);
+    const next = presentNamedCharges(question, oneNamedCharge(question, indexes.map((index) => shown.get(index))), sources);
+    indexes.forEach((index, i) => {
+      const node = next[i] ?? { type: 'stack' as const, children: [] };
+      shown.set(index, node);
+      const key = JSON.stringify(node);
+      if (sentNode.get(index) === key) return;
+      sentNode.set(index, key);
+      send('node', { index, node });
+    });
+  };
   if (arrived.ready && arrived.review) applyReview(send, designReq, shown, arrived.review, started);
   settleComparison();
   settleFacts();
   settleMembers();
   publishReadings();
+  alignRates();
+  restoreKeptProducts();
+  const askedNames = designReq.followup?.question && wantsNamedList(designReq.followup.question)
+    ? designReq.followup.question
+    : designReq.query;
+  if (wantsNamedList(askedNames) && !cardCitesName(askedNames, [...shown.values()], designReq.search.results)) {
+    const node = namedListNode(askedNames, designReq.search.results);
+    const content = [...shown.entries()].filter(([, item]) => item.type !== 'citations' && item.type !== 'actions' && item.type !== 'ticker');
+    const [first, ...rest] = content;
+    if (first) {
+      shown.set(first[0], node);
+      send('node', { index: first[0], node });
+      const empty = { type: 'stack' as const, children: [] as CardNode[] };
+      for (const [index] of rest) {
+        shown.set(index, empty);
+        send('node', { index, node: empty });
+      }
+    }
+  }
+  if (!chat) await searchGaps();
+  separateObjects();
+  republishFees();
   send('done', { ...summary, pagesRead: pages.length, ms: Date.now() - started });
   if (pendingReview && !arrived.ready) {
     const review = await pendingReview;
@@ -679,9 +940,44 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     settleFacts();
     settleMembers();
     publishReadings();
+    alignRates();
+    restoreKeptProducts();
+    separateObjects();
+    const question = compareSides(designReq.query).length >= 2 ? designReq.query : (designReq.followup?.question ?? designReq.query);
+    const photos = placeSidePhotos(question, shown, designReq.search.images);
+    if (photos) {
+      for (const patch of photos) {
+        shown.set(patch.index, patch.node);
+        send('node', { index: patch.index, node: patch.node });
+      }
+    }
+    republishFees();
     mark(scope.ledger, 'reviewed');
   } else if (pendingReview) {
     mark(scope.ledger, 'reviewed');
+  }
+  if (!chat) {
+    try {
+      const patch = await reviewComponents({
+        query: designReq.followup?.question ?? designReq.query,
+        results: designReq.search.results,
+        pages: designReq.pages,
+        head,
+        nodes: shown,
+      }, env, async (query) => {
+        const found = await Promise.race([
+          searchWithLate({ q: query, freshness: 'any', count: 4, lite: true }, env, scope),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
+        ]);
+        return found?.response.results ?? [];
+      });
+      if (patch) {
+        shown.set(patch.index, patch.node);
+        send('node', { index: patch.index, node: patch.node });
+      }
+    } catch (err) {
+      console.log(JSON.stringify({ zo: 'precision-review', failed: String(err).slice(0, 120) }));
+    }
   }
 }
 
@@ -692,9 +988,12 @@ function applyReview(send: Send, req: DesignRequest, shown: Map<number, CardNode
   let fixed = 0;
   for (const fix of review.fixes) {
     if (shown.get(fix.index)?.type === 'ticker') continue;
+    const before = shown.get(fix.index);
     const gated = gateNode(fix.node, req);
     if (!gated) continue;
-    const node = keepPictures(shown.get(fix.index), gated) as CardNode;
+    const accepted = keepShownComponent(before, gated);
+    if (before && accepted === before) continue;
+    const node = keepPictures(before, accepted) as CardNode;
     shown.set(fix.index, node);
     send('node', { index: fix.index, node });
     fixed++;
@@ -705,7 +1004,12 @@ function applyReview(send: Send, req: DesignRequest, shown: Map<number, CardNode
   const isCallout = (node: CardNode | undefined) => node?.type === 'callout' || (node?.type === 'stack' && node.children.some((child) => child.type === 'callout'));
   const leadWarns = isCallout(lead);
   if (warning && leadIndex !== undefined && !leadWarns) {
-    send('node', { index: leadIndex, node: { type: 'stack', direction: 'col', gap: 'sm', children: [warning, shown.get(leadIndex)!] } });
+    const lead = shown.get(leadIndex)!;
+    const wrapped: CardNode = { type: 'stack', direction: 'col', gap: 'sm', children: [warning, lead] };
+    if (keepShownComponent(lead, wrapped) !== lead) {
+      shown.set(leadIndex, wrapped);
+      send('node', { index: leadIndex, node: wrapped });
+    }
   }
   console.log(JSON.stringify({ zo: 'review', ok: review.ok, problems: review.problems, fixed, followups: !!review.followups, warned: !!warning, ms: Date.now() - at, total: Date.now() - started }));
 }
@@ -715,7 +1019,14 @@ function applyReview(send: Send, req: DesignRequest, shown: Map<number, CardNode
  * inside the three-call cap (two rewrites leave no room for Wikipedia).
  * Rewritten follow-ups already say what they mean, so they skip the understanding step.
  */
-async function searchAndDesign(send: Send, env: Env, query: string, freshness: Freshness, context: string | undefined, started: number, scope: AskScope, rewritten = false, seedRows?: SearchResult[], steer?: { avoid: Set<string>; rejected: string }, keepTicker?: CardNode) {
+async function searchAndDesign(send: Send, env: Env, query: string, freshness: Freshness, context: string | undefined, started: number, scope: AskScope, rewritten = false, seedRows?: SearchResult[], steer?: { avoid: Set<string>; rejected: string }, keepTicker?: CardNode, priorBody?: CardNode[], priorImages?: ImageResult[], fanout: string[] = [], followQuestion = '') {
+  const unglued = withoutGluedPerson(query);
+  if (unglued !== query.trim()) query = unglued;
+  const extra = fanout.map((item) => item.trim()).filter((item) => item && item.toLowerCase() !== query.toLowerCase());
+  const sideList = compareSideQueries(query);
+  const shown = [...sideList, ...extra].filter((item, index, all) => all.findIndex((q) => q.toLowerCase() === item.toLowerCase()) === index);
+  // The search the card is about, shown before its sources arrive. A comparison lists each product.
+  send('intent', { intent: query, queries: shown.length ? shown : [query] });
   const located = queryWithPlace(query, scope.place);
   if (located !== query) {
     send('rewrite', { query: located });
@@ -740,11 +1051,16 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   let intentNow: string | undefined;
   void understood.then((x) => { intentNow = x?.intent; });
   let earlyBrief: Promise<EarlyBrief | undefined> | undefined;
+  let sourceJudge: Promise<Awaited<ReturnType<typeof judgeSources>>> | undefined;
   const onLiteral = (hits: WebHit[]) => {
     if (earlyBrief) return;
     // A first look at what the search found, shown while the rest of the search and the layout finish.
     const kept = preferSources(query, gateResults(query, hits.map(webRow)).kept);
     send('peek', kept.slice(0, PEEK_ROWS).map(({ title, url, domain, date }) => ({ title, url, domain, date })));
+    if (!paper && !sourceJudge) {
+      const snippets = kept.slice(0, 6).map((row) => `${row.title} ${row.snippet ?? ''}`).join('\n');
+      sourceJudge = judgeSources(env, query, snippets);
+    }
     if (paper) return;
     earlyBrief = quoting.then(async (quote) => {
       const rows = [...(quote ? [quoteRow(quote)] : []), ...kept].slice(0, BRIEF_ROWS);
@@ -757,9 +1073,13 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   scope.ledger.route = route;
   // Fact hops take the rewrite slots first. A two-fact question spends both, even on the quick route.
   const hopList = paper ? [] : hopQueries(query);
+  // Both forms of a workplace ask ("Tim at X", "Timothy at X") have to run, or a second person
+  // who only shows up under one of them never reaches the picker.
+  const places = workplaceQueries(query);
+  const extraWait = hopList.length || places.length ? 1800 : undefined;
   const withHops = (extras: string[]) => {
-    const room = Math.max(route === 'deep' ? 2 : 1, Math.min(hopList.length, 2));
-    return moreQueries(query, [...hopList, ...extras]).slice(0, room);
+    const room = extraSearchRoom(route, hopList.length, places.length, compareSides(query).length);
+    return moreQueries(query, [...hopList, ...places, ...extras], room);
   };
   const deep = route === 'deep';
   let found: Awaited<ReturnType<typeof searchWithLate>>;
@@ -772,7 +1092,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   const statLine = playerStatRow(query);
   // Searches that need no model ("$rdw" → "RDW stock news today") lead the rewrites.
   const instant = [...tickerQueries(query), ...formalNameQueries(query), ...workplaceQueries(query)];
-  const sides = compareSideQueries(query);
+  const sides = sideList;
   if (!rewritten) {
     // SPD2 (t457): every ask searches its literal words at once; the understood rewrites join the same
     // engine when the intent read lands (~1 s), instead of the whole search waiting for it. A time-sensitive
@@ -780,66 +1100,67 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     const literalFresh = freshness === 'any' ? guessFreshness(query) : freshness;
     const later = understood.then((x) => {
       if (x) send('intent', { intent: x.intent, queries: x.queries });
-      return { more: withHops([...sides, ...instant, ...extraQueries(query, x)]), freshness: freshness === 'any' ? x?.freshness ?? literalFresh : freshness };
+      const extras = extraQueries(query, x).filter((item) => !scope.bound || !foreignName(item, `${query}\n${scope.bound}`));
+      return { more: withHops([...extra, ...sides, ...instant, ...extras]), freshness: freshness === 'any' ? x?.freshness ?? literalFresh : freshness };
     });
     // A price ask is answered by the live quote; the rewrites only add the news around it.
-    found = await searchWithLate({ q: queriesForAsk(query, []), more: withHops([...sides, ...instant]), later, freshness: literalFresh, count: 20, waitExtras: deep && !paper, extrasCutMs: quoteAsk(query) ? QUOTE_EXTRAS_MS : hopList.length ? 1500 : undefined, onLiteral }, env, scope);
+    found = await searchWithLate({ q: queriesForAsk(query, []), more: withHops([...extra, ...sides, ...instant]), later, freshness: literalFresh, count: 20, waitExtras: deep && !paper, extrasCutMs: quoteAsk(query) ? QUOTE_EXTRAS_MS : extraWait, onLiteral }, env, scope);
     mark(scope.ledger, 'found');
     u = await understood;
   } else {
     u = undefined;
     // Literal question first. Planner rewrites are the later calls, still inside the cap.
     const q = queriesForAsk(query, instant);
-    const more = withHops([...sides, ...instant]);
-    found = await searchWithLate({ q, more, freshness: freshness === 'any' ? guessFreshness(query) : freshness, count: 20, extrasCutMs: hopList.length ? 1500 : undefined, onLiteral }, env, scope);
+    const more = withHops([...extra, ...sides, ...instant]);
+    found = await searchWithLate({ q, more, freshness: freshness === 'any' ? guessFreshness(query) : freshness, count: 20, extrasCutMs: extraWait, onLiteral }, env, scope);
   }
   let results = applyPickGate(query, applyRelevance(query, { ...found.response, query }, scope.ledger));
   // "AI news today" must not lead with last week's launch: past-window rows drop once enough current ones remain.
   const span = freshness !== 'any' ? freshness : stricter(guessFreshness(query), u?.freshness === 'day' || u?.freshness === 'week' ? u.freshness : 'any');
   results = { ...results, results: preferFresh(results.results, span) };
   if (heuristicPattern(query) === 'briefing') results = { ...results, results: sinkFormatWords(query, u?.queries ?? [], results.results) };
-  const scholar = await scholarly;
+  // A paper ask needs the catalog. Anything else uses it only when it has already arrived.
+  const scholar = isPaperAsk(query) ? await scholarly : await ifReady(scholarly, [] as Awaited<typeof scholarly>);
   if (scholar.length) results = { ...results, results: withScholarly(scholar, results.results) };
   results = { ...results, results: leadPreprints(query, results.results) };
   results = { ...results, results: dropClinicPages(query, dropStrayDois(query, results.results)) };
-  results = await attachOfficial(query, results, env, scope, officialEarly);
-  const clips = await videos;
-  if (clips.length) results = { ...results, results: wantsVideo(query) ? withVideos(clips, results.results) : withProductClips(clips, results.results) };
-  const quote = await quoting;
+  results = foldReadyOfficial(query, results, officialEarly);
+  const clips = await ifReady(videos, [] as Awaited<typeof videos>);
+  const onModel = clips.filter((clip) => !variantConflict(query, clip));
+  if (onModel.length) results = { ...results, results: wantsVideo(query) ? withVideos(onModel, results.results) : withProductClips(onModel, results.results) };
+  const quote = quoteAsk(query) ? await quoting : await ifReady(quoting, undefined);
   const live = quote ? quoteRow(quote) : undefined;
   if (live) {
     results = { ...results, results: [live, ...results.results.filter((r) => !isQuoteRow(r))] };
     console.log(JSON.stringify({ zo: 'quote', symbol: quote!.symbol, source: quote!.source, ms: Date.now() - started }));
   }
-  // A question that needs another fact keeps searching until that fact is in hand, or the time is gone.
+  // The model says whether these snippets are enough. One more search when they are not.
+  // It does not wait out a second round: the call started with the first results.
   const hopUrls: string[] = [];
-  if (!paper && results.results.length) {
-    // A parallel hop that the time cut dropped is still missing, so it can be asked again here.
-    results = { ...results, results: leadMemberRows(query, results.results) };
-    const asked: string[] = [];
-    let left = 2;
-    while (left > 0 && Date.now() - started < 5200) {
-      const corpus = results.results.slice(0, 12).map((row) => `${row.title} ${row.snippet ?? ''}`).join('\n');
-      const beforeLead = factAnswer(query, corpus)?.lead;
-      const alt = nextHop(query, corpus, { hosts: results.results.map((row) => row.domain), asked });
-      if (!alt) break;
-      asked.push(alt.toLowerCase());
-      left -= 1;
+  if (!paper && results.results.length && (sourceJudge || wantsNamedList(query))) {
+    const judged = sourceJudge
+      ? await Promise.race([
+          sourceJudge,
+          new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), wantsNamedList(query) ? 1200 : 400)),
+        ])
+      : undefined;
+    const needNames = wantsNamedList(query) && citedNames(query, results.results.map((row) => `${row.title ?? ''} ${row.snippet ?? ''}`)).length === 0;
+    const againQuery = needNames
+      ? nameSeekingQuery(query, judged && !judged.enough ? judged.query : undefined)
+      : judged && !judged.enough ? judged.query : '';
+    if (againQuery && againQuery.toLowerCase() !== query.trim().toLowerCase()) {
       const room = SEARCH_CALL_CAP + (scope.ledger.bonus ?? 0) - searchCalls(scope.ledger);
       if (room < 1) scope.ledger.bonus = (scope.ledger.bonus ?? 0) + (1 - room);
-      const again = await searchWithLate({ q: alt, freshness: guessFreshness(query), count: 8, lite: true }, env, scope);
-      const gated = applyRelevance(alt, { ...again.response, query: alt }, scope.ledger);
+      const again = await searchWithLate({ q: againQuery, freshness: guessFreshness(query), count: 8, lite: true }, env, scope);
+      const gated = applyRelevance(againQuery, { ...again.response, query: againQuery }, scope.ledger);
       const add = gated.results.filter((row) => !results.results.some((have) => have.url === row.url)).slice(0, 6);
-      if (!add.length) break;
-      const promoted = [...add, ...results.results];
-      const afterLead = factAnswer(query, promoted.slice(0, 12).map((row) => `${row.title} ${row.snippet ?? ''}`).join('\n'))?.lead;
-      // Pages that supplied the missing fact lead, so the card is read from them.
-      for (const row of add) hopUrls.push(row.url);
-      // The new pages lead so they are the ones read. A later rescue must not throw them away.
-      results = { ...results, results: leadMemberRows(query, [...add, ...results.results], add.map((row) => row.url)) };
-      send('peek', add.slice(0, PEEK_ROWS).map(({ title, url, domain, date }) => ({ title, url, domain, date })));
-      send('search', results);
-      console.log(JSON.stringify({ zo: 'hop', alt, added: add.length, domains: add.map((row) => row.domain), lead: afterLead ?? beforeLead }));
+      if (add.length) {
+        for (const row of add) hopUrls.push(row.url);
+        results = { ...results, results: leadMemberRows(query, [...add, ...results.results], add.map((row) => row.url)) };
+        send('peek', add.slice(0, PEEK_ROWS).map(({ title, url, domain, date }) => ({ title, url, domain, date })));
+        send('search', results);
+        console.log(JSON.stringify({ zo: 'judge-sources', query: againQuery, added: add.length, names: needNames }));
+      }
     }
   }
   let late: Promise<LateExtras> | undefined = found.late;
@@ -990,6 +1311,23 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
         recovered = 'seeds';
       }
     }
+    if (!results.results.length && seedRows?.length) {
+      const asked = query.match(/^(?:what|who)\s+(?:is|are)\s+(.+?)\s*\??$/i)?.[1]?.replace(/[?.!]+$/, '').trim() || query.trim();
+      const forms = nameForms(asked, seedRows.map((row) => `${row.title} ${row.snippet ?? ''}`).join('\n'))
+        .filter((form) => form.toLowerCase() !== asked.toLowerCase())
+        .slice(0, 2);
+      for (const form of forms) {
+        searchRoom(scope);
+        const again = await searchWithLate({ q: `${form} price`, freshness: 'any', count: 8, lite: true }, env, scope);
+        const kept = rowsAbout(asked, form, again.response.results);
+        if (!kept.length) continue;
+        results = { ...again.response, results: kept, knowledge: undefined };
+        late = again.late;
+        recovered = 'relaxed';
+        console.log(JSON.stringify({ zo: 'product-form', form, kept: kept.length }));
+        break;
+      }
+    }
     if (!results.results.length && hasLlm(env)) recovered = 'knowledge';
     console.log(JSON.stringify({ zo: 'empty-recovery', reason, providers: engineErrors(firstEngines), relaxed: tryRelaxed, entity: triedEntity, recovered }));
     if (!results.results.length) {
@@ -1099,6 +1437,17 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   const decision: EntityDecision = live ? { kind: 'skip' } : resolveEntity(query, results.results, { pattern: earlyPattern, prior });
   // Heuristic choices go out immediately. A model pass here waited out a stuck call
   // before the person could tap, which is the slow picker.
+  // A given name plus a workplace that no source names is not the company's card,
+  // and it is not another employee's roles. The question stays the words they typed.
+  if (!steer && decision.kind === 'skip' && !prior && nameWithWorkplace(query)) {
+    noteSpelling(send, query, results.results);
+    scope.ledger.entity = { kind: 'skip' };
+    send('search', results);
+    send('head', { title: query.trim(), icon: 'user' });
+    send('node', { index: 0, node: { type: 'text', text: 'No source names that person.', size: 'lg' } });
+    send('done', { engine: 'extractive', removed: 0, pagesRead: 0, ms: Date.now() - started });
+    return;
+  }
   if (!steer && decision.kind === 'choices') {
     noteSpelling(send, query, results.results);
     scope.ledger.entity = { kind: 'choices', choices: decision.choices.length };
@@ -1109,21 +1458,24 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   const plan = await planned;
   // A bare "who is" for someone without an encyclopedia page, whose namesakes the heuristic dropped:
   // the model may still see several people worth offering ("who is Ed Chu" → oncologist, EPA official, CEO).
-  const unsure = !steer && decision.kind === 'single' && !prior && decision.dropped.length >= 2 && WHO_ASK.test(query) && !distinguishingTerms(query).length
-    && !results.knowledge && !decision.kept.some((i) => /\.wikipedia\.org\//i.test(results.results[i]?.url ?? ''));
+  const mixed = !steer && decision.kind === 'single' && !prior && !distinguishingTerms(query).length && mixedIdentities(decision.entity.name, results.results);
+  const unsure = mixed || (!steer && decision.kind === 'single' && !prior && decision.dropped.length >= 2 && WHO_ASK.test(query) && !distinguishingTerms(query).length
+    && !results.knowledge && !decision.kept.some((i) => /\.wikipedia\.org\//i.test(results.results[i]?.url ?? '')));
   const split = rejectedSplit ?? (unsure ? await splitPeople(decision.entity.name, results.results, env) : undefined);
-  if (split) console.log(JSON.stringify({ zo: 'entity', kind: 'choices', choices: split.length, by: 'model-over-single' }));
-  if (split) {
-    scope.ledger.entity = { kind: 'choices', choices: split.length };
+  const distinct = split && (steer || !samePersonChoices(split, results.results)) ? split : undefined;
+  if (distinct) console.log(JSON.stringify({ zo: 'entity', kind: 'choices', choices: distinct.length, by: 'model-over-single' }));
+  if (distinct) {
+    scope.ledger.entity = { kind: 'choices', choices: distinct.length };
     send('search', results);
     // Choices ride on the done event (FE readChoices() in shared/choices.ts); never cached.
-    send('done', { engine: 'extractive', removed: 0, pagesRead: 0, ms: Date.now() - started, choices: publicChoices(split) });
+    send('done', { engine: 'extractive', removed: 0, pagesRead: 0, ms: Date.now() - started, choices: publicChoices(distinct) });
     return;
   }
   noteSpelling(send, query, results.results);
   let designContext = context;
   let entityHint: ((entity: string) => EntityHint | undefined) | undefined;
   let boostQuery = query;
+  let portraitAgain = false;
   let pattern = plan.pattern;
   let website: number | undefined;
   let person: DesignArgs['person'];
@@ -1150,7 +1502,19 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     }
     entityHint = entityHintFor(decision.entity, query);
     // Name + the asker's own context ("Ray Lee BlueFlame AI") pulls that person's photos, not a namesake's.
-    boostQuery = contextTerms(query).length ? query : decision.entity.name;
+    const askedPlace = contextTerms(query, decision.entity.name);
+    const workplace = portraitWorkplace(decision.entity.org, decision.entity.role, askedPlace);
+    const marks = portraitMarks(decision.entity.role, workplace);
+    portraitAgain = marks.length > 0;
+    if (portraitAgain) {
+      results = {
+        ...results,
+        images: results.images.filter((img) => personPage(decision.entity.name, img) && portraitMatches(marks, img)),
+      };
+    }
+    boostQuery = portraitAgain
+      ? portraitSearchQuery(decision.entity.name, decision.entity.org, decision.entity.role, askedPlace)
+      : (contextTerms(query).length ? query : decision.entity.name);
     // Person singles must be profile cards so image boost + row pictures run (Lead GATE: David Kim / BlueFlame had 0 imgs on answer pattern),
     // unless the ask is about something of theirs ("Jaylen Brown injuries"): that keeps the planned layout.
     if (pattern !== 'profile' && !askTopic(query, decision.entity.name)) {
@@ -1181,13 +1545,162 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
       }
     }
   }
+  if (compareSides(query).length < 2) {
+    const offered = variantChoices(query, found.response.results);
+    if (offered) {
+      send('head', { title: query });
+      send('done', { engine: 'extractive', removed: 0, pagesRead: 0, ms: Date.now() - started, choices: offered });
+      return;
+    }
+  }
+  if (compareSides(query).length >= 2 && pattern !== 'compare') {
+    pattern = 'compare';
+    send('plan', { ...plan, pattern, skeleton: skeletonCard(query, pattern) });
+  }
+  if (compareSides(query).length >= 2) results = await searchNamedSides(query, results, env, scope, send);
   results = { ...results, results: leadMemberRows(query, leadPreprints(query, results.results), hopUrls) };
-  const official = foldReadyOfficial(query, results, officialEarly);
+  const chargeAsk = /\b(?:tax|taxes|fee|fees|fine|fines|toll|tolls|duty|duties|surcharge|levy|levies)\b/i.test(query);
+  const official = chargeAsk
+    ? await attachOfficial(query, results, env, scope, officialEarly)
+    : foldReadyOfficial(query, results, officialEarly);
   if (official !== results) results = official;
   send('search', results);
-  const boost = imageBoost(pattern, results, env, scope, boostQuery);
+  const boost = imageBoost(pattern, results, env, scope, boostQuery, portraitAgain);
   const crypto = cryptographyHint(query, results.results);
-  await design(send, env, { query, pattern, depth: plan.depth, readPages: plan.readPages || deep || fromSeeds, search: results, context: [designContext, crypto].filter(Boolean).join('\n') || undefined, intent: u?.intent, deep, boost, entityHint, person, ticker: quote ? tickerNode(quote) : keepTicker, earlyBrief, website, allowRescue: !isPaperAsk(query), hopUrls }, started, scope, late);
+  await design(send, env, { query, pattern, depth: plan.depth, readPages: plan.readPages || deep || fromSeeds, search: results, context: [designContext, crypto].filter(Boolean).join('\n') || undefined, intent: u?.intent, deep, boost, entityHint, person, ticker: quote ? tickerNode(quote) : keepTicker, earlyBrief, website, allowRescue: !isPaperAsk(query), hopUrls, fromFollowup: rewritten && !isPersonAsk(query), followup: followQuestion ? { mode: 'answer', question: followQuestion } : undefined, priorBody, priorImages }, started, scope, late);
+}
+
+/** A preview URL the browser can actually show. A blocked page image is not a photo. */
+async function imageLoads(url: string): Promise<boolean> {
+  const headers = { 'User-Agent': BROWSER_UA, Accept: 'image/*' };
+  const picture = (res: Response) => res.ok && (res.headers.get('content-type') ?? '').toLowerCase().includes('image');
+  try {
+    const head = await fetch(url, { method: 'HEAD', headers, signal: AbortSignal.timeout(1200), redirect: 'follow' });
+    if (picture(head)) return true;
+    const type = (head.headers.get('content-type') ?? '').toLowerCase();
+    if (head.ok && type && !type.includes('image')) return false;
+  } catch {
+    // Some image hosts reject HEAD and still serve the file.
+  }
+  try {
+    const get = await fetch(url, { method: 'GET', headers, signal: AbortSignal.timeout(1800), redirect: 'follow' });
+    const ok = picture(get);
+    await get.body?.cancel().catch(() => undefined);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+function previewOf(side: string, row: SearchResult): ImageResult | undefined {
+  if (!row.url || !row.image || !/^https:\/\//i.test(row.image)) return undefined;
+  if (!acceptProductPhoto(side, row.title ?? '', `${row.snippet ?? ''} ${row.domain ?? ''}`)) return undefined;
+  return { url: row.url, thumb: row.image, title: row.title || side, source: row.domain || side, license: 'source' };
+}
+
+/** The preview picture on a page about this product. A promo or another product's page is skipped. */
+async function productPhoto(side: string, rows: readonly SearchResult[]): Promise<ImageResult | undefined> {
+  const matches = rows.filter((row) => row.url && acceptProductPhoto(side, row.title ?? '', `${row.snippet ?? ''} ${row.domain ?? ''}`)).slice(0, 5);
+  const found = (await Promise.all(matches.map(async (row) => {
+    const thumb = await ogImageOf(row.url, 1600);
+    if (!thumb) return previewOf(side, row);
+    const loaded = await imageLoads(thumb);
+    return { url: row.url, thumb, title: row.title || side, source: row.domain || side, license: 'source' as const, loaded };
+  }))).filter((image) => image !== undefined);
+  const ready = found.find((image) => !('loaded' in image) || image.loaded);
+  const pick = ready ?? found[0];
+  if (!pick) return undefined;
+  return { url: pick.url, thumb: pick.thumb, title: pick.title, source: pick.source, license: 'source' };
+}
+
+function searchRoom(scope: AskScope) {
+  const room = SEARCH_CALL_CAP + (scope.ledger.bonus ?? 0) - searchCalls(scope.ledger);
+  if (room < 1) scope.ledger.bonus = (scope.ledger.bonus ?? 0) + (1 - room);
+}
+
+/** Pages about this product, including a spaced name ("Glow Band") for a one-word side ("Glowband"). */
+function rowsAbout(side: string, form: string, rows: readonly SearchResult[]): SearchResult[] {
+  return rows.filter((row) => {
+    const text = `${row.title} ${row.snippet ?? ''}`;
+    return mentionsSide(side, text) || mentionsSide(form, text);
+  });
+}
+
+/** Each named product, including ones already on the card. A missing price is another search of that product. */
+async function searchNamedSides(query: string, results: SearchResponse, env: Env, scope: AskScope, send: Send): Promise<SearchResponse> {
+  const sides = compareSides(query).slice(0, 4);
+  if (sides.length < 2) return results;
+  const corpus = results.results.map((row) => `${row.title} ${row.snippet ?? ''}`).join('\n');
+  const found = await Promise.all(sides.map(async (side) => {
+    const forms = nameForms(side, `${corpus}\n${side}`);
+    let rows: SearchResult[] = [];
+    let images: ImageResult[] = [];
+    const havePrice = () => stickerPrice(side, { ...results, results: [...rows, ...results.results] });
+    const specForm = forms[0];
+    const specSearch = specForm
+      ? (async () => {
+        searchRoom(scope);
+        const again = await searchWithLate({ q: `${specForm} specs`, freshness: 'any', count: 5, lite: true }, env, scope);
+        return rowsAbout(side, specForm, again.response.results);
+      })()
+      : Promise.resolve([] as SearchResult[]);
+    if (!havePrice()) {
+      for (const form of forms) {
+        searchRoom(scope);
+        const again = await searchWithLate({ q: `${form} price`, freshness: 'any', count: 6, lite: true }, env, scope);
+        rows = [...rows, ...rowsAbout(side, form, again.response.results)];
+        images = [...(again.response.images ?? []), ...images];
+        if (havePrice()) break;
+      }
+    }
+    rows = [...rows, ...(await specSearch)];
+    const ownImage = (image: ImageResult) => acceptProductPhoto(side, `${image.title} ${image.source}`);
+    images = [...[...rows, ...results.results].flatMap((row) => {
+      const preview = previewOf(side, row);
+      return preview ? [preview] : [];
+    }), ...images.filter(ownImage)];
+    // A price already found does not supply this product's photo. Search the name when none is in hand.
+    if (!images.some(ownImage)) {
+      const form = forms[0] ?? side;
+      searchRoom(scope);
+      const again = await searchWithLate({ q: form, freshness: 'any', count: 5, lite: true }, env, scope);
+      const about = again.response.results.filter((row) => acceptProductPhoto(side, row.title ?? '', `${row.snippet ?? ''} ${row.domain ?? ''}`));
+      rows = [...rows, ...about];
+      images = [
+        ...about.flatMap((row) => {
+          const preview = previewOf(side, row);
+          return preview ? [preview] : [];
+        }),
+        ...(again.response.images ?? []).filter(ownImage),
+        ...images,
+      ];
+    }
+    const photo = await productPhoto(side, [...rows, ...results.results]);
+    if (photo) images = [photo, ...images.filter((image) => image.thumb !== photo.thumb)];
+    return { results: rows, images };
+  }));
+  const add = found.flatMap((item) => item.results).filter((row) => row.url && !results.results.some((have) => have.url === row.url)).slice(0, 12);
+  const seen = new Set(results.images.map((image) => image.thumb));
+  const images = found.flatMap((item) => item.images).filter((image) => image.thumb && !seen.has(image.thumb) && seen.add(image.thumb));
+  if (!add.length && !images.length) return results;
+  const next = { ...results, results: add.length ? [...add, ...results.results] : results.results, images: images.length ? [...images, ...results.images].slice(0, 24) : results.images };
+  send('search', next);
+  console.log(JSON.stringify({ zo: 'compare-sides', sides, added: add.length, images: images.length }));
+  return next;
+}
+
+/** The value if the work has already finished, otherwise the fallback. Does not wait. */
+function ifReady<T>(work: Promise<T>, fallback: T): Promise<T> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value: T) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    work.then(finish, () => finish(fallback));
+    queueMicrotask(() => finish(fallback));
+  });
 }
 
 /** The profile on the card, wherever the layout put it, links the person's own website. */
@@ -1284,6 +1797,19 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
 
   // Arithmetic stays on the figures already on the card and in its sources. A new search
   // is what let an unrelated headline become the answer.
+  if (req.intent !== 'search' && req.intent !== 'adjust') {
+    const priorCard = from?.card ?? [...req.cards].reverse().find((c) => c.card)?.card;
+    const rated = rateOnAmount({ question: req.question, original: req.original, priorTitle: priorCard?.title || from?.title, card: priorCard, search: req.search });
+    if (rated) {
+      const plan = quickPlan(req.original, 'chat');
+      send('plan', { ...plan, mode: 'chat' });
+      send('head', { title: rated.title, subtitle: rated.subtitle });
+      rated.nodes.forEach((node, index) => send('node', { index, node }));
+      send('done', { engine: 'reasoning', removed: 0, pagesRead: 0, ms: Date.now() - started });
+      return;
+    }
+  }
+
   if (req.intent !== 'search' && req.intent !== 'adjust' && isCalculationAsk(req.question)) {
     const priorCard = from?.card ?? [...req.cards].reverse().find((c) => c.card)?.card;
     const priorTitle = priorCard?.title || from?.title;
@@ -1296,12 +1822,33 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
     return;
   }
 
+  // "Add X" stays on the comparison. Searching only X opens a page for X and drops the sides already shown.
+  if (req.intent !== 'adjust') {
+    const priorCard = from?.card ?? [...req.cards].reverse().find((card) => card.card)?.card;
+    const added = addedComparison(req.question, [priorCard?.title ?? '', from?.title ?? '', req.original]);
+    if (added) {
+      const lock = `Keep every side already compared. ${added.added} is a new column. Each side keeps its own price and photo. Do not copy one side's price, photo, spec, or citation onto another.`;
+      send('rewrite', { query: added.query });
+      await searchAndDesign(send, env, added.query, 'any', [lock, context].filter(Boolean).join('\n') || undefined, started, scope, true, undefined, undefined, undefined, priorCard?.body, req.search?.images, added.fanout, req.question);
+      return;
+    }
+  }
+
+  // A follow-up about one product on a comparison searches that product. Both names are not one token.
+  const compared = req.intent !== 'adjust' ? comparisonFollow(req.question, req.original) : undefined;
+  if (compared) {
+    send('rewrite', { query: compared });
+    await searchAndDesign(send, env, compared, 'any', context, started, scope, true, req.search?.results);
+    return;
+  }
+
   // "A vs B vs C" is a new question. Answering it from the card already on screen repeats that card
   // under a "Side by side" label. Search the comparison itself; each other side gets its own query.
   if (req.intent !== 'adjust' && asksToCompare(req.question)) {
     const query = req.question.trim();
+    const priorCard = from?.card ?? [...req.cards].reverse().find((card) => card.card)?.card;
     send('rewrite', { query });
-    await searchAndDesign(send, env, query, 'any', context, started, scope, false);
+    await searchAndDesign(send, env, query, 'any', context, started, scope, false, undefined, undefined, undefined, priorCard?.body, req.search?.images);
     return;
   }
 
@@ -1333,15 +1880,83 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
       await searchAndDesign(send, env, query, 'any', [chosen, pickContext].filter(Boolean).join('\n'), started, scope, true, req.search?.results);
       return;
     }
-    // A Which-one? pick is already the person to search. Any other search button is a short label
-    // for this card ("apple varieties" on an apple pie card), so the search keeps that subject.
-    const query = person ? picked : cardSearchQuery(picked, askedQuestions(req.context)[0] ?? req.original);
+    // A Which-one? pick is already the person to search. The earlier question is not glued on,
+    // and neither is another candidate. A short button on some other card still keeps that card's subject.
+    const rawQuery = person || isPersonAsk(req.original) ? picked : cardSearchQuery(picked, askedQuestions(req.context)[0] ?? req.original);
+    const query = withoutGluedPerson(rawQuery);
     // The pick is final: it locks the person so the same name never offers another picker.
     const label = person ? pickSeeds(picked, req.search?.results ?? []).label : '';
     const chosen = person && personSubject(picked) ? `Chosen person: ${personSubject(picked)}${label ? ` — ${label}` : ''}` : '';
     send('rewrite', { query });
     // EN4 part 8: the rows that produced these choices come along, so the pick never comes back empty.
     await searchAndDesign(send, env, query, 'any', [chosen, pickContext].filter(Boolean).join('\n') || undefined, started, scope, true, req.search?.results);
+    return;
+  }
+
+  // A typed follow-up is one model decision: search, answer from the sources, or calculate.
+  // The gates below stay for an adjust. A typed turn does not fall through them.
+  if (req.intent !== 'adjust') {
+    const onScreen = from?.card ?? [...req.cards].reverse().find((card) => card.card)?.card;
+    const hint = screenSubject(onScreen?.title, req.original);
+    const cardText = onScreen ? `${onScreen.title}\n${onScreen.subtitle ?? ''}\n${JSON.stringify(onScreen.body)}` : '';
+    const sourceText = (req.search?.results ?? []).slice(0, 6).map((row) => `${row.title} ${row.snippet ?? ''}`).join('\n');
+    const planPromise = planLayout(req.question, env, { original: req.original, cards: req.cards.map(({ id, title }) => ({ id, title })), context });
+    const judged = await judgeTurn(env, {
+      question: req.question,
+      original: req.original,
+      context,
+      title: onScreen?.title,
+      card: cardText,
+      sources: sourceText,
+    });
+    const decision = judged ?? {
+      action: 'search' as const,
+      queries: [[hint, req.question.trim()].filter(Boolean).join(' ')],
+      subject: hint,
+    };
+    console.log(JSON.stringify({ zo: 'judge-turn', action: decision.action, subject: decision.subject, queries: decision.queries, model: !!judged }));
+    const planned = decision.action === 'search'
+      ? followSearchPlan({ title: onScreen?.title, question: req.question, queries: decision.queries, subject: decision.subject })
+      : undefined;
+    const lock = planned?.added
+      ? `${planned.added} is its own object. Use only a price, photo, spec, or citation from a source that names it. Do not copy those from another object.`
+      : decision.subject
+        ? `This turn is about ${cleanSideName(decision.subject)}. Answer the new question about that subject. A label is the object name, not the question.`
+        : '';
+    if (decision.action === 'search' && planned) {
+      scope.bound = `${decision.subject}\n${req.question}`;
+      send('rewrite', { query: planned.query });
+      await searchAndDesign(send, env, planned.query, 'any', [lock, context].filter(Boolean).join('\n') || undefined, started, scope, true, undefined, undefined, undefined, onScreen?.body, req.search?.images, planned.fanout, req.question);
+      return;
+    }
+    const plan = await planPromise;
+    const rows = (req.search?.results ?? []).slice(0, 8);
+    if (rows.length) send('peek', rows.map(({ title, url, domain, date }) => ({ title, url, domain, date })));
+    if (decision.action === 'calculate') {
+      send('plan', { ...plan, mode: 'chat' });
+      await design(send, env, {
+        query: req.original,
+        pattern: plan.pattern,
+        depth: plan.depth,
+        readPages: false,
+        search: req.search,
+        followup: { mode: 'chat', question: req.question, calculate: true },
+        context: [lock, context].filter(Boolean).join('\n') || undefined,
+      }, started, scope);
+      return;
+    }
+    send('plan', { ...plan, mode: 'answer' });
+    await design(send, env, {
+      query: req.original,
+      pattern: plan.pattern,
+      depth: plan.depth,
+      readPages: plan.readPages,
+      search: req.search,
+      followup: { mode: 'answer', question: req.question },
+      context: [lock, context].filter(Boolean).join('\n') || undefined,
+      priorBody: onScreen?.body,
+      priorImages: req.search?.images,
+    }, started, scope);
     return;
   }
 
@@ -1384,7 +1999,8 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
     const lock = cue
       ? `This question is about ${named} (${cue}), the person already on screen. A different ${named} is the wrong person.`
       : `This question is about ${named}, the person already on screen.`;
-    await searchAndDesign(send, env, pronoun, 'any', [lock, context].filter(Boolean).join('\n'), started, scope, true);
+    const chosen = `Chosen person: ${named}`;
+    await searchAndDesign(send, env, pronoun, 'any', [chosen, lock, context].filter(Boolean).join('\n'), started, scope, true);
     return;
   }
 
@@ -1405,6 +2021,8 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
   const chart = findTicker(onScreen?.body ?? []);
   const subject = screenSubject(onScreen?.title, req.original);
   const cardText = [covered, onScreen ? `${onScreen.title}\n${onScreen.subtitle ?? ''}\n${JSON.stringify(onScreen.body)}` : ''].filter(Boolean).join('\n');
+  const corpus = `${cardText}\n${(req.search?.results ?? []).map((row) => `${row.title} ${row.snippet ?? ''} ${row.content ?? ''}`).join('\n')}`;
+  const known = req.intent === 'adjust' || sourcesCover(req.question, `${subject}\n${req.original}`, corpus);
   if (req.intent !== 'adjust' && needsOwnSearch(req.question, covered)) {
     const query = personQuestion(req.question);
     send('rewrite', { query });
@@ -1427,10 +2045,23 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
     return;
   }
 
+  // A later turn that adds new words ("floors", "the viewing platform") is still about the subject
+  // already on screen. A different place or business is searched on its own.
+  const stayed = req.intent !== 'adjust' ? sameSubjectQuery(req.question, subject, cardText) : undefined;
+  if (stayed && !known) {
+    const lock = `This follow-up is about ${subject}, the subject already on screen. Search the new words about that subject. Do not switch to a different place or business.`;
+    scope.bound = stayed;
+    send('rewrite', { query: stayed });
+    await searchAndDesign(send, env, stayed, 'any', [lock, context].filter(Boolean).join('\n') || undefined, started, scope, true, undefined, undefined, chart);
+    return;
+  }
+
   // A new question that does not point at the card is searched on its own. The previous
   // subject stays out of the query and out of the conversation the search is written from.
+  // Expansion still cannot add a place or business the question did not name.
   if (req.intent !== 'adjust' && ownQuestion(req.question, covered)) {
     const query = req.question.trim();
+    scope.bound = query;
     send('rewrite', { query });
     await searchAndDesign(send, env, query, 'any', undefined, started, scope, false);
     return;
@@ -1451,7 +2082,19 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
   // The previous card stays in the conversation. The words they typed are the search,
   // not a stub cut to fit a shorter check, and not an answer drawn only from the old pages.
   if (req.intent !== 'adjust' && req.question.trim().length > QUOTE_MAX) {
-    await searchAndDesign(send, env, req.question.trim(), 'any', context, started, scope, false, undefined, undefined, chart);
+    const query = lockChainQuery(req.question, req.question.trim(), subject, `${onScreen?.title ?? ''}\n${req.original}`);
+    scope.bound = `${subject}\n${req.question}`;
+    send('rewrite', { query });
+    await searchAndDesign(send, env, query, 'any', context, started, scope, true, undefined, undefined, chart);
+    return;
+  }
+
+  // The pages on screen do not state this fact. Search the new words about the subject, and show that search.
+  if (!known) {
+    const query = (stayed || [subject, req.question.trim()].filter(Boolean).join(' ')).replace(/\s+/g, ' ').trim();
+    scope.bound = `${subject}\n${req.question}`;
+    send('rewrite', { query });
+    await searchAndDesign(send, env, query, 'any', context, started, scope, true, undefined, undefined, chart);
     return;
   }
 
@@ -1469,7 +2112,9 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
       const host = req.cards.find((c) => c.id === req.from);
       const entity = req.ref?.entity ?? topicOf(host?.card?.title) ?? topicOf(host?.title);
       const ref = req.ref ? { ...req.ref, ...(entity ? { entity } : {}) } : undefined;
-      const query = faithfulQuery(req.question, withRef(await rewritten, ref));
+      const raw = faithfulQuery(req.question, withRef(await rewritten, ref));
+      const query = lockChainQuery(req.question, raw, subject, `${onScreen?.title ?? ''}\n${req.original}`);
+      scope.bound = `${subject}\n${req.question}`;
       send('rewrite', { query });
       await searchAndDesign(send, env, query, 'any', context, started, scope, true, req.ref ? req.search?.results : undefined, undefined, chart);
       return;
@@ -1490,10 +2135,13 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
       return;
     }
     case 'answer':
-    case 'chat':
+    case 'chat': {
+      const rows = (req.search?.results ?? []).slice(0, 8);
+      if (rows.length) send('peek', rows.map(({ title, url, domain, date }) => ({ title, url, domain, date })));
       send('plan', { ...plan, mode });
-      await design(send, env, { query: req.original, pattern: plan.pattern, depth: plan.depth, readPages: plan.readPages, search: req.search, followup: { mode, question: req.question }, context, think: mode === 'chat' && plan.think, ...(chart ? { ticker: chart } : {}) }, started, scope);
+      await design(send, env, { query: req.original, pattern: plan.pattern, depth: plan.depth, readPages: plan.readPages, search: req.search, followup: { mode, question: req.question }, context, ...(chart ? { ticker: chart } : {}) }, started, scope);
       return;
+    }
     default: {
       const unreachable: never = mode;
       throw new Error(`Unknown follow-up mode ${unreachable}`);

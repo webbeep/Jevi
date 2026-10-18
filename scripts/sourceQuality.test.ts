@@ -78,6 +78,16 @@ test('an unpriced product hero does not lead a card that has a priced pick', () 
   ]);
   assert.equal(nodes[0], undefined);
   assert.equal(nodes[1]?.type, 'list');
+  const budgetLabel = finishQuality('best cordless stick vacuum under $200', [
+    { type: 'hero', value: 'Acme Stick', label: 'Best cordless stick vacuum under $200' },
+    { type: 'list', style: 'bullet', items: [{ text: 'Basic Stick', meta: '$140' }] },
+  ]);
+  assert.equal(budgetLabel[0], undefined);
+  const chip = finishQuality('best cordless stick vacuum under $200', [
+    { type: 'hero', value: 'Acme Stick', label: 'Best cordless stick vacuum under $200' },
+    { type: 'actions', items: [{ label: 'Under $150 picks', query: 'Best cordless stick vacuum under $150', kind: 'search' }] },
+  ]);
+  assert.equal(chip[0]?.type, 'hero');
   const kept = finishQuality('How do HDMI switches work', [
     { type: 'hero', value: 'Kinivo 550BN', label: 'Top pick' },
     { type: 'list', style: 'bullet', items: [{ text: 'Fosmon 3-Port', meta: '$13.99' }] },
@@ -97,6 +107,23 @@ test('a pick that misses a stated spec does not lead one that meets it', () => {
   assert.equal(nodes[0], undefined);
   const items = nodes[1]?.type === 'list' ? nodes[1].items.map((item) => item.text) : [];
   assert.equal(items[0], '3-port switch');
+});
+
+test('a priced pick that lacks a stated feature does not stay once another pick has it', () => {
+  const nodes = finishQuality('a keyboard under $40 that is hot-swappable', [
+    {
+      type: 'stack',
+      children: [
+        { type: 'tile', label: 'Acme board', value: '$25', sub: 'wireless gasket mount' },
+        { type: 'tile', label: 'North board', value: '$32', sub: 'hot-swappable linear switches' },
+      ],
+    },
+  ]);
+  const stack = nodes.find((node) => node?.type === 'stack');
+  const labels = stack?.type === 'stack'
+    ? stack.children.flatMap((child) => (child.type === 'tile' ? [child.label] : []))
+    : [];
+  assert.deepEqual(labels, ['North board']);
 });
 
 test('a priced product page leads an unpriced one on a shopping ask', () => {
@@ -191,6 +218,8 @@ test('a named agency and a state count get an official-site search', () => {
   assert.equal(officialProbe('What did studies find about GLP-1 drugs and weight loss?'), '');
   const count = officialProbe('How many foodborne outbreak cases were confirmed last year?');
   assert.match(count, /site:\.gov/);
+  const fee = officialProbe('What is the renewal fee for a harbor permit?');
+  assert.match(fee, /site:\.gov/);
 });
 
 test('government, a journal of record, and a state page lead a count or a paper ask', () => {
@@ -281,6 +310,36 @@ test('a Spanish sentence and a settled disagreement leave the card, and a repeat
   assert.equal(out[1], undefined);
   assert.equal(out[3]?.type === 'table' ? out[3].rows.length : 0, 2);
   assert.deepEqual(out[4]?.type === 'steps' ? out[4].items.map((step) => step.title) : [], ['1. Instructions', '2. Cells read them', '3. The body remembers']);
+});
+
+test('a long clause is said once', () => {
+  const line = 'A network built solely on attention mechanisms, dispensing with recurrence and convolutions entirely.';
+  const nodes: CardNode[] = [
+    { type: 'hero', value: 'Transformer', caption: line },
+    { type: 'text', text: `The paper proposed the Transformer, a network architecture ${line}` },
+    { type: 'text', text: `The Transformer is ${line.charAt(0).toLowerCase()}${line.slice(1)} Self-attention has been used for reading.` },
+  ];
+  const out = finishQuality('what did the paper find', nodes);
+  const texts = out.flatMap((node) => {
+    if (!node) return [];
+    if (node.type === 'text') return [node.text];
+    if (node.type === 'hero') return [node.caption ?? ''];
+    return [];
+  }).join(' ');
+  const hits = texts.toLowerCase().split('dispensing with recurrence').length - 1;
+  assert.equal(hits, 1);
+  assert.match(texts, /Self-attention has been used/);
+});
+
+test('a card that says the person is not named drops another person\'s roles', () => {
+  const nodes: CardNode[] = [
+    { type: 'text', text: 'No source names that person.' },
+    { type: 'tile', label: 'Role', value: 'COO' },
+    { type: 'stat', label: 'Credential', value: 'CFA' },
+  ];
+  const out = finishQuality('who is the person', nodes).filter(Boolean);
+  assert.equal(out.length, 1);
+  assert.equal(out[0]?.type, 'text');
 });
 
 test('a verdict names a model the table compares, and a clinic blurb is not a paper', () => {

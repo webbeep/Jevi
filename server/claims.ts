@@ -3,6 +3,8 @@ import { SENTENCE_BREAK, joinSpacedDecimals } from '../shared/text';
 import { factAnswer } from './hops';
 import { numberTokens } from './ground';
 import { completeCutDecimal, withoutEmptySlots } from './polish';
+import { dropInventedTitles, finishQuotedText, honestHero, honestStudyText, peerPaperItems, peerPaperSource } from './cardAgree';
+import { figureClause, leadFigure, moneyClauses } from './thinSource';
 
 /** One search result, numbered the way the card cites it, with the text the card was allowed to use. */
 export interface ClaimSource {
@@ -22,6 +24,8 @@ const ADVICE = /\b(?:ways|tips|practices|methods|reasons|ideas|strategies|habits
 const MONEY = /\$\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?/;
 const BUDGET = /\b(?:under|below|less than|cheaper than|up to|at most)\b/i;
 const TAX_ASK = /\b(?:sales\s+tax|tax)\b/i;
+const FEE_ASK = /\b(?:fee|fees|fine|fines|toll|tolls|duty|duties|surcharge|levy|levies)\b/i;
+const FEE_GENERIC = new Set(['what', 'whats', 'how', 'much', 'does', 'the', 'fee', 'fees', 'cost', 'costs', 'price', 'for', 'are', 'pay', 'paid', 'current', 'official', 'today', 'this', 'that', 'with', 'from', 'your', 'have', 'need', 'when', 'where', 'which']);
 const PRICE_STOP = new Set(['best', 'top', 'under', 'with', 'for', 'the', 'and', 'laptop', 'laptops', 'buy', 'cheap', 'budget', 'new', 'from', 'than', 'that', 'this']);
 /** Shared accessory nouns. They sit next to someone else's price and are not a product's name. */
 const PRICE_GENERIC = new Set(['cable', 'cables', 'cord', 'cords', 'adapter', 'adapters', 'wire', 'wires', 'case', 'cases', 'cover', 'covers', 'plug', 'plugs', 'item', 'model']);
@@ -46,7 +50,10 @@ function priced(text: string, ceilings: readonly number[]): string | undefined {
     if (!raw) continue;
     const value = moneyValue(raw);
     const lead = match[0].slice(0, match[0].toLowerCase().indexOf('$'));
-    if (BUDGET.test(lead) && ceilings.includes(value)) continue;
+    // "under $200" is a ceiling, not what the product costs, even when the ask's ceiling is different.
+    if (BUDGET.test(lead)) continue;
+    const cap = ceilings.length ? Math.min(...ceilings) : undefined;
+    if (cap !== undefined && value > cap) continue;
     return raw.replace(/\s/g, '');
   }
   return undefined;
@@ -236,7 +243,7 @@ function repairCutQuote(text: string, sources: readonly ClaimSource[]): string {
 
 /** Point each cited number at a page that contains it, and drop a number no cited page states. */
 export function retargetCites(text: string, sources: readonly ClaimSource[], query = ''): string {
-  const joined = repairCutQuote(joinSpacedDecimals(text), sources);
+  const joined = repairCutQuote(finishQuotedText(query, joinSpacedDecimals(text), sources), sources);
   if (!sources.length) return withoutEmptySlots(joined);
   if (!/\d/.test(joined)) return withoutEmptySlots(joined);
   const parts = joined.split(SENTENCE_BREAK);
@@ -416,31 +423,36 @@ function retargetNode(node: CardNode, sources: readonly ClaimSource[], query = '
     case 'quote':
     case 'draft': {
       const cited = retargetCites(node.text, sources, query);
-      const text = cited.split(SENTENCE_BREAK).map((sentence) => {
+      const cleaned = cited.split(SENTENCE_BREAK).map((sentence) => {
         const n = [...sentence.matchAll(/\[(\d+)\]/g)].map((match) => Number(match[1])).at(-1);
         return withoutForeignAgency(sentence, byNumber(sources, n ?? 0));
       }).join(' ');
+      const text = dropInventedTitles(query, honestStudyText(query, cleaned, sources), sources);
+      if (!text) return cleaned ? { type: 'stack', direction: 'col', gap: 'sm', children: [] } : { ...node, text: '' };
       return text === node.text ? node : { ...node, text };
     }
     case 'heading': {
-      const text = retargetCites(node.text, sources, query);
+      const cited = retargetCites(node.text, sources, query);
+      const text = dropInventedTitles(query, honestStudyText(query, cited, sources), sources);
+      if (!text) return cited ? { type: 'stack', direction: 'col', gap: 'sm', children: [] } : { ...node, text: '' };
       return text === node.text ? node : { ...node, text };
     }
     case 'hero': {
-      const caption = node.caption ? completeCutDecimal(retargetCites(node.caption, sources, query), [node.value, node.label]) : node.caption;
-      const nums = significant(node.value);
-      const page = citeValue(node.value, sources, undefined, query);
-      if (!page && keepsDerived(query, node.value, sources)) {
-        return caption === node.caption ? node : { ...node, caption };
+      const face = honestHero(query, node, sources);
+      const caption = face.caption ? completeCutDecimal(retargetCites(face.caption, sources, query), [face.value, face.label]) : face.caption;
+      const nums = significant(face.value);
+      const page = citeValue(face.value, sources, undefined, query);
+      if (!page && keepsDerived(query, face.value, sources)) {
+        return caption === face.caption ? face : { ...face, caption };
       }
       if (!page) {
-        const stripped = nums.length ? stripNums(node.value, nums) : node.value;
-        const value = stripped && /\d/.test(stripped) ? stripped : nums.length ? '' : node.value;
-        return value === node.value && caption === node.caption ? node : { ...node, value, caption };
+        const stripped = nums.length ? stripNums(face.value, nums) : face.value;
+        const value = stripped && /\d/.test(stripped) ? stripped : nums.length ? '' : face.value;
+        return value === face.value && caption === face.caption ? face : { ...face, value, caption };
       }
       const already = caption ? [...caption.matchAll(/\[(\d+)\]/g)].some((match) => Number(match[1]) === page) : false;
       const next = already ? caption : `${caption ? `${caption.replace(/\s*\[\d+\]/g, '').trim()} ` : ''}[${page}]`.trim();
-      return next === node.caption ? node : { ...node, caption: next };
+      return next === face.caption ? face : { ...face, caption: next };
     }
     case 'tile': {
       const valueNums = significant(node.value ?? '');
@@ -496,7 +508,7 @@ function retargetNode(node: CardNode, sources: readonly ClaimSource[], query = '
     }
     case 'list': {
       const items = node.items.map((item) => {
-        const text = retargetCites(item.text, sources);
+        const text = retargetCites(item.text, sources, query);
         // Meta is a plain label next to the source chip, so a number moves the chip
         // instead of writing [n] into the price or the year.
         const metaNums = item.meta ? significant(item.meta) : [];
@@ -517,7 +529,9 @@ function retargetNode(node: CardNode, sources: readonly ClaimSource[], query = '
         }
         return text === item.text && meta === item.meta && source === item.source ? item : { ...item, text, meta, source };
       });
-      return items.every((item, index) => item === node.items[index]) ? node : { ...node, items };
+      const kept = peerPaperItems(query, items, sources);
+      if (!kept.length && items.length) return { type: 'stack', direction: 'col', gap: 'sm', children: [] };
+      return kept.length === node.items.length && kept.every((item, index) => item === node.items[index]) ? node : { ...node, items: kept };
     }
     case 'keyvalue': {
       const items = node.items.map((item) => {
@@ -534,6 +548,12 @@ function retargetNode(node: CardNode, sources: readonly ClaimSource[], query = '
       });
       return items.every((item, index) => item === node.items[index]) ? node : { ...node, items };
     }
+    case 'links': {
+      const items = node.items.filter((item) => peerPaperSource(query, byNumber(sources, item.source)));
+      if (items.length === node.items.length) return node;
+      if (!items.length) return { type: 'stack', direction: 'col', gap: 'sm', children: [] };
+      return { ...node, items };
+    }
     case 'profile':
     case 'steps':
     case 'accordion':
@@ -541,7 +561,6 @@ function retargetNode(node: CardNode, sources: readonly ClaimSource[], query = '
     case 'badges':
     case 'actions':
     case 'choices':
-    case 'links':
     case 'citations':
     case 'pricing':
     case 'scaler':
@@ -573,25 +592,121 @@ function placePhrase(query: string): string[] {
   return city[1]!.toLowerCase().split(/\s+/).filter((word) => word !== 'of' && word !== 'the');
 }
 
+/** A government host. A blog that rounds a rate is not this. */
+function officialDomain(domain: string | undefined): boolean {
+  const host = (domain ?? '').toLowerCase().replace(/^www\./, '').split('/')[0]?.split(':')[0] ?? '';
+  if (!host) return false;
+  return /\.gov(?:\.[a-z]{2})?$/.test(host) || /\.mil(?:\.[a-z]{2})?$/.test(host) || /\.state\.[a-z]{2}\.us$/.test(host);
+}
+
+/** 8 stands in for 8.875 when the official page states the fuller rate. */
+function roundedStandIn(round: number, precise: number): boolean {
+  if (Number.isInteger(precise) || !Number.isInteger(round)) return false;
+  return round === Math.trunc(precise) || round === Math.round(precise);
+}
+
+const NOT_A_PLACE = new Set([
+  'while', 'where', 'which', 'after', 'before', 'under', 'there', 'these', 'those', 'their',
+  'other', 'also', 'many', 'most', 'some', 'such', 'only', 'even', 'from', 'into', 'over',
+  'with', 'this', 'that', 'each', 'both', 'more', 'than', 'then', 'when', 'what', 'have',
+  'been', 'were', 'will', 'would', 'could', 'should', 'during', 'within', 'without',
+  'between', 'through', 'including', 'excluding', 'effective', 'source', 'table', 'below',
+  'above', 'therefore', 'however', 'although', 'because', 'since', 'until', 'among',
+  'across', 'around', 'based', 'using', 'being', 'about', 'first', 'years', 'listed',
+  'various', 'following', 'current', 'history', 'reform', 'public', 'county', 'percent',
+  'january', 'february', 'march', 'april', 'june', 'july', 'august', 'september',
+  'october', 'november', 'december', 'upon', 'remained', 'remains', 'constant', 'uniform',
+  'established', 'imposed', 'authorized', 'twenty', 'build', 'fund', 'proceeds',
+]);
+
+/** Percents that are the rate, not a share of the proceeds ("of which the state retains 80%"). */
+function percentRates(sentence: string): number[] {
+  // A fetched page often escapes the decimal ("8\.25 percent"). That is 8.25, not 25.
+  const cut = (sentence.split(/\bof which\b/i)[0] ?? sentence).replace(/\\(?=\.)/g, '');
+  const rates: number[] = [];
+  for (const match of cut.matchAll(/(\d{1,2}(?:\.\d+)?)\s*(?:%|percent\b)/gi)) {
+    const at = match.index ?? 0;
+    const after = cut.slice(at + match[0].length);
+    if (/^\s+of\b/i.test(after)) continue;
+    const before = cut.slice(Math.max(0, at - 32), at);
+    if (/\b(?:retains|reserved|distributed|portion|share)\s*$/i.test(before)) continue;
+    rates.push(Number(match[1]));
+  }
+  return rates;
+}
+
+/** A fund split ("1.75% to the Build Fund") is not the sales tax rate. */
+function allocationShare(sentence: string): boolean {
+  return /\b(?:fund|reserved|distributed|distribution|portion|proceeds)\b/i.test(sentence) && !/\brate\b/i.test(sentence);
+}
+
+/** "30% of total general revenues" is how big the tax is in the budget, not the rate on a purchase. */
+function revenueShare(sentence: string): boolean {
+  return /\b(?:percentage of|fiscal year|per year)\b/i.test(sentence) && !/\b(?:tax rate|merchandise)\b/i.test(sentence);
+}
+
+function sentenceHasAskWord(sentence: string, word: string): boolean {
+  if (!sentence.includes(word)) return false;
+  if (word === 'general' && /\bgeneral\s+revenues?\b/i.test(sentence) && !/\bgeneral\s+merchandise\b/i.test(sentence)) return false;
+  return true;
+}
+
+/** "In 0.25% increments" is a step local taxes may use, not the rate being asked. */
+function rateIncrement(sentence: string): boolean {
+  return /\b(?:increments?|in addition|above and beyond|add-on|add on)\b/i.test(sentence);
+}
+
+function sourceStatesFullRate(source: ClaimSource): boolean {
+  const body = `${source.text}\n${source.stated ?? ''}`;
+  for (const sentence of body.split(SENTENCE_BREAK)) {
+    if (allocationShare(sentence) || rateIncrement(sentence)) continue;
+    if (percentRates(sentence).some((rate) => rate >= 1 && rate <= 30)) return true;
+  }
+  return false;
+}
+
+interface RateCand {
+  rate: number;
+  n: number;
+  score: number;
+  precise: boolean;
+  official: boolean;
+  combined: boolean;
+  place: boolean;
+}
+
 /**
  * The rate that applies to the purchase the question names. A city question uses the combined
  * local rate a source states, and a threshold on that page ("under $110") decides which rate.
+ * A rate on an official page beats a round figure from somewhere else. A combined rate beats
+ * the state-only piece when the page states both.
  */
 export function salesTax(query: string, sources: readonly ClaimSource[]): TaxPick | undefined {
   if (!TAX_ASK.test(query) || !sources.length) return undefined;
   const price = query.match(/\$\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)/);
   const amount = price ? Number(price[1]!.replace(/,/g, '')) : undefined;
   const place = placePhrase(query);
-  let best: { rate: number; n: number; score: number } | undefined;
+  const found: RateCand[] = [];
+  const fullerOfficial = sources.some((source) => officialDomain(source.domain) && sourceStatesFullRate(source));
   for (const source of sources) {
-    const sentences = source.text.split(SENTENCE_BREAK);
+    const official = officialDomain(source.domain);
+    const body = `${source.text}\n${source.stated ?? ''}`;
+    const head = (body.split('\n')[0] ?? '').toLowerCase();
+    const sentences = body.split(SENTENCE_BREAK);
     for (const sentence of sentences) {
-      const percents = [...sentence.matchAll(/(\d{1,2}(?:\.\d+)?)\s*%/g)].map((match) => Number(match[1]));
+      if (allocationShare(sentence) || revenueShare(sentence)) continue;
+      const percents = percentRates(sentence);
       if (!percents.length) continue;
       const low = sentence.toLowerCase();
-      const namesPlace = place.length > 0 && (place.every((word) => low.includes(word)) || (place.includes('nyc') && low.includes('new york')));
-      const combined = /\b(combined|total|overall)\b/i.test(sentence);
-      const stateOnly = /\bstate\b/i.test(sentence) && !combined;
+      const blob = `${head} ${low}`;
+      const namesPlace = place.length > 0 && (place.every((word) => blob.includes(word)) || (place.includes('nyc') && blob.includes('new york')));
+      const aboutPlace = place.length === 0 || namesPlace;
+      const aboutRevenue = /\b(?:total\s+(?:general\s+)?revenue|percentage of)\b/i.test(sentence);
+      // "The total includes the state's rate of 6.25%" states the state piece, not the combined rate.
+      const statePiece = /\bstate(?:'s)?\b/i.test(sentence) && /\b(?:includes?|included|portion|of which|component)\b/i.test(sentence);
+      const combined = !aboutRevenue && !statePiece && (/\b(?:combined|overall)\b/i.test(sentence) || (/\btotal\b/i.test(sentence) && !/\bstate(?:'s)?\s+(?:sales|use|tax)/i.test(sentence)));
+      const stateOnly = statePiece || (/\bstate\b/i.test(sentence) && !combined);
+      if (/\b(?:mixed beverage|gross receipts|property tax|income tax|franchise tax)\b/i.test(sentence) && !/\b(?:beverage|gross receipts|property tax|income tax|franchise)\b/i.test(query)) continue;
       const threshold = sentence.match(/(?:under|below|less than)\s+\$\s?(\d{1,3}(?:,\d{3})*)/i);
       const cut = threshold ? Number(threshold[1]!.replace(/,/g, '')) : undefined;
       const aboveCut = cut !== undefined && amount !== undefined && amount >= cut;
@@ -602,18 +717,66 @@ export function salesTax(query: string, sources: readonly ClaimSource[]): TaxPic
       for (const rate of rates) {
         let score = 0;
         if (namesPlace) score += 4;
-        if (combined) score += 3;
+        // A commercial combined rate does not outrank a figure the official page states.
+        const officialBeatsCommercial = sources.some((item) => officialDomain(item.domain));
+        if (combined && aboutPlace) score += official || !officialBeatsCommercial ? 12 : 2;
+        else if (combined) score += 1;
+        if (official && aboutPlace) score += officialBeatsCommercial ? 20 : 6;
+        else if (official) score += 2;
+        if (!aboutPlace) score -= 8;
         if (stateOnly) score -= 3;
+        // A question that asks for the combined rate does not lead with the state piece when a source states the combined rate.
+        if (/\bcombined\b/i.test(query) && stateOnly) score -= 16;
+        if (/\bcombined\b/i.test(query) && combined && aboutPlace) score += 6;
+        for (const word of questionWords(query)) if (sentenceHasAskWord(low, word)) score += 4;
+        if (otherPlace(sentence, query)) score -= 20;
+        if (percents.length > 1 && !combined) score -= 6;
+        if (rate < 1 && percents.some((item) => item >= 1)) score -= 12;
+        if (rateIncrement(sentence)) score -= 18;
+        // A tenth of a percent does not lead when an official page states a full rate.
+        if (rate < 1 && fullerOfficial) score -= 16;
+        if (/\b(?:current|remained|remains)\b/i.test(sentence)) score += 8;
         if (aboveCut && forBelow && !forAbove && !combined) score -= 5;
         if (belowCut && combined && forBelow) score -= 4;
         if (aboveCut && (combined || forAbove)) score += 3;
-        if (!best || score > best.score) best = { rate, n: source.n, score };
+        found.push({ rate, n: source.n, score, precise: !Number.isInteger(rate), official, combined, place: namesPlace });
       }
     }
   }
   if (amount !== undefined && exemptPrice(amount, sources)) return undefined;
+  let best = found.reduce<RateCand | undefined>((pick, cand) => {
+    if (!pick || cand.score > pick.score) return cand;
+    if (cand.score === pick.score && cand.precise && !pick.precise) return cand;
+    if (cand.score === pick.score && cand.official && !pick.official && cand.precise === pick.precise) return cand;
+    return pick;
+  }, undefined);
+  if (best && Number.isInteger(best.rate)) {
+    const sharper = found.find((cand) => (cand.official || cand.combined) && cand.place && roundedStandIn(best!.rate, cand.rate));
+    if (sharper) best = sharper;
+  }
   if (!best || best.score < 1) return undefined;
   return { rate: best.rate, n: best.n };
+}
+
+const QUESTION_SKIP = new Set(['sales', 'tax', 'taxes', 'rate', 'rates', 'what', 'which', 'where', 'when', 'does', 'apply', 'applies', 'purchase', 'official', 'current', 'state', 'local']);
+
+function questionWords(query: string): string[] {
+  return query.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 5 && !QUESTION_SKIP.has(word));
+}
+
+/** A city or county the question did not name. Its rate is not the answer for the broader place. */
+function otherPlace(sentence: string, query: string): boolean {
+  const asked = query.toLowerCase();
+  const names = sentence.match(/\b[A-Z][a-z]{2,}\b/g) ?? [];
+  return names.some((name) => {
+    const word = name.toLowerCase();
+    if (asked.includes(word)) return false;
+    if (QUESTION_SKIP.has(word) || NOT_A_PLACE.has(word)) return false;
+    // "Austin, Texas" names the state after the city. It is not some other city's rate.
+    const askedWords = asked.split(/[^a-z0-9]+/).filter((part) => part.length > 3).join('|');
+    if (askedWords && new RegExp(`\\b(?:${askedWords}),\\s+${name}\\b`, 'i').test(sentence)) return false;
+    return word.length >= 5;
+  });
 }
 
 function questionPrice(query: string): number | undefined {
@@ -634,17 +797,27 @@ function exemptPrice(amount: number, sources: readonly ClaimSource[]): boolean {
   return false;
 }
 
-function combinedRate(sources: readonly ClaimSource[]): { rate: number; n: number } | undefined {
-  let best: { rate: number; n: number } | undefined;
+function combinedRate(sources: readonly ClaimSource[], query = ''): { rate: number; n: number } | undefined {
+  const place = placePhrase(query);
+  let best: { rate: number; n: number; score: number } | undefined;
   for (const source of sources) {
-    for (const sentence of source.text.split(SENTENCE_BREAK)) {
+    const body = `${source.text}\n${source.stated ?? ''}`;
+    const head = (body.split('\n')[0] ?? '').toLowerCase();
+    const official = officialDomain(source.domain);
+    for (const sentence of body.split(SENTENCE_BREAK)) {
       if (!/\bcombined\b/i.test(sentence)) continue;
       const percents = [...sentence.matchAll(/(\d{1,2}(?:\.\d+)?)\s*%/g)].map((match) => Number(match[1]));
       const rate = percents.sort((a, b) => b - a)[0];
-      if (rate !== undefined && (!best || rate > best.rate)) best = { rate, n: source.n };
+      if (rate === undefined) continue;
+      const blob = `${head} ${sentence.toLowerCase()}`;
+      const namesPlace = place.length > 0 && place.every((word) => blob.includes(word));
+      let score = 0;
+      if (place.length === 0 || namesPlace) score += 10;
+      if (official) score += 5;
+      if (!best || score > best.score || (score === best.score && rate > best.rate)) best = { rate, n: source.n, score };
     }
   }
-  return best;
+  return best ? { rate: best.rate, n: best.n } : undefined;
 }
 
 /**
@@ -654,7 +827,7 @@ function combinedRate(sources: readonly ClaimSource[]): { rate: number; n: numbe
  */
 export function fixTaxLines(text: string, query: string, sources: readonly ClaimSource[]): string {
   const price = questionPrice(query);
-  const combined = combinedRate(sources);
+  const combined = salesTax(query, sources) ?? combinedRate(sources, query);
   const parts = text.split(SENTENCE_BREAK);
   return parts.map((sentence) => {
     let next = sentence;
@@ -678,13 +851,16 @@ export function fixTaxLines(text: string, query: string, sources: readonly Claim
   }).join(' ');
 }
 
-function applyTaxText(text: string, query: string, pick: TaxPick): string {
+function applyTaxText(text: string, query: string, pick: TaxPick, _keep: ReadonlySet<number>): string {
   const price = query.match(/\$\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)/);
   const amount = price ? Number(price[1]!.replace(/,/g, '')) : undefined;
-  const shown = [...text.matchAll(/(\d{1,2}(?:\.\d+)?)\s*%/g)].map((match) => Number(match[1]));
+  const shown = [...text.matchAll(/(\d{1,2}(?:\.\d+)?)\s*(?:%|percent\b)/gi)].map((match) => Number(match[1]));
   const wrong = shown.find((rate) => Math.abs(rate - pick.rate) > 0.001);
   if (wrong === undefined) return text;
-  let out = text.replace(/(\d{1,2}(?:\.\d+)?)\s*%/, `${pick.rate}%`);
+  let out = text.replace(/(\d{1,2}(?:\.\d+)?)\s*(?:%|percent\b)/gi, (raw, num) => {
+    if (Math.abs(Number(num) - pick.rate) <= 0.001) return raw;
+    return raw.includes('%') ? `${pick.rate}%` : `${pick.rate} percent`;
+  });
   out = out.replace(/\[(\d+)\]/g, `[${pick.n}]`);
   if (amount === undefined) return out;
   const due = amount * pick.rate / 100;
@@ -704,52 +880,92 @@ function applyTaxText(text: string, query: string, pick: TaxPick): string {
   return out.replace(/\s+\./g, '.').replace(/\s{2,}/g, ' ');
 }
 
-function applyTax(node: CardNode, query: string, pick: TaxPick): CardNode {
+function ratesIn(source: ClaimSource | undefined): Set<number> {
+  const found = new Set<number>();
+  if (!source) return found;
+  for (const match of `${source.text}\n${source.stated ?? ''}`.matchAll(/(\d{1,2}(?:\.\d+)?)\s*%/g)) found.add(Number(match[1]));
+  return found;
+}
+
+function applyTax(node: CardNode, query: string, pick: TaxPick, keep: ReadonlySet<number>): CardNode {
   switch (node.type) {
     case 'stack':
     case 'grid':
-    case 'section':
     case 'scroller':
-      return { ...node, children: node.children.map((child) => applyTax(child, query, pick)) };
+      return { ...node, children: node.children.map((child) => applyTax(child, query, pick, keep)) };
+    case 'section': {
+      const title = node.title ? applyTaxText(node.title, query, pick, keep) : node.title;
+      const children = node.children.map((child) => applyTax(child, query, pick, keep));
+      return title === node.title && children.every((child, index) => child === node.children[index]) ? node : { ...node, title, children };
+    }
     case 'tabs':
-      return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: tab.children.map((child) => applyTax(child, query, pick)) })) };
+      return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: tab.children.map((child) => applyTax(child, query, pick, keep)) })) };
     case 'text':
-    case 'callout':
     case 'quote':
     case 'draft':
     case 'heading': {
-      const text = applyTaxText(node.text, query, pick);
+      const text = applyTaxText(node.text, query, pick, keep);
       return text === node.text ? node : { ...node, text };
     }
+    case 'callout': {
+      const text = applyTaxText(node.text, query, pick, keep);
+      const title = node.title ? applyTaxText(node.title, query, pick, keep) : node.title;
+      return text === node.text && title === node.title ? node : { ...node, text, title };
+    }
     case 'hero': {
-      const caption = node.caption ? applyTaxText(node.caption, query, pick) : node.caption;
-      const value = applyTaxText(node.value, query, pick);
-      return caption === node.caption && value === node.value ? node : { ...node, caption, value };
+      const caption = node.caption ? applyTaxText(node.caption, query, pick, keep) : node.caption;
+      const label = node.label ? applyTaxText(node.label, query, pick, keep) : node.label;
+      const value = node.unit === '%' || node.unit === 'percent' ? String(pick.rate) : applyTaxText(node.value, query, pick, keep);
+      return caption === node.caption && label === node.label && value === node.value ? node : { ...node, caption, label, value };
     }
     case 'tile': {
-      const value = node.value ? applyTaxText(node.value, query, pick) : node.value;
-      const sub = node.sub ? applyTaxText(node.sub, query, pick) : node.sub;
-      return value === node.value && sub === node.sub ? node : { ...node, value, sub, source: node.source ?? pick.n };
+      const value = node.value ? applyTaxText(node.value, query, pick, keep) : node.value;
+      const sub = node.sub ? applyTaxText(node.sub, query, pick, keep) : node.sub;
+      const label = applyTaxText(node.label, query, pick, keep);
+      return value === node.value && sub === node.sub && label === node.label ? node : { ...node, value, sub, label, source: node.source ?? pick.n };
     }
     case 'stat': {
-      const value = applyTaxText(node.value, query, pick);
-      return value === node.value ? node : { ...node, value };
+      const label = applyTaxText(node.label, query, pick, keep);
+      const value = node.unit === '%' || node.unit === 'percent' ? String(pick.rate) : applyTaxText(node.value, query, pick, keep);
+      return label === node.label && value === node.value ? node : { ...node, label, value };
     }
     case 'keyvalue': {
       const items = node.items.map((item) => {
-        const value = applyTaxText(item.value, query, pick);
+        const value = applyTaxText(item.value, query, pick, keep);
         return value === item.value ? item : { ...item, value };
       });
       return items.every((item, index) => item === node.items[index]) ? node : { ...node, items };
     }
-    case 'list':
-    case 'timeline':
-    case 'profile':
-    case 'table':
-    case 'steps':
+    case 'list': {
+      const items = node.items.map((item) => {
+        const text = applyTaxText(item.text, query, pick, keep);
+        const meta = item.meta ? applyTaxText(item.meta, query, pick, keep) : item.meta;
+        return text === item.text && meta === item.meta ? item : { ...item, text, meta };
+      });
+      return items.every((item, index) => item === node.items[index]) ? node : { ...node, items };
+    }
+    case 'table': {
+      const rows = node.rows.map((row) => row.map((cell) => applyTaxText(cell, query, pick, keep)));
+      return rows.every((row, index) => row.every((cell, cellIndex) => cell === node.rows[index]?.[cellIndex])) ? node : { ...node, rows };
+    }
+    case 'timeline': {
+      const items = node.items.map((item) => {
+        const title = applyTaxText(item.title, query, pick, keep);
+        const text = item.text ? applyTaxText(item.text, query, pick, keep) : item.text;
+        return title === item.title && text === item.text ? item : { ...item, title, text };
+      });
+      return items.every((item, index) => item === node.items[index]) ? node : { ...node, items };
+    }
     case 'accordion':
+      return { ...node, items: node.items.map((item) => ({ ...item, title: applyTaxText(item.title, query, pick, keep), text: applyTaxText(item.text, query, pick, keep) })) };
     case 'proscons':
+      return { ...node, pros: node.pros.map((item) => applyTaxText(item, query, pick, keep)), cons: node.cons.map((item) => applyTaxText(item, query, pick, keep)) };
     case 'badges':
+      return { ...node, items: node.items.map((item) => applyTaxText(item, query, pick, keep)) };
+    case 'steps':
+      return { ...node, items: node.items.map((item) => ({ ...item, title: applyTaxText(item.title, query, pick, keep), detail: item.detail ? applyTaxText(item.detail, query, pick, keep) : item.detail })) };
+    case 'profile':
+      return { ...node, subtitle: node.subtitle ? applyTaxText(node.subtitle, query, pick, keep) : node.subtitle, facts: node.facts?.map((fact) => ({ ...fact, value: applyTaxText(fact.value, query, pick, keep) })) };
     case 'actions':
     case 'choices':
     case 'links':
@@ -782,6 +998,116 @@ function rankPriced<T>(items: readonly T[], ceilings: readonly number[], pricedT
   const scored = items.map((item, index) => ({ item, index, priced: hasPrice(pricedText(item), ceilings) }));
   if (!scored.some((row) => row.priced)) return items.map((item) => item);
   return scored.filter((row) => row.priced).sort((a, b) => a.index - b.index).map((row) => row.item);
+}
+
+/** A dollar amount above the ask's ceiling is not a price for that pick. "under $200" leaves with the amount. */
+function stripOverBudget(text: string, ceilings: readonly number[]): string {
+  const cap = Math.min(...ceilings);
+  const money = MONEY.source;
+  return text
+    .replace(new RegExp(`\\b(?:under|below|less than|cheaper than|up to|at most)\\s+${money}`, 'gi'), (raw) => {
+      const amount = raw.match(new RegExp(money, 'i'))?.[0];
+      return amount && moneyValue(amount) > cap ? '' : raw;
+    })
+    .replace(new RegExp(money, 'g'), (raw) => (moneyValue(raw) > cap ? '' : raw))
+    .replace(/\s{2,}/g, ' ')
+    .replace(/\s+([,.;:])/g, '$1')
+    .replace(/^[\s,·-]+|[\s,·-]+$/g, '')
+    .trim();
+}
+
+/** A chip above the ceiling is cleared. A label that was only that price is dropped. */
+function insideCeiling(text: string | undefined, ceilings: readonly number[]): string | undefined {
+  if (!text || !ceilings.length) return text;
+  const next = stripOverBudget(text, ceilings);
+  if (!next || (next !== text.trim() && !/\d/.test(next))) return undefined;
+  return next;
+}
+
+/** A budget control above the ask's ceiling ("Under $200" on an under-$150 ask) is not offered. */
+function overBudget(text: string, ceilings: readonly number[]): boolean {
+  const cap = Math.min(...ceilings);
+  return [...text.matchAll(new RegExp(MONEY.source, 'g'))].some((match) => moneyValue(match[0]) > cap);
+}
+
+/** Prices on a pick stay inside the budget the question stated. A higher chip is cleared. */
+function keepBudgetPrices(node: CardNode, ceilings: readonly number[]): CardNode {
+  if (!ceilings.length) return node;
+  switch (node.type) {
+    case 'list': {
+      const items = node.items.map((item) => {
+        const meta = insideCeiling(item.meta, ceilings);
+        const text = stripOverBudget(item.text, ceilings);
+        return meta === item.meta && text === item.text ? item : { ...item, meta, text };
+      });
+      return items.every((item, index) => item === node.items[index]) ? node : { ...node, items };
+    }
+    case 'tile': {
+      const value = insideCeiling(node.value, ceilings);
+      const sub = insideCeiling(node.sub, ceilings);
+      return value === node.value && sub === node.sub ? node : { ...node, value, sub };
+    }
+    case 'stat': {
+      const value = insideCeiling(node.value, ceilings) ?? '';
+      return value === node.value ? node : { ...node, value };
+    }
+    case 'hero': {
+      const value = insideCeiling(node.value, ceilings) ?? node.value;
+      const label = node.label === undefined ? undefined : stripOverBudget(node.label, ceilings);
+      const caption = node.caption === undefined ? undefined : stripOverBudget(node.caption, ceilings);
+      return value === node.value && label === node.label && caption === node.caption ? node : { ...node, value, label, caption };
+    }
+    case 'stack':
+    case 'grid':
+    case 'section':
+    case 'scroller':
+      return { ...node, children: node.children.map((child) => keepBudgetPrices(child, ceilings)) };
+    case 'tabs':
+      return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: tab.children.map((child) => keepBudgetPrices(child, ceilings)) })) };
+    case 'text':
+    case 'callout':
+    case 'quote':
+    case 'draft':
+    case 'heading': {
+      const text = 'text' in node && typeof node.text === 'string' ? stripOverBudget(node.text, ceilings) : undefined;
+      return text === undefined || text === node.text ? node : { ...node, text };
+    }
+    case 'choices': {
+      const options = node.options.filter((option) => !overBudget(option.label, ceilings));
+      return options.length === node.options.length ? node : { ...node, options };
+    }
+    case 'keyvalue':
+    case 'timeline':
+    case 'profile':
+    case 'table':
+    case 'steps':
+    case 'accordion':
+    case 'proscons':
+    case 'badges':
+    case 'actions':
+    case 'links':
+    case 'citations':
+    case 'chart':
+    case 'pricing':
+    case 'scaler':
+    case 'slider':
+    case 'reveal':
+    case 'image':
+    case 'gallery':
+    case 'video':
+    case 'code':
+    case 'divider':
+    case 'progress':
+    case 'rating':
+    case 'diagram':
+    case 'ticker':
+    case 'slot':
+      return node;
+    default: {
+      const unreachable: never = node;
+      return unreachable;
+    }
+  }
 }
 
 /** A priced list drops a pick that still has no price. A list with no prices at all stays, so a miss does not empty the card. */
@@ -1386,14 +1712,746 @@ function repairTaxNode(node: CardNode, query: string, sources: readonly ClaimSou
   }
 }
 
+interface ChargePick { amount: string; value: number; n: number }
+
+/**
+ * The dollar amount an official page states for this fee. A different amount on another site,
+ * or an optional add-on on the same page, is not the charge.
+ */
+export function officialCharge(query: string, sources: readonly ClaimSource[]): ChargePick | undefined {
+  if (!FEE_ASK.test(query) || TAX_ASK.test(query)) return undefined;
+  let best: ChargePick & { score: number; official: boolean } | undefined;
+  for (const source of sources) {
+    const official = officialDomain(source.domain);
+    const lead = leadFigure('levy', query, `${source.text}\n${source.stated ?? ''}`);
+    if (!lead) continue;
+    // A tied score stays with the official page. A line that names the subject more clearly wins
+    // when that page's snippet pairs the amount with a different item.
+    const closer = !best
+      || lead.score > best.score
+      || (lead.score === best.score && official && !best.official);
+    if (closer) best = { amount: lead.figure, value: lead.value, n: source.n, score: lead.score, official };
+  }
+  if (!best) return undefined;
+  return { amount: best.amount, value: best.value, n: best.n };
+}
+
+function officialAmounts(source: ClaimSource | undefined): (value: number) => boolean {
+  const values: number[] = [];
+  if (source) {
+    for (const match of `${source.text}\n${source.stated ?? ''}`.matchAll(new RegExp(MONEY.source, 'g'))) values.push(moneyValue(match[0]));
+  }
+  return (value) => values.some((have) => Math.abs(have - value) < 0.001);
+}
+
+function swapFee(text: string, pick: ChargePick, stated: (value: number) => boolean): string {
+  let replaced = false;
+  const out = text.replace(new RegExp(MONEY.source, 'g'), (raw) => {
+    const value = moneyValue(raw);
+    if (stated(value) || Math.abs(value - pick.value) < 0.001) return raw;
+    replaced = true;
+    return pick.amount;
+  });
+  if (!replaced) return text;
+  return out.replace(/\[(\d+)\]/, `[${pick.n}]`);
+}
+
+function applyCharge(node: CardNode, pick: ChargePick, stated: (value: number) => boolean): CardNode {
+  const line = (text: string) => swapFee(text, pick, stated);
+  switch (node.type) {
+    case 'stack':
+    case 'grid':
+    case 'section':
+    case 'scroller':
+      return { ...node, children: node.children.map((child) => applyCharge(child, pick, stated)) };
+    case 'tabs':
+      return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: tab.children.map((child) => applyCharge(child, pick, stated)) })) };
+    case 'text':
+    case 'callout':
+    case 'quote':
+    case 'draft':
+    case 'heading':
+      return { ...node, text: line(node.text) };
+    case 'hero':
+      return { ...node, value: line(node.value), caption: node.caption ? line(node.caption) : node.caption };
+    case 'tile':
+      return { ...node, value: node.value ? line(node.value) : node.value, sub: node.sub ? line(node.sub) : node.sub };
+    case 'stat':
+      return { ...node, value: line(node.value), label: line(node.label) };
+    case 'keyvalue':
+      return { ...node, items: node.items.map((item) => ({ ...item, value: line(item.value) })) };
+    case 'list':
+      return { ...node, items: node.items.map((item) => ({ ...item, text: line(item.text), meta: item.meta ? line(item.meta) : item.meta })) };
+    case 'table':
+      return { ...node, rows: node.rows.map((row) => row.map((cell) => line(cell))) };
+    case 'timeline':
+      return { ...node, items: node.items.map((item) => ({ ...item, title: line(item.title), text: item.text ? line(item.text) : item.text })) };
+    case 'steps':
+      return { ...node, items: node.items.map((item) => ({ ...item, title: line(item.title), detail: item.detail ? line(item.detail) : item.detail })) };
+    case 'accordion':
+      return { ...node, items: node.items.map((item) => ({ ...item, title: line(item.title), text: line(item.text) })) };
+    case 'proscons':
+      return { ...node, pros: node.pros.map(line), cons: node.cons.map(line) };
+    case 'badges':
+      return { ...node, items: node.items.map(line) };
+    case 'profile':
+      return { ...node, facts: node.facts?.map((fact) => ({ ...fact, value: line(fact.value) })) };
+    case 'actions':
+    case 'choices':
+    case 'links':
+    case 'citations':
+    case 'chart':
+    case 'pricing':
+    case 'scaler':
+    case 'slider':
+    case 'reveal':
+    case 'image':
+    case 'gallery':
+    case 'video':
+    case 'code':
+    case 'divider':
+    case 'progress':
+    case 'rating':
+    case 'diagram':
+    case 'ticker':
+    case 'slot':
+      return node;
+    default: {
+      const unreachable: never = node;
+      return unreachable;
+    }
+  }
+}
+
+function addedRates(text: string): number | undefined {
+  if (!text.includes('+')) return undefined;
+  const parts = [...text.matchAll(/(\d{1,2}(?:\.\d+)?)\s*%/g)].map((match) => Number(match[1]));
+  if (parts.length < 2) return undefined;
+  return Math.round(parts.reduce((sum, rate) => sum + rate, 0) * 1000) / 1000;
+}
+
+/** A sum that does not equal the lead rate leaves the card. The lead is what remains. */
+function withoutBrokenSum(text: string, lead: number): string {
+  const kept = text.split(SENTENCE_BREAK).filter((sentence) => {
+    const sum = addedRates(sentence);
+    return sum === undefined || Math.abs(sum - lead) <= 0.051;
+  });
+  return kept.join(' ').replace(/\s{2,}/g, ' ').trim();
+}
+
+function withLeadRate(text: string, lead: number): string {
+  if (!/(\d{1,2}(?:\.\d+)?)\s*(?:%|percent\b)/i.test(text)) return text;
+  return text.replace(/(\d{1,2}(?:\.\d+)?)\s*(?:%|percent\b)/i, (raw) => (raw.includes('%') ? `${lead}%` : `${lead} percent`));
+}
+
+/** A chart or slider whose percents are not the lead rate. Those numbers would disagree with the card. */
+function strayRateNode(node: CardNode, lead: number): boolean {
+  if (node.type === 'slider') {
+    const unit = (node.unit ?? '').toLowerCase();
+    return (unit === '%' || unit === 'percent') && Math.abs(node.value - lead) > 0.001;
+  }
+  if (node.type !== 'chart') return false;
+  const unit = (node.unit ?? '').replace(/\s/g, '').toLowerCase();
+  const values = node.data.map((item) => item.value);
+  const rates = unit === '%' || unit === 'percent' || values.some((value) => value < 1 || !Number.isInteger(value));
+  if (!rates) return false;
+  return values.some((value) => Math.abs(value - lead) > 0.001);
+}
+
+function alignTaxChildren(children: readonly CardNode[], lead: number): CardNode[] {
+  return children.map((child) => alignTax(child, lead)).filter((child) => {
+    if (strayRateNode(child, lead)) return false;
+    if ('children' in child && Array.isArray(child.children) && child.children.length === 0) return false;
+    return true;
+  });
+}
+
+function alignTax(node: CardNode, lead: number): CardNode {
+  switch (node.type) {
+    case 'stack':
+    case 'grid':
+    case 'scroller': {
+      const children = alignTaxChildren(node.children, lead);
+      return children.length === node.children.length && children.every((child, index) => child === node.children[index]) ? node : { ...node, children };
+    }
+    case 'section': {
+      const children = alignTaxChildren(node.children, lead);
+      if (!children.length) return { type: 'divider' };
+      return children.length === node.children.length && children.every((child, index) => child === node.children[index]) ? node : { ...node, children };
+    }
+    case 'tabs':
+      return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: alignTaxChildren(tab.children, lead) })) };
+    case 'text':
+    case 'callout':
+    case 'quote':
+    case 'draft':
+    case 'heading': {
+      const text = withoutBrokenSum(node.text, lead);
+      return text === node.text ? node : { ...node, text };
+    }
+    case 'hero': {
+      const value = withLeadRate(node.value, lead);
+      const caption = node.caption ? withoutBrokenSum(node.caption, lead) : node.caption;
+      return value === node.value && caption === node.caption ? node : { ...node, value, caption };
+    }
+    case 'stat': {
+      const value = withLeadRate(node.value, lead);
+      return value === node.value ? node : { ...node, value };
+    }
+    case 'tile': {
+      const value = node.value ? withLeadRate(node.value, lead) : node.value;
+      const sub = node.sub ? withoutBrokenSum(node.sub, lead) : node.sub;
+      return value === node.value && sub === node.sub ? node : { ...node, value, sub };
+    }
+    case 'keyvalue':
+    case 'list':
+    case 'timeline':
+    case 'profile':
+    case 'table':
+    case 'steps':
+    case 'accordion':
+    case 'proscons':
+    case 'badges':
+    case 'actions':
+    case 'choices':
+    case 'links':
+    case 'citations':
+    case 'chart':
+    case 'pricing':
+    case 'scaler':
+    case 'slider':
+    case 'reveal':
+    case 'image':
+    case 'gallery':
+    case 'video':
+    case 'code':
+    case 'divider':
+    case 'progress':
+    case 'rating':
+    case 'diagram':
+    case 'ticker':
+    case 'slot':
+      return node;
+    default: {
+      const unreachable: never = node;
+      return unreachable;
+    }
+  }
+}
+
+function statedMoney(text: string, fee: ChargePick, allowed: (value: number) => boolean): string {
+  return text.replace(new RegExp(MONEY.source, 'g'), (raw) => {
+    const value = moneyValue(raw);
+    if (Math.abs(value - fee.value) < 0.001 || allowed(value)) return raw;
+    return '';
+  }).replace(/\s{2,}/g, ' ').replace(/\s+([,.;:])/g, '$1').trim();
+}
+
+const ADDON_LINE = /\b(?:expedit(?:e|ed|ing|ion)?|optional|additional|surcharge|add-on|addon)\b/i;
+
+interface NamedCharge {
+  figure: string;
+  value: number;
+  line: string;
+  n: number;
+  official: boolean;
+}
+
+/** Dollar lines from every source. The winning page can name the base charge and omit the add-on. */
+function namedCharges(sources: readonly ClaimSource[]): NamedCharge[] {
+  const out: NamedCharge[] = [];
+  for (const source of sources) {
+    const official = officialDomain(source.domain);
+    for (const clause of moneyClauses(`${source.text}\n${source.stated ?? ''}`)) {
+      out.push({ ...clause, n: source.n, official });
+    }
+  }
+  return out;
+}
+
+function wordHit(hay: string, token: string): boolean {
+  const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`\\b${escaped}\\b`, 'i').test(hay);
+}
+
+function rowTokens(label: string, weight: number): { token: string; weight: number }[] {
+  const words = label.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 4 && !FEE_GENERIC.has(word));
+  const forms = [...label.matchAll(/\b[a-z]{1,4}-\d{2,}\b/gi)].map((match) => match[0].toLowerCase());
+  return [...words.map((token) => ({ token, weight })), ...forms.map((token) => ({ token, weight: weight + 2 }))];
+}
+
+/**
+ * The source line that names this row. A line that says "expedite" is not the base charge,
+ * and a line that says the item or its form id is not the add-on.
+ */
+function chargeForLabel(label: string, sub: string, query: string, charges: readonly NamedCharge[], lead: ChargePick): NamedCharge | undefined {
+  const spoken = `${label} ${sub}`.replace(/\+/g, ' and ');
+  const tokens = [...rowTokens(label, 2), ...rowTokens(sub, 1)];
+  const addonLabel = ADDON_LINE.test(spoken);
+  const questionAddon = ADDON_LINE.test(query);
+  if (!tokens.length && !addonLabel) return undefined;
+  let best: { charge: NamedCharge; score: number; hits: number } | undefined;
+  for (const charge of charges) {
+    const low = charge.line.toLowerCase();
+    let score = 0;
+    let hits = 0;
+    for (const token of tokens) {
+      if (!wordHit(low, token.token)) continue;
+      score += token.weight;
+      if (token.weight >= 2) hits += 1;
+    }
+    const lineAddon = ADDON_LINE.test(charge.line);
+    if (addonLabel && !questionAddon) score += lineAddon ? 3 : -6;
+    else if (!addonLabel && !questionAddon && lineAddon) score -= 4;
+    if (/\band\s+[a-z]/i.test(charge.line) && !/\band\b/i.test(spoken)) score -= 4;
+    if (score < 2) continue;
+    const leadCopy = Math.abs(charge.value - lead.value) < 0.001;
+    const bestCopy = best ? Math.abs(best.charge.value - lead.value) < 0.001 : false;
+    // "$42 Harbor card" names the next item. "Harbor card: $11" names this one.
+    // An add-on keeps the line that says so, including when that line leads with the amount.
+    const namedFirst = !/^[$£€¥]/.test(charge.line.trim());
+    const bestNamed = best ? !/^[$£€¥]/.test(best.charge.line.trim()) : false;
+    const sameOrder = !best || addonLabel || namedFirst === bestNamed;
+    const closer = !best
+      || score > best.score
+      || (score === best.score && hits > best.hits)
+      || (score === best.score && hits === best.hits && !addonLabel && namedFirst && !bestNamed)
+      || (score === best.score && hits === best.hits && sameOrder && charge.official && !best.charge.official)
+      || (score === best.score && hits === best.hits && sameOrder && charge.official === best.charge.official && addonLabel && !questionAddon && !leadCopy && bestCopy);
+    if (closer) best = { charge, score, hits };
+  }
+  return best?.charge;
+}
+
+/** The row is the charge the question asked for, not a different add-on listed beside it. */
+function asksForCharge(label: string, query: string): boolean {
+  const tokens = query.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 4 && !FEE_GENERIC.has(word));
+  if (!tokens.length) return false;
+  if (ADDON_LINE.test(label) && !ADDON_LINE.test(query)) return false;
+  const low = label.toLowerCase();
+  const hits = tokens.filter((token) => low.includes(token)).length;
+  return hits >= Math.min(2, tokens.length);
+}
+
+/** One shown amount, tied to the line that names its row. The base charge is not copied onto a different row. */
+function pickedAmount(
+  label: string,
+  sub: string,
+  raw: string,
+  fee: ChargePick,
+  allowed: (value: number) => boolean,
+  query: string,
+  charges: readonly NamedCharge[],
+): string {
+  const named = chargeForLabel(label, sub, query, charges, fee);
+  const value = moneyValue(raw);
+  const addonRow = ADDON_LINE.test(`${label} ${sub}`) && !ADDON_LINE.test(query);
+  if (named && Math.abs(value - named.value) < 0.001) return raw.replace(/\s/g, '');
+  if (named && (Math.abs(named.value - fee.value) >= 0.001 || !addonRow)) return named.figure;
+  if (addonRow && charges.some((charge) => Math.abs(charge.value - value) < 0.001 && ADDON_LINE.test(charge.line))) return raw.replace(/\s/g, '');
+  if (addonRow && Math.abs(value - fee.value) < 0.001) return '';
+  if (asksForCharge(label, query) && Math.abs(value - fee.value) >= 0.001) return fee.amount;
+  if (Math.abs(value - fee.value) < 0.001 || allowed(value)) return raw;
+  return '';
+}
+
+function rewriteMoney(
+  label: string,
+  sub: string,
+  text: string,
+  fee: ChargePick,
+  allowed: (value: number) => boolean,
+  query: string,
+  charges: readonly NamedCharge[],
+): string {
+  if (!MONEY.test(text)) return text;
+  let cite: number | undefined;
+  const replaced = text.replace(new RegExp(MONEY.source, 'g'), (raw, index: number) => {
+    const local = label === text ? figureClause(text, index, raw.length) : label;
+    const localSub = label === text ? '' : sub;
+    const next = pickedAmount(local, localSub, raw, fee, allowed, query, charges);
+    const named = chargeForLabel(local, localSub, query, charges, fee);
+    if (named && next.replace(/\s/g, '') === named.figure && Math.abs(moneyValue(raw) - named.value) >= 0.001) cite = named.n;
+    return next;
+  });
+  const cited = cite === undefined ? replaced : replaced.replace(/\[(\d+)\]/, `[${cite}]`);
+  return cited.replace(/\s{2,}/g, ' ').replace(/\s+([,.;:])/g, '$1').trim();
+}
+
+/** The lead amount is the official charge. The hero is that charge. A different row keeps the line that names it. */
+function alignFee(
+  node: CardNode,
+  fee: ChargePick,
+  allowed: (value: number) => boolean,
+  query: string,
+  charges: readonly NamedCharge[],
+): CardNode {
+  const line = (text: string) => statedMoney(text, fee, allowed);
+  const lead = (text: string) => {
+    if (!MONEY.test(text)) return fee.amount;
+    const value = moneyValue(text.match(MONEY)?.[0] ?? '');
+    if (Math.abs(value - fee.value) < 0.001) return line(text);
+    return text.replace(MONEY, fee.amount);
+  };
+  const tied = (label: string, sub: string, text: string) => rewriteMoney(label, sub, text, fee, allowed, query, charges);
+  switch (node.type) {
+    case 'stack':
+    case 'grid':
+    case 'section':
+    case 'scroller':
+      return { ...node, children: node.children.map((child) => alignFee(child, fee, allowed, query, charges)) };
+    case 'tabs':
+      return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: tab.children.map((child) => alignFee(child, fee, allowed, query, charges)) })) };
+    case 'text':
+    case 'callout':
+    case 'quote':
+    case 'draft':
+    case 'heading': {
+      const text = tied(node.text, '', node.text);
+      return text === node.text ? node : { ...node, text };
+    }
+    case 'hero': {
+      const value = lead(node.value);
+      return value === node.value ? node : { ...node, value };
+    }
+    case 'stat': {
+      const addonRow = ADDON_LINE.test(node.label) && !ADDON_LINE.test(query);
+      const value = addonRow ? tied(node.label, '', node.value) : lead(node.value);
+      return value === node.value ? node : { ...node, value };
+    }
+    case 'tile': {
+      const named = node.value ? chargeForLabel(node.label, node.sub ?? '', query, charges, fee) : undefined;
+      const value = node.value ? tied(node.label, node.sub ?? '', node.value) : node.value;
+      const sub = node.sub ? tied(node.label, node.sub, node.sub) : node.sub;
+      const shown = value?.match(MONEY)?.[0];
+      const moved = named && shown && Math.abs(moneyValue(shown) - named.value) < 0.001 && Math.abs(named.value - fee.value) >= 0.001;
+      if (value === node.value && sub === node.sub && !moved) return node;
+      return moved ? { ...node, value, sub, source: named.n } : { ...node, value, sub };
+    }
+    case 'keyvalue':
+      return { ...node, items: node.items.map((item) => ({ ...item, value: tied(item.label, '', item.value) })) };
+    case 'list':
+      return {
+        ...node,
+        items: node.items.map((item) => ({ ...item, text: tied(item.text, '', item.text), meta: item.meta ? tied(item.meta, '', item.meta) : item.meta })),
+      };
+    case 'table':
+      return { ...node, rows: node.rows.map((cells) => cells.map((cell, index) => (index === 0 ? cell : tied(cells[0] ?? '', '', cell)))) };
+    case 'timeline':
+    case 'profile':
+    case 'steps':
+    case 'accordion':
+    case 'proscons':
+    case 'badges':
+    case 'actions':
+    case 'choices':
+    case 'links':
+    case 'citations':
+    case 'chart':
+    case 'pricing':
+    case 'scaler':
+    case 'slider':
+    case 'reveal':
+    case 'image':
+    case 'gallery':
+    case 'video':
+    case 'code':
+    case 'divider':
+    case 'progress':
+    case 'rating':
+    case 'diagram':
+    case 'ticker':
+    case 'slot':
+      return node;
+    default: {
+      const unreachable: never = node;
+      return unreachable;
+    }
+  }
+}
+
+const CHARGE_GENERIC = new Set([
+  'adult', 'minor', 'mail', 'form', 'optional', 'extra', 'added', 'service', 'processing',
+  'renewal', 'cost', 'costs', 'total', 'payable', 'state', 'regular', 'standard', 'current',
+]);
+
+/** The charge a row names. "Expedited" and "Expedited add-on" are one charge. "Book" and "book and card" are not. */
+function chargeName(label: string): string | undefined {
+  const words = label.toLowerCase().replace(/\+/g, ' and ').split(/[^a-z0-9]+/).flatMap((word) => {
+    if (word.length < 4 || FEE_GENERIC.has(word) || CHARGE_GENERIC.has(word)) return [];
+    if (/^expedit/.test(word)) return ['expedite'];
+    return [word];
+  });
+  const forms = [...label.matchAll(/\b[a-z]{1,4}-\d{2,}\b/gi)].map((match) => match[0].toLowerCase());
+  const parts = [...new Set([...words, ...forms])].sort();
+  return parts.length ? parts.join('|') : undefined;
+}
+
+/** Keep the first row that names a charge. The same name, or the same word at the same amount, is not added again. */
+function keepCharge(label: string, text: string, seen: Set<string>, hero?: { name: string; amount: number }): boolean {
+  if (!MONEY.test(text) && !MONEY.test(label)) return true;
+  const amount = moneyValue((text.match(MONEY) ?? label.match(MONEY))?.[0] ?? '');
+  const name = chargeName(label);
+  // The hero is the charge that was asked for. Another row at that same amount is a second copy.
+  if (hero && Number.isFinite(amount) && Math.abs(amount - hero.amount) < 0.001) return false;
+  if (!name) return true;
+  const tokens = name.split('|');
+  const repeated = seen.has(name) || (Number.isFinite(amount) && tokens.some((token) => seen.has(`${token}@${amount}`)));
+  if (repeated) return false;
+  seen.add(name);
+  if (Number.isFinite(amount)) for (const token of tokens) seen.add(`${token}@${amount}`);
+  return true;
+}
+
+function dropRepeatCharge(node: CardNode, seen: Set<string>, hero?: { name: string; amount: number }): CardNode | undefined {
+  switch (node.type) {
+    case 'stack':
+    case 'grid':
+    case 'section':
+    case 'scroller': {
+      const children = node.children.flatMap((child) => {
+        const next = dropRepeatCharge(child, seen, hero);
+        return next ? [next] : [];
+      });
+      return children.length ? { ...node, children } : undefined;
+    }
+    case 'tabs':
+      return {
+        ...node,
+        tabs: node.tabs.map((tab) => ({
+          ...tab,
+          children: tab.children.flatMap((child) => {
+            const next = dropRepeatCharge(child, seen, hero);
+            return next ? [next] : [];
+          }),
+        })),
+      };
+    case 'tile':
+    case 'stat':
+      return keepCharge(node.label, `${node.value ?? ''} ${node.type === 'tile' ? node.sub ?? '' : ''}`, seen, hero) ? node : undefined;
+    case 'keyvalue': {
+      const items = node.items.filter((item) => keepCharge(item.label, item.value, seen, hero));
+      return items.length ? (items.length === node.items.length ? node : { ...node, items }) : undefined;
+    }
+    case 'table': {
+      const rows = node.rows.filter((row) => keepCharge(row[0] ?? '', row.slice(1).join(' '), seen, hero));
+      return rows.length ? (rows.length === node.rows.length ? node : { ...node, rows }) : undefined;
+    }
+    case 'list': {
+      const items = node.items.filter((item) => keepCharge(item.text, `${item.text} ${item.meta ?? ''}`, seen, hero));
+      return items.length ? (items.length === node.items.length ? node : { ...node, items }) : undefined;
+    }
+    case 'text':
+    case 'callout':
+    case 'quote':
+    case 'draft':
+    case 'heading':
+    case 'hero':
+    case 'timeline':
+    case 'profile':
+    case 'steps':
+    case 'accordion':
+    case 'proscons':
+    case 'badges':
+    case 'actions':
+    case 'choices':
+    case 'links':
+    case 'citations':
+    case 'chart':
+    case 'pricing':
+    case 'scaler':
+    case 'slider':
+    case 'reveal':
+    case 'image':
+    case 'gallery':
+    case 'video':
+    case 'code':
+    case 'divider':
+    case 'progress':
+    case 'rating':
+    case 'diagram':
+    case 'ticker':
+    case 'slot':
+      return node;
+    default: {
+      const unreachable: never = node;
+      return unreachable;
+    }
+  }
+}
+
+function heroCharge(node: CardNode): { name: string; amount: number } | undefined {
+  if (node.type === 'hero') {
+    const amount = moneyValue(node.value.match(MONEY)?.[0] ?? '');
+    if (!Number.isFinite(amount)) return undefined;
+    return { name: chargeName(node.label ?? '') ?? '', amount };
+  }
+  if (node.type === 'stack' || node.type === 'grid' || node.type === 'section' || node.type === 'scroller') {
+    for (const child of node.children) {
+      const found = heroCharge(child);
+      if (found) return found;
+    }
+  }
+  if (node.type === 'tabs') {
+    for (const tab of node.tabs) {
+      for (const child of tab.children) {
+        const found = heroCharge(child);
+        if (found) return found;
+      }
+    }
+  }
+  return undefined;
+}
+
+/** One row per named charge, across the whole card. The hero is the answer, not a second copy of a row. */
+export function oneNamedCharge(query: string, nodes: readonly (CardNode | undefined)[]): (CardNode | undefined)[] {
+  if (!FEE_ASK.test(query) || TAX_ASK.test(query)) return [...nodes];
+  const seen = new Set<string>();
+  let hero: { name: string; amount: number } | undefined;
+  for (const node of nodes) {
+    if (!node) continue;
+    hero = heroCharge(node);
+    if (hero) break;
+  }
+  return nodes.map((node) => (node ? dropRepeatCharge(node, seen, hero) : node));
+}
+
+function questionTokens(query: string): string[] {
+  return query.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 4 && !FEE_GENERIC.has(word) && !CHARGE_GENERIC.has(word));
+}
+
+/** Words that sit in front of the amount. A figure that leads the clause has not named its item yet. */
+function labelBeforeAmount(line: string): string | undefined {
+  const money = line.match(MONEY);
+  if (!money || money.index === undefined || money.index === 0 || /^[$£€¥]/.test(line.trim())) return undefined;
+  const words = line.slice(0, money.index).replace(/[^A-Za-z0-9\s+-]/g, ' ').replace(/\s+/g, ' ').trim().split(' ').filter((word) => word.length >= 3);
+  const kept = words.slice(-5);
+  return kept.length ? kept.join(' ') : undefined;
+}
+
+/** An add-on written after its amount ("$15—Expedited") still names that add-on. */
+function addonAfterAmount(line: string): string | undefined {
+  const money = line.match(MONEY);
+  if (!money || money.index === undefined) return undefined;
+  const words = line.slice(money.index + money[0].length).replace(/[^A-Za-z0-9\s+-]/g, ' ').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean).slice(0, 3);
+  const label = words.join(' ');
+  return label && ADDON_LINE.test(label) ? label : undefined;
+}
+
+function recordCharges(node: CardNode, seen: Set<string>): void {
+  if (node.type === 'stack' || node.type === 'grid' || node.type === 'section' || node.type === 'scroller') {
+    for (const child of node.children) recordCharges(child, seen);
+    return;
+  }
+  if (node.type === 'tabs') {
+    for (const tab of node.tabs) for (const child of tab.children) recordCharges(child, seen);
+    return;
+  }
+  if (node.type === 'tile' || node.type === 'stat') {
+    keepCharge(node.label, `${node.value ?? ''} ${node.type === 'tile' ? node.sub ?? '' : ''}`, seen);
+    return;
+  }
+  if (node.type === 'keyvalue') {
+    for (const item of node.items) keepCharge(item.label, item.value, seen);
+    return;
+  }
+  if (node.type === 'table') {
+    for (const row of node.rows) keepCharge(row[0] ?? '', row.slice(1).join(' '), seen);
+    return;
+  }
+  if (node.type === 'list') {
+    for (const item of node.items) keepCharge(item.text, `${item.text} ${item.meta ?? ''}`, seen);
+  }
+}
+
+function placeCharge(node: CardNode, tile: CardNode): CardNode | undefined {
+  if (node.type === 'grid') return { ...node, children: [...node.children, tile] };
+  if (node.type === 'keyvalue' && tile.type === 'tile') return { ...node, items: [...node.items, { label: tile.label, value: tile.value ?? '' }] };
+  if (node.type === 'stack' || node.type === 'section' || node.type === 'scroller') {
+    for (let i = 0; i < node.children.length; i++) {
+      const child = node.children[i];
+      if (!child) continue;
+      const placed = placeCharge(child, tile);
+      if (!placed) continue;
+      const children = node.children.slice();
+      children[i] = placed;
+      return { ...node, children };
+    }
+    return { ...node, children: [...node.children, tile] };
+  }
+  return undefined;
+}
+
+/**
+ * A fee card shows each distinct charge a source names, once.
+ * The lead amount stays the hero. A second row for that same charge is not added.
+ */
+export function presentNamedCharges(query: string, nodes: readonly (CardNode | undefined)[], sources: readonly ClaimSource[]): (CardNode | undefined)[] {
+  if (!FEE_ASK.test(query) || TAX_ASK.test(query)) return [...nodes];
+  const lead = officialCharge(query, sources);
+  if (!lead) return [...nodes];
+  const charges = namedCharges(sources);
+  const asked = questionTokens(query);
+  const labels: string[] = [];
+  const seenLabels = new Set<string>();
+  const consider = (label: string | undefined) => {
+    if (!label) return;
+    const name = chargeName(label);
+    if (!name || seenLabels.has(name)) return;
+    const shares = asked.some((token) => wordHit(label, token));
+    if (/\b(?:for|the|pay|paid|this|that|with|from|when|where|your)\b/i.test(label)) return;
+    if (!shares && !ADDON_LINE.test(label)) return;
+    seenLabels.add(name);
+    labels.push(label);
+  };
+  for (const charge of charges) consider(labelBeforeAmount(charge.line));
+  for (const charge of charges) consider(addonAfterAmount(charge.line));
+  const seen = new Set<string>();
+  for (const node of nodes) if (node) recordCharges(node, seen);
+  const tiles: CardNode[] = [];
+  for (const label of labels) {
+    if (tiles.length >= 6) break;
+    const named = chargeForLabel(label, '', query, charges, lead);
+    if (!named || Math.abs(named.value - lead.value) < 0.001) continue;
+    if (!keepCharge(label, named.figure, seen)) continue;
+    tiles.push({ type: 'tile', label, value: named.figure, source: named.n });
+  }
+  if (!tiles.length) return [...nodes];
+  const next = nodes.map((node) => node);
+  for (const tile of tiles) {
+    let placed = false;
+    for (let i = 0; i < next.length; i++) {
+      const node = next[i];
+      if (!node) continue;
+      const host = placeCharge(node, tile);
+      if (!host) continue;
+      next[i] = host;
+      placed = true;
+      break;
+    }
+    if (!placed) break;
+  }
+  return next;
+}
+
+/** The last pass: every percent on a tax card is the official rate, including nodes added after the first bind. */
+export function agreeOfficialRate(node: CardNode, query: string, sources: readonly ClaimSource[]): CardNode {
+  const tax = salesTax(query, sources);
+  if (!tax) return node;
+  return alignTax(applyTax(node, query, tax, ratesIn(sources.find((source) => source.n === tax.n))), tax.rate);
+}
+
 /** Move each number's citation onto a page that states it, then fill a missing product price from that page. */
 export function bindClaims(node: CardNode, sources: readonly ClaimSource[], query: string): CardNode {
   if (!sources.length) return node;
   const aimed = retargetNode(node, sources, query);
   const tax = salesTax(query, sources);
-  const taxed = tax ? applyTax(aimed, query, tax) : aimed;
+  const taxed = tax ? alignTax(applyTax(aimed, query, tax, ratesIn(sources.find((source) => source.n === tax.n))), tax.rate) : aimed;
   const lined = TAX_ASK.test(query) ? repairTaxNode(taxed, query, sources) : taxed;
-  if (!shoppingAsk(query)) return lined;
+  const fee = officialCharge(query, sources);
+  const allowed = officialAmounts(sources.find((source) => source.n === fee?.n));
+  const charged = fee ? alignFee(applyCharge(lined, fee, allowed), fee, allowed, query, namedCharges(sources)) : lined;
+  if (!shoppingAsk(query)) return charged;
   const ceilings = budgetAmounts(query);
-  return dropPriceless(fillPrices(lined, sources, ceilings), ceilings, query);
+  return dropPriceless(keepBudgetPrices(fillPrices(charged, sources, ceilings), ceilings), ceilings, query);
 }

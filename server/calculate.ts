@@ -79,6 +79,54 @@ interface LooseSearch {
 
 type Op = 'sum' | 'average' | 'difference' | 'product' | 'ratio' | 'rate' | 'bare';
 
+const RATE_ASK = /\b(?:tax|taxes)\b|\bwhat if\b[^?]{0,80}\$\s?\d/i;
+const ASKED_MONEY = /\$\s?(\d[\d,]*(?:\.\d+)?)/;
+
+/** A follow-up that applies a rate already on the card to a new amount. Undefined when the rate is not on the card. */
+export function rateOnAmount(input: {
+  question: string;
+  original: string;
+  priorTitle?: string;
+  card?: AnswerCard;
+  search?: LooseSearch;
+}): CalculationCard | undefined {
+  const question = input.question.trim();
+  if (!RATE_ASK.test(question)) return undefined;
+  const money = question.match(ASKED_MONEY);
+  if (!money) return undefined;
+  const base = Number(money[1]!.replace(/,/g, ''));
+  if (!Number.isFinite(base) || base <= 0) return undefined;
+  const blob = [
+    JSON.stringify(input.card?.body ?? []),
+    input.card?.title ?? '',
+    ...(input.search?.results ?? []).slice(0, 8).map((row) => `${row.title ?? ''} ${row.snippet ?? ''}`),
+  ].join('\n');
+  const rates = [...blob.matchAll(/(\d{1,2}(?:\.\d+)?)\s*(?:%|percent)/gi)]
+    .map((match) => Number(match[1]))
+    .filter((rate) => rate > 0 && rate < 40);
+  const unique = [...new Set(rates.map((rate) => rate.toFixed(3)))].map(Number);
+  if (!unique.length) return undefined;
+  const labeled = blob.match(/(?:combined|total|overall)[^%]{0,32}(\d{1,2}(?:\.\d+)?)\s*%|(\d{1,2}(?:\.\d+)?)\s*%[^.\n]{0,32}(?:combined|total|overall)/i);
+  const labeledRate = Number(labeled?.[1] ?? labeled?.[2]);
+  const summed = unique.find((rate) => {
+    const others = unique.filter((item) => item !== rate);
+    const sum = others.reduce((total, item) => total + item, 0);
+    return others.length >= 2 && Math.abs(sum - rate) < 0.02;
+  });
+  const rate = Number.isFinite(labeledRate) && labeledRate > 0 ? labeledRate : summed ?? (unique.length === 1 ? unique[0] : undefined);
+  if (rate === undefined) return undefined;
+  const due = Math.round(base * rate * 100) / 10000;
+  const dollars = due.toFixed(2);
+  return {
+    title: `Tax $${dollars}`,
+    subtitle: 'From the rate already on the card',
+    nodes: [
+      { type: 'hero', value: `$${dollars}`, label: 'Tax' },
+      { type: 'text', text: `$${base} × ${rate}% is $${dollars}.`, size: 'lg' },
+    ],
+  };
+}
+
 /** "Can you just do the math", "add the two totals", "what's the average of those". Not a how-to. */
 export function isCalculationAsk(question: string): boolean {
   const q = question.trim();

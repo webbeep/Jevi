@@ -1,4 +1,5 @@
 import { NAME_PARTICLE, TOPIC_WORD } from '../shared/askAbout';
+import { compareSides } from './patterns';
 import { boundAsk } from '../shared/queryBound';
 import { nameLike, namesPerson, tokens, type EntityHint } from './imageGate';
 import { hasProductModel } from './productModel';
@@ -124,9 +125,26 @@ const ROLE_TAIL = new Set(SPECIFIC_ROLES.flatMap(([, label]) => label.toLowerCas
 
 /** Lowercase words after a name that are about the person, not part of the name ("Messi now", "Ed playing"). */
 const LOWER_STOP = /^(?:now|today|currently|really|actually|exactly|again|anyway|net|worth|age|wife|husband|married|dating|dead|alive|famous|known|.*ing|.*ed|.*ly)$/;
+/** A lowercase second word that is a thing, not a surname ("Apple watch", "Open source", "New phone"). */
+const NOT_SURNAME = /^(?:phone|phones|watch|watches|source|sources|database|databases|headphones|stock|price|prices|review|reviews|news|guide|app|apps|pro|max|mini|air|plus|case|cases|band|bands|book|books|paper|music|video|game|games|city|state|park|home|store|shop|sale|deal|deals)$/i;
+
+/**
+ * A workplace and a given name, with a company mark between them ("Acme AI Sam"),
+ * is that given name. Two words ("Acme Sam") can still be the person's own name.
+ */
+function workplaceGivenName(query: string): string | undefined {
+  const ask = readWorkplaceFirst(query);
+  if (!ask?.confident) return undefined;
+  const rest = query.trim().replace(/\?+\s*$/, '').replace(WHO_IS, '').replace(ABOUT, '').replace(LEAD_Q, '').trim();
+  const words = rest.split(/\s+/).map(cleanWord).filter(Boolean);
+  if (words.length < 3) return undefined;
+  return ask.given;
+}
 
 /** The person the query is about, or '' when there is none. */
 export function personSubject(query: string): string {
+  const given = workplaceGivenName(query);
+  if (given) return given;
   const raw = query.trim();
   const hadWho = WHO_IS.test(raw) || ABOUT.test(raw);
   let s = raw.replace(/\?+\s*$/, '').replace(WHO_IS, '').replace(ABOUT, '').replace(LEAD_Q, '').trim();
@@ -142,6 +160,8 @@ export function personSubject(query: string): string {
     if (/^[A-Z]/.test(w)) {
       // "Tim From Blueflame Ai": From is the workplace, not a surname, once a place follows it.
       if (run.length === 1 && /^(?:from|at|with)$/i.test(w) && i + 1 < words.length) break;
+      // "Mara Chen Where does she teach": the question starts after the full name.
+      if (run.length >= 2 && /^(?:how|what|when|where|why|which|who)$/i.test(w) && i + 1 < words.length && /^(?:does|did|do|is|are|was|were|can|could|should|would|has|have)$/i.test(words[i + 1]!)) break;
       run.push(w);
       if (run.length === 6) break;
       // "Ed Chu, Montefiore": a comma after a full name ends it; what follows is the detail.
@@ -154,13 +174,15 @@ export function personSubject(query: string): string {
       run.push(w);
     } else break;
   }
-  // "who is Ed chu": a sloppy-case surname after a capitalised first name still belongs to the name.
-  if (hadWho && !commaEnd && run.length && run.length < 3 && words.length <= 4) {
+  // "who is Ed chu" and a bare "Scott eberle": a sloppy-case surname after a capitalised first name
+  // still belongs to the name. Two words only, so "Apple watch" and "Open source" stay topics.
+  const bareSloppy = !hadWho && words.length === 2 && run.length === 1 && likelyGivenName(run[0]!) && !TOPIC_WORD.test(run[0]!);
+  if ((hadWho || bareSloppy) && !commaEnd && run.length && run.length < 3 && words.length <= 4) {
     const start = words.indexOf(run[0]!);
     const from = start + run.length;
     for (const [k, w] of words.slice(from).entries()) {
       const lw = w.toLowerCase();
-      if (run.length >= 3 || !/^[a-z][a-z'-]+$/.test(w) || COMMON.has(lw) || LOWER_STOP.test(lw)) break;
+      if (run.length >= 3 || !/^[a-z][a-z'-]+$/.test(w) || COMMON.has(lw) || LOWER_STOP.test(lw) || NOT_SURNAME.test(lw)) break;
       if (ROLE1.has(lw) || DESCRIPTOR_WORDS.has(lw) || ROLE_TAIL.has(lw) || SPORTS_LEAGUE.test(lw) || ORG_TAIL.test(lw)) break;
       run.push(w[0]!.toUpperCase() + w.slice(1));
       if (rawWords[from + k]!.endsWith(',')) break;
@@ -447,14 +469,26 @@ export function vowelSwap(term: string): string {
  * A corrected word that had been read as a third personal name is put after a comma, so
  * "Jensen Huang Nvdia" becomes "Jensen Huang, Nvidia" and the company stays a detail.
  */
+/** Tokens of a versus side stay as typed. A one-letter change would name a different product. */
+function comparisonTokens(query: string): Set<string> {
+  const tokens = new Set<string>();
+  for (const side of compareSides(query)) {
+    for (const word of side.toLowerCase().split(/[^a-z0-9]+/)) {
+      if (word.length >= 4) tokens.add(word);
+    }
+  }
+  return tokens;
+}
+
 export function spellingQuery(query: string, rows: readonly { title?: string; snippet?: string; url?: string }[]): string {
   const words = query.trim().split(/\s+/);
+  const kept = comparisonTokens(query);
   let changed = false;
   const next = words.map((word) => {
     const core = word.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, '');
     if (core.length < 5) return word;
     const low = core.toLowerCase();
-    if (FUNCTION_WORD.has(low)) return word;
+    if (FUNCTION_WORD.has(low) || kept.has(low)) return word;
     const spell = nearOrgSpelling(low, rows);
     if (!spell || spell === low || isInflection(low, spell.toLowerCase()) || sameLetters(low, spell)) return word;
     // A snippet often repeats the typed query. The title and the address are the page's own spelling.
@@ -683,16 +717,11 @@ function earlierIsWorkplace(placeRaw: string[], givenWord: string): boolean {
 }
 
 /**
- * "Who is Blueflame Tim" is the same ask as "Who is Tim from Blueflame": a workplace and a
- * given name, with the workplace first. from/at/with already return undefined here.
- * `confident` is true when the shape is clear before any search (a known given name, or a
- * CamelCase workplace), so the search can ask "Tim at Blueflame" without waiting.
+ * The last word is a given name and the words before it are a workplace.
+ * Does not call personSubject, so personSubject can call this.
  */
-export function workplaceFirst(query: string): { given: string; place: string[]; placeText: string; confident: boolean } | undefined {
-  const q = query.trim();
-  if (!WHO_IS.test(q) && !ABOUT.test(q)) return undefined;
-  if (givenWithPlace(q)) return undefined;
-  const rest = q.replace(/\?+\s*$/, '').replace(WHO_IS, '').replace(ABOUT, '').replace(LEAD_Q, '').trim();
+function readWorkplaceFirst(query: string): { given: string; place: string[]; placeText: string; confident: boolean } | undefined {
+  const rest = query.trim().replace(/\?+\s*$/, '').replace(WHO_IS, '').replace(ABOUT, '').replace(LEAD_Q, '').trim();
   const words = rest.split(/\s+/).map(cleanWord).filter((w) => w && !COMMON.has(w.toLowerCase()));
   if (words.length < 2 || words.length > 4) return undefined;
   if (words.some((w) => /^(?:from|at|with)$/i.test(w))) return undefined;
@@ -703,11 +732,28 @@ export function workplaceFirst(query: string): { given: string; place: string[];
   if (!place.length) return undefined;
   const given = givenWord[0]!.toUpperCase() + givenWord.slice(1);
   // A short camel-case name ("LeBron James") is still a person. A workplace here is a long
-  // token ("Blueflame") or a company mark ("BlueFlame", "NASA"), and the last word is the given name.
+  // token ("Northwind") or a company mark ("NorthWind", "NASA"), and the last word is the given name.
   const first = placeRaw[0] ?? '';
   const orgLike = placeRaw.some((w) => ORG_TAIL.test(w) || (/^[A-Z]{2,}$/.test(w) && !/^(JR|SR|II|III|IV)$/.test(w)) || (looksLikeOrgToken(w) && w.length >= 8));
   const confident = orgLike || (!GIVEN_NAME(first) && first.length >= 8 && GIVEN_NAME(givenWord));
   return { given, place, placeText: placeRaw.join(' '), confident };
+}
+
+/**
+ * "Who is Northwind Tim" is the same ask as "Who is Tim from Northwind": a workplace and a
+ * given name, with the workplace first. from/at/with already return undefined here.
+ * A confident shape (a known given name, or a clear company mark) is the same ask with no
+ * "who is", so the search can ask "Tim at Northwind" without waiting.
+ * `confident` is true when that shape is clear before any search.
+ */
+export function workplaceFirst(query: string): { given: string; place: string[]; placeText: string; confident: boolean } | undefined {
+  const q = query.trim();
+  if (givenWithPlace(q)) return undefined;
+  const ask = readWorkplaceFirst(q);
+  if (!ask) return undefined;
+  const prefixed = WHO_IS.test(q) || ABOUT.test(q);
+  if (!prefixed && !ask.confident) return undefined;
+  return ask;
 }
 
 /** A given name plus a workplace, in either order. "Tim Cook" is not one of these. */
@@ -751,7 +797,10 @@ export function givenPlaceKept<T extends EntityRow>(query: string, rows: readonl
   if (!given || /\s/.test(given)) return undefined;
   const place = placeWords(query, given);
   if (!place.length) return undefined;
-  return rows.filter((row) => namesPlace(row, place) && mentionsGiven(row, given));
+  const kept = rows.filter((row) => namesPlace(row, place) && mentionsGiven(row, given));
+  // No page names that person. Keep the roster so the ask can offer who the sources do name.
+  if (!kept.length) return undefined;
+  return kept;
 }
 
 /** The title's subject is this exact name ("Blueflame Tim - Wikipedia"), not a later mention. */
@@ -781,7 +830,9 @@ export function workplaceKept<T extends EntityRow>(query: string, rows: readonly
   if (!ask) return undefined;
   const name = personSubject(query);
   if (!name || gluedNameIsPerson(name, rows)) return undefined;
-  return rows.filter((row) => namesPlace(row, ask.place) && mentionsGiven(row, ask.given));
+  const kept = rows.filter((row) => namesPlace(row, ask.place) && mentionsGiven(row, ask.given));
+  if (!kept.length) return undefined;
+  return kept;
 }
 
 export function isPersonAsk(query: string, pattern?: string): boolean {
@@ -792,6 +843,9 @@ export function isPersonAsk(query: string, pattern?: string): boolean {
   // The person gate would require that office title as a full name and drop every page.
   if (officeSubject(subject)) return false;
   if (givenWithPlace(query)) return true;
+  // "Northwind AI Sam" names a person and a company even with no "who is".
+  // A company on its own ("Northwind AI") is not this shape.
+  if (workplaceFirst(query)?.confident && !BUSINESS_TOPIC.test(query)) return true;
   if (pattern === 'profile') return subject !== '';
   if (WHO_IS.test(query.trim()) || ABOUT.test(query.trim())) {
     // "Who is Datasite, owner of BlueFlame AI": one name word plus more words is a company asked about
@@ -1521,6 +1575,59 @@ function hasWholeWord(text: string, word: string): boolean {
  * EN4: the Wikipedia article a one-token ask means ("Who is Obama" → "Barack Obama").
  * A list/disambiguated/one-word title names no single person, so it never qualifies.
  */
+/** Distinct encyclopedia people whose names contain this one-token name. One person is not a choice. */
+function wellKnownPeople(rows: EntityRow[], token: string): { title: string; index: number }[] {
+  const found: { title: string; index: number }[] = [];
+  const keys: string[] = [];
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]!;
+    if (!enWikiArticleRow(row) || isDisambiguationPage(row)) continue;
+    const raw = plainTitle(row);
+    if (!raw || /\b(?:list of|disambiguation)\b/i.test(raw)) continue;
+    const titleText = raw.replace(/\s*\([^)]*\)\s*$/, '').trim();
+    if (!hasWholeWord(titleText, token)) continue;
+    const words = titleText.split(/\s+/).filter(Boolean);
+    if (words.length < 2 || words.length > 4) continue;
+    const key = titleText.toLowerCase();
+    const samePerson = keys.some((have) => {
+      const left = have.split(' ');
+      const right = key.split(' ');
+      const [shorter, longer] = left.length <= right.length ? [left, right] : [right, left];
+      return shorter.every((word) => longer.includes(word));
+    });
+    if (samePerson) continue;
+    keys.push(key);
+    found.push({ title: titleText, index: i });
+  }
+  return found;
+}
+
+const RELATIVE = /\b(?:wife|husband|spouse|mother|father|son|daughter|brother|sister|family|first lady|parent)\b/i;
+
+/**
+ * Two well-known people share this token when one uses it as a given name and another as a surname,
+ * or when two surnames have different given names and neither page is about the other's family.
+ * "Obama" stays one person: the other articles are his family. "North" in "Ada North" and "North Vega" does not.
+ */
+function differentPeople(rows: EntityRow[], token: string): { title: string; index: number }[] {
+  const people = wellKnownPeople(rows, token);
+  if (people.length < 2) return people;
+  const role = (title: string) => {
+    const words = title.toLowerCase().split(/\s+/);
+    const at = words.indexOf(token.toLowerCase());
+    if (at <= 0) return 'given';
+    if (at === words.length - 1) return 'family';
+    return 'middle';
+  };
+  const roles = new Set(people.map((person) => role(person.title)));
+  const independent = people.filter((person, index) => index === 0 || !RELATIVE.test(`${rows[person.index]?.title ?? ''} ${rows[person.index]?.snippet ?? ''}`));
+  if (roles.size >= 2) return independent;
+  const givenSurnames = new Set(independent.filter((person) => role(person.title) === 'given').map((person) => person.title.split(/\s+/).at(-1)?.toLowerCase()).filter((word): word is string => !!word));
+  if (givenSurnames.size >= 2) return independent.filter((person) => role(person.title) === 'given');
+  const givens = new Set(independent.filter((person) => role(person.title) === 'family').map((person) => person.title.split(/\s+/)[0]?.toLowerCase()));
+  return givens.size >= 2 ? independent : people.slice(0, 1);
+}
+
 function wikiArticleForToken(rows: EntityRow[], token: string): { title: string; index: number } | undefined {
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i]!;
@@ -1750,10 +1857,137 @@ function fullNamesMatching(row: EntityRow, first: string): string[] {
   return out;
 }
 
+const NAME_PAIR = /\b([A-Z][a-zA-Z'’-]{2,})\s+([A-Z][a-zA-Z'’-]{2,})\b/g;
+
+/** First Last names a page actually prints. A company mark or a role word is not a person. */
+function peopleOnPage(row: EntityRow): string[] {
+  const text = `${row.title ?? ''} ${row.snippet ?? ''}`;
+  const out: string[] = [];
+  for (const match of text.matchAll(NAME_PAIR)) {
+    const given = match[1]!;
+    const surname = match[2]!;
+    const lowGiven = given.toLowerCase();
+    const lowSurname = surname.toLowerCase();
+    if (COMMON.has(lowGiven) || COMMON.has(lowSurname)) continue;
+    if (ROLE1.has(lowGiven) || ROLE1.has(lowSurname) || DESCRIPTOR_WORDS.has(lowSurname) || ROLE_TAIL.has(lowSurname)) continue;
+    if (looksLikeOrgToken(given) || looksLikeOrgToken(surname) || ORG_TAIL.test(given) || ORG_TAIL.test(surname)) continue;
+    if (GENERIC_ORG.test(surname) || GENERIC_ORG.test(given) || SPORTS_LEAGUE.test(surname)) continue;
+    const full = `${given} ${surname}`;
+    if (!out.some((name) => name.toLowerCase() === full.toLowerCase())) out.push(full);
+  }
+  return out;
+}
+
+/**
+ * Pages that name this person, including a page that also names someone else.
+ * A page that never prints the name stays out.
+ */
+function widenKept(name: string, exclusive: number[], rows: EntityRow[], place: string[]): number[] {
+  const kept = new Set(exclusive);
+  for (let i = 0; i < rows.length; i++) {
+    if (kept.has(i) || !hasFullPersonName(name, rows[i]!)) continue;
+    if (place.length && !namesPlace(rows[i]!, place) && !titleNames(name, rows[i]!.title ?? '')) continue;
+    kept.add(i);
+  }
+  return [...kept].sort((a, b) => a - b);
+}
+
+function singleNamed(name: string, exclusive: number[], rows: EntityRow[], place: string[]): EntityDecision {
+  const keptRows = widenKept(name, exclusive, rows, place);
+  const kept = new Set(keptRows);
+  return {
+    kind: 'single',
+    entity: buildEntity(name, exclusive, rows),
+    kept: keptRows,
+    dropped: rows.map((_, i) => i).filter((i) => !kept.has(i)),
+  };
+}
+
+function choiceKey(choice: EntityChoice): string {
+  return `${choice.name} ${choice.descriptor}`.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function dedupeChoices(choices: EntityChoice[]): EntityChoice[] {
+  const seen = new Set<string>();
+  const out: EntityChoice[] = [];
+  for (const choice of choices) {
+    const key = choiceKey(choice);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(choice);
+  }
+  return out;
+}
+
+const PLACE_ONLY = /^(?:based in|located in|lives in|from|in|at)\b/i;
+
+/**
+ * Two choices with the same full name are one person, including a role plus a place.
+ * Different full names, or two careers under one shared name, stay a picker.
+ */
+function onePerson(choices: EntityChoice[], _rows: EntityRow[]): boolean {
+  if (choices.length < 2) return true;
+  const key = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const name = key(choices[0]!.name);
+  if (!name || choices.some((choice) => key(choice.name) !== name)) return false;
+  if (name.split(' ').length >= 2) {
+    const careers = choices.map((choice) => key(choice.descriptor)).filter((descriptor) => descriptor && !PLACE_ONLY.test(descriptor));
+    if (new Set(careers).size <= 1) return true;
+  }
+  return new Set(choices.map((choice) => key(choice.descriptor))).size < 2;
+}
+
+/** A picker only when the choices name different people. One person is one card. */
+function personDecision(choices: EntityChoice[], rows: EntityRow[]): EntityDecision {
+  const people = dedupeChoices(choices);
+  if (people.length >= 2 && !onePerson(people, rows)) return { kind: 'choices', choices: people };
+  const name = people[0]?.name || '';
+  const fromSeeds = [...new Set(people.flatMap((choice) => choice.seeds ?? []))].filter((i) => i >= 0 && i < rows.length);
+  const named = fromSeeds.length ? fromSeeds : rows.map((_, i) => i).filter((i) => name && hasFullPersonName(name, rows[i]!));
+  const cluster = named.length ? named : rows.map((_, i) => i);
+  const kept = new Set(cluster);
+  return {
+    kind: 'single',
+    entity: buildEntity(name, cluster, rows),
+    kept: cluster,
+    dropped: rows.map((_, i) => i).filter((i) => !kept.has(i)),
+  };
+}
+
+/** The model, or a second pass, offered these choices. True when they are one person. */
+export function samePersonChoices(choices: EntityChoice[], rows: EntityRow[]): boolean {
+  return onePerson(dedupeChoices(choices), rows);
+}
+
+/**
+ * People the sources name at this workplace when the asked given name is not among them.
+ * Two or more is a picker. Fewer is not a card about someone else.
+ */
+function rosterDecision(rows: EntityRow[], place: string[], placeText: string): EntityDecision | undefined {
+  const buckets = new Map<string, { name: string; rows: number[] }>();
+  for (let i = 0; i < rows.length; i++) {
+    if (place.length && !namesPlace(rows[i]!, place)) continue;
+    for (const person of peopleOnPage(rows[i]!)) {
+      const key = person.toLowerCase();
+      const found = buckets.get(key) ?? { name: person, rows: [] };
+      if (!found.rows.includes(i)) found.rows.push(i);
+      buckets.set(key, found);
+    }
+  }
+  const groups = [...buckets.values()].sort((a, b) => b.rows.length - a.rows.length || a.rows[0]! - b.rows[0]!);
+  const choices = groups.slice(0, 4).map((group) => {
+    const choice = toChoice(group.name, group.rows, rows);
+    return choice.descriptor ? choice : { ...choice, descriptor: placeText };
+  }).filter(offerChoice).slice(0, 3);
+  if (choices.length >= 2) return personDecision(choices, rows);
+  return undefined;
+}
+
 /**
  * A given name plus a workplace still names people. Rows that carry different full names
  * are different people: ask which one, and never keep both on one card.
- * One full name is that person only. Rows that never name them stay off the card.
+ * One full name is that person only. A page that also names someone else still counts
+ * when it names this person. Rows that never name them stay off the card.
  */
 function peopleNamedLike(first: string, rows: EntityRow[], place: string[]): EntityDecision | undefined {
   const buckets = new Map<string, { name: string; rows: number[] }>();
@@ -1773,26 +2007,14 @@ function peopleNamedLike(first: string, rows: EntityRow[], place: string[]): Ent
   if (!groups.length) return undefined;
   if (groups.length >= 2) {
     const choices = groups.map((group) => toChoice(group.name, group.rows, rows)).filter(offerChoice).slice(0, 3);
-    if (choices.length >= 2) return { kind: 'choices', choices };
+    if (choices.length >= 2) return personDecision(choices, rows);
     if (choices.length === 1) {
       const only = groups.find((group) => group.name === choices[0]!.name) ?? groups[0]!;
-      const kept = new Set(only.rows);
-      return {
-        kind: 'single',
-        entity: buildEntity(only.name, only.rows, rows),
-        kept: only.rows,
-        dropped: rows.map((_, i) => i).filter((i) => !kept.has(i)),
-      };
+      return singleNamed(only.name, only.rows, rows, place);
     }
   }
   const only = groups[0]!;
-  const kept = new Set(only.rows);
-  return {
-    kind: 'single',
-    entity: buildEntity(only.name, only.rows, rows),
-    kept: only.rows,
-    dropped: rows.map((_, i) => i).filter((i) => !kept.has(i)),
-  };
+  return singleNamed(only.name, only.rows, rows, place);
 }
 
 export function resolveEntity(
@@ -1806,20 +2028,40 @@ export function resolveEntity(
   // A first name and a workplace ("who is Tim from Blueflame") is not one person yet.
   // Two full names in the sources are a choice; one full name keeps only that person's rows.
   if (!opts?.prior && !/\s/.test(name) && givenWithPlace(query)) {
-    const named = peopleNamedLike(name, rows, placeWords(query, name));
+    const place = placeWords(query, name);
+    const named = peopleNamedLike(name, rows, place);
     if (named) return named;
+    // The sources name other people, or do not name this one: ask which person.
+    // Falling through would design a company card and retitle the question.
+    const roster = rosterDecision(rows, place, place.join(' '));
+    if (roster) return roster;
+    return { kind: 'skip' };
   }
-  // "Who is Blueflame Tim" is that same ask with the workplace first. A page that prints
-  // those words as a person's name ("Tim Cook") stays on the full-name path below.
+  // "Who is Northwind Tim" is that same ask with the workplace first. A page that prints
+  // those words as a person's name stays on the full-name path below.
   const swapped = !opts?.prior ? workplaceFirst(query) : undefined;
   if (swapped && !gluedNameIsPerson(name, rows)) {
     const named = peopleNamedLike(swapped.given, rows, swapped.place);
     if (named) return named;
+    const roster = rosterDecision(rows, swapped.place, swapped.placeText);
+    if (roster) return roster;
+    return { kind: 'skip' };
   }
   // A one-token famous ask ("Who is Obama"): one Wikipedia article for the token, plus other
   // Wikipedia pages about it, is one dominant identity — resolve that person instead of skipping.
   // The article title has 2+ words, so the follow-up ask can never come back here.
+  // Two well-known people whose names contain the token ("Ada North" and "North Vega") still ask which one.
   if (!/\s/.test(name) && !opts?.prior) {
+    const people = differentPeople(rows, name);
+    if (people.length >= 2) {
+      const choices = people.slice(0, 3).map((person) => {
+        const choice = toChoice(person.title, [person.index], rows);
+        const snippet = (rows[person.index]?.snippet ?? '').split('\n')[0]?.replace(/\s+/g, ' ').trim() ?? '';
+        const descriptor = choice.descriptor || snippet.slice(0, 90);
+        return { ...choice, name: person.title, descriptor, query: `Who is ${person.title}` };
+      }).filter(offerChoice);
+      if (choices.length >= 2) return personDecision(choices, rows);
+    }
     const hit = wikiArticleForToken(rows, name);
     if (hit) {
       const support = rows.filter((r, i) => i !== hit.index && enWikiArticleRow(r) && hasWholeWord(plainTitle(r), name)).length;
@@ -1907,7 +2149,7 @@ export function resolveEntity(
   const anotherPerson = !!listed && middleInitialPerson(listedText, name);
   if (!pickAsk && !opts?.prior && listed && anotherPerson) {
     const named = middleNameChoices(name, listed, rows);
-    if (named.length >= 2) return { kind: 'choices', choices: named };
+    if (named.length >= 2) return personDecision(named, rows);
   }
 
   // Famous name: the exact Wikipedia article plus other en.wikipedia.org pages about the same
@@ -1919,7 +2161,10 @@ export function resolveEntity(
       const exact = exactHit.i;
       // A namesake article ("John Smith (explorer)") proves ambiguity, not fame.
       const support = rows.filter((r, i) => i !== exact && wikiNamePage(r, name) && !qualifiedNamesake(r, name)).length;
-      if (support >= 2 && !anotherPerson) {
+      // One other encyclopedia page about this name is the same person. A second person is a
+      // qualifier article, a disambiguation list, or a middle initial, and those stay a picker.
+      const secondPerson = anotherPerson || rows.some((row) => isDisambiguationPage(row) || qualifiedNamesake(row, name));
+      if (support >= 1 && !secondPerson) {
         const win = [...new Set([...(strong.find((c) => c.includes(exact)) ?? [exact]), ...weak])];
         // Another, disambiguated person is a different person: never credited to this one.
         const kept = eligible.map((e) => e.i).filter((i) => !qualifiedNamesake(rows[i]!, name));
@@ -1963,7 +2208,7 @@ export function resolveEntity(
       // Prefer real clusters when they already give ≥2 choices.
       const clustered = strong.filter((c) => c.length >= 1).map((c) => toChoice(name, c, rows)).filter(offerChoice).slice(0, 3);
       const merged = clustered.length >= 2 ? clustered : choices;
-      if (merged.length >= 2) return { kind: 'choices', choices: merged };
+      if (merged.length >= 2) return personDecision(merged, rows);
     }
   }
 
@@ -2003,16 +2248,23 @@ export function resolveEntity(
           .slice(0, 3)
           .map((r) => toChoice(name, r.cluster, rows))
           .filter(offerChoice);
-        if (choices.length >= 2) return { kind: 'choices', choices };
+        if (choices.length >= 2) return personDecision(choices, rows);
       }
     } else {
       // Asks with context terms keep the size rule.
       const [first, second] = [strong[0]!, strong[1]!];
       if (first.length >= 2 && second.length >= 2 && second.length >= 0.4 * first.length) {
         const choices = strong.filter((c) => c.length >= 2).map((c) => toChoice(name, c, rows)).filter(offerChoice).slice(0, 3);
-        if (choices.length >= 2) return { kind: 'choices', choices };
+        if (choices.length >= 2) return personDecision(choices, rows);
       }
     }
+  }
+
+  // A bare name whose sources describe different careers is several people. Ask which one
+  // before any of those careers share a card.
+  if (bare && !opts?.prior) {
+    const careers = careerChoices(name, rows);
+    if (careers) return personDecision(careers, rows);
   }
 
   // Single: the top-ranked cluster for a bare ask (else the biggest), weak rows attached to it.
@@ -2028,6 +2280,49 @@ export function resolveEntity(
     kept: [...win],
     dropped: rows.map((_, i) => i).filter((i) => !kept.has(i)),
   };
+}
+
+const SHARED_NAME = /\b(?:multiple|several|many|different) people\b|\bshare(?:s|d)? (?:this|the same) name\b|\b(?:people|persons) (?:named|called|with (?:this|the) name)\b/i;
+
+/**
+ * The sources name more than one person: a page says so, or the pages give them
+ * different careers and no single encyclopedia article is the person.
+ */
+export function mixedIdentities(name: string, rows: EntityRow[]): boolean {
+  if (!name || rows.length < 2) return false;
+  const text = (row: EntityRow) => `${row.title ?? ''} ${row.snippet ?? ''}`;
+  if (rows.some((row) => SHARED_NAME.test(text(row)))) return true;
+  if (rows.some((row) => exactWikiArticle(row, name))) return false;
+  const cores = new Set<string>();
+  for (const row of rows) {
+    if (isDisambiguationPage(row)) continue;
+    const sig = extractSignals(row, name);
+    if (!sig.hasName) continue;
+    for (const core of sig.roleCores) cores.add(core);
+  }
+  return cores.size >= 2;
+}
+
+/** One choice per career when the same bare name belongs to more than one person. */
+function careerChoices(name: string, rows: EntityRow[]): EntityChoice[] | undefined {
+  if (!mixedIdentities(name, rows)) return undefined;
+  const groups = new Map<string, number[]>();
+  rows.forEach((row, i) => {
+    if (isDisambiguationPage(row)) return;
+    const sig = extractSignals(row, name);
+    if (!sig.hasName || !sig.roleCores.length) return;
+    const core = sig.roleCores[0]!;
+    const list = groups.get(core) ?? [];
+    list.push(i);
+    groups.set(core, list);
+  });
+  if (groups.size < 2) return undefined;
+  const choices = [...groups.values()]
+    .sort((a, b) => b.length - a.length || a[0]! - b[0]!)
+    .slice(0, 3)
+    .map((cluster) => toChoice(name, cluster, rows))
+    .filter(offerChoice);
+  return choices.length >= 2 ? choices : undefined;
 }
 
 /** The ask's words after the person name ("Ray Lee BlueFlame AI" → "BlueFlame AI"). */
@@ -2276,7 +2571,10 @@ export function entityHintFor(entity: Entity, query = ''): (label: string) => En
     if ((surname && lt.includes(surname)) || (key && lt.includes(key))) {
       // Person: their photo must also name the chosen org (or come from its domains), never a namesake's.
       if (needCtx.length) return { name: entity.name, aliases: entity.aliases, domains: entity.domains, context: needCtx, strict: true, requireContext: true };
-      return { name: entity.name, aliases: entity.aliases, domains: entity.domains, ...(org ? { context: [org], ...(strict ? { strict: true } : {}) } : {}) };
+      // The card settled on this person. A portrait has to name their company or role, not only the shared name.
+      const resolved = org ? [org] : entity.role ? [entity.role] : [];
+      if (resolved.length) return { name: entity.name, aliases: entity.aliases, domains: entity.domains, context: resolved, ...(strict ? { strict: true } : {}), requireContext: true };
+      return { name: entity.name, aliases: entity.aliases, domains: entity.domains };
     }
     return undefined;
   };

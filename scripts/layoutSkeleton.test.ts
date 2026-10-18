@@ -14,7 +14,8 @@ test('a title lead written twice is kept once', () => {
 test('a comparison placeholder has one tile per side and a table with a factor column', () => {
   assert.equal(compareCount('which is better value: renting vs buying a home'), 2);
   assert.equal(compareCount('tea vs coffee vs water'), 3);
-  assert.deepEqual(compareSideQueries('AJ Dybantsa vs 2026 NBA rookies vs past draft classes'), ['2026 NBA rookies', 'NBA past draft classes']);
+  assert.deepEqual(compareSideQueries('AJ Dybantsa vs 2026 NBA rookies vs past draft classes'), ['2026 NBA rookies', 'NBA past draft classes', 'AJ Dybantsa']);
+  assert.deepEqual(compareSideQueries('Glowband 4 vs Northwatch 2'), ['Northwatch 2', 'Glowband 4']);
   const body = patternSkeleton('compare', 'renting vs buying a home');
   assert.equal(body[0]?.type, 'grid');
   if (body[0]?.type === 'grid') assert.equal(body[0].children.length, 2);

@@ -9,26 +9,58 @@ interface PatternDef extends CardPattern {
 
 const slot = (hint: string, shape: Extract<CardNode, { type: 'slot' }>['shape'] = 'line', size?: { cols?: number; rows?: number }): CardNode => ({ type: 'slot', hint, shape, ...size });
 
+/** "A, B and C" is three sides. "A and B" without a comma stays one phrase for the pair matcher. */
+function listSides(text: string): string[] {
+  if (!text.includes(',')) return [];
+  const parts = text.split(/\s*,\s*/).flatMap((part, i, all) => {
+    const cleaned = part.replace(/^(?:and|with|to)\s+/i, '').trim();
+    if (i === all.length - 1 && /\s+\band\b\s+/i.test(cleaned)) return cleaned.split(/\s+\band\b\s+/i).map((side) => side.trim());
+    return [cleaned];
+  }).filter((part) => part.length >= 2);
+  return parts.length >= 2 ? parts : [];
+}
+
+const LEAD_VERB = /^(?:compare|explain|show|find|watch|describe|summarize|list)\b[\s:,-]*/i;
+
+/** "Compare Harbor" is the product Harbor. The verb is not part of the name. */
+export function withoutLeadVerb(text: string): string {
+  let next = text.trim();
+  let prev = '';
+  while (next && next !== prev) {
+    prev = next;
+    next = next.replace(LEAD_VERB, '').trim();
+  }
+  return next;
+}
+
 /** The things a comparison names ("AJ Dybantsa vs 2026 NBA rookies vs past draft classes" is three). */
 export function compareSides(query: string): string[] {
   const stripped = query.replace(/^(?:which is better(?: value)?|compare)\s*:\s*/i, '').trim();
-  const versus = stripped.split(/\s+(?:vs\.?|versus)\s+/i).map((p) => p.trim()).filter((p) => p.length >= 2);
+  const versus = stripped.split(/\s+(?:vs\.?|versus)\s+/i).map((part) => withoutLeadVerb(part)).filter((part) => part.length >= 2);
   if (versus.length >= 2) return versus;
+  const listed = stripped.match(/^compare\s+(.+)$/i);
+  if (listed) {
+    const sides = listSides(listed[1]!);
+    if (sides.length >= 2) return sides;
+  }
   const compared = stripped.match(/^compare\s+(.+?)\s+(?:and|with|to)\s+(.+)$/i);
   if (!compared) return [];
   return [compared[1]!, compared[2]!].map((p) => p.trim()).filter((p) => p.length >= 2);
 }
 
 /**
- * Searches for every side except the first. The literal question already leads with that
- * name, and a "vs" page is usually about the first name alone.
+ * Each named side, searched on its own in addition to the full question.
+ * The later sides stay first, so a two-extra cap still runs the searches it used to,
+ * and a two-sided question also searches the first product alone.
  * A league named on another side ("NBA") is added when this side doesn't say it.
  */
 export function compareSideQueries(query: string): string[] {
   const sides = compareSides(query);
   if (sides.length < 2) return [];
   const league = query.match(/\b(?:NBA|NFL|MLB|NHL|WNBA)\b/i)?.[0]?.toUpperCase();
-  return sides.slice(1, 3).map((side) => (league && !new RegExp(`\\b${league}\\b`, 'i').test(side) ? `${league} ${side}` : side));
+  const named = (side: string, addLeague: boolean) =>
+    addLeague && league && !new RegExp(`\\b${league}\\b`, 'i').test(side) ? `${league} ${side}` : side;
+  return [...sides.slice(1, 3).map((side) => named(side, true)), named(sides[0]!, false)];
 }
 
 /** How many sides a comparison names ("renting vs buying" is 2). Two when it doesn't say. */

@@ -3,9 +3,9 @@ import { test } from 'node:test';
 import type { CardNode } from '../shared/card.ts';
 import type { SearchResponse } from '../shared/types.ts';
 import { asksToCompare } from '../server/askGuard.ts';
-import { answersComparison, comparisonNodes, comparisonRepair, comparisonTitle, mentionsSide } from '../server/compareAnswer.ts';
+import { acceptProductPhoto, answersComparison, appendAskedFact, breakdownStays, comparisonNodes, comparisonRepair, comparisonTitle, dropShownDenials, keepComparedProducts, mentionsSide, missingSideNode, nameForms, placeSidePhotos, restoreSideTiles, sameProduct, showsComparison } from '../server/compareAnswer.ts';
 import { candidates } from '../server/extract.ts';
-import { compareSideQueries } from '../server/patterns.ts';
+import { compareSideQueries, compareSides, withoutLeadVerb } from '../server/patterns.ts';
 import { Polisher, completeSentences, emptyFigure, withoutEmptySlots } from '../server/polish.ts';
 
 const ASK = 'AJ Dybantsa vs 2026 NBA rookies vs past draft classes';
@@ -56,16 +56,25 @@ test('snippet sentences are not stored already cut off', () => {
   assert.ok(texts.every((t) => !/…|\.\.\.|Big 12/.test(t)));
 });
 
+test('a one-word product is also searched as the spaced name the sources use', () => {
+  assert.deepEqual(nameForms('Glowband', 'Reviewed the Harbor Glow Band against the Northwatch.'), ['Glowband', 'Glow Band', 'Harbor Glow Band']);
+  assert.deepEqual(nameForms('Northwatch 2', 'The Northwatch 2 costs $90.'), ['Northwatch 2']);
+});
+
 test('a comparison follow-up is searched on its own, and a pronoun one is not', () => {
   assert.equal(asksToCompare(ASK), true);
   assert.equal(asksToCompare('compare this with the other one'), false);
-  assert.deepEqual(compareSideQueries(ASK), ['2026 NBA rookies', 'NBA past draft classes']);
+  assert.deepEqual(compareSideQueries(ASK), ['2026 NBA rookies', 'NBA past draft classes', 'AJ Dybantsa']);
 });
 
 test('the card title names the sides being compared, not the previous question', () => {
   assert.equal(comparisonTitle(ASK, 'Nba preseason standouts yesterday'), 'AJ Dybantsa vs 2026 NBA Rookies vs Draft Classes');
   assert.equal(comparisonTitle(ASK, ASK), 'AJ Dybantsa vs 2026 NBA Rookies vs Draft Classes');
   assert.equal(comparisonTitle(ASK, 'Dybantsa vs Rookies'), 'Dybantsa vs Rookies');
+  assert.equal(
+    comparisonTitle('Canon EOS R8 vs Nikon Zf', 'Canon EOS R8 vs Nikon Zf What Is the Battery Life of Each Camera'),
+    'Canon EOS R8 vs Nikon Zf',
+  );
 });
 
 test('a biography of one side is not an answer, and the fallback finishes the sentence', () => {
@@ -90,4 +99,524 @@ test('a biography of one side is not an answer, and the fallback finishes the se
   assert.equal(patches![0]?.index, 0);
   assert.equal(patches![0]?.node.type, 'stack');
   assert.equal(patches![1]?.node.type, 'citations');
+});
+
+test('a relative phrase is not a price when the source states one', () => {
+  const ask = 'Northwatch 2 versus Glowband 4';
+  const table: CardNode = {
+    type: 'table',
+    columns: ['Factor', 'Northwatch 2', 'Glowband 4'],
+    rows: [['Price', 'Costs more', '$30–$40 cheaper']],
+  };
+  const tiles: CardNode = {
+    type: 'grid',
+    cols: 2,
+    children: [
+      { type: 'tile', label: 'Northwatch 2', value: 'Costs more' },
+      { type: 'tile', label: 'Glowband 4', value: '$30–$40 cheaper' },
+    ],
+  };
+  const priced: SearchResponse = {
+    query: ask,
+    freshness: 'any',
+    results: [
+      { title: 'Northwatch 2', url: 'https://example.com/north', snippet: 'The Northwatch 2 is $189.99.', domain: 'example.com', engines: ['web'] },
+      { title: 'Glowband 4', url: 'https://example.com/glow', snippet: 'The Glowband 4 is $79.00.', domain: 'example.com', engines: ['web'] },
+    ],
+    images: [
+      { url: 'https://example.com/north', thumb: 'https://example.com/north.jpg', title: 'Northwatch 2', source: 'Northwatch 2', license: 'source' },
+    ],
+    discussions: [],
+    engines: ['web'],
+  };
+  const patches = comparisonRepair(ask, priced, new Map([[0, tiles], [1, table]]));
+  const blob = JSON.stringify(patches);
+  assert.match(blob, /\$189\.99/);
+  assert.match(blob, /\$79\.00/);
+  assert.match(blob, /north\.jpg/);
+  assert.doesNotMatch(blob, /cheaper|Costs more/);
+});
+
+test('a verdict sentence is not the comparison, so both sides become tiles', () => {
+  const ask = 'Northwatch 2 versus Glowband 4';
+  const verdict: CardNode = { type: 'text', text: 'Pick the Northwatch 2 for the brighter screen and the Glowband 4 for the lower price.', size: 'lg' };
+  assert.equal(showsComparison(ask, [verdict]), false);
+  const shown = new Map<number, CardNode>([[0, verdict]]);
+  const search: SearchResponse = {
+    query: ask,
+    freshness: 'any',
+    results: [
+      { title: 'Northwatch 2', url: 'https://example.com/north', snippet: 'The Northwatch 2 costs $90.', domain: 'example.com', engines: ['web'] },
+      { title: 'Glowband 4', url: 'https://example.com/glow', snippet: 'The Glowband 4 costs $40.', domain: 'example.com', engines: ['web'] },
+    ],
+    images: [
+      { url: 'https://example.com/north', thumb: 'https://example.com/north.jpg', title: 'Northwatch 2', source: 'Northwatch 2', license: 'source' },
+      { url: 'https://example.com/glow', thumb: 'https://example.com/glow.jpg', title: 'Glow Band 4', source: 'Glow Band 4', license: 'source' },
+    ],
+    discussions: [],
+    engines: ['web'],
+  };
+  const patches = comparisonRepair(ask, search, shown);
+  assert.ok(patches);
+  const blob = JSON.stringify(patches);
+  assert.match(blob, /Northwatch 2/);
+  assert.match(blob, /Glow Band 4|Glowband 4/);
+  assert.match(blob, /\$90/);
+  assert.match(blob, /\$40/);
+  assert.match(blob, /north\.jpg/);
+});
+
+test('a compound product name is the spaced name, and a filled comparison is not replaced', () => {
+  const ask = 'Northwatch 2 vs Glowband 4';
+  assert.equal(mentionsSide('Glowband 4', 'The Glow Band 4 costs $40'), true);
+  assert.equal(mentionsSide('Glowband 4', 'The Glow Band 9 costs $40'), false);
+  assert.equal(mentionsSide('past draft classes', 'He is a draft prospect.'), false);
+  const tiles: CardNode = {
+    type: 'grid',
+    cols: 2,
+    children: [
+      { type: 'tile', label: 'Northwatch 2', value: '$90' },
+      { type: 'tile', label: 'Glow Band 4', value: '$40' },
+    ],
+  };
+  const table: CardNode = {
+    type: 'table',
+    columns: ['Factor', 'Northwatch 2', 'Glow Band 4'],
+    rows: [['Price', '$90', '$40'], ['Display', 'OLED', 'AMOLED']],
+  };
+  assert.equal(answersComparison(ask, [tiles, table]), true);
+  const shown = new Map<number, CardNode>([[0, tiles], [1, table]]);
+  assert.equal(comparisonRepair(ask, search('Only one side is discussed here.'), shown), undefined);
+});
+
+test('a list of products is one side each, and a follow-up keeps the price and picture already shown', () => {
+  assert.deepEqual(compareSides('Compare Northwatch 2, Glowband 4 and Harbor Band 8'), ['Northwatch 2', 'Glowband 4', 'Harbor Band 8']);
+  assert.equal(withoutLeadVerb('Compare Harbor Slate'), 'Harbor Slate');
+  assert.deepEqual(compareSides('Compare Harbor Slate vs Northwatch 2'), ['Harbor Slate', 'Northwatch 2']);
+  assert.deepEqual(compareSides('Explain Harbor Slate vs Northwatch 2'), ['Harbor Slate', 'Northwatch 2']);
+  assert.equal(sameProduct('Northwatch 2', 'Northwatch Air'), false);
+  assert.equal(sameProduct('Northwatch 2', 'Northwatch 2'), true);
+  const prior: CardNode[] = [{
+    type: 'grid',
+    cols: 2,
+    children: [
+      { type: 'tile', label: 'Northwatch 2', value: '$179.99', imageSrc: 'https://img.example/north.png' },
+      { type: 'tile', label: 'Glowband 4', value: '$48', imageSrc: 'https://img.example/glow.png' },
+    ],
+  }];
+  const next = new Map<number, CardNode>([[0, {
+    type: 'grid',
+    cols: 2,
+    children: [
+      { type: 'tile', label: 'Northwatch 2', value: '$99', imageSrc: 'https://img.example/other.png' },
+      { type: 'tile', label: 'Northwatch Air', value: '$80' },
+      { type: 'tile', label: 'Glow Band 4', value: '$48' },
+    ],
+  }], [1, {
+    type: 'table',
+    columns: ['Factor', 'Northwatch 2', 'Glow Band 4'],
+    rows: [['Price', '$99', 'Not stated in sources'], ['Display', 'Not stated in sources', 'AMOLED']],
+  }]]);
+  const patches = keepComparedProducts(prior, next, 'Compare Northwatch 2, Northwatch Air and Glowband 4');
+  assert.ok(patches);
+  const grid = patches!.find((patch) => patch.index === 0)?.node;
+  assert.equal(grid?.type, 'grid');
+  if (grid?.type !== 'grid') return;
+  const edge = grid.children.find((node) => node.type === 'tile' && node.label === 'Northwatch 2');
+  const air = grid.children.find((node) => node.type === 'tile' && node.label === 'Northwatch Air');
+  const glow = grid.children.find((node) => node.type === 'tile' && node.label === 'Glow Band 4');
+  assert.equal(edge?.type === 'tile' ? edge.value : '', '$179.99');
+  assert.equal(edge?.type === 'tile' ? edge.imageSrc : '', 'https://img.example/north.png');
+  assert.equal(air?.type === 'tile' ? air.value : '', '$80');
+  assert.equal(glow?.type === 'tile' ? glow.imageSrc : '', 'https://img.example/glow.png');
+  const table = patches!.find((patch) => patch.index === 1)?.node;
+  assert.equal(table?.type, 'table');
+  if (table?.type !== 'table') return;
+  assert.deepEqual(table.rows[0], ['Price', '$179.99', '$48']);
+  const added = missingSideNode('Compare Northwatch 2, Glowband 4 and Harbor Band 8', [
+    { type: 'tile', label: 'Northwatch 2', value: '$90' },
+    { type: 'tile', label: 'Glowband 4', value: '$40' },
+  ], {
+    query: 'Compare Northwatch 2, Glowband 4 and Harbor Band 8',
+    results: [{ title: 'Harbor Band 8 review', url: 'https://example.com/harbor', snippet: 'The Harbor Band 8 costs $60 and lasts a week.', domain: 'example.com', engines: ['web'] }],
+    images: [],
+    engines: [],
+  });
+  assert.equal(added?.type, 'grid');
+  if (added?.type !== 'grid') return;
+  const harbor = added.children[0];
+  assert.equal(harbor?.type === 'tile' ? harbor.label : '', 'Harbor Band 8');
+  assert.equal(harbor?.type === 'tile' ? harbor.value : '', '$60');
+});
+
+test('two figures for one product are the same price, or the other is a labeled offer', () => {
+  const ask = 'Harbor Slate versus Northwatch 2';
+  const tiles: CardNode = {
+    type: 'grid',
+    cols: 2,
+    children: [
+      { type: 'tile', label: 'Harbor Slate', value: '$299.99' },
+      { type: 'tile', label: 'Northwatch 2', value: '$549' },
+    ],
+  };
+  const table: CardNode = {
+    type: 'table',
+    columns: ['Factor', 'Harbor Slate', 'Northwatch 2'],
+    rows: [['Starting price', '$549.99 (5G, Verizon)', '$549']],
+  };
+  const search: SearchResponse = {
+    query: ask,
+    freshness: 'any',
+    results: [],
+    images: [],
+    discussions: [],
+    engines: [],
+  };
+  const patches = comparisonRepair(ask, search, new Map([[0, tiles], [1, table]]));
+  const nextTable = patches?.find((patch) => patch.index === 1)?.node;
+  assert.equal(nextTable?.type, 'table');
+  if (nextTable?.type !== 'table') return;
+  assert.equal(nextTable.rows[0]?.[1], '$299.99');
+  assert.equal(nextTable.rows[0]?.[2], '$549');
+  const offer = nextTable.rows.find((row) => row[0] === 'Verizon price');
+  assert.deepEqual(offer, ['Verizon price', '$549.99', '']);
+  const plain: CardNode = {
+    type: 'table',
+    columns: ['Factor', 'Harbor Slate', 'Northwatch 2'],
+    rows: [['Starting price', '$549.99', '$549']],
+  };
+  const collapsed = comparisonRepair(ask, search, new Map([[0, tiles], [1, plain]]));
+  const collapsedTable = collapsed?.find((patch) => patch.index === 1)?.node;
+  assert.equal(collapsedTable?.type === 'table' ? collapsedTable.rows.length : 0, 1);
+  assert.equal(collapsedTable?.type === 'table' ? collapsedTable.rows[0]?.[1] : '', '$299.99');
+});
+
+test('a later comparison keeps a measured spec when the new cell has no measurement', () => {
+  const prior: CardNode[] = [{
+    type: 'grid',
+    cols: 2,
+    children: [
+      { type: 'tile', label: 'Harbor Slate', value: '$179.99' },
+      { type: 'tile', label: 'Northwatch 2', value: '$34.99' },
+    ],
+  }, {
+    type: 'table',
+    columns: ['Factor', 'Harbor Slate', 'Northwatch 2'],
+    rows: [
+      ['Display', '1.34 AMOLED', '1.72 AMOLED'],
+      ['Weight', '17.7 g without band', '15.95 g'],
+      ['Price', '$179.99', '$34.99'],
+    ],
+  }];
+  const next = new Map<number, CardNode>([[0, {
+    type: 'table',
+    columns: ['Factor', 'Harbor Slate', 'Northwatch 2'],
+    rows: [
+      ['Display', 'Vibrant, glanceable [1]', '1.72 AMOLED, 212 x 520 px [8]'],
+      ['Water resistance', '—', '5ATM'],
+      ['Price', '—', '$34.99'],
+    ],
+  }]]);
+  const patches = keepComparedProducts(prior, next, 'Compare Harbor Slate vs Northwatch 2');
+  const table = patches?.find((patch) => patch.index === 0)?.node;
+  assert.equal(table?.type, 'table');
+  if (table?.type !== 'table') return;
+  const cell = (factor: string, column: number) => table.rows.find((row) => row[0] === factor)?.[column];
+  assert.equal(cell('Display', 1), '1.34 AMOLED');
+  assert.equal(cell('Display', 2), '1.72 AMOLED, 212 x 520 px [8]');
+  assert.equal(cell('Weight', 1), '17.7 g without band');
+  assert.equal(cell('Weight', 2), '15.95 g');
+  assert.equal(cell('Price', 1), '$179.99');
+  assert.equal(cell('Price', 2), '$34.99');
+  assert.equal(cell('Water resistance', 2), '5ATM');
+  const unheaded = keepComparedProducts(prior, new Map([[0, {
+    type: 'table',
+    columns: ['Harbor Slate', 'Northwatch 2'],
+    rows: [['Display', 'Glanceable display [2]', '1.72 AMOLED']],
+  }]]), 'Compare Harbor Slate vs Northwatch 2');
+  const shifted = unheaded?.find((patch) => patch.index === 0)?.node;
+  assert.equal(shifted?.type, 'table');
+  if (shifted?.type !== 'table') return;
+  assert.equal(shifted.rows.find((row) => row[0] === 'Display')?.[1], '1.34 AMOLED');
+  assert.equal(shifted.rows.find((row) => row[0] === 'Display')?.[2], '1.72 AMOLED');
+});
+
+test('a promo page is not a product photo, and a stated spec fills a blank cell', () => {
+  assert.equal(acceptProductPhoto('Harbor Slate', 'Harbor Slate on a white table', 'A product photo.'), true);
+  assert.equal(acceptProductPhoto('Harbor Slate', 'Earn rewards every day', 'The Harbor Slate is mentioned in this airdrop.'), false);
+  assert.equal(acceptProductPhoto('Harbor Slate', 'Harbor Slate vs Northwatch 2', 'Both bands.'), false);
+  assert.equal(acceptProductPhoto('Northwatch X-9 II', 'X-9 II review', ''), true);
+  assert.equal(acceptProductPhoto('Northwatch X-9 II', 'Northwatch X-9 review', ''), false);
+  assert.equal(acceptProductPhoto('Northwatch X-9 II', 'Harbor Slate', ''), false);
+  const placed = placeSidePhotos('Northwatch X-9 II vs Harbor Slate', new Map([[0, {
+    type: 'grid',
+    cols: 2,
+    children: [
+      { type: 'tile', label: 'Northwatch X-9 II', value: '$999', imageSrc: 'https://img.example/slate.jpg' },
+      { type: 'tile', label: 'Harbor Slate', value: '$179.99', imageSrc: 'https://img.example/slate.jpg' },
+    ],
+  }]]), [
+    { url: 'https://example.com/x9', thumb: 'https://img.example/x9.jpg', title: 'Northwatch X-9 II', source: 'example.com', license: 'source' },
+    { url: 'https://example.com/slate', thumb: 'https://img.example/slate.jpg', title: 'Harbor Slate on a white table', source: 'example.com', license: 'source' },
+  ]);
+  const grid = placed?.[0]?.node;
+  assert.equal(grid?.type, 'grid');
+  if (grid?.type !== 'grid') return;
+  assert.equal(grid.children[0]?.type === 'tile' ? grid.children[0].imageSrc : '', 'https://img.example/x9.jpg');
+  assert.equal(grid.children[0]?.type === 'tile' ? grid.children[0].value : '', '$999');
+  assert.equal(grid.children[1]?.type === 'tile' ? grid.children[1].imageSrc : '', 'https://img.example/slate.jpg');
+  assert.equal(grid.children[1]?.type === 'tile' ? grid.children[1].value : '', '$179.99');
+  const ask = 'Harbor Slate versus Northwatch 2';
+  const table: CardNode = {
+    type: 'table',
+    columns: ['Factor', 'Harbor Slate', 'Northwatch 2'],
+    rows: [['Battery life', '—', 'Ten days']],
+  };
+  const tiles: CardNode = {
+    type: 'grid',
+    cols: 2,
+    children: [
+      { type: 'tile', label: 'Harbor Slate', value: '$40' },
+      { type: 'tile', label: 'Northwatch 2', value: '$90' },
+    ],
+  };
+  const search: SearchResponse = {
+    query: ask,
+    freshness: 'any',
+    results: [{
+      title: 'Harbor Slate specs',
+      url: 'https://example.com/slate',
+      snippet: 'The Harbor Slate battery lasts 16 days.',
+      domain: 'example.com',
+      engines: ['web'],
+    }],
+    images: [],
+    discussions: [],
+    engines: [],
+  };
+  const patches = comparisonRepair(ask, search, new Map([[0, tiles], [1, table]]));
+  const next = patches?.find((patch) => patch.index === 1)?.node;
+  assert.equal(next?.type === 'table' ? next.rows[0]?.[1] : '', '16 days');
+  assert.equal(next?.type === 'table' ? next.rows[0]?.[2] : '', 'Ten days');
+  const slogan: CardNode = {
+    type: 'table',
+    columns: ['Factor', 'Harbor Slate', 'Northwatch 2'],
+    rows: [['Display', 'Vibrant, glanceable', '1.72 AMOLED']],
+  };
+  const sized = comparisonRepair(ask, {
+    ...search,
+    results: [{
+      title: 'Harbor Slate specs',
+      url: 'https://example.com/slate',
+      snippet: 'The Harbor Slate display is a 1.34-inch AMOLED.',
+      domain: 'example.com',
+      engines: ['web'],
+    }],
+  }, new Map([[0, slogan]]));
+  const sizedTable = sized?.find((patch) => patch.index === 0)?.node;
+  assert.equal(sizedTable?.type === 'table' ? sizedTable.rows[0]?.[1] : '', '1.34-inch');
+  assert.equal(sizedTable?.type === 'table' ? sizedTable.rows[0]?.[2] : '', '1.72 AMOLED');
+  const mixed = comparisonRepair(ask, {
+    ...search,
+    results: [{
+      title: 'Harbor Slate specs',
+      url: 'https://example.com/slate',
+      snippet: 'The Harbor Slate has a 7-day battery and a glanceable display.',
+      domain: 'example.com',
+      engines: ['web'],
+    }],
+  }, new Map([[0, slogan]]));
+  const mixedTable = mixed?.find((patch) => patch.index === 0)?.node;
+  const mixedCell = mixedTable?.type === 'table' ? mixedTable.rows[0]?.[1] : 'Vibrant, glanceable';
+  assert.equal(mixedCell, 'Vibrant, glanceable');
+});
+
+test('a verdict does not deny a price the card already shows', () => {
+  const ask = 'Fitbit Edge vs Mi Band 10';
+  const tiles: CardNode = {
+    type: 'grid',
+    cols: 2,
+    children: [
+      { type: 'tile', label: 'Fitbit Edge', value: '$179' },
+      { type: 'tile', label: 'Mi Band 10', value: '$34.99' },
+    ],
+  };
+  const table: CardNode = {
+    type: 'table',
+    columns: ['Factor', 'Fitbit Edge', 'Mi Band 10'],
+    rows: [
+      ['Price', '$179', '$34.99'],
+      ['Display', 'Glanceable display', '1.72 AMOLED, 212 x 520 px, 1,500 nits'],
+    ],
+  };
+  const verdict: CardNode = {
+    type: 'callout',
+    tone: 'muted',
+    title: 'Verdict',
+    text: 'Pick the Mi Band 10 for a 1.72 AMOLED screen and 21-day battery. Sources state no Fitbit Edge price.',
+  };
+  const search: SearchResponse = {
+    query: ask,
+    freshness: 'any',
+    results: [
+      { title: 'Fitbit Edge', url: 'https://store.google.com/edge', snippet: 'A fitness tracker with coaching.', domain: 'store.google.com', engines: ['web'] },
+      { title: 'Mi Band 10', url: 'https://www.mi.com/band-10', snippet: 'A 1.72 AMOLED display and 21 days of battery.', domain: 'mi.com', engines: ['web'] },
+    ],
+    images: [],
+    discussions: [],
+    engines: [],
+  };
+  const patches = comparisonRepair(ask, search, new Map([[0, tiles], [1, table], [2, verdict]]));
+  const verdictPatch = patches?.find((patch) => patch.index === 2)?.node;
+  const verdictText = verdictPatch?.type === 'callout' ? verdictPatch.text : '';
+  assert.equal(verdictText, 'Pick the Mi Band 10 for a 1.72 AMOLED screen and 21-day battery.');
+  assert.equal(patches?.some((patch) => patch.index === 0 || patch.index === 1), false);
+  const named = { ...verdict, text: 'Pick the Edge for a 1.34-inch screen. No source states a price for the Edge, so cost can\'t be compared.' };
+  const again = comparisonRepair(ask, search, new Map([[0, tiles], [1, table], [2, named]]));
+  const againText = again?.find((patch) => patch.index === 2)?.node;
+  assert.equal(againText?.type === 'callout' ? againText.text : '', 'Pick the Edge for a 1.34-inch screen.');
+});
+
+test('a follow-up question is removed from the product name, and the asked fact is added from that product\'s source', () => {
+  const prior: CardNode[] = [{ type: 'tile', label: 'Nikon Zf', value: '$1999', imageSrc: 'https://img.example/zf.jpg' }];
+  const next = new Map<number, CardNode>([[0, {
+    type: 'tile',
+    label: 'Nikon Zf What Is the Battery Life of Each Camera?',
+    value: '$1999',
+    imageSrc: 'https://img.example/zf.jpg',
+  }], [1, {
+    type: 'table',
+    columns: ['Factor', 'Canon EOS R8', 'Nikon Zf What Is the Battery Life of Each Camera?'],
+    rows: [['Price', '$1,399', '$1999']],
+  }]]);
+  const patches = keepComparedProducts(prior, next, 'Canon EOS R8 vs Nikon Zf');
+  const tile = patches?.find((patch) => patch.index === 0)?.node;
+  const table = patches?.find((patch) => patch.index === 1)?.node;
+  assert.equal(tile?.type === 'tile' ? tile.label : '', 'Nikon Zf');
+  assert.equal(table?.type === 'table' ? table.columns[2] : '', 'Nikon Zf');
+  const search: SearchResponse = {
+    query: 'Canon EOS R8 vs Nikon Zf',
+    freshness: 'any',
+    results: [
+      { title: 'Canon EOS R8', url: 'https://example.com/r8', snippet: 'The Canon EOS R8 battery lasts 290 shots.', domain: 'example.com', engines: ['web'] },
+      { title: 'Nikon Zf', url: 'https://example.com/zf', snippet: 'The Nikon Zf battery lasts 380 shots.', domain: 'example.com', engines: ['web'] },
+    ],
+    images: [],
+    discussions: [],
+    engines: [],
+  };
+  const added = appendAskedFact('What is the battery life of each camera?', 'Canon EOS R8 vs Nikon Zf', new Map([[1, table?.type === 'table' ? table : next.get(1)!]]), search);
+  const row = added?.[0]?.node.type === 'table' ? added[0].node.rows.at(-1) : undefined;
+  assert.deepEqual(row, ['Battery', '290 shots', '380 shots']);
+});
+
+test('a new side takes its own price, and a follow-up without tiles keeps the earlier photos', () => {
+  const prior: CardNode[] = [{
+    type: 'grid',
+    cols: 2,
+    children: [
+      { type: 'tile', label: 'Pentax KF', value: '$849.95', imageSrc: 'https://img.example/kf.jpg' },
+      { type: 'tile', label: 'Fujifilm X-T30 II', value: '$893.65', imageSrc: 'https://img.example/xt.jpg' },
+    ],
+  }];
+  const table: CardNode = {
+    type: 'table',
+    columns: ['Factor', 'Pentax KF', 'Fujifilm X-T30 II', 'Sony ZV-E10 II'],
+    rows: [['Price', '$849.95', '$893.65', 'Not stated in sources'], ['Battery life', '460 shots', '', ''], ['Battery type', '460 shots', '', '']],
+  };
+  const search: SearchResponse = {
+    query: 'Pentax KF vs Fujifilm X-T30 II vs Sony ZV-E10 II',
+    freshness: 'any',
+    results: [
+      { title: 'Sony ZV-E10 II', url: 'https://example.com/zv', snippet: 'The ZV-E10 II body is $1,099.99.', domain: 'example.com', engines: ['web'] },
+      { title: 'Pentax KF', url: 'https://example.com/kf', snippet: 'The Pentax KF is $849.95.', domain: 'example.com', engines: ['web'] },
+    ],
+    images: [],
+    discussions: [],
+    engines: [],
+  };
+  const repaired = comparisonRepair(search.query, search, new Map([[0, table]]));
+  const next = repaired?.find((patch) => patch.index === 0)?.node;
+  assert.equal(next?.type, 'table');
+  if (next?.type !== 'table') return;
+  assert.equal(next.rows[0]?.[3], '$1,099.99');
+  assert.equal(next.rows[0]?.[1], '$849.95');
+  assert.equal(next.rows[2]?.[1], '');
+  const photos = restoreSideTiles(prior, new Map([[0, table]]), 'Pentax KF vs Fujifilm X-T30 II');
+  const stack = photos?.[0]?.node;
+  assert.equal(stack?.type, 'stack');
+  const grid = stack?.type === 'stack' ? stack.children[0] : undefined;
+  assert.equal(grid?.type === 'grid' ? grid.children.length : 0, 2);
+  assert.equal(grid?.type === 'grid' && grid.children[0]?.type === 'tile' ? grid.children[0].imageSrc : '', 'https://img.example/kf.jpg');
+});
+
+test('a measured cell and a denial of that fact do not both stay, and the empty side is not given the number', () => {
+  const table: CardNode = {
+    type: 'table',
+    columns: ['Factor', 'Harbor Slate', 'Northwatch 2'],
+    rows: [['Battery life', '16 days', '']],
+  };
+  const callout: CardNode = {
+    type: 'callout',
+    tone: 'warning',
+    title: 'Battery life not in these sources',
+    text: 'None of the sources state a battery rating for either product. Northwatch 2 battery life is not in the sources.',
+  };
+  const patches = dropShownDenials(new Map([[0, callout], [1, table]]));
+  const next = patches?.find((patch) => patch.index === 0)?.node;
+  assert.equal(next?.type, 'callout');
+  if (next?.type !== 'callout') return;
+  assert.equal(next.title, undefined);
+  assert.equal(next.text, 'Northwatch 2 battery life is not in the sources.');
+  assert.doesNotMatch(next.text, /either|none of the sources/i);
+  assert.equal(table.type === 'table' ? table.rows[0]?.[1] : '', '16 days');
+  assert.equal(table.type === 'table' ? table.rows[0]?.[2] : '', '');
+});
+
+test('a head-to-head table that names each side in a row stays, instead of being rebuilt', () => {
+  const ask = 'Northwatch vs Glowband';
+  const table: CardNode = {
+    type: 'table',
+    columns: ['', 'Points', 'Rebounds'],
+    rows: [
+      ['Northwatch', '18.4', '10.2'],
+      ['Glowband', '12.1', '8.4'],
+    ],
+  };
+  assert.equal(showsComparison(ask, [table]), false);
+  assert.equal(breakdownStays(ask, [table]), true);
+  const found: SearchResponse = {
+    query: ask,
+    freshness: 'any',
+    results: [
+      { title: 'Northwatch', url: 'https://example.com/north', snippet: 'The Northwatch costs $90.', domain: 'example.com', engines: ['web'] },
+      { title: 'Glowband', url: 'https://example.com/glow', snippet: 'The Glowband costs $40.', domain: 'example.com', engines: ['web'] },
+    ],
+    images: [],
+    discussions: [],
+    engines: ['web'],
+  };
+  assert.ok(comparisonNodes(ask, found).length > 0);
+  assert.equal(comparisonRepair(ask, found, new Map([[0, table]])), undefined);
+});
+
+test('a measured breakdown does not gain the previous card’s rows when the factors are different', () => {
+  const prior: CardNode[] = [{
+    type: 'table',
+    columns: ['Factor', 'Northwatch', 'Glowband'],
+    rows: [
+      ['Price', '$90', '$40'],
+      ['Display', '1.43 inch', '1.2 inch'],
+    ],
+  }];
+  const table: CardNode = {
+    type: 'table',
+    columns: ['Factor', 'Northwatch', 'Glowband'],
+    rows: [
+      ['Points', '18.4', '12.1'],
+      ['Rebounds', '10.2', '8.4'],
+    ],
+  };
+  assert.equal(keepComparedProducts(prior, new Map([[0, table]]), 'Northwatch vs Glowband'), undefined);
+  assert.deepEqual(table.rows.map((row) => row[0]), ['Points', 'Rebounds']);
 });

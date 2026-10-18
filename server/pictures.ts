@@ -3,7 +3,7 @@ import { claimsFigure, showsFigure } from '../shared/figure';
 import { fileWords, fitsEntity, isComposite, namesSibling, rankForEntity, splitEntities } from '../shared/imagematch';
 import type { ImageResult } from '../shared/types';
 import { findImages } from './images';
-import { type GateContext, type PicTarget, accepts, mentions, mentionsAny, nameLike, namedTarget, namesPerson, targetFor, withHint } from './imageGate';
+import { type GateContext, type PicTarget, accepts, contextMarks, mentions, mentionsAny, nameLike, namedTarget, namesPerson, personPage, portraitMatches, portraitSrcOk, profilePortraitMarks, profilePortraitQuery, targetFor, withHint } from './imageGate';
 import { corpusOf, fillRowImages, hasBlankPictures, rowEntity, type RowImageDeps } from './rowImages';
 import type { Env } from './util';
 
@@ -166,6 +166,33 @@ export class PictureResolver {
     return withHint({ kind: 'named', entity: name }, this.ctx);
   }
 
+  /**
+   * A profile photo has to be a page about the resolved person. A picture from the
+   * original results whose page is someone else is dropped, and the portrait is searched again.
+   */
+  /** A picture already in hand whose page is this person and names a company or role on the card. */
+  private pooledPortrait(name: string, marks: readonly string[]): ImageResult | undefined {
+    return this.pool.find((img) => img.thumb && !this.used.has(img.thumb) && portraitSrcOk(img.thumb) && personPage(name, img) && portraitMatches(marks, img));
+  }
+
+  private vetProfile(node: Extract<CardNode, { type: 'profile' }>): CardNode {
+    const target = this.profileTarget(node.name);
+    const placed = this.place(node.name, node.imageRef, node.imageQuery, target);
+    const marks = [...new Set([...profilePortraitMarks(node), ...contextMarks(target.hint?.context)])];
+    if (!marks.length) return { ...node, ...placed };
+    const img = placed.imageSrc
+      ? this.pool.find((p) => p.thumb === placed.imageSrc)
+      : placed.imageRef !== undefined ? this.pool[placed.imageRef] : undefined;
+    if (img && portraitSrcOk(img.thumb) && portraitMatches(marks, img) && personPage(node.name, img)) return { ...node, ...placed };
+    const ready = this.pooledPortrait(node.name, marks);
+    if (ready) {
+      const pic = this.take(ready);
+      return { ...node, imageRef: undefined, imageQuery: undefined, imageSrc: pic.src };
+    }
+    const query = profilePortraitQuery(node, target.hint?.context ?? []);
+    return { ...node, imageRef: undefined, imageSrc: undefined, imageQuery: query };
+  }
+
   /** Card-level pictures: on a one-person card that person's photo, else anything that mentions the subject. */
   private cardPicture(img: ImageResult, about = this.subject): boolean {
     return this.ctx.person ? accepts(this.profileTarget(this.ctx.person), img) : mentionsAny(about, img);
@@ -176,7 +203,7 @@ export class PictureResolver {
       case 'tile':
         return { ...node, ...this.place(node.label, node.imageRef, node.imageQuery, this.tileTarget(node)) };
       case 'profile':
-        return { ...node, ...this.place(node.name, node.imageRef, node.imageQuery, this.profileTarget(node.name)) };
+        return this.vetProfile(node);
       case 'stat': {
         // A designer-supplied stat picture must pass the gate on its own URL; attribute stats never keep one.
         if (!node.image) return node;
@@ -234,10 +261,20 @@ export class PictureResolver {
 
   private async one(query: string, allowGeneric = false, target?: PicTarget): Promise<Pic | undefined> {
     // T443 gate: named items need their name in the picture; free-form images need the subject's main token.
-    const gate = (img: ImageResult) => (target ? accepts(target, img) : this.ctx.person ? this.cardPicture(img) : mentions(query, img));
+    // A resolved person's portrait also has to be their own page, not a logo or a team graphic.
+    const ownPortrait = !!this.ctx.person && !!target && target.kind === 'named' && namesPerson(target.entity, this.ctx.person);
+    const gate = (img: ImageResult) => {
+      if (!(target ? accepts(target, img) : this.ctx.person ? this.cardPicture(img) : mentions(query, img))) return false;
+      return !ownPortrait || (portraitSrcOk(img.thumb) && personPage(this.ctx.person!, img));
+    };
     const pooledRaw = this.fromPool(query);
     const pooled = pooledRaw && gate(pooledRaw) ? pooledRaw : this.pool.find((p) => p.thumb && !this.used.has(p.thumb) && !isComposite(p) && gate(p));
     if (pooled) return this.take(pooled);
+    if (this.rows?.cardImages) {
+      const boosted = await this.rows.cardImages();
+      const hit = boosted.find((img) => img.thumb && !this.used.has(img.thumb) && !isComposite(img) && gate(img));
+      if (hit) return this.take(hit);
+    }
     if (target?.kind === 'none' || this.lookupsLeft-- <= 0) return undefined;
     const found = await this.find(query, this.env, 3, allowGeneric);
     const pick = found.find((img) => this.accepts(query, img, allowGeneric) && gate(img));

@@ -1,6 +1,6 @@
 import { TOPIC_WORD } from '../shared/askAbout';
 import { contextTerms, distinguishingTerms, givenPlaceKept, hasFullPersonName, isPersonAsk, nameIsTopic, personSubject, personSourceOk, workplaceKept } from './entity';
-import { modelConflict } from './productModel';
+import { modelConflict, variantConflict } from './productModel';
 import { cashtags } from './queryClean';
 import { isBlockedHost } from './spamHosts';
 
@@ -187,7 +187,7 @@ function judge(query: string, profile: Profile, row: GateHit): { pass: boolean; 
   const lone = profile.phrases.length === 0 && profile.singles.some(has) && sharesTerms(profile, hits);
   const bodyYears = yearsOf(`${row.title} ${row.snippet ?? ''}`);
   const yearHard = conflicts(profile.years, bodyYears) && !(fullName && !conflicts(profile.years, yearsOf(row.title)));
-  const hard = yearHard || modelConflict(query, row);
+  const hard = yearHard || modelConflict(query, row) || variantConflict(query, row);
   return { pass: !hard && (fullName || nameTouch || lone || score >= MAIN), hard, score, hits };
 }
 

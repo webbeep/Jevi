@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { readBrief, rejectedSources, remapBrief } from '../server/brief.ts';
-import { keepPictures, readReview } from '../server/review.ts';
+import { applyTextEdit, editIsGrounded, keepPictures, readPrecision, readReview, reviewComponents } from '../server/review.ts';
 import { corpusOf, gateNode, type DesignRequest } from '../server/design.ts';
 import { Grounding } from '../server/ground.ts';
 import { findTicker, tickerBody } from '../shared/tickerNotes.ts';
@@ -87,6 +87,70 @@ describe('answer review', () => {
   test('unreadable replies are ignored', () => {
     assert.equal(readReview({ verdict: 'maybe' }, shown), undefined);
     assert.equal(readReview(undefined, shown), undefined);
+  });
+});
+
+describe('precision review', () => {
+  const indices = new Set([0, 1]);
+
+  test('only a real fix for a node on the card is kept', () => {
+    assert.equal(readPrecision({ verdict: 'ok' }, indices), undefined);
+    assert.equal(readPrecision({ verdict: 'fix', index: 4, find: '12.1', replace: '18.4' }, indices), undefined);
+    assert.equal(readPrecision({ verdict: 'fix', index: 1, find: '12.1', replace: '12.1' }, indices), undefined);
+    assert.deepEqual(readPrecision({ verdict: 'fix', index: 1, find: '12.1', replace: '18.4', search: 'Northwatch points' }, indices), {
+      index: 1,
+      find: '12.1',
+      replace: '18.4',
+      search: 'Northwatch points',
+    });
+  });
+
+  test('a denial is removed from that component only', () => {
+    const callout: CardNode = { type: 'callout', tone: 'muted', text: 'No source states the points. Northwatch averages 18.4 points.' };
+    const table: CardNode = {
+      type: 'table',
+      columns: ['', 'Northwatch', 'Glowband'],
+      rows: [['Points', '18.4', '12.1']],
+    };
+    const next = applyTextEdit(callout, 'No source states the points. ', '');
+    assert.equal(next?.type === 'callout' ? next.text : '', ' Northwatch averages 18.4 points.');
+    assert.equal(applyTextEdit(table, 'No source states the points. ', ''), undefined);
+  });
+
+  test('a number copied onto the wrong side is changed in that cell only', () => {
+    const table: CardNode = {
+      type: 'table',
+      columns: ['', 'Northwatch', 'Glowband'],
+      rows: [['Points', '18.4', '18.4 from the other side']],
+    };
+    const next = applyTextEdit(table, '18.4 from the other side', '12.1');
+    assert.equal(next?.type, 'table');
+    if (next?.type !== 'table') return;
+    assert.deepEqual(next.rows, [['Points', '18.4', '12.1']]);
+    assert.deepEqual(next.columns, table.columns);
+  });
+
+  test('a new number the sources do not state is not applied, and a picture url is left alone', () => {
+    assert.equal(editIsGrounded('12.1 points', 'Glowband averages 12.1 points per game.'), true);
+    assert.equal(editIsGrounded('The sources do not state it.', 'Northwatch averages 18.4.'), true);
+    assert.equal(editIsGrounded('99.9 points', 'Glowband averages 12.1 points per game.'), false);
+    const tile: CardNode = { type: 'tile', label: 'Northwatch', value: '$90', imageSrc: 'https://img.example/18.4.jpg' };
+    assert.equal(applyTextEdit(tile, 'https://img.example/18.4.jpg', 'https://img.example/other.jpg'), undefined);
+    assert.equal(tile.imageSrc, 'https://img.example/18.4.jpg');
+  });
+
+  test('a reviewer that cannot run leaves the card that was already shown', async () => {
+    const table: CardNode = {
+      type: 'table',
+      columns: ['', 'Northwatch', 'Glowband'],
+      rows: [['Points', '18.4', '12.1']],
+    };
+    const patch = await reviewComponents({
+      query: 'Northwatch vs Glowband',
+      results: [],
+      nodes: new Map([[0, table]]),
+    }, {});
+    assert.equal(patch, undefined);
   });
 });
 

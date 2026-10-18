@@ -26,7 +26,9 @@ export function normalizeQuery(q: string): string {
 }
 
 export function searchCacheKey(q: string, freshness: string, count: number): string {
-  return `${normalizeQuery(q)}|f=${freshness}|n=${count}|src=2`;
+  // src=3: a workplace plus a given name keeps both people. A list cached under src=2
+  // can name only one of them, and the next ask would open that person directly.
+  return `${normalizeQuery(q)}|f=${freshness}|n=${count}|src=3`;
 }
 
 export function packSearch(res: SearchResponse): string {

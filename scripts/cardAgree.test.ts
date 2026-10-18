@@ -1,0 +1,213 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import type { CardNode } from '../shared/card.ts';
+import { answerTitle, fillPaperCard, finishQuotedText, keepAnswerBody, restoreKeptPapers } from '../server/cardAgree.ts';
+import { bindClaims, type ClaimSource } from '../server/claims.ts';
+import { finishQuality } from '../server/sourceQuality.ts';
+
+const page = (text: string, n = 1, domain?: string): ClaimSource => ({ n, text, domain });
+
+test('a truncated quotation is finished from the source sentence, numbers included', () => {
+  const source = 'Visitors must leave the ridge by 4:30 p.m. when wind exceeds 40 miles per hour. The gate closes after that.';
+  const cut = '"Visitors must leave the ridge by 4."';
+  const next = finishQuotedText('quote the notice about the ridge wind rule', cut, [page(source)]);
+  assert.match(next, /4:30 p\.m\./);
+  assert.match(next, /40 miles per hour/);
+  assert.match(next, /"$/);
+});
+
+test('a nearby sentence is not the quote when another sentence answers', () => {
+  const source = 'The park opens at 8. Trail closures grow longer each time the rain threshold is crossed, and 12 paths shut. Picnic areas stay open all season.';
+  const quoted = '"The park opens at 8."';
+  const next = finishQuotedText('quote the parks page on how trail closures change in heavy rain', quoted, [page(source)]);
+  assert.match(next, /Trail closures grow longer/);
+  assert.match(next, /12 paths/);
+  assert.doesNotMatch(next, /opens at 8/);
+});
+
+test('a quotation that already answers is left whole', () => {
+  const source = 'Trail closures grow longer each time the rain threshold is crossed, and 12 paths shut.';
+  const quoted = '"Trail closures grow longer each time the rain threshold is crossed, and 12 paths shut."';
+  const next = finishQuotedText('quote the parks page on trail closures in the rain', quoted, [page(source)]);
+  assert.equal(next, quoted);
+});
+
+test('a page that does not name the study design is not given one', () => {
+  const sources = [page('The writeup describes the method and the sample. It never names the article type.')];
+  const next = bindClaims({ type: 'text', text: 'The other is an original study.' }, sources, 'which of these papers is a review');
+  assert.equal(next.type === 'text' ? next.text : '', 'The page does not say whether this is a review or an original study.');
+  const stated = bindClaims(
+    { type: 'text', text: 'This one is a systematic review.' },
+    [page('This paper is a systematic review of the trials.')],
+    'which of these papers is a review',
+  );
+  assert.match(stated.type === 'text' ? stated.text : '', /systematic review/);
+});
+
+test('a peer-reviewed list keeps only papers a source identifies', () => {
+  const sources = [
+    page('Harbor trial of the device. DOI 10.2000/harbor.1', 1, 'doi.org'),
+    page('A clinic recap of the device with no identifier.', 2, 'healthline.com'),
+  ];
+  const list: CardNode = {
+    type: 'list',
+    items: [
+      { text: 'Harbor trial of the device. DOI 10.2000/harbor.1' },
+      { text: 'Clinic recap of the device. Mayo Clinic.' },
+      { text: '"Sleep widgets and the invented trial"' },
+    ],
+  };
+  const next = bindClaims(list, sources, 'peer-reviewed papers on the harbor device');
+  const items = next.type === 'list' ? next.items : [];
+  assert.equal(items.length, 1);
+  assert.match(items[0]?.text ?? '', /10\.2000\/harbor\.1/);
+});
+
+test('a keep-only follow-up puts back a paper that still qualifies', () => {
+  const sources = [
+    page('Harbor trial of the device. DOI 10.2000/harbor.1', 1, 'doi.org'),
+    page('Second harbor measurement. DOI 10.2000/harbor.2', 2, 'doi.org'),
+  ];
+  const base: CardNode[] = [{
+    type: 'list',
+    items: [
+      { text: 'Harbor trial of the device. DOI 10.2000/harbor.1' },
+      { text: 'Second harbor measurement. DOI 10.2000/harbor.2' },
+    ],
+  }];
+  const shrunk: CardNode[] = [{ type: 'list', items: [{ text: 'Harbor trial of the device. DOI 10.2000/harbor.1' }] }];
+  const next = restoreKeptPapers('keep only the peer-reviewed ones', shrunk, base, sources);
+  const items = next[0]?.type === 'list' ? next[0].items : [];
+  assert.equal(items.length, 2);
+});
+
+test('a quote ask uses the page sentence when the card line is not on the page', () => {
+  const source = 'The recommended amount of sleep for adults is at least 7 hours each day. Local estimates cover who is short on sleep.';
+  const paraphrase = 'Adults in the middle age band need 7 or more hours, and older adults need 7 to 8.';
+  const next = finishQuotedText('quote the page on how much sleep adults need', paraphrase, [page(source)]);
+  assert.match(next, /at least 7 hours each day/);
+  assert.doesNotMatch(next, /middle age band/);
+});
+
+test('a nearby sentence on the page is not the quote when the answering sentence has the number', () => {
+  const source = 'The recommended amount of sleep for adults is at least 7 hours each day. Local estimates cover adults not getting enough sleep.';
+  const nearby = '"Local estimates cover adults not getting enough sleep."';
+  const next = finishQuotedText('quote the page on how much sleep adults need', nearby, [page(source)]);
+  assert.match(next, /at least 7 hours/);
+  assert.doesNotMatch(next, /Local estimates/);
+});
+
+test('a quote is the sentence, not the page title or a table run together', () => {
+  const titled = 'FastStats: Sleep in Adults\nThe recommended amount of sleep for adults is at least 7 hours each day.';
+  const table = 'Age Group Sleep Adult 18-60 years 7 or more hours 1 Adult 61-64 years 7-9 hours 2 Adult 65 years 7-8 hours 3';
+  const next = finishQuotedText('quote the page on how much sleep adults need', 'The writeup runs the age bands together and never quotes the daily recommendation.', [page(titled), page(table, 2)]);
+  assert.match(next, /at least 7 hours each day/);
+  assert.doesNotMatch(next, /FastStats/);
+  assert.doesNotMatch(next, /Age Group/);
+});
+
+test('a nearby sentence is replaced by the numbered sentence even from another page', () => {
+  const nearby = 'CDC PLACES has local estimates on adults not getting enough sleep.';
+  const answer = 'The recommended amount of sleep for adults is at least 7 hours each day.';
+  const next = finishQuotedText('quote the page on how much sleep adults need', `"${nearby}"`, [page(nearby, 1), page(answer, 2)]);
+  assert.match(next, /at least 7 hours/);
+  assert.doesNotMatch(next, /PLACES/);
+});
+
+test('a title run into the sentence is not part of the quote', () => {
+  const source = 'FastStats: Sleep in Adults The recommended amount of sleep for adults is at least 7 hours each day.';
+  const next = finishQuotedText('quote the page on how much sleep adults need', 'The writeup runs the age bands together and never quotes the daily recommendation.', [page(source)]);
+  assert.match(next, /The recommended amount of sleep for adults is at least 7 hours each day/);
+  assert.doesNotMatch(next, /FastStats/);
+});
+
+test('an empty quotation is replaced by the sentence, without a site label glued on', () => {
+  const source = '| NIOSH Most adults need about 7 to 8 hours of good-quality sleep per night.';
+  const next = finishQuotedText('quote the page on how much sleep adults need', '" [1]"', [page(source)]);
+  assert.match(next, /^"Most adults need about 7 to 8 hours/);
+  assert.doesNotMatch(next, /NIOSH/);
+  const quoted = finishQuotedText('quote the page on how much sleep adults need', '"| NIOSH Most adults need about 7 to 8 hours of good-quality sleep per night."', [page(source)]);
+  assert.match(quoted, /"Most adults need about 7 to 8 hours/);
+  assert.doesNotMatch(quoted, /NIOSH/);
+});
+
+test('a quotation the page does not contain is not shown', () => {
+  const source = 'The recommended amount of sleep for adults is at least 7 hours each day.';
+  const smashed = 'The page states: "About Sleep Adult 65 years and older 7-8 hours1."';
+  const next = finishQuotedText('quote the page on how much sleep adults need', smashed, [page(source)]);
+  assert.match(next, /at least 7 hours/);
+  assert.doesNotMatch(next, /hours1/);
+});
+
+test('the sentence that names the asked source is the quote, and a citation stub is not', () => {
+  const nearby = 'Forecasters say a storm with sustained winds of 74 mph is called a hurricane.';
+  const answer = 'The NWS says a tropical cyclone is a hurricane once sustained winds reach 74 mph.';
+  const query = 'Quote the sentence on the NWS page for the wind speed that makes a storm a hurricane.';
+  const next = finishQuotedText(query, `"${nearby}"`, [{ text: nearby }, { text: answer }]);
+  assert.match(next, /NWS says/);
+  assert.doesNotMatch(next, /Forecasters say/);
+  const stub = finishQuotedText(query, '[2]', [{ text: answer }]);
+  assert.match(stub, /NWS says a tropical cyclone/);
+  assert.doesNotMatch(stub, /^\[2\]$/);
+});
+
+test('a follow-up title answers where someone teaches and what a price would cost in tax', () => {
+  assert.equal(answerTitle('Where does she teach?', 'Ada Lovelace', 'She teaches at Northshore University.'), 'Northshore University');
+  const card = JSON.stringify([{ type: 'hero', value: 'UC Berkeley' }, { type: 'text', text: 'She is also an investigator at the Howard Hughes Medical Institute.' }]);
+  assert.equal(answerTitle('Where does she teach?', 'Jennifer Doudna', card), 'UC Berkeley');
+  const taught = JSON.stringify([
+    { type: 'hero', value: 'Other University' },
+    { type: 'text', text: 'She is a professor of chemistry at the University of California, Berkeley.' },
+  ]);
+  assert.equal(answerTitle('Where does she teach?', 'Mara Chen', taught), 'University of California, Berkeley');
+  assert.equal(answerTitle('What if they cost $80?', 'Sneakers', 'The purchase is taxable. Tax $6.40 at the combined rate.'), 'Tax $6.40');
+  assert.equal(answerTitle('Who is Ada Lovelace?', 'Ada Lovelace', 'She teaches at Northshore University.'), 'Ada Lovelace');
+  const doctorate = JSON.stringify([{ type: 'hero', value: 'UC Berkeley' }, { type: 'text', text: 'She earned her doctorate in chemical engineering at the University of California, Berkeley.' }]);
+  assert.equal(answerTitle('Where did she earn her doctorate?', 'Pasted question title', doctorate), 'University of California, Berkeley');
+});
+
+test('a where-they-teach follow-up keeps a body that names the school', () => {
+  const source = 'She teaches molecular biology at Northshore University and leads a lab there.';
+  const out = keepAnswerBody('Where does she teach?', [{ type: 'stack', children: [] }], source);
+  assert.equal(out[0]?.type, 'text');
+  const body = out[0]?.type === 'text' ? out[0].text : '';
+  assert.match(body, /Northshore University/);
+  assert.equal(answerTitle('Where does she teach?', 'Mara Chen', body), 'Northshore University');
+  const filled = keepAnswerBody('Where does she teach?', [{ type: 'hero', value: 'Northshore University', label: 'School' }], source);
+  assert.equal(filled[0]?.type, 'hero');
+});
+
+test('a shopping count matches the rows, the headline price matches the row, and an over-budget pick does not lead', () => {
+  const nodes: CardNode[] = [
+    { type: 'hero', value: 'Acme kettle', label: 'Pick', caption: 'The cheapest of the three. The Acme kettle is $24.' },
+    { type: 'table', columns: ['Model', 'Price'], rows: [['Acme kettle', '$22'], ['Bravo kettle', '$58']] },
+  ];
+  const out = finishQuality('best kettle under $40', nodes);
+  const hero = out.find((node) => node?.type === 'hero');
+  const caption = hero?.type === 'hero' ? hero.caption ?? '' : '';
+  assert.match(caption, /\$22/);
+  assert.doesNotMatch(caption, /\$24/);
+  assert.match(caption, /of the one|cheapest/i);
+  assert.doesNotMatch(caption, /of the three/);
+  const table = out.find((node) => node?.type === 'table');
+  const rows = table?.type === 'table' ? table.rows : [];
+  assert.equal(rows.length, 1);
+  assert.match(rows[0]?.join(' ') ?? '', /Acme/);
+});
+
+test('a peer-reviewed card is not an empty list when a source names a paper', () => {
+  const nodes: CardNode[] = [
+    { type: 'hero', value: 'One finding', label: 'Top pick' },
+    { type: 'stack', direction: 'col', gap: 'sm', children: [] },
+  ];
+  const out = fillPaperCard('Peer-reviewed papers on lean tissue during treatment', nodes, [{
+    title: 'Changes in lean tissue during treatment',
+    url: 'https://doi.org/10.1000/example.paper',
+    domain: 'doi.org',
+    text: 'Changes in lean tissue during treatment. DOI: 10.1000/example.paper',
+  }]);
+  const body = JSON.stringify(out);
+  assert.match(body, /Changes in lean tissue during treatment/);
+  assert.match(body, /10\.1000\/example\.paper/);
+  assert.equal(out.some((node) => node?.type === 'stack' && node.children.length === 0), false);
+});

@@ -1,4 +1,5 @@
 import { withoutRepeatedLead, type AnswerCard, type CardNode, type FollowupContext, type ImageCredit, type LayoutPlan } from '../shared/card';
+import { cleanSideName } from '../shared/objects';
 import { fitNode } from '../shared/fitChart';
 import { knowledgeMatches } from '../shared/relevance';
 import type { SearchResponse } from '../shared/types';
@@ -106,6 +107,8 @@ export interface DesignRequest {
   pages: PageText[];
   simple?: boolean;
   followup?: FollowupContext;
+  /** A follow-up search. Its design call stays short. */
+  fromFollowup?: boolean;
   /** Compact summary of earlier turns, for resolving references in follow-ups. */
   context?: string;
   /** Reason step by step before designing (slower, for hard questions). */
@@ -122,6 +125,9 @@ export interface DesignRequest {
   facts?: { lead: string; note: string };
   /** Server-built lead (live price and chart) the card opens with; the model designs what follows. */
   ticker?: CardNode;
+  /** Products already compared. A follow-up that adds one keeps their price and picture. */
+  priorBody?: CardNode[];
+  priorImages?: { thumb: string }[];
 }
 
 export interface DesignEvents {
@@ -155,9 +161,12 @@ function followupRules(f: FollowupContext | undefined, originalQuery: string): s
     case 'refine':
       return `\n\nTHIS IS AN ADJUSTED VERSION of CURRENT CARD (below), which answered "${originalQuery}". The person asked: "${f.question}". Output a complete new card that applies the change: keep the same subject and everything that still applies, restructure freely if the change calls for a different layout, and make the change obvious in the subtitle. Mark the matching choices option as selected and move any slider or scaler to the requested value. A "keep only" change drops alternatives that do not match, and does not copy one school, employer, or team into a second role the current card did not give it. The original card stays on screen above, so do not describe what changed in prose.`;
     case 'answer':
-      return `\n\nTHIS IS A FOLLOW-UP. The original search was "${originalQuery}". Design a focused card that answers only the follow-up question "${f.question}". Do not repeat the original answer; pick the components that fit this question best. "Of those", "of these", "which of the ones you listed", "drop any", or "keep only" classifies only the items already on the card. Do not add a new item, and do not state a count of them that is not how many are still listed.`;
+      if (compareSides(originalQuery).length >= 2) {
+        return `\n\nTHIS IS A FOLLOW-UP on the comparison "${originalQuery}". The person asked: "${f.question}". Keep one tile and one column per side. The title and every label are the side names only. Do not append the question onto a name. Answer the question for each side with the figure a source states for that side. Keep each side's own price and photo. A newly named object gets its own tile and column, and only the facts a source states for it. Do not copy another side's price, photo, spec, or citation onto it. If one side's cell already states the figure, do not say the sources lack that figure. An empty cell can say only that side's figure is missing.`;
+      }
+      return `\n\nTHIS IS A FOLLOW-UP. The original search was "${originalQuery}". Design a focused card that answers only the follow-up question "${f.question}". The first body node is the answer to that question. Do not repeat the previous card's lead when this question asks about a different case of the same subject. "Of those", "of these", "which of the ones you listed", "drop any", or "keep only" classifies only the items already on the card. Do not add a new item, and do not state a count of them that is not how many are still listed. Each object in the conversation has a stable id. Identify that object before a fact. A question about the same objects updates those ids. A question that names a different object, or adds one, creates a new id. Do not copy another id's price, photo, spec, or citation onto it.`;
     case 'chat':
-      if (isCalculationAsk(f.question)) {
+      if (f.calculate || isCalculationAsk(f.question)) {
         return `\n\nTHIS IS A CALCULATION using only figures already on the card and in SOURCES for "${originalQuery}". The person asked: "${f.question}". The body is the arithmetic: the result first, then each figure with the unit and the label the source gave it. A clock time such as 15:07 stays whole. Do not summarize an article, and do not use a headline as the answer. The title is the subject already on screen, with that subject's capitalization.`;
       }
       return `\n\nTHIS IS A CONVERSATION TURN, NOT A SEARCH. Reply to "${f.question}" like a thoughtful expert assistant: understand what they really need given the conversation, think it through, and give a direct, confident answer first, then the reasoning or steps that support it. Use the conversation, your general knowledge and the SOURCES where relevant. You may reason, calculate, compare, plan and advise here. Do not invent current specifics (today's prices, recent events, live figures, exact specs you are unsure of); when those matter, say what to check and add a "search" action for it. Only cite [n] when a statement really comes from that source.`;
@@ -186,9 +195,10 @@ FIT THE KIND OF REQUEST
 - Quick fact (who, when, how tall, what time, define a word): the answer in a hero or one sentence, a line of context, and little else — 2-3 nodes.
 - How-to or recipe: time, difficulty or servings tiles, what you need, numbered steps, then one tip.
 - Best X / what to buy: the verdict first, then a media list of picks — each with its own picture and a price or score badge — then what to look for.
+- People, products, or other named things (who, which, standouts, sleepers): each pick is a name from the sources, with the stat or reason that source states. A checklist that restates the question is not the answer. If the sources name none, one callout says the sources named none.
 - X vs Y: a table across the attributes that matter and a one-line verdict on who should pick which. When the comparison is priced plans or tools, a pricing node carries each plan's published price.
 - Best tool / which plan / what it costs for a team: a pricing node, one row per plan. Do not put the team total in a hero, stat, tile or table.
-- Person, place, company or product: profile with picture and key facts, then a short background.
+- Person, place, company or product: profile with picture and key facts, then a short background. A precise bio fact (a birthplace, an ownership share, or an award) is included only when a source about that person states it. Leave it out when sources disagree or a fetched page contradicts the snippet, and do not repeat it on a later turn that did not ask for it.
 - Which of a group did something (appeared in, won, played): one tile per person, value Yes or No. Yes only when a source names that person for that appearance. A credit, video, or song that does not name them is No.
 - News or anything recent: the latest development first with its date; date every item; cite each one and link each story to its source.
 - Wants to watch, listen or go somewhere (videos, tutorials, channels, tools, booking, official sites): put the destinations first as video or links nodes, then a short summary. If they ask for a video or tutorial and a VIDEO source fits, the card opens with one video node.
@@ -205,7 +215,15 @@ RULES
 - Every number, value and fact must come from SOURCES or PAGE TEXT. Never estimate, never use typical or example values, never fill a slot from general knowledge. Any number not found in the sources is automatically deleted, so leave such nodes out. Cite a number only with the source that states that number. Never emit a year, count, or name as an empty slot, an em dash, or a [placeholder]: if the figure is missing, omit that clause. A number inside quotation marks is part of the quote and stays. A research question prefers papers, preprints, and official pages over news and videos. Cite a paper with the DOI, PMC ID, or arXiv ID the source states. When an authority has both a public guideline page and a training or course page, quote the public guideline. A verdict uses the strength the source states: do not soften a clear no into "weak evidence", and do not turn weak evidence into a no. A shopping pick includes its price when a source states one, and a pick with no price does not come before a priced pick that matches the ask.
 - Write in the language of the question. Leave out a sentence that is in another language. A blog, slideshow, or classroom page that names a different year or number than an encyclopedia or official page is not a disagreement: use the encyclopedia or official figure, and do not add a disagreement callout.
 - A score or schedule is one row per game. Never repeat a matchup. If the sources do not list the games asked for, say so in one callout instead of listing games from another day.
-- A follow-up about one attribute (battery, price, storage) answers that attribute with the figures the sources state for the things being compared. Never paste an unfinished snippet, and never bring in a product the question did not name.
+- A follow-up about one attribute (battery, price, storage) answers that attribute with the figures the sources state for the things being compared. Never paste an unfinished snippet, and never bring in a product the question did not name. The title answers the new question: where someone teaches or works is the institution, and a what-if price states the tax on that price.
+- When the person asks for a quote, quote the sentence that answers the question, including the numbers that sentence states. A nearby sentence is not a substitute, and a sentence cut off mid-way is not the quote.
+- A how-to is a steps node: the ordered steps the official page states, each with its title and the sentence that page uses. A short paragraph is not the steps.
+- A live price, tax, or fee leads with the figure the current official source states. Every other number on the card agrees with that figure or with a component that same page states. Do not label every component with the combined figure.
+- A fee lists each other charge a source names once. The amount on that row is the one on the line that names the charge. Do not add a second row for the same charge.
+- A health answer leads with the official figure or verdict. A line under it does not state a different figure or the opposite advice.
+- A comparison stays a visual table with one column per product. Search and show each product the question named. Do not say a side has no specs, or is not in the sources, when that product was not searched. A variant the question did not name (Pro, Plus, Max, Mini, Ultra) is a different product.
+- A line under a verdict has to agree with it. Do not add a claim the verdict rejects. If a page does not say whether a paper is a review or an original study, say that, and do not assert either one.
+- A request for peer-reviewed papers lists the papers a source identifies, each with its title and an open link. An empty list is not an answer. Do not invent a title. A count such as "of the three" matches how many picks the card shows, a headline price is the price on that pick's row, and a pick stays inside the stated budget and spec.
 - Numbered steps are 1, 2, 3 with no gaps. Keep every step a newcomer needs.
 - Never compute new numbers yourself (multiplying, converting, summing), except in two cases. When the TASK says the sources already imply a lead figure, that figure is the hero. When the follow-up asks you to calculate from figures already on the card or in the sources, the body is that calculation, each number keeps the unit and label the source gave it, and a headline is not the answer. When quantities should change with an amount (servings, loaves, people, budget), use a scaler node whose base and amounts are exactly the source values; the person rescales it live.
 - Plan and subscription prices always go in a pricing node, as the published per-seat or flat amount with its source number. Set billing to annual when the source says billed annually, even if the number is per month. Never multiply by people or seats, and never write a dollar amount or team total anywhere else on the card. If the sources do not state a price, leave that amount out.
@@ -287,10 +305,14 @@ function timeRules(req: DesignRequest): string {
 function taskBlock(req: DesignRequest): string {
   const pattern = patternById(req.pattern);
   const asked = req.followup?.question ?? req.query;
-  const sides = req.pattern === 'compare' ? compareSides(asked) : [];
+  const querySides = compareSides(req.query).map((side) => cleanSideName(side));
+  const askedSides = compareSides(asked).map((side) => cleanSideName(side));
+  const sides = (req.pattern === 'compare' ? (querySides.length >= 2 ? querySides : askedSides) : [])
+    .filter((side, index, all) => all.findIndex((item) => item.toLowerCase() === side.toLowerCase()) === index);
+  const followFact = req.followup && sides.length >= 2 ? ` The follow-up asks "${req.followup.question}". Answer that for each side. A label is the side's name only.` : '';
   return [
     `- Pre-selected layout: "${pattern.label}" (${pattern.description}).`,
-    sides.length >= 2 ? `- Compare exactly these sides, not an earlier topic: ${sides.join(' | ')}. The title names the sides. Use a table, or one section per side, with only facts from the sources. A biography of one side does not answer. If the sources never line the sides up, say so in one callout and still show what each side's sources do say. A different model number is a different product: never copy specs, a price, or a date from one model onto another. A VIDEO source can show that a review exists; state a spec or a price only when that source's text states it. Never end a sentence with an ellipsis.` : '',
+    sides.length >= 2 ? `- Compare exactly these sides, not an earlier topic: ${sides.join(' | ')}. The title names the sides. Identify each side before writing its facts. Use a table, or one section per side, with only facts from the sources. A biography of one side does not answer. If the sources never line the sides up, say so in one callout and still show what each side's sources do say. A different model number is a different product: never copy specs, a price, a photo, or a citation from one model onto another. A VIDEO source can show that a review exists; state a spec or a price only when that source's text states it. Never end a sentence with an ellipsis.${followFact}` : '',
     asksLocalConditions(asked) ? '- Local reading: the title is the place (city and region), never the word Weather or Forecast. The hero is the current temperature and the sky only — do not repeat the place as a hero label. Every other reading (humidity, wind, pressure, a later hour) appears once. A series is later periods, never another copy of right now.' : '',
     `- ${DEPTH_HINT[req.depth]}`,
     req.intent ? `- What the person wants: ${req.intent} Answer that; sources that only match their words but not this are background at most.` : '',
@@ -302,7 +324,7 @@ function taskBlock(req: DesignRequest): string {
     briefRules(req),
     followupRules(req.followup, req.search.query).trim().replace(/^/, '- '),
     req.search.results.length && nameWithWorkplace(asked)
-      ? '- This ask is one person at a workplace. Answer with that person\'s profile, titled with their name. Do not answer with the company\'s leadership roster or executive team.'
+      ? '- This ask is one person at a workplace. If the sources name that person, title the card with their name and use only their roles, portrait, and pages. If the sources do not name that person, say so in one sentence. Do not retitle the question, and do not use another person\'s role, photo, or bio.'
       : '',
     req.search.results.length ? '' : nameWithWorkplace(asked)
       ? '- No page names a person by that given name at that workplace. Say that no matching person was found. Do not guess a job, a handle, or a public role.'
@@ -489,7 +511,7 @@ export async function designStream(req: DesignRequest, env: Env, on: DesignEvent
           return unreachable;
         }
       }
-    }, { think: req.think, onThinking: on.thinking });
+    }, { think: req.think, onThinking: on.thinking, ...(req.followup || req.fromFollowup ? { deadlineMs: 12_000 } : {}) });
   } catch (err) {
     console.error('Design stream failed', err);
     failure = err instanceof Error ? err.message : String(err);
@@ -580,7 +602,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
         contentNodes++;
         pictures.emit(node, diagramRegionIndex(i, !!lead, diagramOn), emitNode);
       } else if (parsed?.kind === 'dropped') removed++;
-    });
+    }, req.followup || req.fromFollowup ? { deadlineMs: 12_000 } : {});
   };
 
   const finishCall = () => {
@@ -616,7 +638,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
           return unreachable;
         }
       }
-    });
+    }, req.followup || req.fromFollowup ? { deadlineMs: 12_000 } : {});
   };
 
   if (lead) {

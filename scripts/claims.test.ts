@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { bindClaims, budgetAmounts, claimSources, groundMembers, priceFor, retargetCites, salesTax, shoppingAsk, type ClaimSource } from '../server/claims.ts';
+import { bindClaims, budgetAmounts, claimSources, groundMembers, officialCharge, oneNamedCharge, presentNamedCharges, priceFor, retargetCites, salesTax, shoppingAsk, type ClaimSource } from '../server/claims.ts';
 import { Grounding, groundNodes } from '../server/ground.ts';
 import { sanitizeNodes } from '../server/sanitize.ts';
 import { finishQuality } from '../server/sourceQuality.ts';
@@ -83,6 +83,50 @@ test('shopping picks take a price from the page that names them', () => {
   assert.equal(items[0]?.meta, '$699');
 });
 
+test('a price above the stated budget is not shown on a pick', () => {
+  const catalog: ClaimSource[] = [
+    { n: 1, text: 'Best headphones under $200. The Edifier ES850NB supports LDAC.' },
+    { n: 2, text: 'Sony WH-CH720N is $88. Edifier ES850NB is $119.99.' },
+  ];
+  const list: CardNode = {
+    type: 'list',
+    style: 'check',
+    items: [
+      { text: 'Sony WH-CH720N', meta: '$88' },
+      { text: 'Codec support for hi-res: LDAC on the Edifier ES850NB', meta: '$200' },
+    ],
+  };
+  const next = bindClaims(list, catalog, 'Wireless Noise Cancelling Headphones Under $150');
+  const items = next.type === 'list' ? next.items : [];
+  assert.equal(items.some((item) => /\$200/.test(`${item.meta ?? ''} ${item.text}`)), false);
+  assert.equal(items.some((item) => item.meta === '$88'), true);
+  const chips: CardNode = {
+    type: 'choices',
+    label: 'Budget',
+    options: [
+      { label: 'Under $100', prompt: 'under $100', selected: false },
+      { label: 'Under $150', prompt: 'under $150', selected: true },
+      { label: 'Under $200', prompt: 'under $200', selected: false },
+    ],
+  };
+  const kept = bindClaims(chips, catalog, 'Wireless Noise Cancelling Headphones Under $150');
+  const labels = kept.type === 'choices' ? kept.options.map((option) => option.label) : [];
+  assert.deepEqual(labels, ['Under $100', 'Under $150']);
+  const dangling: CardNode = { type: 'list', items: [{ text: 'JBL Live 780NC', meta: 'Best under $200' }] };
+  const cleared = bindClaims(dangling, catalog, 'Wireless Noise Cancelling Headphones Under $150');
+  assert.equal(cleared.type === 'list' ? cleared.items[0]?.meta : 'kept', undefined);
+  const hero: CardNode = {
+    type: 'hero',
+    value: 'JBL Live 778NC',
+    label: 'Top pick under $150',
+    caption: "Best noise cancelling headphones under $200 we've tested",
+  };
+  const headed = bindClaims(hero, catalog, 'Wireless Noise Cancelling Headphones Under $150');
+  assert.match(headed.type === 'hero' ? headed.caption ?? '' : '', /Best noise cancelling headphones we've tested/);
+  assert.equal(headed.type === 'hero' ? headed.label : '', 'Top pick under $150');
+  assert.doesNotMatch(headed.type === 'hero' ? `${headed.caption} ${headed.value}` : '', /\$200/);
+});
+
 test('a budget ceiling is not the product price', () => {
   assert.deepEqual(budgetAmounts('Best laptop under $800'), [800]);
   const catalog: ClaimSource[] = [
@@ -90,7 +134,9 @@ test('a budget ceiling is not the product price', () => {
   ];
   const list: CardNode = { type: 'list', style: 'number', items: [{ text: 'Dell XPS 13', meta: 'Under $800' }] };
   const next = bindClaims(list, catalog, 'Best laptop under $800');
-  assert.equal(next.type === 'list' ? next.items[0]?.meta : '', '$999.99');
+  const meta = next.type === 'list' ? next.items[0]?.meta ?? '' : '';
+  assert.notEqual(meta, '$999.99');
+  assert.doesNotMatch(meta, /999/);
 });
 
 test('a city sales tax uses the combined rate once the item clears the exemption', () => {
@@ -106,6 +152,345 @@ test('a city sales tax uses the combined rate once the item clears the exemption
   assert.match(body, /\$13\.31/);
   assert.match(body, /\[2\]/);
   assert.doesNotMatch(body, /4%/);
+});
+
+test('a round rate loses to the combined rate the official page states', () => {
+  const pages: ClaimSource[] = [
+    { n: 1, domain: 'tips.example', text: 'Harbor City sales tax\nHarbor City sales tax is 7%.' },
+    { n: 2, domain: 'www.harborcity.gov', text: 'Harbor City sales tax\nThe combined rate is 7.375%.' },
+  ];
+  assert.deepEqual(salesTax('sales tax in Harbor City', pages), { rate: 7.375, n: 2 });
+  const precise: ClaimSource[] = [
+    { n: 1, domain: 'tips.example', text: 'Harbor City sales tax is 7%.' },
+    { n: 2, domain: 'tax.harborcity.gov', text: 'Harbor City sales tax is 7.375%.' },
+  ];
+  assert.deepEqual(salesTax('sales tax in Harbor City', precise), { rate: 7.375, n: 2 });
+  const next = bindClaims({ type: 'text', text: 'Sales tax in Harbor City is 7%.' }, pages, 'sales tax in Harbor City');
+  assert.match(next.type === 'text' ? next.text : '', /7\.375%/);
+  assert.doesNotMatch(next.type === 'text' ? next.text : '', /\b7%/);
+});
+
+test('a combined city rate leads when the official page only states the state piece', () => {
+  const pages: ClaimSource[] = [
+    { n: 1, domain: 'www.harborstate.gov', text: 'Harbor State sales tax\nHarbor State imposes a 6.25 percent state sales and use tax.' },
+    { n: 2, domain: 'www.harborstate.gov', text: 'City tax\nHarbor City total includes the state\'s sales and use tax rate of 6.25%.' },
+    { n: 3, domain: 'www.rates.example', text: 'Harbor City sales tax\nThe minimum combined sales tax rate for Harbor City is 8.25%.' },
+  ];
+  assert.deepEqual(salesTax('Harbor City combined sales tax', pages), { rate: 8.25, n: 3 });
+});
+
+test('an escaped decimal in a fetched page is still the combined rate', () => {
+  const pages: ClaimSource[] = [
+    { n: 1, domain: 'www.harborstate.gov', text: 'Harbor City sales tax\nLocal jurisdictions can impose up to 2 percent for a maximum combined rate of 8\\.25 percent.' },
+  ];
+  assert.deepEqual(salesTax('Harbor City combined sales tax', pages), { rate: 8.25, n: 1 });
+});
+
+test('the state written after the city does not hide the combined rate', () => {
+  const pages: ClaimSource[] = [
+    { n: 1, domain: 'www.harborstate.gov', text: 'Harbor State sales tax\nHarbor State imposes a 6.25 percent state sales and use tax.' },
+    { n: 2, domain: 'www.rates.example', text: 'Harbor City sales tax\nThe minimum combined sales tax rate for Harbor City, Eastland is 8.25%. The Harbor City sales tax rate is 1.00%.' },
+  ];
+  assert.deepEqual(salesTax('Harbor City combined sales tax', pages), { rate: 8.25, n: 2 });
+});
+
+test('an official combined rate still beats a commercial one when the question asks for combined', () => {
+  const pages: ClaimSource[] = [
+    { n: 1, domain: 'www.rates.example', text: 'Harbor City sales tax\nThe combined rate is 9%.' },
+    { n: 2, domain: 'www.harborcity.gov', text: 'Harbor City sales tax\nThe combined sales tax rate in Harbor City is 8.25%.' },
+  ];
+  assert.deepEqual(salesTax('Harbor City combined sales tax', pages), { rate: 8.25, n: 2 });
+});
+
+test('an official snippet beats a commercial combined rate', () => {
+  const pages: ClaimSource[] = [
+    { n: 1, domain: 'www.rates.example', text: 'Harbor City sales tax\nThe combined rate is 7.5%.' },
+    { n: 2, domain: 'www.harborcity.gov', text: 'Harbor City tax\nRates are listed in the table.', stated: 'Harbor City total rate 7.125%' },
+  ];
+  assert.deepEqual(salesTax('sales tax in Harbor City', pages), { rate: 7.125, n: 2 });
+  const next = bindClaims({ type: 'text', text: 'The combined rate is 7.5%.' }, pages, 'sales tax in Harbor City');
+  assert.match(next.type === 'text' ? next.text : '', /7\.125%/);
+  assert.doesNotMatch(next.type === 'text' ? next.text : '', /7\.5%/);
+});
+
+test('the lead rate is the official page, and a sum that misses it leaves', () => {
+  const pages: ClaimSource[] = [
+    { n: 1, domain: 'www.rates.example', text: 'Harbor City sales tax\nThe combined rate is 9.5%.' },
+    { n: 2, domain: 'www.harborcity.gov', text: 'Harbor City sales tax\nThe general merchandise rate is 6.25%.' },
+  ];
+  assert.deepEqual(salesTax('sales tax in Harbor City', pages), { rate: 6.25, n: 2 });
+  const next = bindClaims({
+    type: 'hero',
+    value: '9.5%',
+    label: 'Combined rate',
+    caption: '6.25% state + 1.25% city + 1.25% county',
+  }, pages, 'sales tax in Harbor City');
+  assert.equal(next.type === 'hero' ? next.value : '', '6.25%');
+  assert.equal(next.type === 'hero' ? next.caption : 'kept', '');
+});
+
+test('a fee card does not keep a second amount the official page does not state', () => {
+  const pages: ClaimSource[] = [
+    { n: 1, domain: 'permits.harbor.gov', text: 'Renew a harbor permit by mail\nThe renewal fee for a harbor permit book is $42.' },
+  ];
+  const next = bindClaims({ type: 'stack', gap: 'md', children: [
+    { type: 'hero', value: '$64', label: 'Renewal fee' },
+    { type: 'stat', label: 'Book fee', value: '$42' },
+  ] }, pages, 'What is the renewal fee for a harbor permit book by mail?');
+  const blob = JSON.stringify(next);
+  assert.match(blob, /\$42/);
+  assert.doesNotMatch(blob, /\$64/);
+});
+
+test('a component rate stays and the combined line uses the official rate', () => {
+  const pages: ClaimSource[] = [
+    { n: 1, domain: 'www.rates.example', text: 'Harbor City sales tax\nThe combined rate is 7.5%.' },
+    { n: 2, domain: 'www.harborcity.gov', text: 'Harbor City sales tax\nThe state rate is 6.25%. The combined rate is 7.125%.' },
+  ];
+  const next = bindClaims({ type: 'text', text: 'The state rate is 6.25%. The combined rate is 7.5%.' }, pages, 'sales tax in Harbor City');
+  const body = next.type === 'text' ? next.text : '';
+  assert.match(body, /7\.125%/);
+  assert.doesNotMatch(body, /6\.25%/);
+  assert.doesNotMatch(body, /7\.5%/);
+});
+
+test('a list percent agrees with the official rate', () => {
+  const pages: ClaimSource[] = [
+    { n: 1, domain: 'www.harborstate.gov', text: 'Harbor State sales tax\nThe general merchandise rate is 6.25%.' },
+  ];
+  const next = bindClaims({ type: 'list', items: [{ text: 'General merchandise is 2.69%.' }, { text: 'The state rate is 6.25%.' }] }, pages, 'What is the sales tax on general merchandise in Harbor State?');
+  const blob = JSON.stringify(next);
+  assert.match(blob, /6\.25%/);
+  assert.doesNotMatch(blob, /2\.69%/);
+});
+
+test('a small share inside a breakdown is not the merchandise rate', () => {
+  const pages: ClaimSource[] = [
+    { n: 1, domain: 'www.harborstate.gov', text: 'Harbor State sales tax\nThe general merchandise rate is 6.25%.' },
+    { n: 2, domain: 'www.harborstate.gov', text: 'Harbor State sales tax\nGeneral merchandise consists of a 5.00% state rate, a 1.00% local rate and a 0.25% county rate.' },
+  ];
+  assert.deepEqual(salesTax('What is the sales tax on general merchandise in Harbor State?', pages), { rate: 6.25, n: 1 });
+});
+
+test('a revenue share is not the sales tax rate', () => {
+  const pages: ClaimSource[] = [
+    {
+      n: 1,
+      domain: 'www.harborstate.gov',
+      text: 'Harbor State sales tax\nSales tax revenues as a percentage of total general revenues declined from almost 30% in fiscal year 1990 to less than 23%. The state sales tax rate has remained constant at 6.25%.',
+    },
+  ];
+  assert.deepEqual(salesTax('What is the sales tax on general merchandise in Harbor State?', pages), { rate: 6.25, n: 1 });
+});
+
+test('a local increment is not the rate the official page states', () => {
+  const pages: ClaimSource[] = [
+    {
+      n: 1,
+      domain: 'www.harborstate.gov',
+      text: 'Harbor State sales tax\nWhile local add-ons have grown, the state sales tax rate has remained constant at 6.25% for the past twenty years. The current state sales tax rate is 6.25%, of which the state retains 80% of the tax. A uniform state sales and use tax rate on general merchandise of 6.25 percent was established. The tax may be imposed in 0.25% increments and cannot exceed 1%. 0.25% sales tax on general merchandise in Madison County. The tax rate is 0.25%.',
+    },
+  ];
+  assert.deepEqual(salesTax('What is the sales tax on general merchandise in Harbor State?', pages), { rate: 6.25, n: 1 });
+  const next = bindClaims({
+    type: 'stack',
+    gap: 'md',
+    children: [
+      { type: 'hero', value: '0.25%', label: 'Harbor State sales tax on general merchandise' },
+      { type: 'text', text: 'Qualifying food, drugs and medical appliances are taxed at 1%.' },
+      { type: 'chart', kind: 'bar', unit: '%', title: 'Compare rate', data: [{ label: 'Statewide', value: 0.04 }, { label: 'Palatine', value: 2.69 }] },
+    ],
+  }, pages, 'What is the sales tax on general merchandise in Harbor State?');
+  const blob = JSON.stringify(next);
+  assert.match(blob, /6\.25%/);
+  assert.doesNotMatch(blob, /0\.25%|0\.04|2\.69|1%/);
+  assert.doesNotMatch(blob, /"type":"chart"/);
+});
+
+test('a city rate does not lead when the official page states the broader rate', () => {
+  const pages: ClaimSource[] = [
+    { n: 1, domain: 'www.harborstate.gov', text: 'Harbor State sales tax\nThe general merchandise rate is 6.25%.' },
+    { n: 2, domain: 'www.harborstate.gov', text: 'Harbor State sales tax\nPalatine combined local rate is 2.69%.' },
+  ];
+  assert.deepEqual(salesTax('What is the sales tax on general merchandise in Harbor State?', pages), { rate: 6.25, n: 1 });
+  const next = bindClaims({ type: 'text', text: 'General merchandise sales tax is 2.69%. The state rate is 6.25%.' }, pages, 'What is the sales tax on general merchandise in Harbor State?');
+  const body = next.type === 'text' ? next.text : '';
+  assert.match(body, /6\.25%/);
+  assert.doesNotMatch(body, /2\.69%/);
+});
+
+test('a fee is the amount the official page states', () => {
+  const pages: ClaimSource[] = [
+    { n: 1, domain: 'travelblog.example', text: 'The renewal fee is $64.' },
+    { n: 2, domain: 'permits.harbor.gov', text: 'Harbor permits\nThe renewal fee for a harbor permit is $42. The application fee is $18.' },
+  ];
+  assert.deepEqual(officialCharge('What is the renewal fee for a harbor permit?', pages), { amount: '$42', value: 42, n: 2 });
+  const snippet: ClaimSource[] = [
+    { n: 1, domain: 'notes.example', text: 'The renewal fee is $64. A book and card is $80.' },
+    { n: 2, domain: 'permits.harbor.gov', text: 'Harbor permits\nFee schedule.', stated: 'The renewal fee for a harbor permit book is $42. A book and card renewal is $80.' },
+  ];
+  assert.deepEqual(officialCharge('What is the renewal fee for a harbor permit book?', snippet), { amount: '$42', value: 42, n: 2 });
+  const next = bindClaims({ type: 'stat', label: 'Renewal fee', value: '$64 [1]' }, pages, 'What is the renewal fee for a harbor permit?');
+  const value = next.type === 'stat' ? next.value : '';
+  assert.match(value, /\$42/);
+  assert.doesNotMatch(value, /\$64/);
+  assert.match(value, /\[2\]/);
+  const listed = bindClaims({ type: 'text', text: 'The renewal fee is $64. The application fee is $18.' }, pages, 'What is the renewal fee for a harbor permit?');
+  const body = listed.type === 'text' ? listed.text : '';
+  assert.match(body, /\$42/);
+  assert.match(body, /\$18/);
+  assert.doesNotMatch(body, /\$64/);
+  const split: ClaimSource[] = [
+    { n: 1, domain: 'county.example.gov', text: 'County notes\nThe renewal fee is $64.' },
+    { n: 2, domain: 'permits.harbor.gov', text: 'Renew a harbor permit by mail\nThe renewal fee for a harbor permit book is $42. A book and card is $80.' },
+  ];
+  assert.equal(officialCharge('What is the renewal fee for a harbor permit book by mail?', split)?.amount, '$42');
+  const addon: ClaimSource[] = [
+    { n: 1, domain: 'notes.example', text: 'People remember the renewal fee as $64.' },
+    { n: 2, domain: 'permits.harbor.gov', text: 'Renew a harbor permit book by mail\nThe renewal fee for a harbor permit book is $42.\nExpedited service, add $15.' },
+  ];
+  assert.equal(officialCharge('What is the renewal fee for a harbor permit book by mail?', addon)?.amount, '$42');
+  const hero = bindClaims({ type: 'hero', value: '$15', label: 'Harbor permit book renewal' }, addon, 'What is the renewal fee for a harbor permit book by mail?');
+  assert.match(hero.type === 'hero' ? hero.value : '', /\$42/);
+  const extra = bindClaims({ type: 'text', text: 'Expedited service is $15.' }, addon, 'What is the renewal fee for a harbor permit book by mail?');
+  assert.match(extra.type === 'text' ? extra.text : '', /\$15/);
+  assert.doesNotMatch(extra.type === 'text' ? extra.text : '', /\$42/);
+  const shifted: ClaimSource[] = [
+    { n: 1, domain: 'permits.harbor.gov', text: 'Renew by mail\nYour fee depends on the document. $42 Harbor card ・ $15 Harbor book and card' },
+    { n: 2, domain: 'notes.example', text: 'Harbor book renewal fees\nHarbor book: $42. Harbor card: $15. Harbor book and card: $80.' },
+  ];
+  assert.equal(officialCharge('What is the harbor book renewal fee?', shifted)?.amount, '$42');
+  const lead = bindClaims({ type: 'stat', label: 'Renewal fee', value: '$64' }, split, 'What is the renewal fee for a harbor permit book by mail?');
+  assert.match(lead.type === 'stat' ? lead.value : '', /\$42/);
+  const pair = bindClaims({ type: 'text', text: 'A book and card is $80.' }, split, 'What is the renewal fee for a harbor permit book by mail?');
+  assert.match(pair.type === 'text' ? pair.text : '', /\$80/);
+});
+
+test('an add-on row uses the line that names it, not the base charge', () => {
+  const query = 'What is the harbor book renewal fee?';
+  const pages: ClaimSource[] = [
+    { n: 1, domain: 'permits.harbor.gov', text: 'Harbor permits\nThe renewal fee for a harbor permit book is $42.' },
+    { n: 2, domain: 'notes.example', text: 'Harbor book renewal DS-82 is $42. Expedited service add $15. Execution fee $9. Harbor card is $11. A book and card is $80.' },
+  ];
+  assert.equal(officialCharge(query, pages)?.amount, '$42');
+  const card = bindClaims({
+    type: 'stack',
+    gap: 'md',
+    children: [
+      { type: 'hero', value: '$15', label: 'Harbor book renewal' },
+      { type: 'tile', label: 'Book', value: '$42', sub: 'Adult renewal' },
+      { type: 'tile', label: 'Expedited', value: '$42', sub: 'Extra fee' },
+      { type: 'tile', label: 'Card', value: '$42', sub: 'Adult renewal' },
+      { type: 'keyvalue', items: [{ label: 'Execution fee', value: '$42' }, { label: 'DS-82', value: '$15' }, { label: 'Book + card', value: '$42' }] },
+      { type: 'text', text: 'Expedited service is $42. DS-82 renewal is $15.' },
+    ],
+  }, pages, query);
+  assert.equal(card.type, 'stack');
+  if (card.type !== 'stack') return;
+  const hero = card.children[0];
+  const book = card.children[1];
+  const expedited = card.children[2];
+  const cardTile = card.children[3];
+  const rows = card.children[4];
+  const prose = card.children[5];
+  assert.equal(hero?.type === 'hero' ? hero.value : '', '$42');
+  assert.equal(book?.type === 'tile' ? book.value : '', '$42');
+  assert.equal(expedited?.type === 'tile' ? expedited.value : '', '$15');
+  assert.equal(cardTile?.type === 'tile' ? cardTile.value : '', '$11');
+  assert.match(rows?.type === 'keyvalue' ? rows.items[0]?.value ?? '' : '', /^\$9\b/);
+  assert.match(rows?.type === 'keyvalue' ? rows.items[1]?.value ?? '' : '', /^\$42\b/);
+  assert.match(rows?.type === 'keyvalue' ? rows.items[2]?.value ?? '' : '', /^\$80\b/);
+  assert.equal(expedited?.type === 'tile' ? expedited.source : 0, 2);
+  assert.match(prose?.type === 'text' ? prose.text : '', /\$15/);
+  assert.match(prose?.type === 'text' ? prose.text : '', /\$42/);
+  assert.doesNotMatch(prose?.type === 'text' ? prose.text : '', /Expedited service is \$42/);
+  assert.doesNotMatch(prose?.type === 'text' ? prose.text : '', /DS-82 renewal is \$15/);
+});
+
+test('a second row for the same named charge is dropped', () => {
+  const query = 'What is the harbor book renewal fee?';
+  const nodes = oneNamedCharge(query, [
+    { type: 'hero', value: '$42', label: 'Harbor book renewal' },
+    {
+      type: 'grid',
+      cols: 2,
+      children: [
+        { type: 'tile', label: 'Harbor book', value: '$42', sub: 'Adult renewal' },
+        { type: 'tile', label: 'Expedited add-on', value: '$15', sub: 'Optional' },
+      ],
+    },
+    {
+      type: 'grid',
+      cols: 2,
+      children: [
+        { type: 'tile', label: 'Book + card', value: '$80' },
+        { type: 'tile', label: 'Expedited', value: '$15', sub: 'Extra fee' },
+        { type: 'tile', label: 'First-time book', value: '$42' },
+        { type: 'tile', label: 'Minor book', value: '$27' },
+      ],
+    },
+  ]);
+  const rows = nodes.flatMap((node) => (node?.type === 'grid' ? node.children : []));
+  const labels = rows.map((node) => (node.type === 'tile' ? node.label : ''));
+  assert.deepEqual(labels, ['Expedited add-on', 'Book + card', 'Minor book']);
+  const led = oneNamedCharge(query, [
+    { type: 'hero', value: '$42', label: 'Harbor book renewal' },
+    { type: 'grid', cols: 2, children: [
+      { type: 'tile', label: 'First-time book', value: '$42' },
+      { type: 'tile', label: 'Expedited', value: '$15' },
+      { type: 'tile', label: 'Book + card', value: '$80' },
+    ] },
+  ]);
+  const ledLabels = led.flatMap((node) => (node?.type === 'grid' ? node.children : [])).map((node) => (node.type === 'tile' ? node.label : ''));
+  assert.deepEqual(ledLabels, ['Expedited', 'Book + card']);
+  const generic = oneNamedCharge(query, [
+    { type: 'hero', value: '$42', label: 'Renewal fee' },
+    { type: 'keyvalue', items: [
+      { label: 'First-time book', value: '$42' },
+      { label: 'Book + card', value: '$80' },
+      { label: 'Expedited', value: '$15' },
+    ] },
+  ]);
+  const genericLabels = generic.flatMap((node) => (node?.type === 'keyvalue' ? node.items.map((item) => item.label) : []));
+  assert.deepEqual(genericLabels, ['Book + card', 'Expedited']);
+  const shifted: ClaimSource[] = [
+    { n: 1, domain: 'permits.harbor.gov', text: 'Renew by mail\nYour fee depends on the document. $42 Harbor card ・ $18 Harbor book and card' },
+    { n: 2, domain: 'notes.example', text: 'Harbor book renewal fees\nHarbor book: $42. Harbor card: $11. Harbor book and card: $80. $15—Expedited' },
+  ];
+  assert.equal(officialCharge(query, shifted)?.amount, '$42');
+  const bound = bindClaims({
+    type: 'stack',
+    gap: 'md',
+    children: [
+      { type: 'hero', value: '$18', label: 'Harbor book renewal' },
+      { type: 'keyvalue', items: [{ label: 'Harbor card', value: '$42' }, { label: 'Book + card', value: '$18' }] },
+      { type: 'grid', cols: 2, children: [
+        { type: 'tile', label: 'Expedited', value: '$42', sub: 'Extra fee' },
+        { type: 'tile', label: 'Expedited add-on', value: '$15' },
+      ] },
+    ],
+  }, shifted, query);
+  const once = oneNamedCharge(query, bound.type === 'stack' ? bound.children : []);
+  const cardRow = once[1]?.type === 'keyvalue' ? once[1].items[0]?.value ?? '' : '';
+  const pairRow = once[1]?.type === 'keyvalue' ? once[1].items[1]?.value ?? '' : '';
+  const expediteRows = once[2]?.type === 'grid' ? once[2].children : [];
+  assert.match(cardRow, /^\$11\b/);
+  assert.match(pairRow, /^\$80\b/);
+  assert.equal(expediteRows.length, 1);
+  assert.match(expediteRows[0]?.type === 'tile' ? expediteRows[0].value ?? '' : '', /^\$15\b/);
+  const filled = presentNamedCharges(query, [
+    { type: 'stack', gap: 'md', children: [{ type: 'hero', value: '$42', label: 'Harbor book renewal' }] },
+  ], shifted);
+  const added = filled[0]?.type === 'stack' ? filled[0].children.flatMap((node) => (node.type === 'tile' ? [node] : [])) : [];
+  assert.deepEqual(added.map((node) => node.label), ['Harbor card', 'Harbor book and card', 'Expedited']);
+  assert.deepEqual(added.map((node) => node.value), ['$11', '$80', '$15']);
+  const compared = oneNamedCharge('Fitbit Edge vs Mi Band 10', [
+    { type: 'grid', cols: 2, children: [
+      { type: 'tile', label: 'Fitbit Edge', value: '$179' },
+      { type: 'tile', label: 'Mi Band 10', value: '$53' },
+    ] },
+  ]);
+  assert.equal(compared[0]?.type === 'grid' ? compared[0].children.length : 0, 2);
 });
 
 test('an exempt price does not keep a tax dollar from another line', () => {

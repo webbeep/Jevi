@@ -133,6 +133,79 @@ test('a clear no stays no, and weak evidence stays weak', () => {
   assert.equal(kept.type === 'hero' ? kept.value : '', 'No solid evidence');
 });
 
+test('a benefit line under a no verdict is dropped', () => {
+  const session = new VerdictSession({
+    query: 'Does the evening tea help people sleep?',
+    results: [hit({ title: 'Tea review', url: 'https://agency.example/tea', domain: 'agency.example', snippet: 'There is no solid evidence the evening tea helps people sleep.' })],
+  });
+  const lead = session.offer({ type: 'hero', value: 'No solid evidence', label: 'Sleep' }, 0);
+  assert.equal(lead.node.type === 'hero' ? lead.node.value : '', 'No solid evidence');
+  const line = session.offer({ type: 'text', text: 'A cup might reduce how long it takes to fall asleep. The trials do not show that effect.' }, 1);
+  assert.match(line.node.type === 'text' ? line.node.text : '', /do not show/);
+  assert.doesNotMatch(line.node.type === 'text' ? line.node.text : '', /might reduce/);
+});
+
+test('a pro that fights a no verdict is dropped', () => {
+  const session = new VerdictSession({
+    query: 'Does the evening tea help people sleep?',
+    results: [hit({ title: 'Tea review', url: 'https://agency.example/tea', domain: 'agency.example', snippet: 'There is no solid evidence the evening tea helps people sleep.' })],
+  });
+  session.offer({ type: 'hero', value: 'No solid evidence', label: 'Sleep' }, 0);
+  const node = session.offer({
+    type: 'proscons',
+    pros: ['A cup might reduce how long it takes to fall asleep', 'Linked to lower restless nights in one survey'],
+    cons: ['The trials do not show that effect'],
+  }, 1).node;
+  assert.equal(node.type, 'proscons');
+  if (node.type !== 'proscons') return;
+  assert.deepEqual(node.pros, []);
+  assert.deepEqual(node.cons, ['The trials do not show that effect']);
+});
+
+test('a benefit line inside an accordion under a no verdict is dropped', () => {
+  const session = new VerdictSession({
+    query: 'Does the evening tea help people sleep?',
+    results: [hit({ title: 'Tea review', url: 'https://agency.example/tea', domain: 'agency.example', snippet: 'There is no solid evidence the evening tea helps people sleep.' })],
+  });
+  session.offer({ type: 'hero', value: 'No solid evidence', label: 'Sleep' }, 0);
+  const node = session.offer({
+    type: 'accordion',
+    items: [
+      { title: 'Why the idea is weak', text: 'A cup may help prevent a long night awake, but the dose in one cup is far too small. The trials do not show that effect.' },
+      { title: 'What was measured', text: 'Sleep onset in minutes.' },
+    ],
+  }, 1).node;
+  assert.equal(node.type, 'accordion');
+  if (node.type !== 'accordion') return;
+  assert.equal(node.items.length, 2);
+  assert.doesNotMatch(node.items[0]?.text ?? '', /may help/);
+  const acted = session.offer({
+    type: 'accordion',
+    items: [{ title: 'Mechanism', text: 'A cup may act as a sedative by slowing the evening heart rate.' }],
+  }, 3).node;
+  assert.doesNotMatch(JSON.stringify(acted), /may act/);
+  const shown = session.offer({ type: 'list', style: 'bullet', items: [{ text: 'Light drinking has shown a protective effect in older surveys. The trials do not show that effect.' }] }, 4).node;
+  assert.equal(shown.type, 'list');
+  if (shown.type !== 'list') return;
+  assert.doesNotMatch(shown.items[0]?.text ?? '', /protective effect/);
+  const oxide = session.offer({ type: 'text', text: 'A drink may act as an antioxidant by raising plasma NO. The trials do not show that effect.' }, 5).node;
+  assert.equal(oxide.type, 'text');
+  if (oxide.type !== 'text') return;
+  assert.doesNotMatch(oxide.text, /may act/);
+  const hero = session.offer({ type: 'hero', value: 'No solid evidence', label: 'Sleep', caption: 'A cup may act as a sedative.' }, 6).node;
+  assert.equal(hero.type === 'hero' ? hero.caption : 'kept', undefined);
+  assert.match(oxide.text, /do not show/);
+  assert.match(shown.items[0]?.text ?? '', /do not show/);
+  assert.match(node.items[0]?.text ?? '', /do not show/);
+  const row = session.offer({
+    type: 'keyvalue',
+    items: [{ label: 'Claim', value: 'Linked to lower restless nights' }, { label: 'Trials', value: 'No effect found' }],
+  }, 2).node;
+  assert.equal(row.type, 'keyvalue');
+  if (row.type !== 'keyvalue') return;
+  assert.deepEqual(row.items.map((item) => item.label), ['Trials']);
+});
+
 test('a consistent No tile is left alone', () => {
   const lead: CardNode = { type: 'hero', value: 'No', label: 'The store is closed today', caption: 'The owner posted that the shop is shut on Mondays.' };
   const session = new VerdictSession({
