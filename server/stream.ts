@@ -52,6 +52,7 @@ import { keepPictures, reviewCard, type Review } from './review';
 import { permitted } from './images';
 import { hasLlm } from './llm';
 import { collectPages, ogImageOf } from './pages';
+import { applyFetched, fetchCitePages, fillFromSearch, pagesFromContent, renumberPages, shiftBrief, snippetSupports, thinPlan, type FetchedPage } from './thinSource';
 import { MADE_PATTERNS, compareSideQueries, heuristicPattern, skeletonCard } from './patterns';
 import { planLayout } from './plan';
 import type { AskScope, CallLedger } from './budget';
@@ -391,8 +392,18 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   const briefing = !newSearch || chat || isPaperAsk(req.query) ? undefined
     : req.earlyBrief ? req.earlyBrief.then((early) => early ? remapBrief(early.brief, early.judged, req.search.results) : undefined)
     : briefSources({ query: req.query, intent: req.intent, context: req.context, results: req.search.results, isLive: isQuoteRow, shown: req.ticker ? TICKER_SHOWN : undefined }, env);
+  // A fee, tax, spec, or quote whose kept page has a thin snippet is read with DeepSeek
+  // while the usual page budget runs. This does not start during the Serper fan-out.
+  const asked = req.followup?.question ?? req.query;
+  const thinOpts = { mode: req.followup?.mode, pattern: req.pattern, quote: isQuoteRow(req.search.results[0]) };
+  const thin = thinPlan(asked, req.search.results, thinOpts);
+  const skip = new Set(thin.fetches.map((url) => normalizeUrl(url)));
+  if (thin.fetches.length || thin.search) console.log(JSON.stringify({ zo: 'deepseek', plan: thin.kind, fetch: thin.fetches.length, search: thin.search }));
+  const citeFetch: Promise<FetchedPage[]> = thin.fetches.length && thin.kind
+    ? fetchCitePages(env, scope, thin.kind, thin.fetches).catch(() => [])
+    : Promise.resolve([]);
   // Page reads overlap the source check. A rescue throws those pages away and reads the new rows.
-  const reading = collectPages(req.search.results, env, budget, late, scope, req.query);
+  const reading = collectPages(req.search.results, env, { ...budget, skip }, late, scope, req.query);
   const briefWait = skipReads && briefing
     ? Promise.race([briefing, new Promise<SourceBrief | undefined>((resolve) => setTimeout(() => resolve(undefined), 400))])
     : briefing;
@@ -432,9 +443,46 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       }
     }
   }
-  const pages = reread ? await collectPages(req.search.results, env, budget, undefined, scope, req.query) : await reading;
+  // Serper has finished, including a rescue. One DeepSeek search only if the fact is still missing
+  // and no kept page was the one to read. A fetch of a page Serper already found stays a fetch.
+  const serperCorpus = req.search.results.map((row) => `${row.title} ${row.snippet} ${row.content ?? ''}`).join('\n');
+  const priorContent = new Set(req.search.results.flatMap((row) => (row.content ? [normalizeUrl(row.url)] : [])));
+  let gapFill: ReturnType<typeof fillFromSearch> | undefined;
+  let citeWait = citeFetch;
+  // A fetch already started stays the only fetch. Search runs only when nothing was fetched.
+  if (thin.kind && !thin.fetches.length && (rescued || reread || thin.search)) {
+    const again = thinPlan(asked, req.search.results, thinOpts);
+    if (again.fetches.length && again.kind) citeWait = fetchCitePages(env, scope, again.kind, again.fetches).catch(() => []);
+    else if (again.search && again.kind) gapFill = fillFromSearch(asked, req.search, env, scope, again.kind, again.site).catch(() => undefined);
+  }
+  const pageBudgetNow = { ...budget, skip };
+  const [pagesRaw, fetched, filled] = await Promise.all([
+    reread ? collectPages(req.search.results, env, pageBudgetNow, undefined, scope, req.query) : reading,
+    citeWait,
+    gapFill ?? Promise.resolve(undefined),
+  ]);
+  let pages = pagesRaw;
+  if (filled?.search) {
+    if (filled.shifted && brief) brief = shiftBrief(brief, filled.shifted.after, filled.shifted.by);
+    if (filled.shifted) pages = renumberPages(pages, filled.shifted.after, filled.shifted.by);
+    req = { ...req, search: filled.search };
+    if (filled.added) {
+      send('peek', filled.search.results.slice(0, PEEK_ROWS).map(({ title, url, domain, date }) => ({ title, url, domain, date })));
+      send('search', req.search);
+    }
+  }
+  if (fetched.length) {
+    const applied = applyFetched(req.search, pages, fetched);
+    req = { ...req, search: applied.search };
+    pages = applied.pages;
+  }
+  pages = pagesFromContent(req.search.results, pages);
+  const addedText = [...fetched.map((page) => page.text), ...(filled?.search ? [filled.search.results.map((row) => row.content ?? '').join('\n')] : [])].join('\n');
+  if (brief?.missing && thin.kind && (snippetSupports(thin.kind, serperCorpus) || (addedText.trim() && snippetSupports(thin.kind, addedText)))) {
+    brief = { ...brief, missing: undefined };
+  }
   mark(scope.ledger, 'pages');
-  const fresh = pages.filter((p) => !req.search.results[p.n - 1]?.content);
+  const fresh = pages.filter((page) => !priorContent.has(normalizeUrl(page.url)));
   if (fresh.length) send('pages', fresh.map(({ n, url, text }) => ({ n, url, text })));
 
   // Page preview images and images from engines that answered late are often the most relevant ones.
