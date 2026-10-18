@@ -78,3 +78,25 @@ test('a slogan takes a number from the same clause, and the search names the mis
   assert.equal(missed, undefined);
   assert.match(gapSearchQuery('Harbor Slate vs Northwatch 2', [gap]), /Display/);
 });
+
+test('a versus page does not copy one side\'s measurement into the other side\'s blank', () => {
+  const gap = {
+    index: 0,
+    path: [{ kind: 'cell' as const, row: 0, column: 2 }],
+    label: 'Battery life',
+    side: 'Northwatch 2',
+    previous: '',
+    missing: true,
+    whole: false,
+  };
+  const copied = citeForGap(gap, [{
+    title: 'Harbor Slate vs Northwatch 2',
+    snippet: 'The Harbor Slate battery lasts 16 days.',
+  }]);
+  assert.equal(copied, undefined);
+  const own = citeForGap(gap, [{
+    title: 'Northwatch 2 specs',
+    snippet: 'The Northwatch 2 battery lasts 7 days.',
+  }]);
+  assert.equal(own, '7 days [1]');
+});

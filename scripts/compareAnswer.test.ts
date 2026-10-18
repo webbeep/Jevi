@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import type { CardNode } from '../shared/card.ts';
 import type { SearchResponse } from '../shared/types.ts';
 import { asksToCompare } from '../server/askGuard.ts';
-import { acceptProductPhoto, answersComparison, appendAskedFact, comparisonNodes, comparisonRepair, comparisonTitle, keepComparedProducts, mentionsSide, missingSideNode, nameForms, restoreSideTiles, sameProduct, showsComparison } from '../server/compareAnswer.ts';
+import { acceptProductPhoto, answersComparison, appendAskedFact, comparisonNodes, comparisonRepair, comparisonTitle, dropShownDenials, keepComparedProducts, mentionsSide, missingSideNode, nameForms, restoreSideTiles, sameProduct, showsComparison } from '../server/compareAnswer.ts';
 import { candidates } from '../server/extract.ts';
 import { compareSideQueries, compareSides, withoutLeadVerb } from '../server/patterns.ts';
 import { Polisher, completeSentences, emptyFigure, withoutEmptySlots } from '../server/polish.ts';
@@ -527,4 +527,27 @@ test('a new side takes its own price, and a follow-up without tiles keeps the ea
   const grid = stack?.type === 'stack' ? stack.children[0] : undefined;
   assert.equal(grid?.type === 'grid' ? grid.children.length : 0, 2);
   assert.equal(grid?.type === 'grid' && grid.children[0]?.type === 'tile' ? grid.children[0].imageSrc : '', 'https://img.example/kf.jpg');
+});
+
+test('a measured cell and a denial of that fact do not both stay, and the empty side is not given the number', () => {
+  const table: CardNode = {
+    type: 'table',
+    columns: ['Factor', 'Harbor Slate', 'Northwatch 2'],
+    rows: [['Battery life', '16 days', '']],
+  };
+  const callout: CardNode = {
+    type: 'callout',
+    tone: 'warning',
+    title: 'Battery life not in these sources',
+    text: 'None of the sources state a battery rating for either product. Northwatch 2 battery life is not in the sources.',
+  };
+  const patches = dropShownDenials(new Map([[0, callout], [1, table]]));
+  const next = patches?.find((patch) => patch.index === 0)?.node;
+  assert.equal(next?.type, 'callout');
+  if (next?.type !== 'callout') return;
+  assert.equal(next.title, undefined);
+  assert.equal(next.text, 'Northwatch 2 battery life is not in the sources.');
+  assert.doesNotMatch(next.text, /either|none of the sources/i);
+  assert.equal(table.type === 'table' ? table.rows[0]?.[1] : '', '16 days');
+  assert.equal(table.type === 'table' ? table.rows[0]?.[2] : '', '');
 });

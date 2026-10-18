@@ -766,6 +766,100 @@ function askedLabel(question: string): string | undefined {
   return word[0]!.toUpperCase() + word.slice(1);
 }
 
+const FACT_DENIAL = /\b(?:not stated|not in (?:the |these )?sources|unavailable|none of the sources|no sources?|neither|don'?t state|do not state|does not state|doesn'?t state)\b|\bno\b[^.]{0,48}\b(?:rating|figure|spec)\b/i;
+const BLANKET_DENIAL = /\b(?:neither|either|both|all of them|every one|none of the)\b/i;
+
+interface ShownFact {
+  label: string;
+  filled: string[];
+  empty: string[];
+}
+
+function shownFacts(nodes: Iterable<CardNode>): ShownFact[] {
+  const facts = new Map<string, ShownFact>();
+  const take = (label: string): ShownFact => {
+    const key = label.toLowerCase();
+    const have = facts.get(key);
+    if (have) return have;
+    const next = { label, filled: [], empty: [] };
+    facts.set(key, next);
+    return next;
+  };
+  const walk = (node: CardNode) => {
+    if (node.type === 'table') {
+      const columns = shownColumns(node.columns, node.rows);
+      for (const row of node.rows) {
+        const label = (row[0] ?? '').trim();
+        if (!labelKeys(label).length) continue;
+        const fact = take(label);
+        columns.forEach((name, column) => {
+          if (column === 0 || !String(name).trim()) return;
+          const cell = row[column] ?? '';
+          if (measureNumbers(cell).length) fact.filled.push(String(name));
+          else fact.empty.push(String(name));
+        });
+      }
+    }
+    if ('children' in node && Array.isArray(node.children)) node.children.forEach(walk);
+    if (node.type === 'tabs') node.tabs.forEach((tab) => tab.children.forEach(walk));
+  };
+  for (const node of nodes) walk(node);
+  return [...facts.values()].filter((fact) => fact.filled.length > 0);
+}
+
+/** A sentence that says the fact is missing, while a cell already states it. A line about only the empty side can stay. */
+function deniesShown(sentence: string, facts: readonly ShownFact[]): boolean {
+  const text = sentence.trim();
+  if (!text || !FACT_DENIAL.test(text)) return false;
+  for (const fact of facts) {
+    if (!mentionsLabel(fact.label, text)) continue;
+    const namesFilled = fact.filled.some((side) => mentionsSide(side, text) || sideWord(side, text));
+    const namesEmpty = fact.empty.some((side) => mentionsSide(side, text) || sideWord(side, text));
+    if (namesEmpty && !namesFilled && !BLANKET_DENIAL.test(text)) continue;
+    return true;
+  }
+  return false;
+}
+
+function withoutDenial(node: CardNode, facts: readonly ShownFact[]): CardNode | undefined {
+  if (node.type === 'callout' || node.type === 'text' || node.type === 'heading') {
+    const text = node.text.split(/(?<=[.!?])\s+/).map((sentence) => sentence.trim()).filter((sentence) => sentence && !deniesShown(sentence, facts)).join(' ');
+    if (node.type === 'callout') {
+      const title = node.title && deniesShown(node.title, facts) ? undefined : node.title;
+      if (!text && !title) return undefined;
+      if (text === node.text && title === node.title) return node;
+      return title ? { ...node, text, title } : { ...node, text, title: undefined };
+    }
+    if (!text) return undefined;
+    return text === node.text ? node : { ...node, text };
+  }
+  if ('children' in node && Array.isArray(node.children)) {
+    const children = node.children.map((child) => withoutDenial(child, facts)).filter((child): child is CardNode => !!child);
+    if (children.length === node.children.length && children.every((child, index) => child === node.children[index])) return node;
+    if (!children.length) return undefined;
+    return { ...node, children } as CardNode;
+  }
+  if (node.type === 'tabs') {
+    const tabs = node.tabs.map((tab) => ({ ...tab, children: tab.children.map((child) => withoutDenial(child, facts)).filter((child): child is CardNode => !!child) }));
+    if (tabs.every((tab, index) => tab.children.length === node.tabs[index]?.children.length && tab.children.every((child, childIndex) => child === node.tabs[index]?.children[childIndex]))) return node;
+    return { ...node, tabs };
+  }
+  return node;
+}
+
+/** A cited measurement and a “not in the sources” line cannot both stand for the same fact. */
+export function dropShownDenials(nodes: Map<number, CardNode>): { index: number; node: CardNode }[] | undefined {
+  const facts = shownFacts(nodes.values());
+  if (!facts.length) return undefined;
+  const patches: { index: number; node: CardNode }[] = [];
+  for (const [index, node] of nodes) {
+    const next = withoutDenial(node, facts);
+    if (next === node) continue;
+    patches.push({ index, node: next ?? { type: 'stack', children: [] } });
+  }
+  return patches.length ? patches : undefined;
+}
+
 /** A follow-up that drops the pictures puts each side's own photo and price back. */
 export function restoreSideTiles(prior: readonly CardNode[], nodes: Map<number, CardNode>, question: string): { index: number; node: CardNode }[] | undefined {
   const sides = compareSides(question).map((side) => cleanSideName(side));

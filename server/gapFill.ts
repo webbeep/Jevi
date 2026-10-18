@@ -88,9 +88,19 @@ export function citeForGap(gap: PieceGap, rows: readonly GapRow[]): string | und
     const where = `${row.title ?? ''} ${row.snippet ?? ''}`;
     if (gap.side && !mentionsName(gap.side, where)) continue;
     const phrase = phraseForLabel(blobOf(row), gap.label);
-    if (phrase) return `${phrase} [${i + 1}]`;
+    if (phrase && aboutSide(gap.side, row, phrase)) return `${phrase} [${i + 1}]`;
   }
   return undefined;
+}
+
+/** A number from the other side of a versus page is not this side's figure. A page about this side alone still counts. */
+function aboutSide(side: string | undefined, row: GapRow, phrase: string): boolean {
+  if (!side) return true;
+  const sentences = blobOf(row).split(/(?<=[.!?])\s+/);
+  if (sentences.some((sentence) => sentence.includes(phrase) && mentionsName(side, sentence))) return true;
+  const title = row.title ?? '';
+  if (/\b(?:vs\.?|versus)\b/i.test(`${title} ${row.snippet ?? ''}`)) return false;
+  return mentionsName(side, title);
 }
 
 /** The words to search: the question, the side, and the missing label. */

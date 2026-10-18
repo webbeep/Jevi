@@ -71,8 +71,8 @@ import { domainOf } from './util';
 import { choicesIn, distinctActions, subjectWords } from './chips';
 import { anchoredFollowup, asksToCompare, comparisonFollow, cryptographyHint, faithfulQuery, followSearchQuery, foreignName, isWritingAsk, lockChainQuery, needsOwnSearch, ownQuestion, personQuestion, quickPlan, quoteFollowQuery, sameSubjectQuery, screenSubject, scrubLeak, sourcesCover, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
 import { calculationAnswer, isCalculationAsk, rateOnAmount } from './calculate';
-import { acceptProductPhoto, appendAskedFact, comparisonRepair, comparisonTitle, keepComparedProducts, mentionsSide, missingSideNode, nameForms, restoreSideTiles, stickerPrice } from './compareAnswer';
-import { cardGaps, citeForGap, gapSearchQuery, markGap, settleGap, type PieceGap } from './gapFill';
+import { acceptProductPhoto, appendAskedFact, comparisonRepair, comparisonTitle, dropShownDenials, keepComparedProducts, mentionsSide, missingSideNode, nameForms, restoreSideTiles, stickerPrice } from './compareAnswer';
+import { cardGaps, citeForGap, gapSearchQuery, settleGap, type PieceGap } from './gapFill';
 import { unblendObjects } from './objectFacts';
 import { withFinishedSentences } from './polish';
 import { queryWithPlace, readerPlace, settleReadings } from './readings';
@@ -633,6 +633,10 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
         node = kept;
       }
       shown.set(index, node);
+      const denied = dropShownDenials(shown);
+      if (denied) {
+        for (const patch of denied) shown.set(patch.index, patch.node);
+      }
       const choices = choicesIn([node]);
       if (choices.length) {
         for (const [at, prior] of shown) {
@@ -683,7 +687,8 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   };
   const searchGaps = async () => {
     const question = designReq.followup?.question ?? designReq.query;
-    const gaps = cardGaps(shown);
+    // Finished cells stay on screen. A placeholder is the wait, before those cells exist.
+    const gaps = cardGaps(shown).filter((gap) => gap.missing);
     if (!gaps.length) return;
     const originals = new Map<number, CardNode>();
     for (const gap of gaps) {
@@ -691,35 +696,13 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       if (node && !originals.has(gap.index)) originals.set(gap.index, node);
     }
     const query = gapSearchQuery(question, gaps);
-    send('intent', { intent: query, queries: [query] });
-    const marked = new Map<number, CardNode>();
-    for (const gap of gaps) {
-      const base = marked.get(gap.index) ?? originals.get(gap.index);
-      if (!base) continue;
-      const next = markGap(base, gap);
-      marked.set(gap.index, next);
-      shown.set(gap.index, next);
-      send('node', { index: gap.index, node: next });
-    }
-    const restore = () => {
-      for (const [index, node] of originals) {
-        shown.set(index, node);
-        send('node', { index, node });
-      }
-    };
     try {
-      const found = await Promise.all([
-        Promise.race([
-          searchWithLate({ q: query, freshness: 'any', count: 6, lite: true }, env, scope),
-          new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
-        ]),
-        new Promise((resolve) => setTimeout(resolve, 800)),
-      ]).then(([result]) => result);
+      const found = await Promise.race([
+        searchWithLate({ q: query, freshness: 'any', count: 6, lite: true }, env, scope),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
+      ]);
       const rows = found?.response.results ?? [];
-      if (!rows.length) {
-        restore();
-        return;
-      }
+      if (!rows.length) return;
       const have = new Set(designReq.search.results.map((row) => row.url));
       const add = rows.filter((row) => row.url && !have.has(row.url)).slice(0, 4);
       if (add.length) {
@@ -742,11 +725,11 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
           const text = cited?.replace(/\[(\d+)\]$/, (_match, n: string) => `[${base + Number(n)}]`);
           next = settleGap(next, gap, text);
         }
+        if (JSON.stringify(next) === JSON.stringify(original)) continue;
         shown.set(index, next);
         send('node', { index, node: next });
       }
     } catch (err) {
-      restore();
       console.log(JSON.stringify({ zo: 'gap-search', error: err instanceof Error ? err.message : 'failed' }));
     }
   };
@@ -800,6 +783,13 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
           shown.set(patch.index, patch.node);
           send('node', { index: patch.index, node: patch.node });
         }
+      }
+    }
+    const denied = dropShownDenials(shown);
+    if (denied) {
+      for (const patch of denied) {
+        shown.set(patch.index, patch.node);
+        send('node', { index: patch.index, node: patch.node });
       }
     }
     const extra = missingSideNode(question, [...shown.values()], designReq.search);
