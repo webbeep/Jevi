@@ -694,10 +694,13 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       }
     };
     try {
-      const found = await Promise.race([
-        searchWithLate({ q: query, freshness: 'any', count: 6, lite: true }, env, scope),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
-      ]);
+      const found = await Promise.all([
+        Promise.race([
+          searchWithLate({ q: query, freshness: 'any', count: 6, lite: true }, env, scope),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
+        ]),
+        new Promise((resolve) => setTimeout(resolve, 800)),
+      ]).then(([result]) => result);
       const rows = found?.response.results ?? [];
       if (!rows.length) {
         restore();
