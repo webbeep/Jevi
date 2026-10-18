@@ -550,6 +550,11 @@ function withPrice(value: string, price: string): string {
   return MONEY.test(value) ? value.replace(MONEY, price) : price;
 }
 
+/** A measured spec has a number. A slogan ("vibrant", "lightweight") does not. */
+function hasMeasure(text: string): boolean {
+  return /\d/.test(text);
+}
+
 /**
  * A follow-up that adds a product keeps the price and picture already shown for a product
  * that is still in the comparison. A different model's number does not replace that price.
@@ -580,10 +585,8 @@ export function keepComparedProducts(prior: readonly CardNode[], nodes: Map<numb
             if (product.price && price && price !== product.price) return withPrice(cell, product.price);
             if (product.price && (!cell.trim() || NOT_STATED.test(cell))) return product.price;
           }
-          if (NOT_STATED.test(cell)) {
-            const earlier = product.rows.find((item) => item.factor.toLowerCase() === factor.toLowerCase());
-            if (earlier) return earlier.value;
-          }
+          const earlier = product.rows.find((item) => item.factor.toLowerCase() === factor.toLowerCase());
+          if (earlier && (NOT_STATED.test(cell) || BLANK_CELL.test(cell) || (hasMeasure(earlier.value) && !hasMeasure(cell)))) return earlier.value;
           return cell;
         });
       });

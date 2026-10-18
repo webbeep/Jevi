@@ -1633,7 +1633,7 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
       const planned = followSearchPlan({ title: onScreen?.title, question: req.question, queries: decision.queries, subject: decision.subject });
       scope.bound = `${decision.subject}\n${req.question}`;
       send('rewrite', { query: planned.query });
-      await searchAndDesign(send, env, planned.query, 'any', [lock, context].filter(Boolean).join('\n') || undefined, started, scope, true, undefined, undefined, undefined, undefined, undefined, planned.fanout);
+      await searchAndDesign(send, env, planned.query, 'any', [lock, context].filter(Boolean).join('\n') || undefined, started, scope, true, undefined, undefined, undefined, onScreen?.body, req.search?.images, planned.fanout);
       return;
     }
     const plan = await planPromise;
