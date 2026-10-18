@@ -2282,9 +2282,9 @@ function dropRepeatCharge(node: CardNode, seen: Set<string>, hero?: { name: stri
 
 function heroCharge(node: CardNode): { name: string; amount: number } | undefined {
   if (node.type === 'hero') {
-    const name = chargeName(node.label ?? '');
     const amount = moneyValue(node.value.match(MONEY)?.[0] ?? '');
-    return name && Number.isFinite(amount) ? { name, amount } : undefined;
+    if (!Number.isFinite(amount)) return undefined;
+    return { name: chargeName(node.label ?? '') ?? '', amount };
   }
   if (node.type === 'stack' || node.type === 'grid' || node.type === 'section' || node.type === 'scroller') {
     for (const child of node.children) {
@@ -2399,6 +2399,7 @@ export function presentNamedCharges(query: string, nodes: readonly (CardNode | u
     const name = chargeName(label);
     if (!name || seenLabels.has(name)) return;
     const shares = asked.some((token) => wordHit(label, token));
+    if (/\b(?:for|the|pay|paid|this|that|with|from|when|where|your)\b/i.test(label)) return;
     if (!shares && !ADDON_LINE.test(label)) return;
     seenLabels.add(name);
     labels.push(label);
