@@ -71,7 +71,7 @@ import { domainOf } from './util';
 import { choicesIn, distinctActions, subjectWords } from './chips';
 import { anchoredFollowup, asksToCompare, comparisonFollow, cryptographyHint, faithfulQuery, followSearchQuery, foreignName, isWritingAsk, lockChainQuery, needsOwnSearch, ownQuestion, personQuestion, quickPlan, quoteFollowQuery, sameSubjectQuery, screenSubject, scrubLeak, sourcesCover, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
 import { calculationAnswer, isCalculationAsk, rateOnAmount } from './calculate';
-import { acceptProductPhoto, appendAskedFact, comparisonRepair, comparisonTitle, keepComparedProducts, mentionsSide, missingSideNode, nameForms, stickerPrice } from './compareAnswer';
+import { acceptProductPhoto, appendAskedFact, comparisonRepair, comparisonTitle, keepComparedProducts, mentionsSide, missingSideNode, nameForms, restoreSideTiles, stickerPrice } from './compareAnswer';
 import { cardGaps, citeForGap, gapSearchQuery, markGap, settleGap, type PieceGap } from './gapFill';
 import { unblendObjects } from './objectFacts';
 import { withFinishedSentences } from './polish';
@@ -784,6 +784,15 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       }
     }
     restoreKeptProducts();
+    if (designReq.priorBody?.length && compareSides(question).length >= 2) {
+      const photos = restoreSideTiles(designReq.priorBody, shown, question);
+      if (photos) {
+        for (const patch of photos) {
+          shown.set(patch.index, patch.node);
+          send('node', { index: patch.index, node: patch.node });
+        }
+      }
+    }
     if (designReq.followup?.question && compareSides(designReq.query).length >= 2) {
       const asked = appendAskedFact(designReq.followup.question, designReq.query, shown, designReq.search);
       if (asked) {

@@ -31,7 +31,7 @@ function statedFor(name: string, value: string, sources: readonly SourceRow[]): 
   return sources.some((source) => {
     const blob = `${source.title ?? ''}. ${source.snippet ?? ''} ${source.content ?? ''}`;
     for (const sentence of blob.split(/(?<=[.!?])\s+/)) {
-      for (const clause of sentence.split(/\s*(?:,|;|\band\b|\bwith\b)\s*/i)) {
+      for (const clause of sentence.split(/\s*(?:;|\band\b|\bwith\b|,(?!\d))\s*/i)) {
         if (!sourceNames(name, clause)) continue;
         if (nums.every((num) => clause.includes(num))) return true;
       }

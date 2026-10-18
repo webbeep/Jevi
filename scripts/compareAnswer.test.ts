@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import type { CardNode } from '../shared/card.ts';
 import type { SearchResponse } from '../shared/types.ts';
 import { asksToCompare } from '../server/askGuard.ts';
-import { acceptProductPhoto, answersComparison, appendAskedFact, comparisonNodes, comparisonRepair, comparisonTitle, keepComparedProducts, mentionsSide, missingSideNode, nameForms, sameProduct, showsComparison } from '../server/compareAnswer.ts';
+import { acceptProductPhoto, answersComparison, appendAskedFact, comparisonNodes, comparisonRepair, comparisonTitle, keepComparedProducts, mentionsSide, missingSideNode, nameForms, restoreSideTiles, sameProduct, showsComparison } from '../server/compareAnswer.ts';
 import { candidates } from '../server/extract.ts';
 import { compareSideQueries, compareSides, withoutLeadVerb } from '../server/patterns.ts';
 import { Polisher, completeSentences, emptyFigure, withoutEmptySlots } from '../server/polish.ts';
@@ -487,4 +487,44 @@ test('a follow-up question is removed from the product name, and the asked fact 
   const added = appendAskedFact('What is the battery life of each camera?', 'Canon EOS R8 vs Nikon Zf', new Map([[1, table?.type === 'table' ? table : next.get(1)!]]), search);
   const row = added?.[0]?.node.type === 'table' ? added[0].node.rows.at(-1) : undefined;
   assert.deepEqual(row, ['Battery', '290 shots', '380 shots']);
+});
+
+test('a new side takes its own price, and a follow-up without tiles keeps the earlier photos', () => {
+  const prior: CardNode[] = [{
+    type: 'grid',
+    cols: 2,
+    children: [
+      { type: 'tile', label: 'Pentax KF', value: '$849.95', imageSrc: 'https://img.example/kf.jpg' },
+      { type: 'tile', label: 'Fujifilm X-T30 II', value: '$893.65', imageSrc: 'https://img.example/xt.jpg' },
+    ],
+  }];
+  const table: CardNode = {
+    type: 'table',
+    columns: ['Factor', 'Pentax KF', 'Fujifilm X-T30 II', 'Sony ZV-E10 II'],
+    rows: [['Price', '$849.95', '$893.65', 'Not stated in sources'], ['Battery life', '460 shots', '', ''], ['Battery type', '460 shots', '', '']],
+  };
+  const search: SearchResponse = {
+    query: 'Pentax KF vs Fujifilm X-T30 II vs Sony ZV-E10 II',
+    freshness: 'any',
+    results: [
+      { title: 'Sony ZV-E10 II', url: 'https://example.com/zv', snippet: 'The ZV-E10 II body is $1,099.99.', domain: 'example.com', engines: ['web'] },
+      { title: 'Pentax KF', url: 'https://example.com/kf', snippet: 'The Pentax KF is $849.95.', domain: 'example.com', engines: ['web'] },
+    ],
+    images: [],
+    discussions: [],
+    engines: [],
+  };
+  const repaired = comparisonRepair(search.query, search, new Map([[0, table]]));
+  const next = repaired?.find((patch) => patch.index === 0)?.node;
+  assert.equal(next?.type, 'table');
+  if (next?.type !== 'table') return;
+  assert.equal(next.rows[0]?.[3], '$1,099.99');
+  assert.equal(next.rows[0]?.[1], '$849.95');
+  assert.equal(next.rows[2]?.[1], '');
+  const photos = restoreSideTiles(prior, new Map([[0, table]]), 'Pentax KF vs Fujifilm X-T30 II');
+  const stack = photos?.[0]?.node;
+  assert.equal(stack?.type, 'stack');
+  const grid = stack?.type === 'stack' ? stack.children[0] : undefined;
+  assert.equal(grid?.type === 'grid' ? grid.children.length : 0, 2);
+  assert.equal(grid?.type === 'grid' && grid.children[0]?.type === 'tile' ? grid.children[0].imageSrc : '', 'https://img.example/kf.jpg');
 });

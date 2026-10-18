@@ -225,6 +225,34 @@ const RELATIVE_PRICE = /\b(?:cheaper|cost(?:s|ing)? more|more expensive|less exp
 const NO_PRICE = /\bno price stated\b|\bprice (?:is )?not stated\b|\bno specs or price\b/i;
 const DENIES_PRICE = /\b(?:no|not|n't|without)\b(?:\s+\w+){0,8}\s+price\b/i;
 
+/** A price from a clause that names this side. Another side's price is not reused. */
+function statedPrice(side: string, search: SearchResponse, blocked: readonly string[]): string | undefined {
+  const taken = new Set(blocked.map((price) => price.replace(/\s/g, '')));
+  const accept = (amount: string | undefined) => {
+    if (!amount) return undefined;
+    const price = amount.replace(/\s/g, '');
+    return taken.has(price) ? undefined : price;
+  };
+  const direct = accept(stickerPrice(side, search));
+  if (direct) return direct;
+  const marks = side.toLowerCase().split(/[^a-z0-9]+/).filter((word) => /\d/.test(word));
+  if (!marks.length) return undefined;
+  for (const result of search.results) {
+    const blob = `${result.title ?? ''}. ${result.snippet ?? ''} ${result.content ?? ''}`;
+    if (!marks.some((mark) => blob.toLowerCase().includes(mark))) continue;
+    for (const sentence of blob.split(/(?<=[.!?])\s+/)) {
+      for (const clause of sentence.split(/\s*(?:;|\band\b|\bwith\b|,(?!\d))\s*/i)) {
+        if (!marks.some((mark) => clause.toLowerCase().includes(mark)) || RELATIVE_PRICE.test(clause)) continue;
+        const amounts = [...clause.matchAll(new RegExp(STICKER.source, 'g'))].map((match) => match[0]);
+        if (amounts.length !== 1) continue;
+        const price = accept(amounts[0]);
+        if (price) return price;
+      }
+    }
+  }
+  return undefined;
+}
+
 /** One amount the source states for this product. A range or a "cheaper" line is not that price. */
 export function stickerPrice(side: string, search: SearchResponse): string | undefined {
   for (const result of search.results) {
@@ -359,10 +387,12 @@ function groundCompareNode(node: CardNode, sides: string[], search: SearchRespon
   if (node.type === 'tile') {
     const side = sides.find((item) => mentionsSide(item, node.label));
     if (!side) return node;
-    const price = stickerPrice(side, search);
+    const blocked = [...shown.entries()].filter(([name]) => name !== side).map(([, price]) => price);
+    const price = statedPrice(side, search, blocked);
     const image = imageForSide(side, search.images ?? []);
+    const missing = !node.value || NOT_STATED.test(node.value) || /not in sources|no specs/i.test(node.value);
     const relative = !!node.value && (RELATIVE_PRICE.test(node.value) || !moneyIn(node.value));
-    const value = price && (!node.value || relative) ? price : node.value;
+    const value = price && (missing || relative) ? price : node.value;
     const imageSrc = node.imageSrc || image;
     if (value === node.value && imageSrc === node.imageSrc) return node;
     return { ...node, value, imageSrc, imageQuery: node.imageQuery ?? sideTitle(side) };
@@ -370,12 +400,27 @@ function groundCompareNode(node: CardNode, sides: string[], search: SearchRespon
   if (node.type === 'table') {
     const rows = node.rows.map((row) => row.map((cell, index) => {
       const side = sides.find((item) => mentionsSide(item, node.columns[index] ?? ''));
-      if (!side || moneyIn(cell) || hasMeasure(cell)) return cell;
-      if (priceRow(row[0] ?? '') || RELATIVE_PRICE.test(cell)) return stickerPrice(side, search) ?? (BLANK_CELL.test(cell) ? cell : '');
+      if (!side || moneyIn(cell)) return cell;
+      if (priceRow(row[0] ?? '') || RELATIVE_PRICE.test(cell)) {
+        const blocked = [...shown.entries()].filter(([name]) => name !== side).map(([, price]) => price);
+        const found = statedPrice(side, search, blocked);
+        if (found) return found;
+        return BLANK_CELL.test(cell) || NOT_STATED.test(cell) ? cell : '';
+      }
+      if (hasMeasure(cell)) return cell;
       return specFromSources(row[0] ?? '', side, search) ?? cell;
     }));
-    if (rows.every((row, index) => row.every((cell, cellIndex) => cell === node.rows[index]?.[cellIndex]))) return node;
-    return { ...node, rows };
+    const confirmed = rows.map((row, rowIndex) => row.map((cell, index) => {
+      if (index === 0 || !hasMeasure(cell)) return cell;
+      const factor = row[0] ?? '';
+      const side = sides.find((item) => mentionsSide(item, node.columns[index] ?? ''));
+      if (!side || specFromSources(factor, side, search)) return cell;
+      const nums = measureNumbers(cell);
+      const copied = rows.slice(0, rowIndex).some((earlier) => nums.every((num) => measureNumbers(earlier[index] ?? '').includes(num)) && labelKeys(factor).some((key) => labelKeys(earlier[0] ?? '').includes(key)));
+      return copied ? '' : cell;
+    }));
+    if (confirmed.every((row, index) => row.every((cell, cellIndex) => cell === node.rows[index]?.[cellIndex]))) return node;
+    return { ...node, rows: confirmed };
   }
   if (node.type === 'tabs') {
     return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: tab.children.map((child) => groundCompareNode(child, sides, search, shown)) })) };
@@ -719,6 +764,33 @@ function askedLabel(question: string): string | undefined {
   const word = question.toLowerCase().split(/[^a-z0-9]+/).find((item) => item.length >= 5 && !ASKED_STOP.has(item));
   if (!word) return undefined;
   return word[0]!.toUpperCase() + word.slice(1);
+}
+
+/** A follow-up that drops the pictures puts each side's own photo and price back. */
+export function restoreSideTiles(prior: readonly CardNode[], nodes: Map<number, CardNode>, question: string): { index: number; node: CardNode }[] | undefined {
+  const sides = compareSides(question).map((side) => cleanSideName(side));
+  if (sides.length < 2) return undefined;
+  let hasTile = false;
+  const see = (node: CardNode) => {
+    if (node.type === 'tile') hasTile = true;
+    if ('children' in node && Array.isArray(node.children)) node.children.forEach(see);
+    if (node.type === 'tabs') node.tabs.forEach((tab) => tab.children.forEach(see));
+  };
+  for (const node of nodes.values()) see(node);
+  if (hasTile) return undefined;
+  const products = productsOnCard(prior);
+  const tiles: CardNode[] = [];
+  for (const side of sides) {
+    const product = products.find((item) => sameProduct(item.name, side));
+    if (!product || (!product.imageSrc && !product.price)) continue;
+    tiles.push({ type: 'tile', label: product.name, value: product.price, imageSrc: product.imageSrc });
+  }
+  if (tiles.length < 2) return undefined;
+  const cols = Math.min(tiles.length, 3) as 2 | 3;
+  const grid: CardNode = { type: 'grid', cols, children: tiles };
+  const first = [...nodes.entries()].find(([, node]) => node.type !== 'actions' && node.type !== 'citations' && node.type !== 'ticker');
+  if (!first) return undefined;
+  return [{ index: first[0], node: { type: 'stack', gap: 'md', children: [grid, first[1]] } }];
 }
 
 /** A follow-up that asks for one fact adds that row when a source states it for a side. */
