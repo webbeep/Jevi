@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import type { CardNode } from '../shared/card.ts';
 import type { SearchResponse } from '../shared/types.ts';
 import { asksToCompare } from '../server/askGuard.ts';
-import { acceptProductPhoto, answersComparison, comparisonNodes, comparisonRepair, comparisonTitle, keepComparedProducts, mentionsSide, missingSideNode, nameForms, sameProduct, showsComparison } from '../server/compareAnswer.ts';
+import { acceptProductPhoto, answersComparison, appendAskedFact, comparisonNodes, comparisonRepair, comparisonTitle, keepComparedProducts, mentionsSide, missingSideNode, nameForms, sameProduct, showsComparison } from '../server/compareAnswer.ts';
 import { candidates } from '../server/extract.ts';
 import { compareSideQueries, compareSides, withoutLeadVerb } from '../server/patterns.ts';
 import { Polisher, completeSentences, emptyFigure, withoutEmptySlots } from '../server/polish.ts';
@@ -71,6 +71,10 @@ test('the card title names the sides being compared, not the previous question',
   assert.equal(comparisonTitle(ASK, 'Nba preseason standouts yesterday'), 'AJ Dybantsa vs 2026 NBA Rookies vs Draft Classes');
   assert.equal(comparisonTitle(ASK, ASK), 'AJ Dybantsa vs 2026 NBA Rookies vs Draft Classes');
   assert.equal(comparisonTitle(ASK, 'Dybantsa vs Rookies'), 'Dybantsa vs Rookies');
+  assert.equal(
+    comparisonTitle('Canon EOS R8 vs Nikon Zf', 'Canon EOS R8 vs Nikon Zf What Is the Battery Life of Each Camera'),
+    'Canon EOS R8 vs Nikon Zf',
+  );
 });
 
 test('a biography of one side is not an answer, and the fallback finishes the sentence', () => {
@@ -450,4 +454,37 @@ test('a verdict does not deny a price the card already shows', () => {
   const again = comparisonRepair(ask, search, new Map([[0, tiles], [1, table], [2, named]]));
   const againText = again?.find((patch) => patch.index === 2)?.node;
   assert.equal(againText?.type === 'callout' ? againText.text : '', 'Pick the Edge for a 1.34-inch screen.');
+});
+
+test('a follow-up question is removed from the product name, and the asked fact is added from that product\'s source', () => {
+  const prior: CardNode[] = [{ type: 'tile', label: 'Nikon Zf', value: '$1999', imageSrc: 'https://img.example/zf.jpg' }];
+  const next = new Map<number, CardNode>([[0, {
+    type: 'tile',
+    label: 'Nikon Zf What Is the Battery Life of Each Camera?',
+    value: '$1999',
+    imageSrc: 'https://img.example/zf.jpg',
+  }], [1, {
+    type: 'table',
+    columns: ['Factor', 'Canon EOS R8', 'Nikon Zf What Is the Battery Life of Each Camera?'],
+    rows: [['Price', '$1,399', '$1999']],
+  }]]);
+  const patches = keepComparedProducts(prior, next, 'Canon EOS R8 vs Nikon Zf');
+  const tile = patches?.find((patch) => patch.index === 0)?.node;
+  const table = patches?.find((patch) => patch.index === 1)?.node;
+  assert.equal(tile?.type === 'tile' ? tile.label : '', 'Nikon Zf');
+  assert.equal(table?.type === 'table' ? table.columns[2] : '', 'Nikon Zf');
+  const search: SearchResponse = {
+    query: 'Canon EOS R8 vs Nikon Zf',
+    freshness: 'any',
+    results: [
+      { title: 'Canon EOS R8', url: 'https://example.com/r8', snippet: 'The Canon EOS R8 battery lasts 290 shots.', domain: 'example.com', engines: ['web'] },
+      { title: 'Nikon Zf', url: 'https://example.com/zf', snippet: 'The Nikon Zf battery lasts 380 shots.', domain: 'example.com', engines: ['web'] },
+    ],
+    images: [],
+    discussions: [],
+    engines: [],
+  };
+  const added = appendAskedFact('What is the battery life of each camera?', 'Canon EOS R8 vs Nikon Zf', new Map([[1, table?.type === 'table' ? table : next.get(1)!]]), search);
+  const row = added?.[0]?.node.type === 'table' ? added[0].node.rows.at(-1) : undefined;
+  assert.deepEqual(row, ['Battery', '290 shots', '380 shots']);
 });

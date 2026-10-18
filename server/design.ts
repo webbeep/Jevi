@@ -1,4 +1,5 @@
 import { withoutRepeatedLead, type AnswerCard, type CardNode, type FollowupContext, type ImageCredit, type LayoutPlan } from '../shared/card';
+import { cleanSideName } from '../shared/objects';
 import { fitNode } from '../shared/fitChart';
 import { knowledgeMatches } from '../shared/relevance';
 import type { SearchResponse } from '../shared/types';
@@ -160,6 +161,9 @@ function followupRules(f: FollowupContext | undefined, originalQuery: string): s
     case 'refine':
       return `\n\nTHIS IS AN ADJUSTED VERSION of CURRENT CARD (below), which answered "${originalQuery}". The person asked: "${f.question}". Output a complete new card that applies the change: keep the same subject and everything that still applies, restructure freely if the change calls for a different layout, and make the change obvious in the subtitle. Mark the matching choices option as selected and move any slider or scaler to the requested value. A "keep only" change drops alternatives that do not match, and does not copy one school, employer, or team into a second role the current card did not give it. The original card stays on screen above, so do not describe what changed in prose.`;
     case 'answer':
+      if (compareSides(originalQuery).length >= 2) {
+        return `\n\nTHIS IS A FOLLOW-UP on the comparison "${originalQuery}". The person asked: "${f.question}". Keep one tile and one column per side. The title and every label are the side names only. Do not append the question onto a name. Answer the question for each side with the figure a source states for that side. Keep each side's own price and photo. A newly named object gets its own tile and column, and only the facts a source states for it. Do not copy another side's price, photo, spec, or citation onto it.`;
+      }
       return `\n\nTHIS IS A FOLLOW-UP. The original search was "${originalQuery}". Design a focused card that answers only the follow-up question "${f.question}". The first body node is the answer to that question. Do not repeat the previous card's lead when this question asks about a different case of the same subject. "Of those", "of these", "which of the ones you listed", "drop any", or "keep only" classifies only the items already on the card. Do not add a new item, and do not state a count of them that is not how many are still listed. Each object in the conversation has a stable id. Identify that object before a fact. A question about the same objects updates those ids. A question that names a different object, or adds one, creates a new id. Do not copy another id's price, photo, spec, or citation onto it.`;
     case 'chat':
       if (f.calculate || isCalculationAsk(f.question)) {
@@ -300,10 +304,14 @@ function timeRules(req: DesignRequest): string {
 function taskBlock(req: DesignRequest): string {
   const pattern = patternById(req.pattern);
   const asked = req.followup?.question ?? req.query;
-  const sides = req.pattern === 'compare' ? compareSides(asked) : [];
+  const querySides = compareSides(req.query).map((side) => cleanSideName(side));
+  const askedSides = compareSides(asked).map((side) => cleanSideName(side));
+  const sides = (req.pattern === 'compare' ? (querySides.length >= 2 ? querySides : askedSides) : [])
+    .filter((side, index, all) => all.findIndex((item) => item.toLowerCase() === side.toLowerCase()) === index);
+  const followFact = req.followup && sides.length >= 2 ? ` The follow-up asks "${req.followup.question}". Answer that for each side. A label is the side's name only.` : '';
   return [
     `- Pre-selected layout: "${pattern.label}" (${pattern.description}).`,
-    sides.length >= 2 ? `- Compare exactly these sides, not an earlier topic: ${sides.join(' | ')}. The title names the sides. Identify each side before writing its facts. Use a table, or one section per side, with only facts from the sources. A biography of one side does not answer. If the sources never line the sides up, say so in one callout and still show what each side's sources do say. A different model number is a different product: never copy specs, a price, a photo, or a citation from one model onto another. A VIDEO source can show that a review exists; state a spec or a price only when that source's text states it. Never end a sentence with an ellipsis.` : '',
+    sides.length >= 2 ? `- Compare exactly these sides, not an earlier topic: ${sides.join(' | ')}. The title names the sides. Identify each side before writing its facts. Use a table, or one section per side, with only facts from the sources. A biography of one side does not answer. If the sources never line the sides up, say so in one callout and still show what each side's sources do say. A different model number is a different product: never copy specs, a price, a photo, or a citation from one model onto another. A VIDEO source can show that a review exists; state a spec or a price only when that source's text states it. Never end a sentence with an ellipsis.${followFact}` : '',
     asksLocalConditions(asked) ? '- Local reading: the title is the place (city and region), never the word Weather or Forecast. The hero is the current temperature and the sky only — do not repeat the place as a hero label. Every other reading (humidity, wind, pressure, a later hour) appears once. A series is later periods, never another copy of right now.' : '',
     `- ${DEPTH_HINT[req.depth]}`,
     req.intent ? `- What the person wants: ${req.intent} Answer that; sources that only match their words but not this are background at most.` : '',

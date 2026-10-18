@@ -1,4 +1,5 @@
 import type { CardNode } from '../shared/card';
+import { cleanSideName } from '../shared/objects';
 import type { SearchResponse } from '../shared/types';
 import { candidates } from './extract';
 import { compareSides } from './patterns';
@@ -107,14 +108,18 @@ function shortSide(side: string): string {
  * A comparison title names the sides. The previous question, or a title that
  * never mentions them, is replaced. A title the model already aimed at the sides is kept.
  */
+const QUESTION_WORD = /\b(?:what|how|why|when|where|who|which|add|include)\b/i;
+
 export function comparisonTitle(question: string, proposed: string): string {
-  const sides = compareSides(question);
+  const sides = compareSides(question).map((side) => cleanSideName(side));
   if (sides.length < 2) return proposed;
+  const title = sides.map(shortSide).join(' vs ');
+  const bounded = title.length > 80 ? `${shortSide(sides[0]!)} vs ${sides.length - 1} others` : title;
+  if (!sides.some((side) => QUESTION_WORD.test(side)) && QUESTION_WORD.test(proposed)) return bounded;
   const named = sides.filter((side) => mentionsSide(side, proposed)).length;
   const same = proposed.trim().toLowerCase() === question.trim().toLowerCase();
   if (!same && (named >= 2 || (named === 1 && /\bvs\.?\b/i.test(proposed)))) return proposed;
-  const title = sides.map(shortSide).join(' vs ');
-  return title.length > 80 ? `${shortSide(sides[0]!)} vs ${sides.length - 1} others` : title;
+  return bounded;
 }
 
 function cardText(nodes: CardNode[]): string {
@@ -188,7 +193,7 @@ function mentionsLabel(label: string, sentence: string): boolean {
   return keys.some((key) => words.some((word) => word.startsWith(key)));
 }
 
-const MEASURE = /\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*[x×]\s*\d{1,3}(?:,\d{3})*(?:\.\d+)?)*(?:\s*[-–]?\s*(?:inch(?:es)?|["″]|mm|cm|kg|oz|mah|nits?|atm|px|hours?|days?|grams?|g\b))/i;
+const MEASURE = /\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*[x×]\s*\d{1,3}(?:,\d{3})*(?:\.\d+)?)*(?:\s*[-–]?\s*(?:inch(?:es)?|["″]|mm|cm|kg|oz|mah|nits?|atm|px|hours?|days?|shots?|frames?|grams?|g\b))/i;
 
 /** The number and unit in a sentence ("1.34-inch", "17.7 g", "16 days"). A bare year is not a spec. */
 function measuredPhrase(sentence: string): string | undefined {
@@ -570,7 +575,7 @@ export function productsOnCard(nodes: readonly CardNode[], images: readonly { th
   const picture = (src?: string, ref?: number) => src || (ref !== undefined ? images[ref]?.thumb : undefined);
   const walk = (node: CardNode) => {
     if (node.type === 'tile') {
-      const product = take(node.label);
+      const product = take(cleanSideName(node.label));
       const price = money(node.value);
       if (price && !product.price) product.price = price;
       const src = picture(node.imageSrc, node.imageRef);
@@ -580,7 +585,7 @@ export function productsOnCard(nodes: readonly CardNode[], images: readonly { th
       const columns = shownColumns(node.columns, node.rows);
       columns.forEach((name, index) => {
         if (index === 0 || !name.trim()) return;
-        const product = take(name);
+        const product = take(cleanSideName(name));
         for (const row of node.rows) {
           const factor = (row[0] ?? '').trim();
           const value = (row[index] ?? '').trim();
@@ -632,15 +637,23 @@ export function keepComparedProducts(prior: readonly CardNode[], nodes: Map<numb
   const patches: { index: number; node: CardNode }[] = [];
   const visit = (node: CardNode): CardNode => {
     if (node.type === 'tile') {
-      const product = kept.find((item) => sameProduct(item.name, node.label));
-      if (!product) return node;
-      let next = node;
+      const clean = cleanSideName(node.label);
+      const product = kept.find((item) => sameProduct(item.name, clean));
+      const label = clean === node.label.trim() ? node.label : (product?.name ?? clean);
+      let next = label !== node.label ? { ...node, label } : node;
+      if (!product) return next;
       if (product.price && money(next.value) !== product.price) next = { ...next, value: money(next.value) ? withPrice(next.value ?? '', product.price) : product.price };
       if (product.imageSrc) next = { ...next, imageSrc: product.imageSrc, imageRef: undefined, imageQuery: undefined };
       return next;
     }
     if (node.type === 'table' && node.rows.some((row) => row.length >= 2)) {
-      const columns = shownColumns(node.columns, node.rows);
+      const columns = shownColumns(node.columns, node.rows).map((name, index) => {
+        if (index === 0 || !String(name).trim()) return name;
+        const clean = cleanSideName(name);
+        if (clean === String(name).trim()) return name;
+        const product = kept.find((item) => sameProduct(item.name, clean));
+        return product ? product.name : clean;
+      });
       const rows = node.rows.map((row) => {
         const factor = (row[0] ?? '').trim();
         const padded = [...row, ...Array(Math.max(0, columns.length - row.length)).fill('')];
@@ -698,6 +711,38 @@ export function keepComparedProducts(prior: readonly CardNode[], nodes: Map<numb
     if (next !== node) patches.push({ index, node: next });
   }
   return patches.length ? patches : undefined;
+}
+
+const ASKED_STOP = new Set(['camera', 'cameras', 'product', 'products', 'model', 'models', 'these', 'those', 'which', 'about', 'their', 'please', 'would', 'could', 'should', 'compare', 'every', 'other', 'thing', 'things']);
+
+function askedLabel(question: string): string | undefined {
+  const word = question.toLowerCase().split(/[^a-z0-9]+/).find((item) => item.length >= 5 && !ASKED_STOP.has(item));
+  if (!word) return undefined;
+  return word[0]!.toUpperCase() + word.slice(1);
+}
+
+/** A follow-up that asks for one fact adds that row when a source states it for a side. */
+export function appendAskedFact(question: string, sidesQuery: string, nodes: Map<number, CardNode>, search: SearchResponse): { index: number; node: CardNode }[] | undefined {
+  const sides = compareSides(sidesQuery).map((side) => cleanSideName(side));
+  const label = askedLabel(question);
+  if (!label || sides.length < 2) return undefined;
+  for (const [index, node] of nodes) {
+    if (node.type !== 'table' || !node.rows.some((row) => row.length >= 2)) continue;
+    if (node.rows.some((row) => mentionsLabel(label, row[0] ?? ''))) return undefined;
+    const columns = shownColumns(node.columns, node.rows);
+    const cells = columns.map((name, column) => {
+      if (column === 0) return label;
+      const side = sides.find((item) => mentionsSide(item, name));
+      return side ? specFromSources(label, side, search) ?? '' : '';
+    });
+    if (!cells.slice(1).some((cell) => cell.trim())) continue;
+    const rows = [
+      ...node.rows.map((row) => [...row, ...Array(Math.max(0, columns.length - row.length)).fill('')]),
+      cells,
+    ];
+    return [{ index, node: { ...node, columns, rows } }];
+  }
+  return undefined;
 }
 
 /** A named side the card left out, filled from the search that was run for it. */

@@ -71,7 +71,7 @@ import { domainOf } from './util';
 import { choicesIn, distinctActions, subjectWords } from './chips';
 import { anchoredFollowup, asksToCompare, comparisonFollow, cryptographyHint, faithfulQuery, followSearchQuery, foreignName, isWritingAsk, lockChainQuery, needsOwnSearch, ownQuestion, personQuestion, quickPlan, quoteFollowQuery, sameSubjectQuery, screenSubject, scrubLeak, sourcesCover, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
 import { calculationAnswer, isCalculationAsk, rateOnAmount } from './calculate';
-import { acceptProductPhoto, comparisonRepair, comparisonTitle, keepComparedProducts, mentionsSide, missingSideNode, nameForms, stickerPrice } from './compareAnswer';
+import { acceptProductPhoto, appendAskedFact, comparisonRepair, comparisonTitle, keepComparedProducts, mentionsSide, missingSideNode, nameForms, stickerPrice } from './compareAnswer';
 import { cardGaps, citeForGap, gapSearchQuery, markGap, settleGap, type PieceGap } from './gapFill';
 import { unblendObjects } from './objectFacts';
 import { withFinishedSentences } from './polish';
@@ -85,6 +85,7 @@ import { variantChoices, variantConflict } from './productModel';
 import { recallClips, wantsVideo, withProductClips, withVideos } from './videoSearch';
 import { guessFreshness, preferFresh, staleComplaint, stricter } from './freshness';
 import { isQuoteRow, liveQuote, quoteRow, tickerNode } from './liveQuote';
+import { cleanSideName } from '../shared/objects';
 import { followSearchPlan, judgeSources, judgeTurn } from './turnJudge';
 import { findTicker } from '../shared/tickerNotes';
 import { splitPeople } from './peopleSplit';
@@ -602,7 +603,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     thinking: () => send('thinking', {}),
     layout: (regions) => send('layout', regions),
     head: (h) => {
-      const question = questionOf();
+      const question = compareSides(designReq.query).length >= 2 ? designReq.query : questionOf();
       const locked = designReq.person?.name || priorEntity(designReq.context)?.name;
       // A picked person is titled with their name even when the layout is not already a profile.
       // An ask about something of theirs ("Jensen Huang net worth") keeps that in the title.
@@ -620,6 +621,10 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       const keptNode = withoutRepeatedCallouts(node, priorNodes);
       if (!keptNode) return;
       node = keptNode;
+      if (designReq.priorBody?.length && compareSides(designReq.query).length >= 2) {
+        const named = keepComparedProducts(designReq.priorBody, new Map([[index, node]]), designReq.query, designReq.priorImages);
+        if (named?.[0]) node = named[0].node;
+      }
       if (node.type === 'actions') {
         const clean = withoutLeakActions(node);
         if (!clean) return;
@@ -747,7 +752,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   };
   const restoreKeptProducts = () => {
     if (!designReq.priorBody?.length) return;
-    const question = designReq.followup?.question ?? designReq.query;
+    const question = compareSides(designReq.query).length >= 2 ? designReq.query : (designReq.followup?.question ?? designReq.query);
     const kept = keepComparedProducts(designReq.priorBody, shown, question, designReq.priorImages);
     if (!kept) return;
     for (const patch of kept) {
@@ -756,7 +761,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     }
   };
   const settleComparison = () => {
-    const question = designReq.followup?.question ?? designReq.query;
+    const question = compareSides(designReq.query).length >= 2 ? designReq.query : (designReq.followup?.question ?? designReq.query);
     if (designReq.pattern === 'compare') {
       const title = comparisonTitle(question, head?.title ?? question);
       if (head && title !== head.title) {
@@ -779,6 +784,15 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       }
     }
     restoreKeptProducts();
+    if (designReq.followup?.question && compareSides(designReq.query).length >= 2) {
+      const asked = appendAskedFact(designReq.followup.question, designReq.query, shown, designReq.search);
+      if (asked) {
+        for (const patch of asked) {
+          shown.set(patch.index, patch.node);
+          send('node', { index: patch.index, node: patch.node });
+        }
+      }
+    }
     const extra = missingSideNode(question, [...shown.values()], designReq.search);
     if (!extra) return;
     const index = Math.max(-1, ...shown.keys()) + 1;
@@ -948,7 +962,7 @@ function applyReview(send: Send, req: DesignRequest, shown: Map<number, CardNode
  * inside the three-call cap (two rewrites leave no room for Wikipedia).
  * Rewritten follow-ups already say what they mean, so they skip the understanding step.
  */
-async function searchAndDesign(send: Send, env: Env, query: string, freshness: Freshness, context: string | undefined, started: number, scope: AskScope, rewritten = false, seedRows?: SearchResult[], steer?: { avoid: Set<string>; rejected: string }, keepTicker?: CardNode, priorBody?: CardNode[], priorImages?: ImageResult[], fanout: string[] = []) {
+async function searchAndDesign(send: Send, env: Env, query: string, freshness: Freshness, context: string | undefined, started: number, scope: AskScope, rewritten = false, seedRows?: SearchResult[], steer?: { avoid: Set<string>; rejected: string }, keepTicker?: CardNode, priorBody?: CardNode[], priorImages?: ImageResult[], fanout: string[] = [], followQuestion = '') {
   const unglued = withoutGluedPerson(query);
   if (unglued !== query.trim()) query = unglued;
   const extra = fanout.map((item) => item.trim()).filter((item) => item && item.toLowerCase() !== query.toLowerCase());
@@ -1490,7 +1504,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   send('search', results);
   const boost = imageBoost(pattern, results, env, scope, boostQuery, portraitAgain);
   const crypto = cryptographyHint(query, results.results);
-  await design(send, env, { query, pattern, depth: plan.depth, readPages: plan.readPages || deep || fromSeeds, search: results, context: [designContext, crypto].filter(Boolean).join('\n') || undefined, intent: u?.intent, deep, boost, entityHint, person, ticker: quote ? tickerNode(quote) : keepTicker, earlyBrief, website, allowRescue: !isPaperAsk(query), hopUrls, fromFollowup: rewritten && !isPersonAsk(query), priorBody, priorImages }, started, scope, late);
+  await design(send, env, { query, pattern, depth: plan.depth, readPages: plan.readPages || deep || fromSeeds, search: results, context: [designContext, crypto].filter(Boolean).join('\n') || undefined, intent: u?.intent, deep, boost, entityHint, person, ticker: quote ? tickerNode(quote) : keepTicker, earlyBrief, website, allowRescue: !isPaperAsk(query), hopUrls, fromFollowup: rewritten && !isPersonAsk(query), followup: followQuestion ? { mode: 'answer', question: followQuestion } : undefined, priorBody, priorImages }, started, scope, late);
 }
 
 /** A preview URL the browser can actually show. A blocked page image is not a photo. */
@@ -1784,14 +1798,18 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
       subject: hint,
     };
     console.log(JSON.stringify({ zo: 'judge-turn', action: decision.action, subject: decision.subject, queries: decision.queries, model: !!judged }));
-    const lock = decision.subject
-      ? `This turn is about ${decision.subject}, the subject already on screen. Answer the new question about that subject.`
-      : '';
-    if (decision.action === 'search') {
-      const planned = followSearchPlan({ title: onScreen?.title, question: req.question, queries: decision.queries, subject: decision.subject });
+    const planned = decision.action === 'search'
+      ? followSearchPlan({ title: onScreen?.title, question: req.question, queries: decision.queries, subject: decision.subject })
+      : undefined;
+    const lock = planned?.added
+      ? `${planned.added} is its own object. Use only a price, photo, spec, or citation from a source that names it. Do not copy those from another object.`
+      : decision.subject
+        ? `This turn is about ${cleanSideName(decision.subject)}. Answer the new question about that subject. A label is the object name, not the question.`
+        : '';
+    if (decision.action === 'search' && planned) {
       scope.bound = `${decision.subject}\n${req.question}`;
       send('rewrite', { query: planned.query });
-      await searchAndDesign(send, env, planned.query, 'any', [lock, context].filter(Boolean).join('\n') || undefined, started, scope, true, undefined, undefined, undefined, onScreen?.body, req.search?.images, planned.fanout);
+      await searchAndDesign(send, env, planned.query, 'any', [lock, context].filter(Boolean).join('\n') || undefined, started, scope, true, undefined, undefined, undefined, onScreen?.body, req.search?.images, planned.fanout, req.question);
       return;
     }
     const plan = await planPromise;

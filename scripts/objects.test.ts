@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { CardNode } from '../shared/card.ts';
-import { objectContext, sameObject } from '../shared/objects.ts';
+import { cleanSideName, objectContext, sameObject } from '../shared/objects.ts';
 import { unblendObjects } from '../server/objectFacts.ts';
 
 test('a different number is a different object, and each object keeps its own id', () => {
   assert.equal(sameObject('Contax T2', 'Contax T3'), false);
   assert.equal(sameObject('Contax T2', 'The Contax T2'), true);
+  assert.equal(cleanSideName('Nikon Zf What Is the Battery Life of Each Camera?'), 'Nikon Zf');
+  assert.equal(cleanSideName('Add the Sony a7C II'), 'Sony a7C II');
   const context = objectContext([{
     body: [{
       type: 'table',

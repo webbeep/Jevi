@@ -4,7 +4,7 @@ import { GAP_MARK } from '../shared/gap';
 const BLANK = /^[\s—–\-−~]*$/;
 const NOT_STATED = /\bnot stated\b/i;
 const CITE = /\[\d+\]/;
-const MEASURE = /\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*[x×]\s*\d{1,3}(?:,\d{3})*(?:\.\d+)?)*(?:\s*[-–]?\s*(?:inch(?:es)?|in\b|["″]|mm|cm|kg|oz|mah|nits?|atm|px|hours?|days?|grams?|g\b))/i;
+const MEASURE = /\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*[x×]\s*\d{1,3}(?:,\d{3})*(?:\.\d+)?)*(?:\s*[-–]?\s*(?:inch(?:es)?|in\b|["″]|mm|cm|kg|oz|mah|nits?|atm|px|hours?|days?|shots?|frames?|grams?|g\b))/i;
 const MONEY = /[$€£¥]\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?/;
 
 type Step = { kind: 'child'; at: number } | { kind: 'cell'; row: number; column: number };
@@ -133,7 +133,7 @@ function collect(node: CardNode, index: number, path: Step[], out: PieceGap[]) {
       row.forEach((cell, column) => {
         if (column === 0) return;
         const text = cell.trim();
-        if (CITE.test(text)) return;
+        if (CITE.test(text) || MONEY.test(text) || measureNumbers(text).length > 0) return;
         const missing = !text || BLANK.test(text) || NOT_STATED.test(text);
         const side = sideName(node.columns, node.rows, column);
         out.push({

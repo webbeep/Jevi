@@ -15,13 +15,13 @@ function numbersOf(text: string): string[] {
 }
 
 function sourceNames(name: string, text: string): boolean {
-  const tokens = name.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 4 || /^\d+$/.test(word));
-  const words = tokens.filter((word) => !/^\d+$/.test(word));
-  const nums = tokens.filter((word) => /^\d+$/.test(word));
+  const tokens = name.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 2);
+  const marks = tokens.filter((word) => /\d/.test(word));
+  const words = tokens.filter((word) => word.length >= 4 && !/\d/.test(word));
   const hay = text.toLowerCase();
   if (words.length && !words.some((word) => hay.includes(word))) return false;
-  if (nums.length && !nums.some((num) => new RegExp(`\\b${num}\\b`).test(hay))) return false;
-  return words.length > 0;
+  if (marks.length && !marks.some((mark) => hay.includes(mark))) return false;
+  return words.length > 0 || marks.length > 0;
 }
 
 /** A source that names this object also states this number. */
@@ -29,9 +29,14 @@ function statedFor(name: string, value: string, sources: readonly SourceRow[]): 
   const nums = numbersOf(value);
   if (!nums.length) return true;
   return sources.some((source) => {
-    const title = `${source.title ?? ''} ${source.snippet ?? ''}`;
-    const blob = `${title} ${source.content ?? ''}`;
-    return sourceNames(name, title) && nums.every((num) => blob.includes(num));
+    const blob = `${source.title ?? ''}. ${source.snippet ?? ''} ${source.content ?? ''}`;
+    for (const sentence of blob.split(/(?<=[.!?])\s+/)) {
+      for (const clause of sentence.split(/\s*(?:,|;|\band\b|\bwith\b)\s*/i)) {
+        if (!sourceNames(name, clause)) continue;
+        if (nums.every((num) => clause.includes(num))) return true;
+      }
+    }
+    return false;
   });
 }
 

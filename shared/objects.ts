@@ -1,6 +1,22 @@
 import type { CardNode } from './card';
 
 const STOP = new Set(['the', 'and', 'with', 'for', 'vs', 'versus', 'from']);
+const LEAD_COMMAND = /^(?:please|add|include|also|plus|instead|show|tell|compare|explain)$/i;
+const FILLER = /^(?:the|a|an|this|that|to)$/i;
+const QUESTION_WORD = /^(?:what|whats|how|why|when|where|who|which|add|include|also|plus|instead|show|tell|does|do|did|can|could|should|would|please)$/i;
+
+/** "Nikon Zf What is the battery life" is the Nikon Zf. The question is not part of the name. */
+export function cleanSideName(name: string): string {
+  let words = name.replace(/[?]+/g, '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
+  while (words.length > 1 && LEAD_COMMAND.test(words[0]!.replace(/[^A-Za-z']/g, ''))) {
+    words = words.slice(1);
+    while (words.length > 1 && FILLER.test(words[0]!.replace(/[^A-Za-z']/g, ''))) words = words.slice(1);
+  }
+  while (words.length > 1 && FILLER.test(words[0]!.replace(/[^A-Za-z']/g, ''))) words = words.slice(1);
+  const cut = words.findIndex((word, index) => index > 0 && QUESTION_WORD.test(word.replace(/[^A-Za-z']/g, '')));
+  const kept = (cut === -1 ? words : words.slice(0, cut)).join(' ').trim();
+  return kept.length >= 2 ? kept : name.replace(/[?]+/g, '').trim();
+}
 
 function parts(name: string): string[] {
   return name.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 2 && !STOP.has(word));
@@ -31,9 +47,10 @@ export interface ThreadObject {
 }
 
 function take(objects: ThreadObject[], name: string): ThreadObject {
-  const found = objects.find((item) => sameObject(item.name, name));
+  const clean = cleanSideName(name);
+  const found = objects.find((item) => sameObject(item.name, clean));
   if (found) return found;
-  const next = { id: `o${objects.length + 1}`, name: name.trim(), facts: [] };
+  const next = { id: `o${objects.length + 1}`, name: clean, facts: [] };
   objects.push(next);
   return next;
 }
