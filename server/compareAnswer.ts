@@ -169,6 +169,25 @@ function joinSides(sides: string[]): string {
  * A side with nothing gets a plain note instead of another subject's biography.
  */
 const STICKER = /(?:\$|€|£|¥)\s?\d{1,4}(?:,\d{3})*(?:\.\d{2})?/g;
+const BLANK_CELL = /^[\s—–\-−~]*$/;
+
+/** A blank spec cell takes the sentence where this product's sources state that spec. */
+function specFromSources(label: string, side: string, search: SearchResponse): string | undefined {
+  const keys = label.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 5);
+  if (!keys.length) return undefined;
+  for (const result of search.results) {
+    const blob = `${result.title ?? ''}. ${result.snippet ?? ''} ${result.content ?? ''}`;
+    if (!mentionsSide(side, `${result.title ?? ''} ${result.snippet ?? ''}`)) continue;
+    for (const sentence of blob.split(/(?<=[.!?])\s+/)) {
+      const low = sentence.toLowerCase();
+      if (!keys.some((key) => low.includes(key))) continue;
+      const clean = sentence.replace(/\s+/g, ' ').trim();
+      if (clean.length < 8 || clean.length > 110) continue;
+      return clean;
+    }
+  }
+  return undefined;
+}
 const RELATIVE_PRICE = /\b(?:cheaper|cost(?:s|ing)? more|more expensive|less expensive|saving|saves|discount|between|than)\b|(?:\$|€|£|¥)\s?\d[\d,]*(?:\.\d{2})?\s*[–-]\s*(?:\$|€|£|¥)?\s?\d/i;
 const NO_PRICE = /\bno price stated\b|\bprice (?:is )?not stated\b|\bno specs or price\b/i;
 
@@ -201,8 +220,20 @@ function priceForSide(side: string, rows: { text: string }[]): string | undefine
   return undefined;
 }
 
+const PROMO = /\b(?:promo(?:tion)?|giveaway|airdrop|rewards?)\b/i;
+
+/** A picture of this product, from a page about this product. A promo or a versus roundup is not that picture. */
+export function acceptProductPhoto(side: string, title: string, extra = ''): boolean {
+  const page = title.replace(/\s+/g, ' ').trim();
+  if (!page || !mentionsSide(side, page)) return false;
+  if (/\b(?:vs\.?|versus)\b/i.test(page)) return false;
+  const blob = `${page} ${extra}`;
+  if (PROMO.test(blob) && !PROMO.test(side)) return false;
+  return true;
+}
+
 function imageForSide(side: string, images: SearchResponse['images']): string | undefined {
-  const hit = images.find((image) => mentionsSide(side, `${image.title} ${image.source}`));
+  const hit = images.find((image) => acceptProductPhoto(side, `${image.title} ${image.source}`));
   return hit?.thumb || undefined;
 }
 
@@ -283,6 +314,10 @@ function groundCompareNode(node: CardNode, sides: string[], search: SearchRespon
     const rows = node.rows.map((row) => row.map((cell, index) => {
       const side = sides.find((item) => mentionsSide(item, node.columns[index] ?? ''));
       if (!side || moneyIn(cell)) return cell;
+      if (BLANK_CELL.test(cell)) {
+        if (priceRow(row[0] ?? '')) return stickerPrice(side, search) ?? cell;
+        return specFromSources(row[0] ?? '', side, search) ?? cell;
+      }
       if (!RELATIVE_PRICE.test(cell)) return cell;
       return stickerPrice(side, search) ?? '';
     }));

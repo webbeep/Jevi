@@ -70,7 +70,7 @@ import { domainOf } from './util';
 import { choicesIn, distinctActions, subjectWords } from './chips';
 import { anchoredFollowup, asksToCompare, comparisonFollow, cryptographyHint, faithfulQuery, followSearchQuery, foreignName, isWritingAsk, lockChainQuery, needsOwnSearch, ownQuestion, personQuestion, quickPlan, quoteFollowQuery, sameSubjectQuery, screenSubject, scrubLeak, sourcesCover, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
 import { calculationAnswer, isCalculationAsk, rateOnAmount } from './calculate';
-import { comparisonRepair, comparisonTitle, keepComparedProducts, mentionsSide, missingSideNode, nameForms, stickerPrice } from './compareAnswer';
+import { acceptProductPhoto, comparisonRepair, comparisonTitle, keepComparedProducts, mentionsSide, missingSideNode, nameForms, stickerPrice } from './compareAnswer';
 import { withFinishedSentences } from './polish';
 import { queryWithPlace, readerPlace, settleReadings } from './readings';
 import { isKeepOnly, keptBody } from './refine';
@@ -1345,9 +1345,9 @@ async function imageLoads(url: string): Promise<boolean> {
   }
 }
 
-/** The preview picture on a page that names this product. A review with no picture is skipped. */
+/** The preview picture on a page about this product. A promo or another product's page is skipped. */
 async function productPhoto(side: string, rows: readonly SearchResult[]): Promise<ImageResult | undefined> {
-  const matches = rows.filter((row) => row.url && mentionsSide(side, `${row.title} ${row.snippet ?? ''}`)).slice(0, 5);
+  const matches = rows.filter((row) => row.url && acceptProductPhoto(side, row.title ?? '', `${row.snippet ?? ''} ${row.domain ?? ''}`)).slice(0, 5);
   const found = await Promise.all(matches.map(async (row) => {
     const thumb = await ogImageOf(row.url, 1600);
     if (!thumb || !(await imageLoads(thumb))) return undefined;
@@ -1379,6 +1379,14 @@ async function searchNamedSides(query: string, results: SearchResponse, env: Env
     let rows: SearchResult[] = [];
     let images: ImageResult[] = [];
     const havePrice = () => stickerPrice(side, { ...results, results: [...rows, ...results.results] });
+    const specForm = forms[0];
+    const specSearch = specForm
+      ? (async () => {
+        searchRoom(scope);
+        const again = await searchWithLate({ q: `${specForm} specs`, freshness: 'any', count: 5, lite: true }, env, scope);
+        return rowsAbout(side, specForm, again.response.results);
+      })()
+      : Promise.resolve([] as SearchResult[]);
     if (!havePrice()) {
       for (const form of forms) {
         searchRoom(scope);
@@ -1388,7 +1396,9 @@ async function searchNamedSides(query: string, results: SearchResponse, env: Env
         if (havePrice()) break;
       }
     }
+    rows = [...rows, ...(await specSearch)];
     const photo = await productPhoto(side, [...rows, ...results.results]);
+    images = images.filter((image) => acceptProductPhoto(side, `${image.title} ${image.source}`));
     if (photo) images = [photo, ...images];
     return { results: rows, images };
   }));

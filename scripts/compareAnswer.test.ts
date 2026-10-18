@@ -3,9 +3,9 @@ import { test } from 'node:test';
 import type { CardNode } from '../shared/card.ts';
 import type { SearchResponse } from '../shared/types.ts';
 import { asksToCompare } from '../server/askGuard.ts';
-import { answersComparison, comparisonNodes, comparisonRepair, comparisonTitle, keepComparedProducts, mentionsSide, missingSideNode, nameForms, sameProduct, showsComparison } from '../server/compareAnswer.ts';
+import { acceptProductPhoto, answersComparison, comparisonNodes, comparisonRepair, comparisonTitle, keepComparedProducts, mentionsSide, missingSideNode, nameForms, sameProduct, showsComparison } from '../server/compareAnswer.ts';
 import { candidates } from '../server/extract.ts';
-import { compareSideQueries, compareSides } from '../server/patterns.ts';
+import { compareSideQueries, compareSides, withoutLeadVerb } from '../server/patterns.ts';
 import { Polisher, completeSentences, emptyFigure, withoutEmptySlots } from '../server/polish.ts';
 
 const ASK = 'AJ Dybantsa vs 2026 NBA rookies vs past draft classes';
@@ -187,6 +187,9 @@ test('a compound product name is the spaced name, and a filled comparison is not
 
 test('a list of products is one side each, and a follow-up keeps the price and picture already shown', () => {
   assert.deepEqual(compareSides('Compare Northwatch 2, Glowband 4 and Harbor Band 8'), ['Northwatch 2', 'Glowband 4', 'Harbor Band 8']);
+  assert.equal(withoutLeadVerb('Compare Harbor Slate'), 'Harbor Slate');
+  assert.deepEqual(compareSides('Compare Harbor Slate vs Northwatch 2'), ['Harbor Slate', 'Northwatch 2']);
+  assert.deepEqual(compareSides('Explain Harbor Slate vs Northwatch 2'), ['Harbor Slate', 'Northwatch 2']);
   assert.equal(sameProduct('Northwatch 2', 'Northwatch Air'), false);
   assert.equal(sameProduct('Northwatch 2', 'Northwatch 2'), true);
   const prior: CardNode[] = [{
@@ -282,4 +285,42 @@ test('two figures for one product are the same price, or the other is a labeled 
   const collapsedTable = collapsed?.find((patch) => patch.index === 1)?.node;
   assert.equal(collapsedTable?.type === 'table' ? collapsedTable.rows.length : 0, 1);
   assert.equal(collapsedTable?.type === 'table' ? collapsedTable.rows[0]?.[1] : '', '$299.99');
+});
+
+test('a promo page is not a product photo, and a stated spec fills a blank cell', () => {
+  assert.equal(acceptProductPhoto('Harbor Slate', 'Harbor Slate on a white table', 'A product photo.'), true);
+  assert.equal(acceptProductPhoto('Harbor Slate', 'Earn rewards every day', 'The Harbor Slate is mentioned in this airdrop.'), false);
+  assert.equal(acceptProductPhoto('Harbor Slate', 'Harbor Slate vs Northwatch 2', 'Both bands.'), false);
+  const ask = 'Harbor Slate versus Northwatch 2';
+  const table: CardNode = {
+    type: 'table',
+    columns: ['Factor', 'Harbor Slate', 'Northwatch 2'],
+    rows: [['Battery life', '—', 'Ten days']],
+  };
+  const tiles: CardNode = {
+    type: 'grid',
+    cols: 2,
+    children: [
+      { type: 'tile', label: 'Harbor Slate', value: '$40' },
+      { type: 'tile', label: 'Northwatch 2', value: '$90' },
+    ],
+  };
+  const search: SearchResponse = {
+    query: ask,
+    freshness: 'any',
+    results: [{
+      title: 'Harbor Slate specs',
+      url: 'https://example.com/slate',
+      snippet: 'The Harbor Slate battery lasts 16 days.',
+      domain: 'example.com',
+      engines: ['web'],
+    }],
+    images: [],
+    discussions: [],
+    engines: [],
+  };
+  const patches = comparisonRepair(ask, search, new Map([[0, tiles], [1, table]]));
+  const next = patches?.find((patch) => patch.index === 1)?.node;
+  assert.equal(next?.type === 'table' ? next.rows[0]?.[1] : '', 'The Harbor Slate battery lasts 16 days.');
+  assert.equal(next?.type === 'table' ? next.rows[0]?.[2] : '', 'Ten days');
 });

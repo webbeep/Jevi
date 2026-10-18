@@ -23,19 +23,20 @@ test('a comparison follow-up searches every product named on the card', () => {
   const plan = followSearchPlan({
     title: 'Harbor Slate vs Northwatch 2',
     question: 'Compare specs',
-    queries: ['Harbor Slate specs', 'Northwatch 2 specs'],
+    queries: ['Compare Harbor Slate', 'Northwatch 2 specs'],
     subject: 'Harbor Slate',
   });
-  assert.match(plan.query, /Harbor Slate vs Northwatch 2/);
-  assert.match(plan.query, /Compare specs/);
+  assert.equal(plan.query, 'Harbor Slate vs Northwatch 2');
   assert.deepEqual(plan.fanout, ['Harbor Slate specs', 'Northwatch 2 specs']);
-  const one = followSearchPlan({
+  const again = followSearchPlan({
     title: 'Harbor Slate vs Northwatch 2',
-    question: 'Compare specs',
-    queries: ['Harbor Slate specs'],
+    question: 'Compare Harbor Slate vs Northwatch 2',
+    queries: ['Compare Harbor Slate', 'Fitbit Air'],
     subject: 'Harbor Slate',
   });
-  assert.match(one.query, /Northwatch 2/);
+  assert.equal(again.query, 'Harbor Slate vs Northwatch 2');
+  assert.deepEqual(again.fanout, ['Harbor Slate', 'Northwatch 2']);
+  for (const query of [again.query, ...again.fanout]) assert.doesNotMatch(query, /\bCompare\b/);
 });
 
 test('the place on the card stays in front of a qualifier', () => {

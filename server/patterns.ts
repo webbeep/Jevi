@@ -20,10 +20,23 @@ function listSides(text: string): string[] {
   return parts.length >= 2 ? parts : [];
 }
 
+const LEAD_VERB = /^(?:compare|explain|show|find|watch|describe|summarize|list)\b[\s:,-]*/i;
+
+/** "Compare Harbor" is the product Harbor. The verb is not part of the name. */
+export function withoutLeadVerb(text: string): string {
+  let next = text.trim();
+  let prev = '';
+  while (next && next !== prev) {
+    prev = next;
+    next = next.replace(LEAD_VERB, '').trim();
+  }
+  return next;
+}
+
 /** The things a comparison names ("AJ Dybantsa vs 2026 NBA rookies vs past draft classes" is three). */
 export function compareSides(query: string): string[] {
   const stripped = query.replace(/^(?:which is better(?: value)?|compare)\s*:\s*/i, '').trim();
-  const versus = stripped.split(/\s+(?:vs\.?|versus)\s+/i).map((p) => p.trim()).filter((p) => p.length >= 2);
+  const versus = stripped.split(/\s+(?:vs\.?|versus)\s+/i).map((part) => withoutLeadVerb(part)).filter((part) => part.length >= 2);
   if (versus.length >= 2) return versus;
   const listed = stripped.match(/^compare\s+(.+)$/i);
   if (listed) {

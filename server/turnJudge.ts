@@ -1,4 +1,5 @@
 import { hasLlm, llmJson } from './llm';
+import { compareSides, withoutLeadVerb } from './patterns';
 import type { Env } from './util';
 
 /**
@@ -58,16 +59,31 @@ export function placeOnScreen(title: string | undefined): string {
   return name.join(' ');
 }
 
+const FOLLOW_VERB = /^(?:compare|explain|show|find|watch|describe|summarize|list)\b/i;
+
 /** The searches for this follow-up. A comparison keeps every product in the query and in the fan-out. */
 export function followSearchPlan(input: { title?: string; question: string; queries: string[]; subject: string }): { query: string; fanout: string[] } {
   const title = input.title?.replace(/\s+/g, ' ').trim() ?? '';
   const asked = input.question.replace(/^(?:and|so)\s+/i, '').trim();
   const compared = /\s(?:vs\.?|versus)\s/i.test(title);
-  if (compared) return { query: `${title} ${asked}`.replace(/\s+/g, ' ').trim(), fanout: input.queries };
+  if (compared && FOLLOW_VERB.test(asked)) {
+    const sides = compareSides(title);
+    const known = new Set(title.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean));
+    const attribute = withoutLeadVerb(asked)
+      .split(/\s+/)
+      .filter((word) => {
+        const bare = word.toLowerCase().replace(/[^a-z0-9]+/g, '');
+        return bare.length > 2 && !known.has(bare) && bare !== 'vs' && bare !== 'versus';
+      })
+      .join(' ');
+    const fanout = sides.map((side) => (attribute ? `${side} ${attribute}` : side));
+    return { query: title, fanout };
+  }
+  if (compared) return { query: `${title} ${asked}`.replace(/\s+/g, ' ').trim(), fanout: input.queries.map(withoutLeadVerb) };
   const place = placeOnScreen(title) || input.subject;
-  const written = input.queries[0] ?? asked;
-  const query = place && !written.toLowerCase().includes(place.toLowerCase()) ? `${place} ${asked}` : written;
-  return { query, fanout: input.queries.slice(1) };
+  const written = withoutLeadVerb(input.queries[0] ?? asked);
+  const query = place && !written.toLowerCase().includes(place.toLowerCase()) ? `${place} ${withoutLeadVerb(asked)}` : written;
+  return { query, fanout: input.queries.slice(1).map(withoutLeadVerb) };
 }
 
 export function parseDecision(raw: unknown): TurnDecision | undefined {
