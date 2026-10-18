@@ -262,7 +262,10 @@ function liveQuoteRule(req: DesignRequest): string {
       ? '- The card ALREADY OPENS with a live price chart showing the current price, the change and an interactive chart with ranges. Do not add a price hero, a price stat or any price chart, and never say a chart, image or price data is missing or unavailable. Drop any chart or image slot in the skeleton. Start with the day range and 52-week range as two tiles, then why it is moving today from dated news sources [n], then anything else the ask needs.'
       : '- The daily closes in [1] make a good line chart; the day and 52-week ranges fit tiles.',
     '- Use news sources for why it is moving, not for the price.',
-  ].join('\n');
+    /=X$/i.test(row!.url) || /\bto [A-Z]{3}\b/.test(row!.title)
+      ? '- An exchange rate is shown the way it was asked: how many of the second currency one of the first buys. Do not add the inverse rate, a range of tiny inverse figures, or a converter row unless the ask is for one.'
+      : '',
+  ].filter(Boolean).join('\n');
 }
 
 function briefRules(req: DesignRequest): string {
@@ -313,7 +316,7 @@ function taskBlock(req: DesignRequest): string {
   return [
     `- Pre-selected layout: "${pattern.label}" (${pattern.description}).`,
     sides.length >= 2 ? `- Compare exactly these sides, not an earlier topic: ${sides.join(' | ')}. The title names the sides. Identify each side before writing its facts. Use a table, or one section per side, with only facts from the sources. A biography of one side does not answer. If the sources never line the sides up, say so in one callout and still show what each side's sources do say. A different model number is a different product: never copy specs, a price, a photo, or a citation from one model onto another. A VIDEO source can show that a review exists; state a spec or a price only when that source's text states it. Never end a sentence with an ellipsis.${followFact}` : '',
-    asksLocalConditions(asked) ? '- Local reading: the title is the place (city and region), never the word Weather or Forecast. The hero is the current temperature and the sky only — do not repeat the place as a hero label. Every other reading (humidity, wind, pressure, a later hour) appears once. A series is later periods, never another copy of right now.' : '',
+    asksLocalConditions(asked) ? '- Local reading: when a National Weather Service forecast is in the sources, its high, low and sky for today are the readings, cited to it. The title is the place (city and region), never the word Weather or Forecast. The hero is the current temperature and the sky only — do not repeat the place as a hero label. Every other reading (humidity, wind, pressure, a later hour) appears once. A series is later periods, never another copy of right now.' : '',
     `- ${DEPTH_HINT[req.depth]}`,
     req.intent ? `- What the person wants: ${req.intent} Answer that; sources that only match their words but not this are background at most.` : '',
     req.simple ? '- Write for a 10-year-old: plain words and a friendly analogy.' : '',

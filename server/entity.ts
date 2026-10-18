@@ -505,7 +505,8 @@ export function spellingQuery(query: string, rows: readonly { title?: string; sn
     const last = parts[parts.length - 1]!.toLowerCase().replace(/[^a-z0-9]/g, '');
     const stillTyped = next.some((word) => word.toLowerCase().includes(last));
     if (last.length >= 5 && !stillTyped) {
-      const person = parts.slice(0, -1).join(' ');
+      // The person keeps the spelling just corrected ("Satya Nadela" → "Satya Nadella").
+      const person = fixed.split(/\s+/).slice(0, parts.length - 1).join(' ');
       const detail = fixed.split(/\s+/).slice(parts.length - 1).join(' ');
       return `${person}, ${detail}`.replace(/\s+/g, ' ').trim();
     }

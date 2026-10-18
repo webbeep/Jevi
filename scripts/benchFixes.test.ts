@@ -62,3 +62,29 @@ test('beside the live chart, a line saying no price came back is dropped', () =>
   assert.deepEqual(body.map((node) => node.type), ['ticker', 'text']);
   assert.equal((body[1] as Extract<CardNode, { type: 'text' }>).text, 'Prices move every second during trading hours.');
 });
+
+test('a misspelled person and company are both corrected', async () => {
+  const { spellingQuery } = await import('../server/entity.ts');
+  const rows = [
+    { title: 'Microsoft CEO: Satya Nadella', url: 'https://news.microsoft.com/exec/satya-nadella/', snippet: 'Satya Nadella is Chairman and Chief Executive Officer of Microsoft.' },
+    { title: 'Satya Nadella', url: 'https://www.britannica.com/money/Satya-Nadella', snippet: 'Satya Nadella became CEO of Microsoft in 2014.' },
+  ];
+  assert.equal(spellingQuery('Satya Nadela Microsft', rows), 'Satya Nadella, Microsoft');
+});
+
+test('a weather ask names its place for the official forecast', async () => {
+  const { weatherPlace } = await import('../server/weatherService.ts');
+  assert.deepEqual(weatherPlace("What's the forecast high in New York City today?"), { city: 'New York', state: 'New York' });
+  assert.deepEqual(weatherPlace('Austin, TX weather'), { city: 'Austin', state: 'Texas' });
+  assert.deepEqual(weatherPlace('weather in Chicago tomorrow'), { city: 'Chicago' });
+  assert.equal(weatherPlace('how does weather work'), undefined);
+  assert.equal(weatherPlace('Bitcoin price in USD'), undefined);
+});
+
+test('a currency question in words is a live exchange-rate quote, in the direction asked', async () => {
+  const { quoteAsk } = await import('../shared/quoteAsk.ts');
+  assert.deepEqual(quoteAsk('How many Japanese yen is one US dollar today?'), { kind: 'fx', symbol: 'USDJPY=X', name: 'USD to JPY' });
+  assert.deepEqual(quoteAsk('euros to dollars exchange rate'), { kind: 'fx', symbol: 'EURUSD=X', name: 'EUR to USD' });
+  assert.equal(quoteAsk('How much does a Nintendo Switch 2 cost in the US right now?'), undefined);
+  assert.equal(quoteAsk('How much is a subway ride in New York City?'), undefined);
+});

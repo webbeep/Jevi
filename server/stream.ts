@@ -86,6 +86,7 @@ import { variantChoices, variantConflict } from './productModel';
 import { recallClips, wantsVideo, withProductClips, withVideos } from './videoSearch';
 import { guessFreshness, preferFresh, staleComplaint, stricter } from './freshness';
 import { isQuoteRow, liveQuote, quoteRow, tickerNode } from './liveQuote';
+import { nwsForecastRow } from './weatherService';
 import { cleanSideName } from '../shared/objects';
 import { cardCitesName, citedNames, nameSeekingQuery, namedListNode, wantsNamedList } from './namedList';
 import { addedComparison, followSearchPlan, judgeSources, judgeTurn } from './turnJudge';
@@ -1018,6 +1019,8 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   const videos = recallClips(query);
   // A preseason line lives on the player page, which the web results often miss once the main engine is capped.
   const statLine = playerStatRow(query);
+  // A US weather ask reads the National Weather Service forecast while the web search runs.
+  const forecast = nwsForecastRow(query);
   // Searches that need no model ("$rdw" → "RDW stock news today") lead the rewrites.
   const instant = [...tickerQueries(query), ...formalNameQueries(query), ...workplaceQueries(query)];
   const sides = sideList;
@@ -1092,6 +1095,8 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     }
   }
   let late: Promise<LateExtras> | undefined = found.late;
+  const nws = await forecast;
+  if (nws) results = { ...results, results: [nws, ...results.results.filter((row) => row.domain !== nws.domain)] };
   const line = await statLine;
   if (line) {
     const key = normalizeUrl(line.url);

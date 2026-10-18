@@ -106,6 +106,42 @@ function fxPair(q: string): QuoteAsk | undefined {
   return { kind: 'fx', symbol: `${a}${b}=X`, name: `${a} to ${b}` };
 }
 
+/** Currency names as people say them. A country word before "dollar" names that dollar. */
+const CURRENCY_WORDS: [RegExp, string][] = [
+  [/\b(?:us|u\.s\.|american) dollars?\b/g, 'usd'],
+  [/\bcanadian dollars?\b|\bloonies?\b/g, 'cad'],
+  [/\baustralian dollars?\b/g, 'aud'],
+  [/\bnew zealand dollars?\b/g, 'nzd'],
+  [/\bhong kong dollars?\b/g, 'hkd'],
+  [/\bsingapore dollars?\b/g, 'sgd'],
+  [/\b(?:japanese )?yen\b/g, 'jpy'],
+  [/\beuros?\b/g, 'eur'],
+  [/\b(?:british pounds?|pounds? sterling|sterling)\b/g, 'gbp'],
+  [/\bswiss francs?\b/g, 'chf'],
+  [/\b(?:chinese )?(?:yuan|renminbi|rmb)\b/g, 'cny'],
+  [/\b(?:indian )?rupees?\b/g, 'inr'],
+  [/\b(?:south )?korean won\b/g, 'krw'],
+  [/\bmexican pesos?\b/g, 'mxn'],
+  [/\bbrazilian reais\b|\bbrazilian real\b/g, 'brl'],
+  [/\bdollars?\b|\bbucks\b/g, 'usd'],
+];
+
+/**
+ * "How many Japanese yen is one US dollar today?" is USD→JPY: the amount asked for is in yen, per one dollar.
+ * "euros to dollars" reads left to right. Undefined unless two different currencies are named as an exchange.
+ */
+function fxWords(q: string): QuoteAsk | undefined {
+  let named = q;
+  for (const [re, code] of CURRENCY_WORDS) named = named.replace(re, code);
+  if (named === q) return undefined;
+  const many = named.match(new RegExp(`\\bhow (?:many|much)\\s+(${FIAT_RE})\\b[^?]*?\\b(?:is|are|in|for|per|to|equals?|buys?|get)\\s+(?:one|a|an|1)?\\s*(${FIAT_RE})\\b`));
+  if (many && many[1] !== many[2]) {
+    const [quote, base] = [many[1]!.toUpperCase(), many[2]!.toUpperCase()];
+    return { kind: 'fx', symbol: `${base}${quote}=X`, name: `${base} to ${quote}` };
+  }
+  return fxPair(named.replace(/\b(?:one|a|an|1)\s+(?=(?:${FIAT_RE})\b)/g, ''));
+}
+
 function coinAlone(q: string): QuoteAsk | undefined {
   const words = q.trim().split(' ');
   const hit = words.find((w) => CRYPTO[w]);
@@ -161,6 +197,7 @@ export function quoteAsk(query: string): QuoteAsk | undefined {
   const short = q.trim().split(' ').length <= 6;
   return cryptoPair(q)
     ?? fxPair(q)
+    ?? fxWords(q)
     ?? coinAlone(q)
     ?? (short ? fromTable(q, COMMODITY, 'commodity', /\b(?:price[sd]?|prices|per ounce|barrel|futures|today|now|rate|trading|spot)\b/) : undefined)
     ?? (short && !/\b(?:stock|shares?)\b/.test(q) ? fromTable(q, INDEX, 'index', /\b(?:index|today|now|price|level|points|futures|up|down|drop(?:ped|ping)?|rall(?:y|ied)|close[sd]?|open(?:ed)?)\b/) : undefined)
