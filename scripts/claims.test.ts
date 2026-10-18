@@ -433,6 +433,16 @@ test('a second row for the same named charge is dropped', () => {
   const rows = nodes.flatMap((node) => (node?.type === 'grid' ? node.children : []));
   const labels = rows.map((node) => (node.type === 'tile' ? node.label : ''));
   assert.deepEqual(labels, ['Harbor book', 'Expedited add-on', 'Book + card', 'Minor book']);
+  const led = oneNamedCharge(query, [
+    { type: 'hero', value: '$42', label: 'Harbor book renewal' },
+    { type: 'grid', cols: 2, children: [
+      { type: 'tile', label: 'First-time book', value: '$42' },
+      { type: 'tile', label: 'Expedited', value: '$15' },
+      { type: 'tile', label: 'Book + card', value: '$80' },
+    ] },
+  ]);
+  const ledLabels = led.flatMap((node) => (node?.type === 'grid' ? node.children : [])).map((node) => (node.type === 'tile' ? node.label : ''));
+  assert.deepEqual(ledLabels, ['Expedited', 'Book + card']);
   const shifted: ClaimSource[] = [
     { n: 1, domain: 'permits.harbor.gov', text: 'Renew by mail\nYour fee depends on the document. $42 Harbor card ・ $18 Harbor book and card' },
     { n: 2, domain: 'notes.example', text: 'Harbor book renewal fees\nHarbor book: $42. Harbor card: $11. Harbor book and card: $80. $15—Expedited' },

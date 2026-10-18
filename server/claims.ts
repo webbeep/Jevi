@@ -2188,27 +2188,32 @@ function chargeName(label: string): string | undefined {
 }
 
 /** Keep the first row that names a charge. The same name, or the same word at the same amount, is not added again. */
-function keepCharge(label: string, text: string, seen: Set<string>): boolean {
+function keepCharge(label: string, text: string, seen: Set<string>, hero?: { name: string; amount: number }): boolean {
   if (!MONEY.test(text) && !MONEY.test(label)) return true;
   const name = chargeName(label);
   if (!name) return true;
   const amount = moneyValue((text.match(MONEY) ?? label.match(MONEY))?.[0] ?? '');
   const tokens = name.split('|');
-  const repeated = seen.has(name) || (Number.isFinite(amount) && tokens.some((token) => seen.has(`${token}@${amount}`)));
+  const heroRepeat = !!hero
+    && name !== hero.name
+    && Number.isFinite(amount)
+    && Math.abs(amount - hero.amount) < 0.001
+    && tokens.some((token) => hero.name.split('|').includes(token));
+  const repeated = heroRepeat || seen.has(name) || (Number.isFinite(amount) && tokens.some((token) => seen.has(`${token}@${amount}`)));
   if (repeated) return false;
   seen.add(name);
   if (Number.isFinite(amount)) for (const token of tokens) seen.add(`${token}@${amount}`);
   return true;
 }
 
-function dropRepeatCharge(node: CardNode, seen: Set<string>): CardNode | undefined {
+function dropRepeatCharge(node: CardNode, seen: Set<string>, hero?: { name: string; amount: number }): CardNode | undefined {
   switch (node.type) {
     case 'stack':
     case 'grid':
     case 'section':
     case 'scroller': {
       const children = node.children.flatMap((child) => {
-        const next = dropRepeatCharge(child, seen);
+        const next = dropRepeatCharge(child, seen, hero);
         return next ? [next] : [];
       });
       return children.length ? { ...node, children } : undefined;
@@ -2219,24 +2224,24 @@ function dropRepeatCharge(node: CardNode, seen: Set<string>): CardNode | undefin
         tabs: node.tabs.map((tab) => ({
           ...tab,
           children: tab.children.flatMap((child) => {
-            const next = dropRepeatCharge(child, seen);
+            const next = dropRepeatCharge(child, seen, hero);
             return next ? [next] : [];
           }),
         })),
       };
     case 'tile':
     case 'stat':
-      return keepCharge(node.label, `${node.value ?? ''} ${node.type === 'tile' ? node.sub ?? '' : ''}`, seen) ? node : undefined;
+      return keepCharge(node.label, `${node.value ?? ''} ${node.type === 'tile' ? node.sub ?? '' : ''}`, seen, hero) ? node : undefined;
     case 'keyvalue': {
-      const items = node.items.filter((item) => keepCharge(item.label, item.value, seen));
+      const items = node.items.filter((item) => keepCharge(item.label, item.value, seen, hero));
       return items.length ? (items.length === node.items.length ? node : { ...node, items }) : undefined;
     }
     case 'table': {
-      const rows = node.rows.filter((row) => keepCharge(row[0] ?? '', row.slice(1).join(' '), seen));
+      const rows = node.rows.filter((row) => keepCharge(row[0] ?? '', row.slice(1).join(' '), seen, hero));
       return rows.length ? (rows.length === node.rows.length ? node : { ...node, rows }) : undefined;
     }
     case 'list': {
-      const items = node.items.filter((item) => keepCharge(item.text, `${item.text} ${item.meta ?? ''}`, seen));
+      const items = node.items.filter((item) => keepCharge(item.text, `${item.text} ${item.meta ?? ''}`, seen, hero));
       return items.length ? (items.length === node.items.length ? node : { ...node, items }) : undefined;
     }
     case 'text':
@@ -2278,11 +2283,40 @@ function dropRepeatCharge(node: CardNode, seen: Set<string>): CardNode | undefin
   }
 }
 
+function heroCharge(node: CardNode): { name: string; amount: number } | undefined {
+  if (node.type === 'hero') {
+    const name = chargeName(node.label ?? '');
+    const amount = moneyValue(node.value.match(MONEY)?.[0] ?? '');
+    return name && Number.isFinite(amount) ? { name, amount } : undefined;
+  }
+  if (node.type === 'stack' || node.type === 'grid' || node.type === 'section' || node.type === 'scroller') {
+    for (const child of node.children) {
+      const found = heroCharge(child);
+      if (found) return found;
+    }
+  }
+  if (node.type === 'tabs') {
+    for (const tab of node.tabs) {
+      for (const child of tab.children) {
+        const found = heroCharge(child);
+        if (found) return found;
+      }
+    }
+  }
+  return undefined;
+}
+
 /** One row per named charge, across the whole card. The hero is the answer, not a second copy of a row. */
 export function oneNamedCharge(query: string, nodes: readonly (CardNode | undefined)[]): (CardNode | undefined)[] {
   if (!FEE_ASK.test(query) || TAX_ASK.test(query)) return [...nodes];
   const seen = new Set<string>();
-  return nodes.map((node) => (node ? dropRepeatCharge(node, seen) : node));
+  let hero: { name: string; amount: number } | undefined;
+  for (const node of nodes) {
+    if (!node) continue;
+    hero = heroCharge(node);
+    if (hero) break;
+  }
+  return nodes.map((node) => (node ? dropRepeatCharge(node, seen, hero) : node));
 }
 
 function questionTokens(query: string): string[] {
