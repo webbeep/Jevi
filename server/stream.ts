@@ -58,6 +58,7 @@ import { keepPictures, reviewCard, type Review } from './review';
 import { permitted } from './images';
 import { hasLlm } from './llm';
 import { BROWSER_UA, collectPages, ogImageOf } from './pages';
+import { applyFetched, fetchCitePages, fillFromSearch, pagesFromContent, renumberPages, shiftBrief, snippetSupports, thinPlan, type FetchedPage } from './thinSource';
 import { MADE_PATTERNS, compareSideQueries, compareSides, heuristicPattern, skeletonCard } from './patterns';
 import { planLayout } from './plan';
 import type { AskScope, CallLedger } from './budget';
@@ -71,6 +72,7 @@ import { choicesIn, distinctActions, subjectWords } from './chips';
 import { anchoredFollowup, asksToCompare, comparisonFollow, cryptographyHint, faithfulQuery, followSearchQuery, foreignName, isWritingAsk, lockChainQuery, needsOwnSearch, ownQuestion, personQuestion, quickPlan, quoteFollowQuery, sameSubjectQuery, screenSubject, scrubLeak, sourcesCover, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
 import { calculationAnswer, isCalculationAsk, rateOnAmount } from './calculate';
 import { acceptProductPhoto, comparisonRepair, comparisonTitle, keepComparedProducts, mentionsSide, missingSideNode, nameForms, stickerPrice } from './compareAnswer';
+import { cardGaps, citeForGap, gapSearchQuery, markGap, settleGap, type PieceGap } from './gapFill';
 import { withFinishedSentences } from './polish';
 import { queryWithPlace, readerPlace, settleReadings } from './readings';
 import { isKeepOnly, keptBody } from './refine';
@@ -408,8 +410,18 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   const briefing = !newSearch || chat || isPaperAsk(req.query) ? undefined
     : req.earlyBrief ? req.earlyBrief.then((early) => early ? remapBrief(early.brief, early.judged, req.search.results) : undefined)
     : briefSources({ query: req.query, intent: req.intent, context: req.context, results: req.search.results, isLive: isQuoteRow, shown: req.ticker ? TICKER_SHOWN : undefined }, env);
+  // A fee, tax, spec, or quote whose kept page has a thin snippet is read with DeepSeek
+  // while the usual page budget runs. This does not start during the Serper fan-out.
+  const asked = req.followup?.question ?? req.query;
+  const thinOpts = { mode: req.followup?.mode, pattern: req.pattern, quote: isQuoteRow(req.search.results[0]) };
+  const thin = thinPlan(asked, req.search.results, thinOpts);
+  const skip = new Set(thin.fetches.map((url) => normalizeUrl(url)));
+  if (thin.fetches.length || thin.search) console.log(JSON.stringify({ zo: 'deepseek', plan: thin.kind, fetch: thin.fetches.length, search: thin.search }));
+  const citeFetch: Promise<FetchedPage[]> = thin.fetches.length && thin.kind
+    ? fetchCitePages(env, scope, thin.kind, thin.fetches).catch(() => [])
+    : Promise.resolve([]);
   // Page reads overlap the source check. A rescue throws those pages away and reads the new rows.
-  const reading = collectPages(req.search.results, env, budget, late, scope, req.query);
+  const reading = collectPages(req.search.results, env, { ...budget, skip }, late, scope, req.query);
   const briefWait = skipReads && briefing
     ? Promise.race([briefing, new Promise<SourceBrief | undefined>((resolve) => setTimeout(() => resolve(undefined), 400))])
     : briefing;
@@ -453,13 +465,47 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       }
     }
   }
-  const pagesReady = reread ? collectPages(req.search.results, env, budget, undefined, scope, req.query) : reading;
-  // A quote needs the named page. Every other card starts from the sources already in hand.
-  const pages = wantsNamedQuote(req.query)
-    ? await pagesReady
-    : await Promise.race([pagesReady, new Promise<Awaited<typeof pagesReady>>((resolve) => setTimeout(() => resolve([]), 0))]);
+  // Serper has finished, including a rescue. One DeepSeek search only if the fact is still missing
+  // and no kept page was the one to read. A fetch of a page Serper already found stays a fetch.
+  const serperCorpus = req.search.results.map((row) => `${row.title} ${row.snippet} ${row.content ?? ''}`).join('\n');
+  const priorContent = new Set(req.search.results.flatMap((row) => (row.content ? [normalizeUrl(row.url)] : [])));
+  let gapFill: ReturnType<typeof fillFromSearch> | undefined;
+  let citeWait = citeFetch;
+  // A fetch already started stays the only fetch. Search runs only when nothing was fetched.
+  if (thin.kind && !thin.fetches.length && (rescued || reread || thin.search)) {
+    const again = thinPlan(asked, req.search.results, thinOpts);
+    if (again.fetches.length && again.kind) citeWait = fetchCitePages(env, scope, again.kind, again.fetches).catch(() => []);
+    else if (again.search && again.kind) gapFill = fillFromSearch(asked, req.search, env, scope, again.kind, again.site).catch(() => undefined);
+  }
+  const pageBudgetNow = { ...budget, skip };
+  const pagesReady = reread ? collectPages(req.search.results, env, pageBudgetNow, undefined, scope, req.query) : reading;
+  const [pagesRaw, fetched, filled] = await Promise.all([
+    wantsNamedQuote(req.query) ? pagesReady : Promise.race([pagesReady, new Promise<Awaited<typeof pagesReady>>((resolve) => setTimeout(() => resolve([]), 0))]),
+    citeWait,
+    gapFill ?? Promise.resolve(undefined),
+  ]);
+  let pages = pagesRaw;
+  if (filled?.search) {
+    if (filled.shifted && brief) brief = shiftBrief(brief, filled.shifted.after, filled.shifted.by);
+    if (filled.shifted) pages = renumberPages(pages, filled.shifted.after, filled.shifted.by);
+    req = { ...req, search: filled.search };
+    if (filled.added) {
+      send('peek', filled.search.results.slice(0, PEEK_ROWS).map(({ title, url, domain, date }) => ({ title, url, domain, date })));
+      send('search', req.search);
+    }
+  }
+  if (fetched.length) {
+    const applied = applyFetched(req.search, pages, fetched);
+    req = { ...req, search: applied.search };
+    pages = applied.pages;
+  }
+  pages = pagesFromContent(req.search.results, pages);
+  const addedText = [...fetched.map((page) => page.text), ...(filled?.search ? [filled.search.results.map((row) => row.content ?? '').join('\n')] : [])].join('\n');
+  if (brief?.missing && thin.kind && (snippetSupports(thin.kind, serperCorpus) || (addedText.trim() && snippetSupports(thin.kind, addedText)))) {
+    brief = { ...brief, missing: undefined };
+  }
   mark(scope.ledger, 'pages');
-  const fresh = pages.filter((p) => !req.search.results[p.n - 1]?.content);
+  const fresh = pages.filter((page) => !priorContent.has(normalizeUrl(page.url)));
   if (fresh.length) send('pages', fresh.map(({ n, url, text }) => ({ n, url, text })));
 
   // Page preview images and images from engines that answered late are often the most relevant ones.
@@ -621,6 +667,72 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
         new Promise<{ ready: false; review: undefined }>((resolve) => setTimeout(() => resolve({ ready: false, review: undefined }), 1200)),
       ])
     : { ready: true as const, review: undefined };
+  const searchGaps = async () => {
+    const question = designReq.followup?.question ?? designReq.query;
+    const gaps = cardGaps(shown);
+    if (!gaps.length) return;
+    const originals = new Map<number, CardNode>();
+    for (const gap of gaps) {
+      const node = shown.get(gap.index);
+      if (node && !originals.has(gap.index)) originals.set(gap.index, node);
+    }
+    const query = gapSearchQuery(question, gaps);
+    send('intent', { intent: query, queries: [query] });
+    const marked = new Map<number, CardNode>();
+    for (const gap of gaps) {
+      const base = marked.get(gap.index) ?? originals.get(gap.index);
+      if (!base) continue;
+      const next = markGap(base, gap);
+      marked.set(gap.index, next);
+      shown.set(gap.index, next);
+      send('node', { index: gap.index, node: next });
+    }
+    const restore = () => {
+      for (const [index, node] of originals) {
+        shown.set(index, node);
+        send('node', { index, node });
+      }
+    };
+    try {
+      const found = await Promise.race([
+        searchWithLate({ q: query, freshness: 'any', count: 6, lite: true }, env, scope),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
+      ]);
+      const rows = found?.response.results ?? [];
+      if (!rows.length) {
+        restore();
+        return;
+      }
+      const have = new Set(designReq.search.results.map((row) => row.url));
+      const add = rows.filter((row) => row.url && !have.has(row.url)).slice(0, 4);
+      if (add.length) {
+        send('search', { ...designReq.search, results: [...designReq.search.results, ...add] });
+        send('peek', add.slice(0, 4).map(({ title, url, domain, date }) => ({ title, url, domain, date })));
+      }
+      const base = designReq.search.results.length;
+      const byIndex = new Map<number, PieceGap[]>();
+      for (const gap of gaps) {
+        const list = byIndex.get(gap.index) ?? [];
+        list.push(gap);
+        byIndex.set(gap.index, list);
+      }
+      for (const [index, pieces] of byIndex) {
+        const original = originals.get(index);
+        if (!original) continue;
+        let next = original;
+        for (const gap of pieces) {
+          const cited = add.length ? citeForGap(gap, add) : undefined;
+          const text = cited?.replace(/\[(\d+)\]$/, (_match, n: string) => `[${base + Number(n)}]`);
+          next = settleGap(next, gap, text);
+        }
+        shown.set(index, next);
+        send('node', { index, node: next });
+      }
+    } catch (err) {
+      restore();
+      console.log(JSON.stringify({ zo: 'gap-search', error: err instanceof Error ? err.message : 'failed' }));
+    }
+  };
   const restoreKeptProducts = () => {
     if (!designReq.priorBody?.length) return;
     const question = designReq.followup?.question ?? designReq.query;
@@ -757,6 +869,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   publishReadings();
   alignRates();
   restoreKeptProducts();
+  if (!chat) await searchGaps();
   send('done', { ...summary, pagesRead: pages.length, ms: Date.now() - started });
   if (pendingReview && !arrived.ready) {
     const review = await pendingReview;

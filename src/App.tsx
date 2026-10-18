@@ -22,7 +22,8 @@ import type { SearchResponse } from '../shared/types';
 import { api } from './api';
 import { AnswerCardView } from './card/AnswerCardView';
 import { ResearchTrail } from './card/ResearchTrail';
-import { hasArrivedSources, showWaitingLayout } from './card/waitingLayout';
+import { showWaitingLayout } from './card/waitingLayout';
+import { hasGap } from '../shared/gap';
 import { CardContext, type CardContextValue } from './card/context';
 import { Icon } from './card/Icon';
 import { WhichOne } from './card/WhichOne';
@@ -1035,27 +1036,12 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
   // its hero, tiles, grid and section titles — not a generic pair of shimmer blocks. A later `layout`
   // event (a profile override, a video lead) replaces it with the skeleton the card will actually fill.
   const chosenLayout = turn.live?.regions.length ? turn.live.regions : turn.plan?.skeleton.body ?? [];
-  // An empty search is not a source. The trail stays up until a source row has actually painted,
-  // so the empty comparison slots are not the first frame.
-  const hasSources = hasArrivedSources(turn.search, turn.peek);
-  const [sourcesReady, setSourcesReady] = useState(false);
-  useEffect(() => {
-    if (!hasSources) {
-      setSourcesReady(false);
-      return;
-    }
-    const timer = window.setTimeout(() => setSourcesReady(true), 480);
-    return () => window.clearTimeout(timer);
-  }, [hasSources, turn.id]);
-  // The skeleton is the wait only. A finished card clears `live`, which used to make this true again
-  // and put the placeholder back on top of the result.
+  // The trail stays up until a real component arrives. An empty layout is not shown in its place.
   const layoutReady = showWaitingLayout({
     filling: turn.filling,
     hasResult: !!turn.result,
     answerStarted,
     layoutCount: chosenLayout.length,
-    needsSources: turn.kind === 'search',
-    sourcesReady,
   });
   const card: AnswerCard = useMemo(() => {
     const skeleton = { title: turn.question, body: LOADING };
@@ -1079,6 +1065,9 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
   const spelling = visibleSpelling(turn.question, turn.spelling);
   const waiting = turn.filling && !turn.result && !turn.offline && !turn.error && !answerStarted;
   const trail = waiting && searching ? (
+    <ResearchTrail question={turn.question} intent={turn.intent} peek={turn.peek} search={turn.search} />
+  ) : undefined;
+  const gapTrail = turn.filling && answerStarted && card.body.some(hasGap) ? (
     <ResearchTrail question={turn.question} intent={turn.intent} peek={turn.peek} search={turn.search} />
   ) : undefined;
 
@@ -1178,6 +1167,7 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
               toolbar={!turn.filling && !offlinePartial && turn.result ? <SaveButton query={turn.question} title={card.title} card={card} /> : undefined}
               provisional={provisional}
               trail={trail}
+              gapTrail={gapTrail}
               revealLayout={layoutReady}
             />
           </CardContext.Provider>}

@@ -65,6 +65,14 @@ test('a collapsed region is dropped and does not bring its skeleton back', () =>
   assert.deepEqual(liveBody({ nodes, regions }, false), [text('89°')]);
 });
 
+test('a searched gap is the only placeholder beside components that already have data', () => {
+  const regions = [slot('tiles'), slot('table')];
+  const gap: CardNode = { type: 'slot', hint: 'Weight', shape: 'line' };
+  const nodes: (CardNode | undefined)[] = [text('Fitbit Edge $179'), gap];
+  assert.deepEqual(liveBody({ nodes, regions }, true), [text('Fitbit Edge $179'), gap]);
+  assert.deepEqual(liveBody({ nodes: [gap], regions }, true), []);
+});
+
 test('every node arrived while designing shows them all, no skeleton', () => {
   const regions = [slot('0'), slot('1'), slot('2')];
   const nodes: (CardNode | undefined)[] = [text('0'), text('1'), text('2')];

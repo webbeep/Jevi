@@ -32,7 +32,8 @@ export function liveBody(live: { nodes: (CardNode | undefined)[]; regions: CardN
   const out: CardNode[] = [];
   for (let i = 0; i < live.regions.length; i++) {
     const node = live.nodes[i];
-    if (!node || node.type === 'slot' || isBlankLayout(node)) continue;
+    if (!node || isBlankLayout(node)) continue;
+    // A slot here is one missing piece the server is searching, not the empty layout.
     out.push(node);
   }
   for (let i = live.regions.length; i < live.nodes.length; i++) {

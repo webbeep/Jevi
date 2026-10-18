@@ -229,7 +229,7 @@ export function NodeView({ node }: { node: CardNode }): ReactNode {
     case 'actions': return <Actions node={node} />;
     // Cited sources are listed once, in the card's footer.
     case 'citations': return null;
-    case 'slot': return <SlotView node={node} />;
+    case 'slot': return <div data-testid="gap-slot"><SlotView node={node} /></div>;
     case 'choices': return <Choices node={node} />;
     case 'slider': return <SliderNode node={node} />;
     case 'scaler': return <Scaler node={node} />;

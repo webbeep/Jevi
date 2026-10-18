@@ -42,6 +42,8 @@ export interface CallLedger {
   entity?: { kind: string; id?: string; dropped?: number; choices?: number };
   /** Milliseconds from the ask's start to the first time each stage was reached (server log and `done`). */
   stages?: { at: number; ms: Record<string, number> };
+  /** DeepSeek Search and Fetch calls this ask actually sent. Unset when neither ran. */
+  deepseek?: { search: number; fetch: number };
 }
 
 /** Records the first time this ask reached `stage`. */

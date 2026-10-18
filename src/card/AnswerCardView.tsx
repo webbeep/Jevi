@@ -27,7 +27,7 @@ import { Icon } from './Icon';
 import { hasVideo, Nodes } from './render';
 import { CardTitle } from './primitives';
 
-export function AnswerCardView({ card, ask = '', version, filling, streaming, status, pattern, alternatives, onPattern, simple, onSimple, onRegenerate, onRetry, toolbar, provisional = false, trail, revealLayout = false }: {
+export function AnswerCardView({ card, ask = '', version, filling, streaming, status, pattern, alternatives, onPattern, simple, onSimple, onRegenerate, onRetry, toolbar, provisional = false, trail, gapTrail, revealLayout = false }: {
   card: AnswerCard;
   /** The question this card answers, so a saved chart can be refit without a new search. */
   ask?: string;
@@ -50,6 +50,8 @@ export function AnswerCardView({ card, ask = '', version, filling, streaming, st
   provisional?: boolean;
   /** Shown in place of the body while the searches and their results are still arriving. */
   trail?: ReactNode;
+  /** A search for one missing piece, shown under the components that already have data. */
+  gapTrail?: ReactNode;
   /** The chosen layout is on screen and the answer has not been written yet, so its pieces animate in. */
   revealLayout?: boolean;
 }) {
@@ -184,6 +186,7 @@ export function AnswerCardView({ card, ask = '', version, filling, streaming, st
               </div>
             )}
           </div>
+          {gapTrail && <div className="mt-4">{gapTrail}</div>}
         </CardTitle.Provider>
       </div>
 

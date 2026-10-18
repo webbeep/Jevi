@@ -4,6 +4,7 @@ import { Check, ChevronLeft, ChevronRight, Copy, Globe, Minus, Play, Star, Thumb
 import { actionQuery, askQuestion, isLookupLabel, type AskRef, type Box } from '../../shared/askAbout';
 import type { CardNode, Tone } from '../../shared/card';
 import { factTileLabel } from '../../shared/factTile';
+import { GAP_MARK } from '../../shared/gap';
 import { initials } from '../../shared/initials';
 import type { SearchResult } from '../../shared/types';
 import { cn } from '@/lib/utils';
@@ -751,7 +752,7 @@ export function TableView({ node }: { node: Of<'table'> }) {
           {node.rows.map((r, ri) => (
             <TableRow key={ri}>
               {r.map((cell, ci) => <TableCell key={ci} className={cn('whitespace-normal px-2 py-2 text-[13px] align-top sm:px-3 sm:py-2.5 sm:text-sm', ci === 0 && 'font-medium text-muted-foreground', node.highlight === ci && 'bg-muted/60')}>
-                <RichText text={cell} inline />
+                {cell === GAP_MARK ? <Skeleton data-testid="gap-slot" className="h-3.5 w-24" /> : <RichText text={cell} inline />}
               </TableCell>)}
             </TableRow>
           ))}

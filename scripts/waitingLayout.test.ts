@@ -7,14 +7,12 @@ const waiting = {
   hasResult: false,
   answerStarted: false,
   layoutCount: 3,
-  needsSources: true,
-  sourcesReady: true,
 };
 
-test('the plan skeleton shows once sources have settled and the answer has not started', () => {
-  assert.equal(showWaitingLayout(waiting), true);
-  assert.equal(showWaitingLayout({ ...waiting, sourcesReady: false }), false);
-  assert.equal(showWaitingLayout({ ...waiting, needsSources: false, sourcesReady: false }), true);
+test('the empty layout stays off the source trail until a component has data', () => {
+  assert.equal(showWaitingLayout(waiting), false);
+  assert.equal(showWaitingLayout({ ...waiting, answerStarted: true }), false);
+  assert.equal(showWaitingLayout({ ...waiting, layoutCount: 0 }), false);
 });
 
 test('an empty search is not a source on the card', () => {
@@ -27,6 +25,5 @@ test('an empty search is not a source on the card', () => {
 test('a finished card does not fall back to the placeholder when the live stream is cleared', () => {
   assert.equal(showWaitingLayout({ ...waiting, filling: false, hasResult: true }), false);
   assert.equal(showWaitingLayout({ ...waiting, hasResult: true }), false);
-  assert.equal(showWaitingLayout({ ...waiting, answerStarted: true }), false);
   assert.equal(showWaitingLayout({ ...waiting, filling: false }), false);
 });
