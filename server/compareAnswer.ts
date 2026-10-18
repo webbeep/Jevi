@@ -527,12 +527,14 @@ export function productsOnCard(nodes: readonly CardNode[], images: readonly { th
       const src = picture(node.imageSrc, node.imageRef);
       if (src && !product.imageSrc) product.imageSrc = src;
     }
-    if (node.type === 'table' && node.columns.length >= 2) {
-      node.columns.slice(1).forEach((name, column) => {
+    if (node.type === 'table' && node.rows.some((row) => row.length >= 2)) {
+      const columns = shownColumns(node.columns, node.rows);
+      columns.forEach((name, index) => {
+        if (index === 0 || !name.trim()) return;
         const product = take(name);
         for (const row of node.rows) {
           const factor = (row[0] ?? '').trim();
-          const value = (row[column + 1] ?? '').trim();
+          const value = (row[index] ?? '').trim();
           if (!factor || !value || NOT_STATED.test(value)) continue;
           if (/^price$/i.test(factor) && !product.price) product.price = money(value) ?? value;
           if (!product.rows.some((have) => have.factor.toLowerCase() === factor.toLowerCase())) product.rows.push({ factor, value });
@@ -550,15 +552,30 @@ function withPrice(value: string, price: string): string {
   return MONEY.test(value) ? value.replace(MONEY, price) : price;
 }
 
-/** A measured spec has a number. A slogan ("vibrant", "lightweight") does not. */
+/**
+ * The header the table actually draws. A row that is wider than the header list
+ * is a factor plus one cell per product, so the product names sit on the right.
+ */
+function shownColumns(columns: readonly string[], rows: readonly string[][]): string[] {
+  const width = Math.max(columns.length, ...rows.map((row) => row.length), 0);
+  return [...Array(Math.max(0, width - columns.length)).fill(''), ...columns];
+}
+
+/** Numbers that are a spec. A bracket citation is not one. */
+function measureNumbers(text: string): string[] {
+  const bare = text.replace(/\s*\[(?:\d+\s*,\s*)*\d+\]/g, ' ');
+  return [...bare.matchAll(/\d+(?:\.\d+)?/g)].map((match) => match[0]);
+}
+
+/** A measured spec has a number. A citation like [1] and a slogan ("vibrant", "lightweight") do not. */
 function hasMeasure(text: string): boolean {
-  return /\d/.test(text);
+  return measureNumbers(text).length > 0;
 }
 
 /**
  * A follow-up that adds a product keeps the price and picture already shown for a product
  * that is still in the comparison. A different model's number does not replace that price.
- * "Not stated" is filled from the row the earlier card already had.
+ * A measured spec stays when the new cell is a slogan or a blank, and a dropped measured row comes back.
  */
 export function keepComparedProducts(prior: readonly CardNode[], nodes: Map<number, CardNode>, question: string, images: readonly { thumb: string }[] = []): { index: number; node: CardNode }[] | undefined {
   const kept = productsOnCard(prior, images);
@@ -573,24 +590,48 @@ export function keepComparedProducts(prior: readonly CardNode[], nodes: Map<numb
       if (product.imageSrc) next = { ...next, imageSrc: product.imageSrc, imageRef: undefined, imageQuery: undefined };
       return next;
     }
-    if (node.type === 'table' && node.columns.length >= 2) {
+    if (node.type === 'table' && node.rows.some((row) => row.length >= 2)) {
+      const columns = shownColumns(node.columns, node.rows);
       const rows = node.rows.map((row) => {
         const factor = (row[0] ?? '').trim();
-        return row.map((cell, column) => {
+        const padded = [...row, ...Array(Math.max(0, columns.length - row.length)).fill('')];
+        return padded.map((cell, column) => {
           if (column === 0) return cell;
-          const product = kept.find((item) => sameProduct(item.name, node.columns[column] ?? ''));
+          const product = kept.find((item) => sameProduct(item.name, columns[column] ?? ''));
           if (!product) return cell;
           if (/^price$/i.test(factor)) {
             const price = money(cell);
             if (product.price && price && price !== product.price) return withPrice(cell, product.price);
-            if (product.price && (!cell.trim() || NOT_STATED.test(cell))) return product.price;
+            if (product.price && (!price || NOT_STATED.test(cell) || BLANK_CELL.test(cell))) return product.price;
           }
           const earlier = product.rows.find((item) => item.factor.toLowerCase() === factor.toLowerCase());
           if (earlier && (NOT_STATED.test(cell) || BLANK_CELL.test(cell) || (hasMeasure(earlier.value) && !hasMeasure(cell)))) return earlier.value;
           return cell;
         });
       });
-      return { ...node, rows };
+      const present = new Set(rows.map((row) => (row[0] ?? '').trim().toLowerCase()).filter(Boolean));
+      const pending = new Map<string, string[]>();
+      columns.forEach((name, column) => {
+        if (column === 0 || !name.trim()) return;
+        const product = kept.find((item) => sameProduct(item.name, name));
+        if (!product) return;
+        const shown = rows.map((row) => row[column] ?? '').join('\n');
+        const shownNumbers = new Set(measureNumbers(shown));
+        for (const earlier of product.rows) {
+          const key = earlier.factor.toLowerCase();
+          if (!hasMeasure(earlier.value) || present.has(key)) continue;
+          const numbers = measureNumbers(earlier.value);
+          if (numbers.length && numbers.every((n) => shownNumbers.has(n))) continue;
+          const extra = pending.get(key) ?? columns.map((_, index) => (index === 0 ? earlier.factor : ''));
+          if (!extra[column]) extra[column] = earlier.value;
+          pending.set(key, extra);
+        }
+      });
+      const nextRows = [...rows, ...pending.values()];
+      const sameColumns = columns.length === node.columns.length && columns.every((name, index) => name === node.columns[index]);
+      const sameRows = nextRows.length === node.rows.length && nextRows.every((row, index) => row.length === node.rows[index]?.length && row.every((cell, cellIndex) => cell === node.rows[index]?.[cellIndex]));
+      if (sameColumns && sameRows) return node;
+      return { ...node, columns, rows: nextRows };
     }
     if ('children' in node && Array.isArray(node.children)) {
       const children = node.children.map(visit);

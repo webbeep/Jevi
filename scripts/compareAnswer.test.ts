@@ -289,6 +289,13 @@ test('two figures for one product are the same price, or the other is a labeled 
 
 test('a later comparison keeps a measured spec when the new cell has no measurement', () => {
   const prior: CardNode[] = [{
+    type: 'grid',
+    cols: 2,
+    children: [
+      { type: 'tile', label: 'Harbor Slate', value: '$179.99' },
+      { type: 'tile', label: 'Northwatch 2', value: '$34.99' },
+    ],
+  }, {
     type: 'table',
     columns: ['Factor', 'Harbor Slate', 'Northwatch 2'],
     rows: [
@@ -301,20 +308,33 @@ test('a later comparison keeps a measured spec when the new cell has no measurem
     type: 'table',
     columns: ['Factor', 'Harbor Slate', 'Northwatch 2'],
     rows: [
-      ['Display', 'Vibrant, glanceable', '1.72 AMOLED, 212 x 520 px'],
-      ['Weight', 'Slim, lightweight', '15.95 g'],
-      ['Price', '$179.99', '$34.99'],
+      ['Display', 'Vibrant, glanceable [1]', '1.72 AMOLED, 212 x 520 px [8]'],
+      ['Water resistance', '—', '5ATM'],
+      ['Price', '—', '$34.99'],
     ],
   }]]);
   const patches = keepComparedProducts(prior, next, 'Compare Harbor Slate vs Northwatch 2');
   const table = patches?.find((patch) => patch.index === 0)?.node;
   assert.equal(table?.type, 'table');
   if (table?.type !== 'table') return;
-  assert.equal(table.rows[0]?.[1], '1.34 AMOLED');
-  assert.equal(table.rows[1]?.[1], '17.7 g without band');
-  assert.equal(table.rows[0]?.[2], '1.72 AMOLED, 212 x 520 px');
-  assert.equal(table.rows[2]?.[1], '$179.99');
-  assert.equal(table.rows[2]?.[2], '$34.99');
+  const cell = (factor: string, column: number) => table.rows.find((row) => row[0] === factor)?.[column];
+  assert.equal(cell('Display', 1), '1.34 AMOLED');
+  assert.equal(cell('Display', 2), '1.72 AMOLED, 212 x 520 px [8]');
+  assert.equal(cell('Weight', 1), '17.7 g without band');
+  assert.equal(cell('Weight', 2), '15.95 g');
+  assert.equal(cell('Price', 1), '$179.99');
+  assert.equal(cell('Price', 2), '$34.99');
+  assert.equal(cell('Water resistance', 2), '5ATM');
+  const unheaded = keepComparedProducts(prior, new Map([[0, {
+    type: 'table',
+    columns: ['Harbor Slate', 'Northwatch 2'],
+    rows: [['Display', 'Glanceable display [2]', '1.72 AMOLED']],
+  }]]), 'Compare Harbor Slate vs Northwatch 2');
+  const shifted = unheaded?.find((patch) => patch.index === 0)?.node;
+  assert.equal(shifted?.type, 'table');
+  if (shifted?.type !== 'table') return;
+  assert.equal(shifted.rows.find((row) => row[0] === 'Display')?.[1], '1.34 AMOLED');
+  assert.equal(shifted.rows.find((row) => row[0] === 'Display')?.[2], '1.72 AMOLED');
 });
 
 test('a promo page is not a product photo, and a stated spec fills a blank cell', () => {

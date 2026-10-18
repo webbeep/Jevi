@@ -621,6 +621,16 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
         new Promise<{ ready: false; review: undefined }>((resolve) => setTimeout(() => resolve({ ready: false, review: undefined }), 1200)),
       ])
     : { ready: true as const, review: undefined };
+  const restoreKeptProducts = () => {
+    if (!designReq.priorBody?.length) return;
+    const question = designReq.followup?.question ?? designReq.query;
+    const kept = keepComparedProducts(designReq.priorBody, shown, question, designReq.priorImages);
+    if (!kept) return;
+    for (const patch of kept) {
+      shown.set(patch.index, patch.node);
+      send('node', { index: patch.index, node: patch.node });
+    }
+  };
   const settleComparison = () => {
     const question = designReq.followup?.question ?? designReq.query;
     if (designReq.pattern === 'compare') {
@@ -637,13 +647,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
         }
       }
     }
-    const kept = designReq.priorBody?.length ? keepComparedProducts(designReq.priorBody, shown, question, designReq.priorImages) : undefined;
-    if (kept) {
-      for (const patch of kept) {
-        shown.set(patch.index, patch.node);
-        send('node', { index: patch.index, node: patch.node });
-      }
-    }
+    restoreKeptProducts();
     const extra = missingSideNode(question, [...shown.values()], designReq.search);
     if (!extra) return;
     const index = Math.max(-1, ...shown.keys()) + 1;
@@ -745,6 +749,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   settleMembers();
   publishReadings();
   alignRates();
+  restoreKeptProducts();
   send('done', { ...summary, pagesRead: pages.length, ms: Date.now() - started });
   if (pendingReview && !arrived.ready) {
     const review = await pendingReview;
@@ -754,6 +759,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     settleMembers();
     publishReadings();
     alignRates();
+    restoreKeptProducts();
     mark(scope.ledger, 'reviewed');
   } else if (pendingReview) {
     mark(scope.ledger, 'reviewed');
@@ -1661,6 +1667,8 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
       search: req.search,
       followup: { mode: 'answer', question: req.question },
       context: [lock, context].filter(Boolean).join('\n') || undefined,
+      priorBody: onScreen?.body,
+      priorImages: req.search?.images,
     }, started, scope);
     return;
   }
