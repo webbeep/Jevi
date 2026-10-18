@@ -89,3 +89,23 @@ export function cleanMarkdown(md: string, max = 6000): string {
     .replace(/\n{2,}/g, '\n');
   return text.length > max ? `${text.slice(0, max)}…` : text;
 }
+
+/** A DOI, an arXiv id or a link. Its digits name a record, they are not a figure to ground. */
+const IDENTIFIER = /\b10\.\d{4,9}\/[-._;()/:a-z0-9]+|\barxiv:\s?\d{4}\.\d{4,5}(?:v\d+)?|\barxiv\.org\/(?:abs|pdf)\/\d{4}\.\d{4,5}(?:v\d+)?|\bhttps?:\/\/[^\s<>"')\]]+/gi;
+
+/** The identifiers in `text`, lowercased, without a trailing full stop or bracket. */
+export function identifiersIn(text: string): string[] {
+  return (text.match(IDENTIFIER) ?? []).map((id) => id.toLowerCase().replace(/[.,;:)]+$/, '').replace(/^arxiv:\s?/, 'arxiv:'));
+}
+
+/** `text` with its identifiers blanked, so only the figures it states are left to check. */
+export function withoutIdentifiers(text: string): string {
+  return text.replace(IDENTIFIER, ' ');
+}
+
+/** The DOI or arXiv number inside an identifier, so "https://doi.org/10.1111/x" and "10.1111/x" are one record. */
+export function recordKey(id: string): string {
+  return id.match(/10\.\d{4,9}\/[-._;()/:a-z0-9]+/i)?.[0].toLowerCase().replace(/[.,;:)]+$/, '')
+    ?? id.match(/\d{4}\.\d{4,5}(?:v\d+)?/)?.[0].replace(/v\d+$/, '')
+    ?? id.toLowerCase();
+}

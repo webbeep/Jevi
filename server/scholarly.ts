@@ -74,6 +74,8 @@ export type Work = {
   primary_location?: { source?: { display_name?: string } | null; landing_page_url?: string | null } | null;
   abstract_inverted_index?: Record<string, number[]> | null;
   abstract?: string;
+  /** PubMed tags this work as a randomized controlled trial. */
+  trial?: boolean;
 };
 
 function abstractOf(index: Work['abstract_inverted_index']): string {
@@ -218,6 +220,50 @@ async function crossrefWorks(topic: string): Promise<Work[]> {
   return (data.message?.items ?? []).map(crossrefToWork).sort((a, b) => (b.cited_by_count ?? 0) - (a.cited_by_count ?? 0));
 }
 
+/** "randomized trials of semaglutide", "RCTs", "clinical trials": the ask is for trials, not any paper on the topic. */
+const TRIAL_ASK = /\b(?:randomi[sz]ed|rcts?|(?:clinical|controlled) trials?|trials?)\b/i;
+const TRIAL_WORDS = /\b(?:randomi[sz]ed|controlled|clinical|rcts?|trials?)\b/gi;
+/** A review, a pooled analysis or a protocol is about trials. It is not one. */
+const NOT_A_TRIAL = /\b(?:systematic review|meta-?analys[ie]s|review|protocol|rationale and design|design and rationale|pooled analysis|post hoc|strategies)\b/i;
+
+export function isTrialAsk(query: string): boolean {
+  return isPaperAsk(query) && TRIAL_ASK.test(query);
+}
+
+type PubmedSummary = { title?: string; pubdate?: string; fulljournalname?: string; source?: string; authors?: { name?: string }[]; articleids?: { idtype?: string; value?: string }[]; pubtype?: string[] };
+
+/**
+ * Randomized controlled trials from PubMed (keyless), which tags each article with its study design,
+ * so a review or a protocol never stands in for a trial. Most relevant first.
+ */
+async function pubmedTrials(topic: string): Promise<Work[]> {
+  const subject = topic.replace(TRIAL_WORDS, ' ').replace(/\s+/g, ' ').trim();
+  if (subject.length < 3) return [];
+  const base = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils';
+  const term = encodeURIComponent(`${subject} AND randomized controlled trial[pt]`);
+  const found = await getJson<{ esearchresult?: { idlist?: string[] } }>(`${base}/esearch.fcgi?db=pubmed&retmode=json&retmax=8&sort=relevance&tool=zo&term=${term}`);
+  const ids = found.esearchresult?.idlist ?? [];
+  if (!ids.length) return [];
+  const summary = await getJson<{ result?: Record<string, PubmedSummary> & { uids?: string[] } }>(`${base}/esummary.fcgi?db=pubmed&retmode=json&tool=zo&id=${ids.join(',')}`);
+  const result = summary.result;
+  if (!result) return [];
+  return ids.flatMap((id): Work[] => {
+    const row = result[id] as PubmedSummary | undefined;
+    const doi = row?.articleids?.find((item) => item.idtype === 'doi')?.value;
+    if (!row?.title || !doi) return [];
+    const year = Number(row.pubdate?.match(/\b(19|20)\d{2}\b/)?.[0]);
+    return [{
+      doi,
+      title: row.title.replace(/\.$/, ''),
+      publication_year: Number.isFinite(year) ? year : undefined,
+      authorships: (row.authors ?? []).map((author) => ({ author: { display_name: author.name } })),
+      primary_location: { source: { display_name: row.fulljournalname ?? row.source ?? '' } },
+      abstract: (row.pubtype ?? []).join(', '),
+      trial: true,
+    }];
+  });
+}
+
 async function arxivWorks(topic: string): Promise<Work[]> {
   const q = encodeURIComponent(topic);
   const paths = [
@@ -276,14 +322,23 @@ export function mergeWorks(groups: { via: string; works: Work[] }[]): { via: str
 }
 
 /** OpenAlex, Crossref, and arXiv in parallel. Any empty or failing catalog is skipped. */
-async function works(topic: string, preprint = false): Promise<{ via: string; works: Work[] }> {
-  const [oa, cr, ax] = await Promise.allSettled([openAlexWorks(topic, preprint), crossrefWorks(topic), arxivWorks(topic)]);
-  return mergeWorks([settledWorks('openalex', oa), settledWorks('crossref', cr), settledWorks('arxiv', ax)].filter((g): g is { via: string; works: Work[] } => !!g));
+async function works(topic: string, preprint = false, trials = false): Promise<{ via: string; works: Work[] }> {
+  const [pm, oa, cr, ax] = await Promise.allSettled([trials ? pubmedTrials(topic) : Promise.resolve([]), openAlexWorks(topic, preprint), crossrefWorks(topic), arxivWorks(topic)]);
+  // Trials tagged by PubMed lead: the catalogs rank reviews of those trials above the trials themselves.
+  return mergeWorks([settledWorks('pubmed', pm), settledWorks('openalex', oa), settledWorks('crossref', cr), settledWorks('arxiv', ax)].filter((g): g is { via: string; works: Work[] } => !!g));
+}
+
+/** On a trial ask, a review or protocol is dropped, and a PubMed-tagged trial goes first. */
+export function trialsFirst(found: Work[], query: string): Work[] {
+  if (!isTrialAsk(query)) return found;
+  const trials = found.filter((work) => !NOT_A_TRIAL.test(work.title ?? ''));
+  return [...trials.filter((work) => work.trial), ...trials.filter((work) => !work.trial)];
 }
 
 /** A paper's title has to share the question's topic. An unrelated DOI, whatever its year, does not. */
 export function paperOnTopic(query: string, title: string, snippet = ''): boolean {
-  const topic = paperTopic(query).toLowerCase().split(/\s+/).filter((word) => word.length >= 3);
+  // "randomized trials" says what kind of paper, not what it is about: an ML paper on trial analysis is off topic.
+  const topic = paperTopic(query).replace(TRIAL_WORDS, ' ').toLowerCase().split(/\s+/).filter((word) => word.length >= 3);
   if (topic.length < 2) return true;
   const text = `${title} ${snippet}`.toLowerCase();
   const hit = topic.filter((word) => text.includes(word));
@@ -373,10 +428,10 @@ export async function scholarlyResults(query: string): Promise<SearchResult[]> {
   const started = Date.now();
   try {
     const preprintAsk = isPreprintAsk(query);
-    const found = await works(topic, preprintAsk);
+    const found = await works(topic, preprintAsk, isTrialAsk(query));
     const anchor = paperAnchor(query);
     const matched = anchor ? found.works.filter((work) => workMatches(work, anchor)) : found.works;
-    const onTopic = matched.filter((work) => paperOnTopic(query, work.title ?? '', work.abstract ?? ''));
+    const onTopic = trialsFirst(matched.filter((work) => paperOnTopic(query, work.title ?? '', work.abstract ?? '')), query);
     const out = pickWorks(onTopic, query).map((work) => workToResult(work, preprintAsk)).filter((r): r is SearchResult => !!r).slice(0, MAX);
     console.log(JSON.stringify({ zo: 'scholar', via: found.via, n: out.length, ms: Date.now() - started }));
     return out;

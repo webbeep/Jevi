@@ -71,7 +71,7 @@ import type { WebHit } from './cascade';
 import { domainOf } from './util';
 import { choicesIn, distinctActions, subjectWords } from './chips';
 import { anchoredFollowup, asksToCompare, comparisonFollow, cryptographyHint, faithfulQuery, followSearchQuery, foreignName, isWritingAsk, lockChainQuery, needsOwnSearch, ownQuestion, personQuestion, quickPlan, quoteFollowQuery, sameSubjectQuery, screenSubject, scrubLeak, sourcesCover, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
-import { calculationAnswer, isCalculationAsk, rateOnAmount } from './calculate';
+import { calculationAnswer, isCalculationAsk, leadTaxedTotal, rateOnAmount, splitShare } from './calculate';
 import { acceptProductPhoto, appendAskedFact, comparisonRepair, comparisonTitle, dropShownDenials, keepComparedProducts, mentionsSide, missingSideNode, nameForms, placeSidePhotos, restoreSideTiles, stickerPrice } from './compareAnswer';
 import { cardGaps, citeForGap, gapSearchQuery, settleGap, type PieceGap } from './gapFill';
 import { unblendObjects } from './objectFacts';
@@ -89,7 +89,7 @@ import { isQuoteRow, liveQuote, quoteRow, tickerNode } from './liveQuote';
 import { cleanSideName } from '../shared/objects';
 import { cardCitesName, citedNames, nameSeekingQuery, namedListNode, wantsNamedList } from './namedList';
 import { addedComparison, followSearchPlan, judgeSources, judgeTurn } from './turnJudge';
-import { findTicker } from '../shared/tickerNotes';
+import { deniesPrice, findTicker } from '../shared/tickerNotes';
 import { splitPeople } from './peopleSplit';
 import { personSteer, pronounFollow, roleFollow, threadPerson, topicOnly, withoutChosen } from './personSteer';
 import type { Send } from './sse';
@@ -634,6 +634,8 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       const aboutPerson = !!locked && (designReq.pattern === 'profile' || !!designReq.person || isPersonAsk(question));
       const title = designReq.pattern === 'compare' ? comparisonTitle(question, h.title) : personCardTitle(question, h.title, aboutPerson ? locked : undefined);
       head = title === h.title ? h : { ...h, title };
+      // The live chart shows the price. A subtitle saying none came back is false.
+      if (designReq.ticker && deniesPrice(head.subtitle)) head = { ...head, subtitle: undefined };
       publishReadings();
     },
     node: (node, index) => {
@@ -827,6 +829,15 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       else if (node !== nodes[i]) publish(index, node);
     });
   };
+  // A "what would I pay with tax" card leads with the taxed total, not the bare price beside a rate.
+  const leadTotal = () => {
+    const indexes = [...shown.keys()].sort((a, b) => a - b);
+    const nodes = indexes.map((index) => shown.get(index)!);
+    const next = leadTaxedTotal(questionOf(), nodes);
+    next?.forEach((node, i) => {
+      if (node !== nodes[i]) publish(indexes[i]!, node);
+    });
+  };
   const alignRates = () => {
     const asked = designReq.followup?.question ?? designReq.query;
     const sources = claimSources(designReq.search.results, pages);
@@ -850,6 +861,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   settleMembers();
   publishReadings();
   alignRates();
+  leadTotal();
   restoreKeptProducts();
   const askedNames = designReq.followup?.question && wantsNamedList(designReq.followup.question)
     ? designReq.followup.question
@@ -1677,6 +1689,22 @@ function engineErrors(engines: EngineStatus[]): string[] {
   return engines.filter((engine) => engine.error).map((engine) => `${engine.name}:${engine.error}`);
 }
 
+/** What a card settles: its subtitle and the first hero or sentence, where a verdict like "No — One WTC is still the tallest" sits. */
+function cardLead(card: AnswerCard): string {
+  const first = (nodes: readonly CardNode[]): string => {
+    for (const node of nodes) {
+      if (node.type === 'hero') return `${node.label ?? ''} ${node.value} ${node.caption ?? ''}`;
+      if (node.type === 'text') return node.text;
+      if ('children' in node && Array.isArray(node.children)) {
+        const inner = first(node.children);
+        if (inner) return inner;
+      }
+    }
+    return '';
+  };
+  return [card.subtitle ?? '', first(card.body)].join(' ').trim();
+}
+
 async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind: 'followup' }>, started: number, scope: AskScope) {
   const cleaned = plainFollowup(req.question);
   if (cleaned !== req.question) req = { ...req, question: cleaned };
@@ -1721,6 +1749,20 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
       send('plan', { ...plan, mode: 'chat' });
       send('head', { title: rated.title, subtitle: rated.subtitle });
       rated.nodes.forEach((node, index) => send('node', { index, node }));
+      send('done', { engine: 'reasoning', removed: 0, pagesRead: 0, ms: Date.now() - started });
+      return;
+    }
+  }
+
+  // "If my brother and I split it" divides the total already on the card, worked from its most precise tax rate.
+  if (req.intent !== 'search' && req.intent !== 'adjust') {
+    const priorCard = from?.card ?? [...req.cards].reverse().find((c) => c.card)?.card;
+    const split = splitShare({ question: req.question, card: priorCard });
+    if (split) {
+      const plan = quickPlan(req.original, 'chat');
+      send('plan', { ...plan, mode: 'chat' });
+      send('head', { title: split.title, subtitle: split.subtitle });
+      split.nodes.forEach((node, index) => send('node', { index, node }));
       send('done', { engine: 'reasoning', removed: 0, pagesRead: 0, ms: Date.now() - started });
       return;
     }
@@ -1832,15 +1874,16 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
     };
     console.log(JSON.stringify({ zo: 'judge-turn', action: decision.action, subject: decision.subject, queries: decision.queries, model: !!judged }));
     const planned = decision.action === 'search'
-      ? followSearchPlan({ title: onScreen?.title, question: req.question, queries: decision.queries, subject: decision.subject })
+      ? followSearchPlan({ title: onScreen?.title, question: req.question, queries: decision.queries, subject: decision.subject, lead: onScreen ? cardLead(onScreen) : '' })
       : undefined;
+    const subject = planned?.subject ?? decision.subject;
     const lock = planned?.added
       ? `${planned.added} is its own object. Use only a price, photo, spec, or citation from a source that names it. Do not copy those from another object.`
-      : decision.subject
-        ? `This turn is about ${cleanSideName(decision.subject)}. Answer the new question about that subject. A label is the object name, not the question.`
+      : subject
+        ? `This turn is about ${cleanSideName(subject)}. Answer the new question about that subject. A label is the object name, not the question.`
         : '';
     if (decision.action === 'search' && planned) {
-      scope.bound = `${decision.subject}\n${req.question}`;
+      scope.bound = `${subject}\n${req.question}`;
       send('rewrite', { query: planned.query });
       await searchAndDesign(send, env, planned.query, 'any', [lock, context].filter(Boolean).join('\n') || undefined, started, scope, true, undefined, undefined, undefined, onScreen?.body, req.search?.images, planned.fanout, req.question);
       return;

@@ -1,5 +1,5 @@
 import type { CardNode } from '../shared/card';
-import { SENTENCE_BREAK, citedSentences, joinSpacedDecimals } from '../shared/text';
+import { SENTENCE_BREAK, citedSentences, joinSpacedDecimals, withoutIdentifiers } from '../shared/text';
 import { factAnswer } from './hops';
 import { numberTokens } from './ground';
 import { completeCutDecimal, withoutEmptySlots } from './polish';
@@ -87,7 +87,7 @@ export function shoppingAsk(query: string): boolean {
 
 function significant(text: string): string[] {
   // "19th" is an ordinal label. Stripping the digits leaves a hole ("th century").
-  const quantities = text.replace(/\[\d+\]/g, '').replace(/\b\d+(?:st|nd|rd|th)\b/gi, ' ');
+  const quantities = withoutIdentifiers(text).replace(/\[\d+\]/g, '').replace(/\b\d+(?:st|nd|rd|th)\b/gi, ' ');
   return numberTokens(quantities).filter((num) => Number(num) > FREE);
 }
 

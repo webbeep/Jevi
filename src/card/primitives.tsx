@@ -83,6 +83,8 @@ function useCountUp(value: string, ms = 700): string {
 
 export function Hero({ node }: { node: Of<'hero'> }) {
   const value = useCountUp(node.value);
+  // A saved "60°" with unit "°F" reads 60°F, not 60°°F.
+  const unit = node.unit && /°$/.test(node.value) ? node.unit.replace(/^°/, '') : node.unit;
   return (
     <div className="flex min-w-0 flex-col">
       {node.label && (
@@ -94,7 +96,7 @@ export function Hero({ node }: { node: Of<'hero'> }) {
       <div className="flex items-start gap-3">
         <span className={cn('text-[52px] font-semibold leading-[0.95] tracking-[-0.045em] sm:text-[64px]', node.value.length > 8 && node.value.length <= 14 && 'text-[36px] leading-[1.05] tracking-[-0.035em] sm:text-[64px] sm:leading-[0.95] sm:tracking-[-0.045em]', node.value.length > 14 && 'text-[32px] leading-tight tracking-[-0.03em] sm:text-[40px]', TONE_TEXT[node.tone === 'primary' || !node.tone ? 'default' : node.tone])}>
           <span className="tabular-nums" style={{ color: returnColor(plain(node.value), plain(node.label ?? '')) }}>{plain(value)}</span>
-          {node.unit && <span className="ml-1 align-top text-xl font-normal tracking-[-0.02em] text-muted-foreground sm:text-2xl">{node.unit}</span>}
+          {unit && <span className="ml-1 align-top text-xl font-normal tracking-[-0.02em] text-muted-foreground sm:text-2xl">{unit}</span>}
         </span>
         {node.icon && <Icon name={node.icon} className="mt-1 size-10 text-muted-foreground/60 sm:size-12" />}
       </div>

@@ -139,10 +139,34 @@ export function addedComparison(question: string, titles: readonly string[]): { 
 }
 
 /** The searches for this follow-up. A comparison keeps every product in the query and in the fan-out. */
-export function followSearchPlan(input: { title?: string; question: string; queries: string[]; subject: string }): { query: string; fanout: string[]; added?: string } {
+/** The side a lead sentence names: "One WTC" in "No — One World Trade Center is still the tallest" (an initialism counts). */
+export function sideNamed(lead: string, side: string): boolean {
+  const text = lead.replace(/\s+/g, ' ').trim();
+  if (!text) return false;
+  if (text.toLowerCase().includes(side.toLowerCase())) return true;
+  const initials = text.split(/[^A-Za-z0-9]+/).filter((word) => /^[A-Z]/.test(word)).map((word) => word[0]).join('');
+  const words = side.split(/\s+/).filter(Boolean);
+  return words.length > 0 && words.every((word) => {
+    if (new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(text)) return true;
+    return /^[A-Z]{2,5}$/.test(word) && initials.includes(word);
+  });
+}
+
+const SINGULAR_POINTER = /\b(?:it|its|it's|he|she|his|her)\b/i;
+
+export function followSearchPlan(input: { title?: string; question: string; queries: string[]; subject: string; lead?: string }): { query: string; fanout: string[]; added?: string; subject?: string } {
   const title = input.title?.replace(/\s+/g, ' ').trim() ?? '';
   const asked = input.question.replace(/^(?:and|so)\s+/i, '').trim();
   const sides = uniqueSides(compareSides(title).map((side) => cleanSideName(side)));
+  // "When did it open?" on a card whose lead settles one side ("No — One WTC is still the tallest") is about that side.
+  const pointed = sides.length >= 2 && SINGULAR_POINTER.test(asked) && !sides.some((side) => sideNamed(asked, side))
+    ? sides.filter((side) => sideNamed(input.lead ?? '', side))
+    : [];
+  if (pointed.length === 1) {
+    const side = pointed[0]!;
+    const query = asked.replace(/\bit's\b/i, `${side} is`).replace(SINGULAR_POINTER, side).replace(/[?.!]+$/, '');
+    return { query, fanout: [], subject: side };
+  }
   if (sides.length >= 2) {
     const intro = objectPhrase(asked, sides);
     if (intro?.kind === 'switch') return { query: intro.name, fanout: [intro.name], added: intro.name };

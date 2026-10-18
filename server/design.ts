@@ -275,7 +275,7 @@ function briefRules(req: DesignRequest): string {
     b.stale.length ? `- ${refs(b.stale)} are outdated for this ask: never present their facts or numbers as current; leave them out.` : '',
     b.offTopic.length ? `- ${refs(b.offTopic)} are about something else (another person, product, place or period): never use them.` : '',
     b.conflicts.length ? `- Sources disagree: ${b.conflicts.join(' ')} Trust the live or newest authoritative source and date the figure you show.` : '',
-    b.missing && !(req.ticker && CHART_TALK.test(b.missing)) ? `- The sources don't answer: ${b.missing} Say that in one short warning callout. The title still names what was asked. Do not lead with a hero whose only point is that the sources were the wrong subject.` : '',
+    b.missing && !(req.ticker && (CHART_TALK.test(b.missing) || /\b(?:price|quote|market data|trading)\b/i.test(b.missing))) ? `- The sources don't answer: ${b.missing} Say that in one short warning callout. The title still names what was asked. Do not lead with a hero whose only point is that the sources were the wrong subject.` : '',
   ].filter(Boolean).join('\n');
 }
 
@@ -336,6 +336,11 @@ function taskBlock(req: DesignRequest): string {
 }
 
 /** Numbers the card may show: never from a source the brief found outdated or about something else. */
+/** The source links, where a paper's DOI or arXiv number usually is. */
+function linksOf(req: DesignRequest): string {
+  return req.search.results.map((row) => row.url).join(' ');
+}
+
 export function corpusOf(req: DesignRequest): string {
   const rejected = rejectedSources(req.brief, Math.min(req.search.results.length, BRIEF_ROWS));
   return [
@@ -420,7 +425,7 @@ function parseLine(line: string, g: Grounding, imageCount: number, query: string
 /** A node written outside the design stream (the answer review) passes the same sanitize and grounding gates. */
 export function gateNode(raw: unknown, req: DesignRequest): CardNode | undefined {
   const chat = req.followup?.mode === 'chat';
-  const g = new Grounding(corpusOf(req), chat);
+  const g = new Grounding(corpusOf(req), chat, linksOf(req));
   const claims = chat ? [] : claimSources(req.search.results, req.pages);
   const parsed = parseLine(JSON.stringify(raw), g, Math.min(req.search.images.length, 12), req.query, priceSources(req), req.followup?.question ?? req.query, claims, corpusOf(req));
   const node = parsed?.kind === 'node' ? emitReady(parsed.node, req.search.results.length === 0) : undefined;
@@ -456,7 +461,7 @@ export async function designStream(req: DesignRequest, env: Env, on: DesignEvent
   const chat = req.followup?.mode === 'chat';
   const corpus = corpusOf(req);
   const claims = chat ? [] : claimSources(req.search.results, req.pages);
-  const g = new Grounding(corpus, chat);
+  const g = new Grounding(corpus, chat, linksOf(req));
   const polish = new Polisher(textCap(req));
   const pictures = new PictureResolver(env, req.search.images, on.credit, req.query, undefined, req.rowImages && { ...req.rowImages, results: req.search.results });
   const emitNode = bindVerdict(req, on.node);
@@ -580,7 +585,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
   const sources = priceSources(req);
   const corpus = corpusOf(req);
   const claims = claimSources(req.search.results, req.pages);
-  const g = new Grounding(corpus);
+  const g = new Grounding(corpus, false, linksOf(req));
   const pictures = new PictureResolver(env, req.search.images, on.credit, req.query, undefined, req.rowImages && { ...req.rowImages, results: req.search.results });
   const emitNode = bindVerdict(req, on.node);
   const polish = new Polisher(textCap(req));

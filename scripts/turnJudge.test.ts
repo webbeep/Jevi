@@ -100,3 +100,19 @@ test('a source decision names one more search only when the snippets are not eno
   assert.equal(parseSourceDecision({ enough: false, query: '' }), undefined);
   assert.equal(parseSourceDecision({ enough: 'yes' }), undefined);
 });
+
+test('a singular follow-up on a comparison card asks about the side its lead settles', () => {
+  const plan = followSearchPlan({
+    title: 'Empire State Building vs. One WTC',
+    question: 'When did it open?',
+    queries: ['Empire State Building One WTC When did it open?'],
+    subject: 'Empire State Building',
+    lead: 'No — One World Trade Center is still the tallest One World Trade Center is the tallest No',
+  });
+  assert.equal(plan.query, 'When did One WTC open');
+  assert.equal(plan.subject, 'One WTC');
+  assert.deepEqual(plan.fanout, []);
+  // Without a lead that picks one side, "each" still searches both.
+  const both = followSearchPlan({ title: 'Harbor Slate vs Northwatch 2', question: 'When did it launch?', queries: [], subject: '', lead: 'Two smartwatches, side by side' });
+  assert.equal(both.query, 'Harbor Slate vs Northwatch 2');
+});

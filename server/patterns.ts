@@ -35,17 +35,38 @@ export function withoutLeadVerb(text: string): string {
 
 /** The things a comparison names ("AJ Dybantsa vs 2026 NBA rookies vs past draft classes" is three). */
 export function compareSides(query: string): string[] {
-  const stripped = query.replace(/^(?:which is better(?: value)?|compare)\s*:\s*/i, '').trim();
-  const versus = stripped.split(/\s+(?:vs\.?|versus)\s+/i).map((part) => withoutLeadVerb(part)).filter((part) => part.length >= 2);
-  if (versus.length >= 2) return versus;
-  const listed = stripped.match(/^compare\s+(.+)$/i);
+  const asked = query.replace(/^(?:which is better(?: value)?|compare)\s*:\s*/i, '').trim();
+  // "X and Y side by side: price and storage" compares X and Y. What comes after the colon is what to compare them on,
+  // unless the comparison itself comes after it ("Phones: iPhone 17 vs Pixel 10").
+  const before = sidesIn(asked.replace(/\s*:\s+.*$/, ''));
+  if (before.length) return before;
+  const after = asked.match(/:\s+(.+)$/)?.[1];
+  const listed = after ? sidesIn(after) : [];
+  return listed.length ? listed : sidesIn(asked);
+}
+
+function sidesIn(asked: string): string[] {
+  const stripped = asked
+    .replace(/[\s,]+(?:side[\s-]by[\s-]side|head[\s-]to[\s-]head)\s*$/i, '')
+    .replace(/[.?!]+$/, '')
+    .trim();
+  // "Make a table comparing A and B" asks for the same comparison as "Compare A and B".
+  const lead = stripped.replace(/^.*?\bcomparing\s+/i, 'compare ');
+  const versus = lead.split(/\s+(?:vs\.?|versus)\s+/i).map((part) => withoutLeadVerb(part)).filter((part) => part.length >= 2);
+  if (versus.length >= 2) return versus.map(sideName);
+  const listed = lead.match(/^compare\s+(.+)$/i);
   if (listed) {
     const sides = listSides(listed[1]!);
-    if (sides.length >= 2) return sides;
+    if (sides.length >= 2) return sides.map(sideName);
   }
-  const compared = stripped.match(/^compare\s+(.+?)\s+(?:and|with|to)\s+(.+)$/i);
+  const compared = lead.match(/^compare\s+(.+?)\s+(?:and|with|to)\s+(.+)$/i);
   if (!compared) return [];
-  return [compared[1]!, compared[2]!].map((p) => p.trim()).filter((p) => p.length >= 2);
+  return [compared[1]!, compared[2]!].map(sideName).filter((p) => p.length >= 2);
+}
+
+/** "the iPhone 17" is the iPhone 17, and "a traditional IRA for 2026" is a traditional IRA: the year scopes the whole question. */
+function sideName(side: string): string {
+  return side.trim().replace(/^(?:the|a|an)\s+/i, '').replace(/\s+(?:for|in)\s+(?:(?:19|20)\d\d|the U\.?S\.?|the United States)$/i, '').trim();
 }
 
 /**

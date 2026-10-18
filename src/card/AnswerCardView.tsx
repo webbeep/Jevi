@@ -18,7 +18,7 @@ import {
 import { cardPlainText } from '../../shared/cardText';
 import { publicShareUrl } from '../../shared/publicUrl';
 import { fitNode } from '../../shared/fitChart';
-import { tickerRows } from '../../shared/tickerNotes';
+import { deniesPrice, findTicker, tickerRows } from '../../shared/tickerNotes';
 import { citedRefs } from '../library';
 import { LogoMark } from '../Logo';
 import { FaviconStack } from '../Sources';
@@ -69,6 +69,8 @@ export function AnswerCardView({ card, keys, ask = '', version, filling, streami
   );
   const body = useMemo(() => rows.map((row) => row.node), [rows]);
   const bodyKeys = useMemo(() => (keys ? rows.map((row) => row.key) : undefined), [rows, keys]);
+  // Beside the live chart, a subtitle saying no price came back is false.
+  const subtitle = card.subtitle && deniesPrice(card.subtitle) && findTicker(card.body) ? undefined : card.subtitle;
   // A rounded overflow clip on an ancestor snapshots a cross-origin player, so its frames arrive late.
   const embed = body.some(hasVideo);
   const cited = useMemo(() => (filling ? [] : citedRefs(card).flatMap((n) => (results[n - 1] ? [results[n - 1]] : []))), [filling, card, results]);
@@ -106,8 +108,8 @@ export function AnswerCardView({ card, keys, ask = '', version, filling, streami
         </div>
         <div className="min-w-0 flex-1 self-center">
           <h2 className={cn('text-balance text-[16.5px] font-semibold leading-[1.3] tracking-[-0.02em] sm:text-[17px]', provisional && 'line-clamp-1')}>{withoutRepeatedLead(card.title)}</h2>
-          {card.subtitle && (
-            <p className={cn('mt-0.5 text-pretty text-[13px] leading-snug text-muted-foreground', provisional && 'line-clamp-1')}>{card.subtitle}</p>
+          {subtitle && (
+            <p className={cn('mt-0.5 text-pretty text-[13px] leading-snug text-muted-foreground', provisional && 'line-clamp-1')}>{subtitle}</p>
           )}
         </div>
         <div className="flex shrink-0 items-center">

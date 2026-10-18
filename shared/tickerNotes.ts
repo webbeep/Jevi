@@ -6,6 +6,18 @@ const UNAVAILABLE = /\b(no|not|unavailable|missing|isn'?t|aren'?t|couldn'?t|can'
 
 export const saysChartMissing = (text: string) => CHART_TALK.test(text) && UNAVAILABLE.test(text);
 
+/** "No current Nvidia price came back", "Live quote unavailable": false beside the chart that shows the price. */
+const PRICE_DENIAL = /\b(?:no|not|unavailable|couldn'?t|can'?t|cannot|wasn'?t|isn'?t)\b[^.!?]{0,60}\b(?:price|quote|market data)\b|\b(?:price|quote|market data)\b[^.!?]{0,40}\b(?:unavailable|not available|be confirmed|came back|found)\b/i;
+
+export function deniesPrice(text: string | undefined): boolean {
+  return !!text && PRICE_DENIAL.test(text) && /\b(?:no|not|unavailable|couldn'?t|can'?t|cannot|wasn'?t|isn'?t)\b/i.test(text);
+}
+
+/** A sentence that says the price is missing is dropped; the rest of the paragraph stays. */
+function withoutPriceDenial(text: string): string {
+  return text.split(/(?<=[.!?])\s+/).filter((sentence) => !deniesPrice(sentence)).join(' ').trim();
+}
+
 /**
  * Next to a ticker: a model-drawn chart only repeats the price, worse, and a note that a chart is missing is wrong.
  * Used on the server before a node is sent, and in the client for cards saved before that check existed.
@@ -13,6 +25,11 @@ export const saysChartMissing = (text: string) => CHART_TALK.test(text) && UNAVA
 export function withoutCharts(node: CardNode | undefined): CardNode | undefined {
   if (!node || node.type === 'chart') return undefined;
   if ((node.type === 'callout' || node.type === 'text') && saysChartMissing(`${node.type === 'callout' ? node.title ?? '' : ''} ${node.text}`)) return undefined;
+  if (node.type === 'hero' && deniesPrice(`${node.label ?? ''} ${node.value} ${node.caption ?? ''}`)) return undefined;
+  if ((node.type === 'callout' || node.type === 'text') && deniesPrice(node.text)) {
+    const text = withoutPriceDenial(node.text);
+    return text ? { ...node, text } : undefined;
+  }
   if (node.type === 'tabs') {
     const tabs = node.tabs.map((t) => ({ ...t, children: t.children.map(withoutCharts).filter((c): c is CardNode => !!c) })).filter((t) => t.children.length);
     return tabs.length ? { ...node, tabs } : undefined;

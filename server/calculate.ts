@@ -821,3 +821,135 @@ function combine(kind: Exclude<Op, 'bare' | 'rate'>, figures: Figure[]): number 
     }
   }
 }
+
+/** Every labeled figure on a card: hero, stat, tile, key-value row and table row, with the label beside it. */
+function labeledFigures(nodes: readonly CardNode[]): { label: string; value: string }[] {
+  const out: { label: string; value: string }[] = [];
+  const walk = (node: CardNode) => {
+    switch (node.type) {
+      case 'hero':
+        out.push({ label: `${node.label ?? ''} ${node.caption ?? ''}`, value: node.value });
+        return;
+      case 'stat':
+        out.push({ label: node.label, value: node.value });
+        return;
+      case 'tile':
+        out.push({ label: `${node.label} ${node.sub ?? ''}`, value: node.value ?? '' });
+        return;
+      case 'keyvalue':
+        for (const item of node.items) out.push({ label: item.label, value: item.value });
+        return;
+      case 'table':
+        for (const row of node.rows) out.push({ label: row[0] ?? '', value: row.slice(1).join(' ') });
+        return;
+      case 'tabs':
+        node.tabs.forEach((tab) => tab.children.forEach(walk));
+        return;
+      default:
+        if ('children' in node && Array.isArray(node.children)) node.children.forEach(walk);
+    }
+  };
+  nodes.forEach(walk);
+  return out;
+}
+
+const dollarsIn = (text: string): number | undefined => {
+  const match = text.match(/\$\s?(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)/);
+  const value = match ? Number(match[1]!.replace(/,/g, '')) : NaN;
+  return Number.isFinite(value) && value > 0 ? value : undefined;
+};
+const money = (value: number) => `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/**
+ * The price, the sales-tax rate and any taxed total a card states. The rate is the most precise one
+ * on the card: "8.875%" wins over "almost 9%", which is a rounding of it.
+ */
+export function cardPriceAndTax(nodes: readonly CardNode[]): { price?: number; rate?: number; total?: number } {
+  const figures = labeledFigures(nodes);
+  const total = figures.find((f) => /\btotal\b|\bwith tax\b|\bafter tax\b|\bout the door\b/i.test(f.label) && !/\bsplit|each|per\b/i.test(f.label));
+  const price = figures.find((f) => /\b(?:price|cost|msrp|retail|list)\b/i.test(f.label) && !/\btax|total|fee|split|each\b/i.test(f.label) && dollarsIn(f.value) !== undefined)
+    ?? figures.find((f) => !/\btax|total|fee|split|each|%/i.test(`${f.label} ${f.value}`) && dollarsIn(f.value) !== undefined);
+  const rates = figures
+    .filter((f) => /\btax\b/i.test(f.label) || /\btax\b/i.test(f.value))
+    .flatMap((f) => [...`${f.value} ${f.label}`.matchAll(/(\d{1,2}(?:\.\d+)?)\s*%/g)].map((m) => m[1]!))
+    .filter((raw) => Number(raw) > 0 && Number(raw) < 15)
+    .sort((a, b) => (b.split('.')[1]?.length ?? 0) - (a.split('.')[1]?.length ?? 0));
+  return { price: price && dollarsIn(price.value), rate: rates[0] ? Number(rates[0]) : undefined, total: total && dollarsIn(total.value) };
+}
+
+const PEOPLE: Record<string, number> = { two: 2, three: 3, four: 4, five: 5, six: 6, both: 2 };
+const SPLIT_ASK = /\bsplit\b|\beach of us\b|\bper person\b|\bdivide(?:d)?\b[^?]{0,20}\b(?:between|among|by)\b|\bshare (?:it|the cost)\b/i;
+
+/** How many people share: "my brother and I" is two, "three ways" is three. Undefined when the question does not say. */
+export function splitCount(question: string): number | undefined {
+  const q = question.toLowerCase();
+  const ways = q.match(/\b(two|three|four|five|six|\d)\s+ways\b/) ?? q.match(/\b(?:between|among)\s+(two|three|four|five|six|\d)\b/) ?? q.match(/\bthe\s+(two|three|four|five|six|\d)\s+of us\b/);
+  if (ways) return PEOPLE[ways[1]!] ?? Number(ways[1]);
+  const named = q.match(/\b(?:my|our)\s+[a-z]+(?:\s+and\s+(?:my|our)\s+[a-z]+)*\s+and\s+(?:i|me)\b/);
+  if (named) return named[0].split(/\s+and\s+/).length;
+  if (/\bboth of us\b|\bthe two of us\b/.test(q)) return 2;
+  return undefined;
+}
+
+/** "If my brother and I split it, how much does each of us pay?" — the card's total, divided. Undefined when the card has no amount. */
+export function splitShare(input: { question: string; card?: AnswerCard }): CalculationCard | undefined {
+  if (!SPLIT_ASK.test(input.question) || !input.card) return undefined;
+  const people = splitCount(input.question);
+  if (!people || people < 2) return undefined;
+  const { price, rate, total } = cardPriceAndTax(input.card.body);
+  const taxed = total ?? (price !== undefined && rate !== undefined ? Math.round(price * (1 + rate / 100) * 100) / 100 : undefined);
+  const amount = taxed ?? price;
+  if (amount === undefined) return undefined;
+  const each = Math.round((amount / people) * 100) / 100;
+  const how = total !== undefined
+    ? `${money(total)} total`
+    : taxed !== undefined && price !== undefined && rate !== undefined
+      ? `${money(price)} + ${rate}% sales tax = ${money(taxed)}`
+      : `${money(amount)}`;
+  const subject = input.card.title.replace(/\b(?:price|cost)s?\b.*$/i, '').trim() || input.card.title;
+  return {
+    title: `${subject} split ${people} ways`.replace(/\s+/g, ' '),
+    subtitle: 'From the figures already on the card',
+    nodes: [
+      { type: 'hero', value: `${money(each)} each`, label: `Split ${people} ways` },
+      { type: 'text', text: `${how}, divided by ${people}, is ${money(each)} each.`, size: 'lg' },
+      { type: 'grid', cols: 3, children: [
+        { type: 'stat', label: 'Total', value: money(amount) },
+        { type: 'stat', label: 'People', value: String(people) },
+        { type: 'stat', label: 'Each pays', value: money(each) },
+      ] },
+    ],
+  };
+}
+
+const TAX_TOTAL_ASK = /\b(?:with|after|including|plus|incl\.?)\b[^?]{0,30}\btax(?:es)?\b|\bsales tax\b[^?]{0,40}\b(?:pay|cost|total)\b|\b(?:pay|cost|total)\b[^?]{0,40}\bsales tax\b/i;
+
+/**
+ * "What would I pay with sales tax in NYC?" is answered by the taxed total. When the card states a price
+ * and the tax rate but no total, the lead becomes that total, worked from the most precise rate on the card.
+ * Undefined when the question is not that ask, a figure is missing, or the card already shows the total.
+ */
+export function leadTaxedTotal(question: string, nodes: readonly CardNode[]): CardNode[] | undefined {
+  if (!TAX_TOTAL_ASK.test(question)) return undefined;
+  const { price, rate, total } = cardPriceAndTax(nodes);
+  if (price === undefined || rate === undefined) return undefined;
+  const taxed = Math.round(price * (1 + rate / 100) * 100) / 100;
+  if (total !== undefined && Math.abs(total - taxed) <= 0.02) return undefined;
+  const tax = Math.round((taxed - price) * 100) / 100;
+  const hero: CardNode = { type: 'hero', value: money(taxed), label: 'Total with sales tax', caption: `${money(price)} + ${rate}% tax (${money(tax)})` };
+  let placed = false;
+  const swap = (node: CardNode): CardNode => {
+    if (placed) return node;
+    if (node.type === 'hero') {
+      placed = true;
+      return hero;
+    }
+    if ((node.type === 'stack' || node.type === 'grid' || node.type === 'section') && node.children.some((child) => child.type === 'hero')) {
+      return { ...node, children: node.children.map(swap) };
+    }
+    return node;
+  };
+  const next = nodes.map(swap);
+  if (placed) return next;
+  return nodes.length ? [{ type: 'stack', direction: 'col', gap: 'md', children: [hero, nodes[0]!] }, ...nodes.slice(1)] : [hero];
+}

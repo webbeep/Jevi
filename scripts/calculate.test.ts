@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { calculationAnswer, figureValue, isCalculationAsk, rateOnAmount, readFigures, subjectTitle } from '../server/calculate.ts';
+import { calculationAnswer, cardPriceAndTax, figureValue, isCalculationAsk, leadTaxedTotal, rateOnAmount, readFigures, splitCount, splitShare, subjectTitle } from '../server/calculate.ts';
 import { extractStats } from '../server/extract.ts';
-import type { AnswerCard } from '../shared/card.ts';
+import type { AnswerCard, CardNode } from '../shared/card.ts';
 
 const headline = '10/9 The Lead: Three Darkhorse First-Time All-Stars for the 2026-27 Season';
 
@@ -229,4 +229,43 @@ test('a follow-up that applies a rate already on the card answers at once', () =
   assert.match(answer?.title ?? '', /\$4\.00/);
   assert.match(JSON.stringify(answer), /\$50 × 8%/);
   assert.ok(Date.now() - started < 1000);
+});
+
+// The NYC card from the benchmark chain (FU-01.T2): a price, a rounded rate and the precise rate, no total.
+const NYC_CARD: AnswerCard = {
+  title: 'Switch 2 Price With NYC Tax',
+  subtitle: 'Official US price plus New York City sales tax',
+  body: [
+    { type: 'hero', value: '$499.99', unit: 'USD', label: 'Switch 2 US price after increase', caption: 'Up from $449.99; NYC sales tax added at checkout [7]' },
+    { type: 'grid', cols: 3, children: [
+      { type: 'tile', label: 'Switch 2 price', value: '$499.99' },
+      { type: 'tile', label: 'NY sales tax', value: 'Almost 9%' },
+      { type: 'tile', label: 'Nintendo fee', value: '1.5% of retail, max $15' },
+    ] },
+    { type: 'keyvalue', items: [{ label: 'Nintendo sales tax', value: 'Set by local tax laws' }, { label: 'NYC sales tax rate', value: 'Manhattan 8.875%' }] },
+  ],
+};
+
+test('a card reads its price and its most precise tax rate', () => {
+  assert.deepEqual(cardPriceAndTax(NYC_CARD.body), { price: 499.99, rate: 8.875, total: undefined });
+});
+
+test('splitting the bill divides the taxed total worked from the precise rate', () => {
+  assert.equal(splitCount('If my brother and I split it, how much does each of us pay?'), 2);
+  assert.equal(splitCount('split it three ways'), 3);
+  assert.equal(splitCount('my sister and my brother and I'), 3);
+  const split = splitShare({ question: 'If my brother and I split it, how much does each of us pay?', card: NYC_CARD });
+  assert.ok(split);
+  assert.equal((split.nodes[0] as Extract<CardNode, { type: 'hero' }>).value, '$272.18 each');
+  assert.match(JSON.stringify(split.nodes), /\$544\.36/);
+  assert.equal(splitShare({ question: 'How long is the battery life?', card: NYC_CARD }), undefined);
+});
+
+test('a with-tax ask leads with the taxed total', () => {
+  const next = leadTaxedTotal('What would I pay with sales tax in New York City?', NYC_CARD.body);
+  const hero = next?.[0] as Extract<CardNode, { type: 'hero' }>;
+  assert.equal(hero.value, '$544.36');
+  assert.match(hero.caption ?? '', /\$499\.99 \+ 8\.875% tax \(\$44\.37\)/);
+  assert.equal(next?.[1], NYC_CARD.body[1]);
+  assert.equal(leadTaxedTotal('How much is a Switch 2?', NYC_CARD.body), undefined);
 });

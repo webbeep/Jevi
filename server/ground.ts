@@ -1,5 +1,5 @@
 import type { AnswerCard, CardNode } from '../shared/card';
-import { joinSpacedDecimals } from '../shared/text';
+import { identifiersIn, joinSpacedDecimals, recordKey, withoutIdentifiers } from '../shared/text';
 
 /** Numbers up to this value may appear without a source (counts, "step 1", etc.). */
 const FREE_NUMBER_MAX = 2;
@@ -9,20 +9,30 @@ export function numberTokens(s: string): string[] {
   return (joined.match(/\d[\d,]*(?:\.\d+)?/g) ?? []).map((n) => n.replace(/,/g, '').replace(/\.0+$/, ''));
 }
 
+/** A DOI or an arXiv paper, the identifiers a card must take from its sources rather than write. */
+const isRecord = (id: string) => /^10\.|doi\.org|arxiv/i.test(id);
+
 export class Grounding {
   private readonly known: Set<string>;
 
+  /** DOIs and arXiv papers the sources name, in their titles, text or links. */
+  private readonly records: Set<string>;
+
   private readonly lenient: boolean;
 
-  /** `lenient` turns checks off, for answers that come from reasoning rather than sources. */
-  constructor(corpus: string, lenient = false) {
+  /** `lenient` turns checks off, for answers that come from reasoning rather than sources. `links` are the source URLs. */
+  constructor(corpus: string, lenient = false, links = '') {
     this.known = new Set(numberTokens(corpus));
+    this.records = new Set(identifiersIn(`${corpus} ${links}`).filter(isRecord).map(recordKey));
     this.lenient = lenient;
   }
 
   ok(s: string | number | undefined): boolean {
     if (s === undefined || this.lenient) return true;
-    return numberTokens(String(s)).every((n) => this.known.has(n) || Number(n) <= FREE_NUMBER_MAX);
+    const text = String(s);
+    // A paper's DOI is checked as a record the sources name. Its digits are not figures.
+    if (!identifiersIn(text).filter(isRecord).every((id) => this.records.has(recordKey(id)))) return false;
+    return numberTokens(withoutIdentifiers(text)).every((n) => this.known.has(n) || Number(n) <= FREE_NUMBER_MAX);
   }
 
   /** Keeps only sentences whose numbers are all backed by the sources. */

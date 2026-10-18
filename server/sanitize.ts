@@ -47,6 +47,22 @@ const str = (v: unknown, max = 400): string | undefined => {
   const s = stripMarkup(v);
   return s ? sliceText(s, max) : undefined;
 };
+/**
+ * A unit is a short measure ("°F", "mg/day", "per month"). A longer phrase is not cut to fit: it comes back
+ * as `phrase` for the caption. A degree sign written on both the value and the unit is shown once.
+ */
+export function valueUnit(value: string | undefined, unit: string | undefined): { value?: string; unit?: string; phrase?: string } {
+  if (!unit) return { value };
+  const both = value && /°$/.test(value) && /^°/.test(unit) ? value.replace(/°$/, '') : value;
+  if (unit.length > 16 || unit.split(/\s+/).length > 3) return { value: both, phrase: unit };
+  return { value: both, unit };
+}
+
+function statUnit(value: string, unit: string | undefined): { value: string; unit?: string } {
+  const measure = valueUnit(value, unit);
+  return { value: measure.phrase ? `${measure.value} ${measure.phrase}` : measure.value ?? value, unit: measure.unit };
+}
+
 const num = (v: unknown): number | undefined => {
   const n = typeof v === 'string' ? Number(v.replace(/[^\d.-]/g, '')) : v;
   return typeof n === 'number' && Number.isFinite(n) ? n : undefined;
@@ -113,11 +129,14 @@ function sanitizeNode(raw: unknown, imageCount: number, depth: number, ctx?: { s
     case 'divider':
       return { type };
     case 'hero': {
-      const value = str(n.value, 120);
       const label = str(n.label, 80);
+      const measure = valueUnit(str(n.value, 120), str(n.unit, 200));
+      const value = measure.value;
       // Repair before markup cleanup. An unmatched quote is removed, and the decimal it was holding goes with the signal.
-      const caption = typeof n.caption === 'string' ? str(completeCutDecimal(n.caption, [value, label]), 200) : undefined;
-      return value ? { type, value, unit: str(n.unit, 20), label, caption, icon: icon(n.icon), tone: tone(n.tone) } : undefined;
+      const said = typeof n.caption === 'string' ? str(completeCutDecimal(n.caption, [value, label]), 200) : undefined;
+      // "of total energy intake" is what the figure is a share of. It reads in the caption, never cut to fit as a unit.
+      const caption = measure.phrase ? [measure.phrase[0]!.toUpperCase() + measure.phrase.slice(1), said].filter(Boolean).join(' · ') : said;
+      return value ? { type, value, unit: measure.unit, label, caption, icon: icon(n.icon), tone: tone(n.tone) } : undefined;
     }
     case 'heading': {
       const text = str(n.text, 160);
@@ -131,7 +150,7 @@ function sanitizeNode(raw: unknown, imageCount: number, depth: number, ctx?: { s
       const label = str(n.label, 60);
       const value = str(n.value, 40);
       const image = str(n.image, 500);
-      return label && value ? { type, label, value, unit: str(n.unit, 20), icon: icon(n.icon), delta: str(n.delta, 30), trend: oneOf(n.trend, ['up', 'down', 'flat'] as const), image: image && /^https:\/\//i.test(image) ? image : undefined } : undefined;
+      return label && value ? { type, label, ...statUnit(value, str(n.unit, 200)), icon: icon(n.icon), delta: str(n.delta, 30), trend: oneOf(n.trend, ['up', 'down', 'flat'] as const), image: image && /^https:\/\//i.test(image) ? image : undefined } : undefined;
     }
     case 'tile': {
       const label = str(n.label, 60);
