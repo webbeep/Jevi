@@ -2190,13 +2190,13 @@ function chargeName(label: string): string | undefined {
 /** Keep the first row that names a charge. The same name, or the same word at the same amount, is not added again. */
 function keepCharge(label: string, text: string, seen: Set<string>, hero?: { name: string; amount: number }): boolean {
   if (!MONEY.test(text) && !MONEY.test(label)) return true;
-  const name = chargeName(label);
-  if (!name) return true;
   const amount = moneyValue((text.match(MONEY) ?? label.match(MONEY))?.[0] ?? '');
-  const tokens = name.split('|');
+  const name = chargeName(label);
   // The hero is the charge that was asked for. Another row at that same amount is a second copy.
-  const heroRepeat = !!hero && Number.isFinite(amount) && Math.abs(amount - hero.amount) < 0.001;
-  const repeated = heroRepeat || seen.has(name) || (Number.isFinite(amount) && tokens.some((token) => seen.has(`${token}@${amount}`)));
+  if (hero && Number.isFinite(amount) && Math.abs(amount - hero.amount) < 0.001) return false;
+  if (!name) return true;
+  const tokens = name.split('|');
+  const repeated = seen.has(name) || (Number.isFinite(amount) && tokens.some((token) => seen.has(`${token}@${amount}`)));
   if (repeated) return false;
   seen.add(name);
   if (Number.isFinite(amount)) for (const token of tokens) seen.add(`${token}@${amount}`);
@@ -2394,17 +2394,17 @@ export function presentNamedCharges(query: string, nodes: readonly (CardNode | u
   const asked = questionTokens(query);
   const labels: string[] = [];
   const seenLabels = new Set<string>();
-  const consider = (label: string | undefined, line: string) => {
+  const consider = (label: string | undefined) => {
     if (!label) return;
     const name = chargeName(label);
     if (!name || seenLabels.has(name)) return;
-    const shares = asked.some((token) => wordHit(label, token) || wordHit(line, token));
+    const shares = asked.some((token) => wordHit(label, token));
     if (!shares && !ADDON_LINE.test(label)) return;
     seenLabels.add(name);
     labels.push(label);
   };
-  for (const charge of charges) consider(labelBeforeAmount(charge.line), charge.line);
-  for (const charge of charges) consider(addonAfterAmount(charge.line), charge.line);
+  for (const charge of charges) consider(labelBeforeAmount(charge.line));
+  for (const charge of charges) consider(addonAfterAmount(charge.line));
   const seen = new Set<string>();
   for (const node of nodes) if (node) recordCharges(node, seen);
   const tiles: CardNode[] = [];

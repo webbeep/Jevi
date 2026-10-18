@@ -48,7 +48,7 @@ import type { EngineStatus, Freshness, ImageResult, SearchResponse, SearchResult
 import { rewriteQuery } from './ai';
 import { type DesignRequest, designParallel, designStream, gateNode } from './design';
 import { BRIEF_ROWS, briefSources, remapBrief, type SourceBrief } from './brief';
-import { agreeOfficialRate, claimSources, groundMembers, presentNamedCharges } from './claims';
+import { agreeOfficialRate, claimSources, groundMembers, oneNamedCharge, presentNamedCharges } from './claims';
 import { answerTitle, fillPaperCard, keepAnswerBody, restoreKeptPapers, wantsNamedQuote } from './cardAgree';
 import { dropDisputedBio, type BioSource } from './bioFacts';
 import { withoutGluedPerson } from './peopleSplit';
@@ -866,6 +866,22 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       send('node', { index, node: next });
     }
   };
+  // A review fix or a gap search sends its own node after the collapsed card. Publish the
+  // fee rows again so that send is not the one left on screen.
+  const republishFees = () => {
+    const question = questionOf();
+    const indexes = [...shown.keys()].sort((a, b) => a - b);
+    const sources = claimSources(designReq.search.results, designReq.pages);
+    const next = presentNamedCharges(question, oneNamedCharge(question, indexes.map((index) => shown.get(index))), sources);
+    indexes.forEach((index, i) => {
+      const node = next[i] ?? { type: 'stack' as const, children: [] };
+      shown.set(index, node);
+      const key = JSON.stringify(node);
+      if (sentNode.get(index) === key) return;
+      sentNode.set(index, key);
+      send('node', { index, node });
+    });
+  };
   if (arrived.ready && arrived.review) applyReview(send, designReq, shown, arrived.review, started);
   settleComparison();
   settleFacts();
@@ -874,6 +890,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   alignRates();
   restoreKeptProducts();
   if (!chat) await searchGaps();
+  republishFees();
   send('done', { ...summary, pagesRead: pages.length, ms: Date.now() - started });
   if (pendingReview && !arrived.ready) {
     const review = await pendingReview;
@@ -884,6 +901,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     publishReadings();
     alignRates();
     restoreKeptProducts();
+    republishFees();
     mark(scope.ledger, 'reviewed');
   } else if (pendingReview) {
     mark(scope.ledger, 'reviewed');
