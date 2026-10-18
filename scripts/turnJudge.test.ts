@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { followSearchPlan, parseDecision, parseSourceDecision, placeOnScreen } from '../server/turnJudge.ts';
+import { addedComparison, followSearchPlan, parseDecision, parseSourceDecision, placeOnScreen } from '../server/turnJudge.ts';
 
 test('a follow-up decision is a search, an answer, or a calculation', () => {
   assert.deepEqual(parseDecision({
@@ -63,6 +63,14 @@ test('adding an object searches that object and does not glue the question onto 
   assert.equal(plan.added, 'Glowband 4');
   assert.ok(plan.fanout.includes('Glowband 4'));
   for (const query of [plan.query, ...plan.fanout]) assert.doesNotMatch(query, /battery|What|Add/i);
+});
+
+test('adding an object keeps every side even when the card title is missing', () => {
+  const plan = addedComparison('Add the Glowband 4', ['', 'Harbor Slate versus Northwatch 2']);
+  assert.equal(plan?.query, 'Harbor Slate vs Northwatch 2 vs Glowband 4');
+  assert.equal(plan?.added, 'Glowband 4');
+  assert.ok(plan?.fanout.includes('Glowband 4'));
+  assert.equal(addedComparison('What is the battery life of each camera?', ['Harbor Slate vs Northwatch 2']), undefined);
 });
 
 test('switching to a different object searches only that object', () => {

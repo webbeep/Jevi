@@ -87,7 +87,7 @@ import { guessFreshness, preferFresh, staleComplaint, stricter } from './freshne
 import { isQuoteRow, liveQuote, quoteRow, tickerNode } from './liveQuote';
 import { cleanSideName } from '../shared/objects';
 import { cardCitesName, citedNames, nameSeekingQuery, namedListNode, wantsNamedList } from './namedList';
-import { followSearchPlan, judgeSources, judgeTurn } from './turnJudge';
+import { addedComparison, followSearchPlan, judgeSources, judgeTurn } from './turnJudge';
 import { findTicker } from '../shared/tickerNotes';
 import { splitPeople } from './peopleSplit';
 import { personSteer, pronounFollow, roleFollow, threadPerson, topicOnly, withoutChosen } from './personSteer';
@@ -1738,6 +1738,18 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
     answer.nodes.forEach((node, index) => send('node', { index, node }));
     send('done', { engine: 'reasoning', removed: 0, pagesRead: 0, ms: Date.now() - started });
     return;
+  }
+
+  // "Add X" stays on the comparison. Searching only X opens a page for X and drops the sides already shown.
+  if (req.intent !== 'adjust') {
+    const priorCard = from?.card ?? [...req.cards].reverse().find((card) => card.card)?.card;
+    const added = addedComparison(req.question, [priorCard?.title ?? '', from?.title ?? '', req.original]);
+    if (added) {
+      const lock = `Keep every side already compared. ${added.added} is a new column. Each side keeps its own price and photo. Do not copy one side's price, photo, spec, or citation onto another.`;
+      send('rewrite', { query: added.query });
+      await searchAndDesign(send, env, added.query, 'any', [lock, context].filter(Boolean).join('\n') || undefined, started, scope, true, undefined, undefined, undefined, priorCard?.body, req.search?.images, added.fanout, req.question);
+      return;
+    }
   }
 
   // A follow-up about one product on a comparison searches that product. Both names are not one token.

@@ -117,6 +117,27 @@ function objectPhrase(question: string, sides: string[]): { name: string; kind: 
   return { name, kind };
 }
 
+/**
+ * "Add X" on a comparison keeps every side and adds X.
+ * The card title or the original question can name the sides. Undefined when this is not an add.
+ */
+export function addedComparison(question: string, titles: readonly string[]): { query: string; fanout: string[]; added: string } | undefined {
+  if (!ADD_LEAD.test(question.trim())) return undefined;
+  let sides: string[] = [];
+  for (const title of titles) {
+    const found = uniqueSides(compareSides(title).map((side) => cleanSideName(side)));
+    if (found.length >= 2) {
+      sides = found;
+      break;
+    }
+  }
+  if (sides.length < 2) return undefined;
+  const intro = objectPhrase(question, sides);
+  if (!intro || intro.kind !== 'add') return undefined;
+  const next = [...sides, intro.name];
+  return { query: next.join(' vs '), fanout: [intro.name, ...sides], added: intro.name };
+}
+
 /** The searches for this follow-up. A comparison keeps every product in the query and in the fan-out. */
 export function followSearchPlan(input: { title?: string; question: string; queries: string[]; subject: string }): { query: string; fanout: string[]; added?: string } {
   const title = input.title?.replace(/\s+/g, ' ').trim() ?? '';
