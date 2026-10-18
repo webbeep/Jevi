@@ -2194,11 +2194,8 @@ function keepCharge(label: string, text: string, seen: Set<string>, hero?: { nam
   if (!name) return true;
   const amount = moneyValue((text.match(MONEY) ?? label.match(MONEY))?.[0] ?? '');
   const tokens = name.split('|');
-  const heroRepeat = !!hero
-    && name !== hero.name
-    && Number.isFinite(amount)
-    && Math.abs(amount - hero.amount) < 0.001
-    && tokens.some((token) => hero.name.split('|').includes(token));
+  // The hero is the charge that was asked for. Another row at that same amount is a second copy.
+  const heroRepeat = !!hero && Number.isFinite(amount) && Math.abs(amount - hero.amount) < 0.001;
   const repeated = heroRepeat || seen.has(name) || (Number.isFinite(amount) && tokens.some((token) => seen.has(`${token}@${amount}`)));
   if (repeated) return false;
   seen.add(name);

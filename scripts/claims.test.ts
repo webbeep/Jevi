@@ -432,7 +432,7 @@ test('a second row for the same named charge is dropped', () => {
   ]);
   const rows = nodes.flatMap((node) => (node?.type === 'grid' ? node.children : []));
   const labels = rows.map((node) => (node.type === 'tile' ? node.label : ''));
-  assert.deepEqual(labels, ['Harbor book', 'Expedited add-on', 'Book + card', 'Minor book']);
+  assert.deepEqual(labels, ['Expedited add-on', 'Book + card', 'Minor book']);
   const led = oneNamedCharge(query, [
     { type: 'hero', value: '$42', label: 'Harbor book renewal' },
     { type: 'grid', cols: 2, children: [
