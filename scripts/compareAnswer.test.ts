@@ -446,4 +446,8 @@ test('a verdict does not deny a price the card already shows', () => {
   const verdictText = verdictPatch?.type === 'callout' ? verdictPatch.text : '';
   assert.equal(verdictText, 'Pick the Mi Band 10 for a 1.72 AMOLED screen and 21-day battery.');
   assert.equal(patches?.some((patch) => patch.index === 0 || patch.index === 1), false);
+  const named = { ...verdict, text: 'Pick the Edge for a 1.34-inch screen. No source states a price for the Edge, so cost can\'t be compared.' };
+  const again = comparisonRepair(ask, search, new Map([[0, tiles], [1, table], [2, named]]));
+  const againText = again?.find((patch) => patch.index === 2)?.node;
+  assert.equal(againText?.type === 'callout' ? againText.text : '', 'Pick the Edge for a 1.34-inch screen.');
 });

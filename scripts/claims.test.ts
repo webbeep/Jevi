@@ -179,6 +179,13 @@ test('a combined city rate leads when the official page only states the state pi
   assert.deepEqual(salesTax('Harbor City combined sales tax', pages), { rate: 8.25, n: 3 });
 });
 
+test('an escaped decimal in a fetched page is still the combined rate', () => {
+  const pages: ClaimSource[] = [
+    { n: 1, domain: 'www.harborstate.gov', text: 'Harbor City sales tax\nLocal jurisdictions can impose up to 2 percent for a maximum combined rate of 8\\.25 percent.' },
+  ];
+  assert.deepEqual(salesTax('Harbor City combined sales tax', pages), { rate: 8.25, n: 1 });
+});
+
 test('the state written after the city does not hide the combined rate', () => {
   const pages: ClaimSource[] = [
     { n: 1, domain: 'www.harborstate.gov', text: 'Harbor State sales tax\nHarbor State imposes a 6.25 percent state sales and use tax.' },

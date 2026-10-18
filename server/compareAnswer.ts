@@ -17,6 +17,12 @@ function haystack(text: string): string {
   return text.toLowerCase();
 }
 
+/** A shorter name the card uses ("Edge") still names that side. */
+function sideWord(side: string, text: string): boolean {
+  const hay = haystack(text);
+  return side.toLowerCase().split(/[^a-z0-9]+/).some((word) => word.length >= 4 && new RegExp(`\\b${word}\\b`).test(hay));
+}
+
 /**
  * A product written as one word is the same side when the card splits it.
  * "glowband 4" is on the card that says "Glow Band 4". A different model number is not.
@@ -336,7 +342,7 @@ function shownPrices(nodes: readonly CardNode[], sides: string[]): Map<string, s
 function groundCompareNode(node: CardNode, sides: string[], search: SearchResponse, shown: ReadonlyMap<string, string>): CardNode {
   if (node.type === 'text' || node.type === 'callout' || node.type === 'heading') {
     const text = node.text.split(/(?<=[.!?])\s+/).map((sentence) => {
-      const side = sides.find((item) => mentionsSide(item, sentence));
+      const side = sides.find((item) => mentionsSide(item, sentence) || sideWord(item, sentence));
       const price = side ? shown.get(side) || stickerPrice(side, search) : undefined;
       if (price && (NO_PRICE.test(sentence) || DENIES_PRICE.test(sentence))) return '';
       if (!RELATIVE_PRICE.test(sentence)) return sentence;

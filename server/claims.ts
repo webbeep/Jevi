@@ -621,7 +621,8 @@ const NOT_A_PLACE = new Set([
 
 /** Percents that are the rate, not a share of the proceeds ("of which the state retains 80%"). */
 function percentRates(sentence: string): number[] {
-  const cut = sentence.split(/\bof which\b/i)[0] ?? sentence;
+  // A fetched page often escapes the decimal ("8\.25 percent"). That is 8.25, not 25.
+  const cut = (sentence.split(/\bof which\b/i)[0] ?? sentence).replace(/\\(?=\.)/g, '');
   const rates: number[] = [];
   for (const match of cut.matchAll(/(\d{1,2}(?:\.\d+)?)\s*(?:%|percent\b)/gi)) {
     const at = match.index ?? 0;
