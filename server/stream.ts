@@ -52,7 +52,7 @@ import { agreeOfficialRate, claimSources, groundMembers } from './claims';
 import { answerTitle, fillPaperCard, keepAnswerBody, restoreKeptPapers, wantsNamedQuote } from './cardAgree';
 import { dropDisputedBio, type BioSource } from './bioFacts';
 import { withoutGluedPerson } from './peopleSplit';
-import { abstainComputed, alignFactProse, cardFacts, factAnswer, hasMemberWork, hopQueries, leadMemberRows, nextHop, placeFactLead, unsupportedYear } from './hops';
+import { abstainComputed, alignFactProse, cardFacts, factAnswer, hasMemberWork, hopQueries, leadMemberRows, placeFactLead, unsupportedYear } from './hops';
 import { gapQuery, onTopicCount, rescueQuery, sourcesMiss } from './rescue';
 import { keepPictures, reviewCard, type Review } from './review';
 import { permitted } from './images';
@@ -82,6 +82,7 @@ import { variantChoices, variantConflict } from './productModel';
 import { recallClips, wantsVideo, withProductClips, withVideos } from './videoSearch';
 import { guessFreshness, preferFresh, staleComplaint, stricter } from './freshness';
 import { isQuoteRow, liveQuote, quoteRow, tickerNode } from './liveQuote';
+import { judgeSources, judgeTurn } from './turnJudge';
 import { findTicker } from '../shared/tickerNotes';
 import { splitPeople } from './peopleSplit';
 import { personSteer, pronounFollow, roleFollow, threadPerson, topicOnly, withoutChosen } from './personSteer';
@@ -818,11 +819,16 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   let intentNow: string | undefined;
   void understood.then((x) => { intentNow = x?.intent; });
   let earlyBrief: Promise<EarlyBrief | undefined> | undefined;
+  let sourceJudge: Promise<Awaited<ReturnType<typeof judgeSources>>> | undefined;
   const onLiteral = (hits: WebHit[]) => {
     if (earlyBrief) return;
     // A first look at what the search found, shown while the rest of the search and the layout finish.
     const kept = preferSources(query, gateResults(query, hits.map(webRow)).kept);
     send('peek', kept.slice(0, PEEK_ROWS).map(({ title, url, domain, date }) => ({ title, url, domain, date })));
+    if (!paper && !sourceJudge) {
+      const snippets = kept.slice(0, 6).map((row) => `${row.title} ${row.snippet ?? ''}`).join('\n');
+      sourceJudge = judgeSources(env, query, snippets);
+    }
     if (paper) return;
     earlyBrief = quoting.then(async (quote) => {
       const rows = [...(quote ? [quoteRow(quote)] : []), ...kept].slice(0, BRIEF_ROWS);
@@ -896,35 +902,27 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     results = { ...results, results: [live, ...results.results.filter((r) => !isQuoteRow(r))] };
     console.log(JSON.stringify({ zo: 'quote', symbol: quote!.symbol, source: quote!.source, ms: Date.now() - started }));
   }
-  // A question that needs another fact keeps searching until that fact is in hand, or the time is gone.
+  // The model says whether these snippets are enough. One more search when they are not.
+  // It does not wait out a second round: the call started with the first results.
   const hopUrls: string[] = [];
-  if (!paper && results.results.length) {
-    // A parallel hop that the time cut dropped is still missing, so it can be asked again here.
-    results = { ...results, results: leadMemberRows(query, results.results) };
-    const asked: string[] = [];
-    let left = 2;
-    while (left > 0 && Date.now() - started < 5200) {
-      const corpus = results.results.slice(0, 12).map((row) => `${row.title} ${row.snippet ?? ''}`).join('\n');
-      const beforeLead = factAnswer(query, corpus)?.lead;
-      const alt = nextHop(query, corpus, { hosts: results.results.map((row) => row.domain), asked });
-      if (!alt) break;
-      asked.push(alt.toLowerCase());
-      left -= 1;
+  if (!paper && results.results.length && sourceJudge) {
+    const judged = await Promise.race([
+      sourceJudge,
+      new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 400)),
+    ]);
+    if (judged && !judged.enough) {
       const room = SEARCH_CALL_CAP + (scope.ledger.bonus ?? 0) - searchCalls(scope.ledger);
       if (room < 1) scope.ledger.bonus = (scope.ledger.bonus ?? 0) + (1 - room);
-      const again = await searchWithLate({ q: alt, freshness: guessFreshness(query), count: 8, lite: true }, env, scope);
-      const gated = applyRelevance(alt, { ...again.response, query: alt }, scope.ledger);
+      const again = await searchWithLate({ q: judged.query, freshness: guessFreshness(query), count: 8, lite: true }, env, scope);
+      const gated = applyRelevance(judged.query, { ...again.response, query: judged.query }, scope.ledger);
       const add = gated.results.filter((row) => !results.results.some((have) => have.url === row.url)).slice(0, 6);
-      if (!add.length) break;
-      const promoted = [...add, ...results.results];
-      const afterLead = factAnswer(query, promoted.slice(0, 12).map((row) => `${row.title} ${row.snippet ?? ''}`).join('\n'))?.lead;
-      // Pages that supplied the missing fact lead, so the card is read from them.
-      for (const row of add) hopUrls.push(row.url);
-      // The new pages lead so they are the ones read. A later rescue must not throw them away.
-      results = { ...results, results: leadMemberRows(query, [...add, ...results.results], add.map((row) => row.url)) };
-      send('peek', add.slice(0, PEEK_ROWS).map(({ title, url, domain, date }) => ({ title, url, domain, date })));
-      send('search', results);
-      console.log(JSON.stringify({ zo: 'hop', alt, added: add.length, domains: add.map((row) => row.domain), lead: afterLead ?? beforeLead }));
+      if (add.length) {
+        for (const row of add) hopUrls.push(row.url);
+        results = { ...results, results: leadMemberRows(query, [...add, ...results.results], add.map((row) => row.url)) };
+        send('peek', add.slice(0, PEEK_ROWS).map(({ title, url, domain, date }) => ({ title, url, domain, date })));
+        send('search', results);
+        console.log(JSON.stringify({ zo: 'judge-sources', query: judged.query, added: add.length }));
+      }
     }
   }
   let late: Promise<LateExtras> | undefined = found.late;
@@ -1590,6 +1588,67 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
     send('rewrite', { query });
     // EN4 part 8: the rows that produced these choices come along, so the pick never comes back empty.
     await searchAndDesign(send, env, query, 'any', [chosen, pickContext].filter(Boolean).join('\n') || undefined, started, scope, true, req.search?.results);
+    return;
+  }
+
+  // A typed follow-up is one model decision: search, answer from the sources, or calculate.
+  // The gates below stay for an adjust. A typed turn does not fall through them.
+  if (req.intent !== 'adjust') {
+    const onScreen = from?.card ?? [...req.cards].reverse().find((card) => card.card)?.card;
+    const hint = screenSubject(onScreen?.title, req.original);
+    const cardText = onScreen ? `${onScreen.title}\n${onScreen.subtitle ?? ''}\n${JSON.stringify(onScreen.body)}` : '';
+    const sourceText = (req.search?.results ?? []).slice(0, 6).map((row) => `${row.title} ${row.snippet ?? ''}`).join('\n');
+    const planPromise = planLayout(req.question, env, { original: req.original, cards: req.cards.map(({ id, title }) => ({ id, title })), context });
+    const judged = await judgeTurn(env, {
+      question: req.question,
+      original: req.original,
+      context,
+      title: onScreen?.title,
+      card: cardText,
+      sources: sourceText,
+    });
+    const decision = judged ?? {
+      action: 'search' as const,
+      queries: [[hint, req.question.trim()].filter(Boolean).join(' ')],
+      subject: hint,
+    };
+    console.log(JSON.stringify({ zo: 'judge-turn', action: decision.action, subject: decision.subject, queries: decision.queries, model: !!judged }));
+    const lock = decision.subject
+      ? `This turn is about ${decision.subject}, the subject already on screen. Answer the new question about that subject.`
+      : '';
+    if (decision.action === 'search') {
+      const query = decision.queries[0] ?? req.question.trim();
+      scope.bound = `${decision.subject}\n${req.question}`;
+      send('rewrite', { query });
+      await searchAndDesign(send, env, query, 'any', [lock, context].filter(Boolean).join('\n') || undefined, started, scope, true);
+      return;
+    }
+    const plan = await planPromise;
+    const rows = (req.search?.results ?? []).slice(0, 8);
+    if (rows.length) send('peek', rows.map(({ title, url, domain, date }) => ({ title, url, domain, date })));
+    if (decision.action === 'calculate') {
+      send('plan', { ...plan, mode: 'chat' });
+      await design(send, env, {
+        query: req.original,
+        pattern: plan.pattern,
+        depth: plan.depth,
+        readPages: false,
+        search: req.search,
+        followup: { mode: 'chat', question: req.question, calculate: true },
+        context: [lock, context].filter(Boolean).join('\n') || undefined,
+      }, started, scope);
+      return;
+    }
+    send('plan', { ...plan, mode: 'answer' });
+    await design(send, env, {
+      query: req.original,
+      pattern: plan.pattern,
+      depth: plan.depth,
+      readPages: plan.readPages,
+      search: req.search,
+      followup: { mode: 'answer', question: req.question },
+      context: [lock, context].filter(Boolean).join('\n') || undefined,
+    }, started, scope);
     return;
   }
 

@@ -140,6 +140,8 @@ export interface FollowupContext {
   mode: Exclude<FollowupMode, 'search'>;
   question: string;
   baseCard?: AnswerCard;
+  /** The turn is arithmetic on figures already on screen. The card shows that result. */
+  calculate?: boolean;
 }
 
 export interface CardResponse {

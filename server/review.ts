@@ -13,6 +13,11 @@ import type { Env } from './util';
 const SYSTEM = `You review an answer card before it is saved, like a careful editor checking facts. Judge it against what the person wants, today's date, the conversation and the search results.
 Flag only real errors that would mislead the reader:
 - it does not answer the goal, or answers a different question;
+- a how-to is a paragraph or skips steps the official page states, instead of those steps in order;
+- a requested quote is a paraphrase, a fragment, or a sentence that drops the numbers the page states;
+- a price, tax, or fee is not the figure the official source states, or another number on the card fights that figure;
+- a health line states a different figure or the opposite of the official verdict it leads with;
+- a comparison is not a visual table of each product the question named, or it leads with a different variant;
 - it is about the wrong subject (a namesake, another company, product, place or period);
 - it presents an old value or old news as current (check dates against today), or contradicts a LIVE result or newer results;
 - a stated fact, number or date is not supported by the results, or is attributed to the wrong thing;
