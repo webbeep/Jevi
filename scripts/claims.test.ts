@@ -366,6 +366,47 @@ test('a fee is the amount the official page states', () => {
   assert.match(pair.type === 'text' ? pair.text : '', /\$80/);
 });
 
+test('an add-on row uses the line that names it, not the base charge', () => {
+  const query = 'What is the harbor book renewal fee?';
+  const pages: ClaimSource[] = [
+    { n: 1, domain: 'permits.harbor.gov', text: 'Harbor permits\nThe renewal fee for a harbor permit book is $42.' },
+    { n: 2, domain: 'notes.example', text: 'Harbor book renewal DS-82 is $42. Expedited service add $15. Execution fee $9. Harbor card is $11. A book and card is $80.' },
+  ];
+  assert.equal(officialCharge(query, pages)?.amount, '$42');
+  const card = bindClaims({
+    type: 'stack',
+    gap: 'md',
+    children: [
+      { type: 'hero', value: '$15', label: 'Harbor book renewal' },
+      { type: 'tile', label: 'Book', value: '$42', sub: 'Adult renewal' },
+      { type: 'tile', label: 'Expedited', value: '$42', sub: 'Extra fee' },
+      { type: 'tile', label: 'Card', value: '$42', sub: 'Adult renewal' },
+      { type: 'keyvalue', items: [{ label: 'Execution fee', value: '$42' }, { label: 'DS-82', value: '$15' }, { label: 'Book + card', value: '$42' }] },
+      { type: 'text', text: 'Expedited service is $42. DS-82 renewal is $15.' },
+    ],
+  }, pages, query);
+  assert.equal(card.type, 'stack');
+  if (card.type !== 'stack') return;
+  const hero = card.children[0];
+  const book = card.children[1];
+  const expedited = card.children[2];
+  const cardTile = card.children[3];
+  const rows = card.children[4];
+  const prose = card.children[5];
+  assert.equal(hero?.type === 'hero' ? hero.value : '', '$42');
+  assert.equal(book?.type === 'tile' ? book.value : '', '$42');
+  assert.equal(expedited?.type === 'tile' ? expedited.value : '', '$15');
+  assert.equal(cardTile?.type === 'tile' ? cardTile.value : '', '$11');
+  assert.match(rows?.type === 'keyvalue' ? rows.items[0]?.value ?? '' : '', /^\$9\b/);
+  assert.match(rows?.type === 'keyvalue' ? rows.items[1]?.value ?? '' : '', /^\$42\b/);
+  assert.match(rows?.type === 'keyvalue' ? rows.items[2]?.value ?? '' : '', /^\$80\b/);
+  assert.equal(expedited?.type === 'tile' ? expedited.source : 0, 2);
+  assert.match(prose?.type === 'text' ? prose.text : '', /\$15/);
+  assert.match(prose?.type === 'text' ? prose.text : '', /\$42/);
+  assert.doesNotMatch(prose?.type === 'text' ? prose.text : '', /Expedited service is \$42/);
+  assert.doesNotMatch(prose?.type === 'text' ? prose.text : '', /DS-82 renewal is \$15/);
+});
+
 test('an exempt price does not keep a tax dollar from another line', () => {
   const pages: ClaimSource[] = [
     { n: 1, text: 'New York State sales tax is 4%.' },

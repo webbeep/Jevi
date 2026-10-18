@@ -190,9 +190,10 @@ function clauseAt(text: string, index: number, length: number): string {
   const prev = [...text.slice(0, index).matchAll(/[$£€¥]\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?|\d+(?:\.\d+)?\s*(?:%|percent\b)/gi)].at(-1);
   const prevEnd = prev ? (prev.index ?? 0) + prev[0].length : 0;
   const prevBreak = breakIndex(text, index - 1, -1);
-  // A label after the previous amount stays with that amount. This figure starts at itself, or after a break.
+  // A label after the previous amount stays with that amount. A break immediately after that
+  // amount (the period in "$42. Expedited…") starts this figure, so its own label is kept.
   const start = prev
-    ? (prevBreak > prevEnd ? prevBreak + 1 : index)
+    ? (prevBreak >= prevEnd ? prevBreak + 1 : index)
     : (prevBreak >= 0 && index - prevBreak < 180 ? prevBreak + 1 : Math.max(0, index - 80));
   const after = text.slice(index + length);
   const nextFigure = after.search(/[$£€¥]\s?\d|\d+(?:\.\d+)?\s*(?:%|percent\b)/i);
@@ -208,6 +209,23 @@ function clauseAt(text: string, index: number, length: number): string {
  * The figure the question is about. A different amount in the same snippet, including an
  * optional add-on, does not win just because it is a number.
  */
+/** Every dollar figure with the clause that names it. An add-on and the base charge stay on their own lines. */
+export function moneyClauses(text: string): { figure: string; value: number; line: string }[] {
+  const out: { figure: string; value: number; line: string }[] = [];
+  for (const match of text.matchAll(new RegExp(MONEY_RE.source, 'g'))) {
+    const figure = match[0].replace(/\s/g, '');
+    const value = Number(figure.replace(/[^\d.]/g, ''));
+    if (!Number.isFinite(value)) continue;
+    out.push({ figure, value, line: clauseAt(text, match.index ?? 0, match[0].length) });
+  }
+  return out;
+}
+
+/** The clause that belongs to the figure at `index`. */
+export function figureClause(text: string, index: number, length: number): string {
+  return clauseAt(text, index, length);
+}
+
 export function leadFigure(kind: FactKind, question: string, text: string): LeadFigure | undefined {
   if (kind === 'quote') return undefined;
   const want = wantFor(kind, question);

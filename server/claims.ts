@@ -4,7 +4,7 @@ import { factAnswer } from './hops';
 import { numberTokens } from './ground';
 import { completeCutDecimal, withoutEmptySlots } from './polish';
 import { dropInventedTitles, finishQuotedText, honestHero, honestStudyText, peerPaperItems, peerPaperSource } from './cardAgree';
-import { leadFigure } from './thinSource';
+import { figureClause, leadFigure, moneyClauses } from './thinSource';
 
 /** One search result, numbered the way the card cites it, with the text the card was allowed to use. */
 export interface ClaimSource {
@@ -1949,6 +1949,74 @@ function statedMoney(text: string, fee: ChargePick, allowed: (value: number) => 
 
 const ADDON_LINE = /\b(?:expedit(?:e|ed|ing|ion)?|optional|additional|surcharge|add-on|addon)\b/i;
 
+interface NamedCharge {
+  figure: string;
+  value: number;
+  line: string;
+  n: number;
+  official: boolean;
+}
+
+/** Dollar lines from every source. The winning page can name the base charge and omit the add-on. */
+function namedCharges(sources: readonly ClaimSource[]): NamedCharge[] {
+  const out: NamedCharge[] = [];
+  for (const source of sources) {
+    const official = officialDomain(source.domain);
+    for (const clause of moneyClauses(`${source.text}\n${source.stated ?? ''}`)) {
+      out.push({ ...clause, n: source.n, official });
+    }
+  }
+  return out;
+}
+
+function wordHit(hay: string, token: string): boolean {
+  const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`\\b${escaped}\\b`, 'i').test(hay);
+}
+
+function rowTokens(label: string, weight: number): { token: string; weight: number }[] {
+  const words = label.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 4 && !FEE_GENERIC.has(word));
+  const forms = [...label.matchAll(/\b[a-z]{1,4}-\d{2,}\b/gi)].map((match) => match[0].toLowerCase());
+  return [...words.map((token) => ({ token, weight })), ...forms.map((token) => ({ token, weight: weight + 2 }))];
+}
+
+/**
+ * The source line that names this row. A line that says "expedite" is not the base charge,
+ * and a line that says the item or its form id is not the add-on.
+ */
+function chargeForLabel(label: string, sub: string, query: string, charges: readonly NamedCharge[], lead: ChargePick): NamedCharge | undefined {
+  const spoken = `${label} ${sub}`.replace(/\+/g, ' and ');
+  const tokens = [...rowTokens(label, 2), ...rowTokens(sub, 1)];
+  const addonLabel = ADDON_LINE.test(spoken);
+  const questionAddon = ADDON_LINE.test(query);
+  if (!tokens.length && !addonLabel) return undefined;
+  let best: { charge: NamedCharge; score: number; hits: number } | undefined;
+  for (const charge of charges) {
+    const low = charge.line.toLowerCase();
+    let score = 0;
+    let hits = 0;
+    for (const token of tokens) {
+      if (!wordHit(low, token.token)) continue;
+      score += token.weight;
+      if (token.weight >= 2) hits += 1;
+    }
+    const lineAddon = ADDON_LINE.test(charge.line);
+    if (addonLabel && !questionAddon) score += lineAddon ? 3 : -6;
+    else if (!addonLabel && !questionAddon && lineAddon) score -= 4;
+    if (/\band\s+[a-z]/i.test(charge.line) && !/\band\b/i.test(spoken)) score -= 4;
+    if (score < 2) continue;
+    const leadCopy = Math.abs(charge.value - lead.value) < 0.001;
+    const bestCopy = best ? Math.abs(best.charge.value - lead.value) < 0.001 : false;
+    const closer = !best
+      || score > best.score
+      || (score === best.score && hits > best.hits)
+      || (score === best.score && hits === best.hits && charge.official && !best.charge.official)
+      || (score === best.score && hits === best.hits && charge.official === best.charge.official && addonLabel && !questionAddon && !leadCopy && bestCopy);
+    if (closer) best = { charge, score, hits };
+  }
+  return best?.charge;
+}
+
 /** The row is the charge the question asked for, not a different add-on listed beside it. */
 function asksForCharge(label: string, query: string): boolean {
   const tokens = query.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 4 && !FEE_GENERIC.has(word));
@@ -1959,8 +2027,59 @@ function asksForCharge(label: string, query: string): boolean {
   return hits >= Math.min(2, tokens.length);
 }
 
-/** The lead amount is the official charge. The hero is that charge even when the page also lists an add-on. */
-function alignFee(node: CardNode, fee: ChargePick, allowed: (value: number) => boolean, query: string): CardNode {
+/** One shown amount, tied to the line that names its row. The base charge is not copied onto a different row. */
+function pickedAmount(
+  label: string,
+  sub: string,
+  raw: string,
+  fee: ChargePick,
+  allowed: (value: number) => boolean,
+  query: string,
+  charges: readonly NamedCharge[],
+): string {
+  const named = chargeForLabel(label, sub, query, charges, fee);
+  const value = moneyValue(raw);
+  const addonRow = ADDON_LINE.test(`${label} ${sub}`) && !ADDON_LINE.test(query);
+  if (named && Math.abs(value - named.value) < 0.001) return raw.replace(/\s/g, '');
+  if (named && (Math.abs(named.value - fee.value) >= 0.001 || !addonRow)) return named.figure;
+  if (addonRow && charges.some((charge) => Math.abs(charge.value - value) < 0.001 && ADDON_LINE.test(charge.line))) return raw.replace(/\s/g, '');
+  if (addonRow && Math.abs(value - fee.value) < 0.001) return '';
+  if (asksForCharge(label, query) && Math.abs(value - fee.value) >= 0.001) return fee.amount;
+  if (Math.abs(value - fee.value) < 0.001 || allowed(value)) return raw;
+  return '';
+}
+
+function rewriteMoney(
+  label: string,
+  sub: string,
+  text: string,
+  fee: ChargePick,
+  allowed: (value: number) => boolean,
+  query: string,
+  charges: readonly NamedCharge[],
+): string {
+  if (!MONEY.test(text)) return text;
+  let cite: number | undefined;
+  const replaced = text.replace(new RegExp(MONEY.source, 'g'), (raw, index: number) => {
+    const local = label === text ? figureClause(text, index, raw.length) : label;
+    const localSub = label === text ? '' : sub;
+    const next = pickedAmount(local, localSub, raw, fee, allowed, query, charges);
+    const named = chargeForLabel(local, localSub, query, charges, fee);
+    if (named && next.replace(/\s/g, '') === named.figure && Math.abs(moneyValue(raw) - named.value) >= 0.001) cite = named.n;
+    return next;
+  });
+  const cited = cite === undefined ? replaced : replaced.replace(/\[(\d+)\]/, `[${cite}]`);
+  return cited.replace(/\s{2,}/g, ' ').replace(/\s+([,.;:])/g, '$1').trim();
+}
+
+/** The lead amount is the official charge. The hero is that charge. A different row keeps the line that names it. */
+function alignFee(
+  node: CardNode,
+  fee: ChargePick,
+  allowed: (value: number) => boolean,
+  query: string,
+  charges: readonly NamedCharge[],
+): CardNode {
   const line = (text: string) => statedMoney(text, fee, allowed);
   const lead = (text: string) => {
     if (!MONEY.test(text)) return fee.amount;
@@ -1968,42 +2087,50 @@ function alignFee(node: CardNode, fee: ChargePick, allowed: (value: number) => b
     if (Math.abs(value - fee.value) < 0.001) return line(text);
     return text.replace(MONEY, fee.amount);
   };
-  const charged = (label: string, text: string) => (asksForCharge(label, query) && MONEY.test(text) ? text.replace(MONEY, fee.amount) : line(text));
+  const tied = (label: string, sub: string, text: string) => rewriteMoney(label, sub, text, fee, allowed, query, charges);
   switch (node.type) {
     case 'stack':
     case 'grid':
     case 'section':
     case 'scroller':
-      return { ...node, children: node.children.map((child) => alignFee(child, fee, allowed, query)) };
+      return { ...node, children: node.children.map((child) => alignFee(child, fee, allowed, query, charges)) };
     case 'tabs':
-      return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: tab.children.map((child) => alignFee(child, fee, allowed, query)) })) };
+      return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: tab.children.map((child) => alignFee(child, fee, allowed, query, charges)) })) };
     case 'text':
     case 'callout':
     case 'quote':
     case 'draft':
     case 'heading': {
-      const text = line(node.text);
+      const text = tied(node.text, '', node.text);
       return text === node.text ? node : { ...node, text };
     }
-    case 'hero':
+    case 'hero': {
+      const value = lead(node.value);
+      return value === node.value ? node : { ...node, value };
+    }
     case 'stat': {
-      const value = lead(node.type === 'hero' ? node.value : node.value);
-      return value === (node.type === 'hero' ? node.value : node.value) ? node : { ...node, value };
+      const addonRow = ADDON_LINE.test(node.label) && !ADDON_LINE.test(query);
+      const value = addonRow ? tied(node.label, '', node.value) : lead(node.value);
+      return value === node.value ? node : { ...node, value };
     }
     case 'tile': {
-      const value = node.value ? (asksForCharge(node.label, query) ? lead(node.value) : line(node.value)) : node.value;
-      const sub = node.sub ? line(node.sub) : node.sub;
-      return value === node.value && sub === node.sub ? node : { ...node, value, sub };
+      const named = node.value ? chargeForLabel(node.label, node.sub ?? '', query, charges, fee) : undefined;
+      const value = node.value ? tied(node.label, node.sub ?? '', node.value) : node.value;
+      const sub = node.sub ? tied(node.label, node.sub, node.sub) : node.sub;
+      const shown = value?.match(MONEY)?.[0];
+      const moved = named && shown && Math.abs(moneyValue(shown) - named.value) < 0.001 && Math.abs(named.value - fee.value) >= 0.001;
+      if (value === node.value && sub === node.sub && !moved) return node;
+      return moved ? { ...node, value, sub, source: named.n } : { ...node, value, sub };
     }
     case 'keyvalue':
-      return { ...node, items: node.items.map((item) => ({ ...item, value: charged(item.label, item.value) })) };
+      return { ...node, items: node.items.map((item) => ({ ...item, value: tied(item.label, '', item.value) })) };
     case 'list':
       return {
         ...node,
-        items: node.items.map((item) => ({ ...item, text: charged(item.text, item.text), meta: item.meta ? line(item.meta) : item.meta })),
+        items: node.items.map((item) => ({ ...item, text: tied(item.text, '', item.text), meta: item.meta ? tied(item.meta, '', item.meta) : item.meta })),
       };
     case 'table':
-      return { ...node, rows: node.rows.map((row) => row.map((cell, index) => (index === 0 ? cell : charged(row[0] ?? '', cell)))) };
+      return { ...node, rows: node.rows.map((cells) => cells.map((cell, index) => (index === 0 ? cell : tied(cells[0] ?? '', '', cell)))) };
     case 'timeline':
     case 'profile':
     case 'steps':
@@ -2052,7 +2179,8 @@ export function bindClaims(node: CardNode, sources: readonly ClaimSource[], quer
   const taxed = tax ? alignTax(applyTax(aimed, query, tax, ratesIn(sources.find((source) => source.n === tax.n))), tax.rate) : aimed;
   const lined = TAX_ASK.test(query) ? repairTaxNode(taxed, query, sources) : taxed;
   const fee = officialCharge(query, sources);
-  const charged = fee ? alignFee(applyCharge(lined, fee, officialAmounts(sources.find((source) => source.n === fee.n))), fee, officialAmounts(sources.find((source) => source.n === fee.n)), query) : lined;
+  const allowed = officialAmounts(sources.find((source) => source.n === fee?.n));
+  const charged = fee ? alignFee(applyCharge(lined, fee, allowed), fee, allowed, query, namedCharges(sources)) : lined;
   if (!shoppingAsk(query)) return charged;
   const ceilings = budgetAmounts(query);
   return dropPriceless(keepBudgetPrices(fillPrices(charged, sources, ceilings), ceilings), ceilings, query);
