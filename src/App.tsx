@@ -22,7 +22,7 @@ import type { SearchResponse } from '../shared/types';
 import { api } from './api';
 import { AnswerCardView } from './card/AnswerCardView';
 import { ResearchTrail } from './card/ResearchTrail';
-import { showWaitingLayout } from './card/waitingLayout';
+import { hasArrivedSources, showWaitingLayout } from './card/waitingLayout';
 import { CardContext, type CardContextValue } from './card/context';
 import { Icon } from './card/Icon';
 import { WhichOne } from './card/WhichOne';
@@ -1035,8 +1035,18 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
   // its hero, tiles, grid and section titles — not a generic pair of shimmer blocks. A later `layout`
   // event (a profile override, a video lead) replaces it with the skeleton the card will actually fill.
   const chosenLayout = turn.live?.regions.length ? turn.live.regions : turn.plan?.skeleton.body ?? [];
-  // Peek rows are already sources. The chosen layout replaces them as soon as they are on screen.
-  const sourcesSettled = !!turn.search || (turn.peek?.length ?? 0) > 0;
+  // An empty search is not a source. The trail stays up until a source row has actually painted,
+  // so the empty comparison slots are not the first frame.
+  const hasSources = hasArrivedSources(turn.search, turn.peek);
+  const [sourcesReady, setSourcesReady] = useState(false);
+  useEffect(() => {
+    if (!hasSources) {
+      setSourcesReady(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setSourcesReady(true), 480);
+    return () => window.clearTimeout(timer);
+  }, [hasSources, turn.id]);
   // The skeleton is the wait only. A finished card clears `live`, which used to make this true again
   // and put the placeholder back on top of the result.
   const layoutReady = showWaitingLayout({
@@ -1045,7 +1055,7 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
     answerStarted,
     layoutCount: chosenLayout.length,
     needsSources: turn.kind === 'search',
-    sourcesSettled,
+    sourcesReady,
   });
   const card: AnswerCard = useMemo(() => {
     const skeleton = { title: turn.question, body: LOADING };

@@ -19,7 +19,7 @@ export interface SourceDecision {
 const TURN = `You decide the next action for a follow-up in a search conversation. Reply as JSON: {"action":"search"|"answer"|"calculate","queries":string[],"subject":string}
 - subject: the thing this turn is about. Keep the subject already on screen unless the person clearly changes topic. A place or business named only as a qualifier (from X, in X, for a visitor) is not a new subject. If they challenge the subject and the card rejected that name, keep the subject the card affirmed, not the name they proposed.
 - action "answer" when the card and the sources already state the fact this turn asks. queries is empty. A different case of the same subject (another visitor, another city, another option) is not answered by the previous case's figure. If that case is not already stated, action is "search" and the query names it.
-- action "search" when they do not. queries is 1 or 2 web searches, the new words plus that subject, each 3-12 words. A comparison searches each product as its own name, never glued into one token. A variant (Pro, Plus, Max, Mini, Ultra) is a different product: search the exact model asked, not a different variant. A how-to, a requested quote, a live price, a tax, a fee, or a health question searches the official page for that subject.
+- action "search" when they do not. queries is 1 to 4 web searches, the new words plus that subject, each 3-12 words. When the card is a comparison and the follow-up asks for specs, prices, or a table, return one query per product already named on the card: that product's name plus the new words. Do not drop a side, and do not glue the names into one token. A variant (Pro, Plus, Max, Mini, Ultra) is a different product: search the exact model asked, not a different variant. A how-to, a requested quote, a live price, a tax, a fee, or a health question searches the official page for that subject.
 - action "calculate" when they ask to split, multiply, or apply a rate or price already on the card. queries is empty. The figure on the card is the figure to use.
 - Do not add a person, place, or business that the follow-up and the subject do not name.`;
 
@@ -58,6 +58,18 @@ export function placeOnScreen(title: string | undefined): string {
   return name.join(' ');
 }
 
+/** The searches for this follow-up. A comparison keeps every product in the query and in the fan-out. */
+export function followSearchPlan(input: { title?: string; question: string; queries: string[]; subject: string }): { query: string; fanout: string[] } {
+  const title = input.title?.replace(/\s+/g, ' ').trim() ?? '';
+  const asked = input.question.replace(/^(?:and|so)\s+/i, '').trim();
+  const compared = /\s(?:vs\.?|versus)\s/i.test(title);
+  if (compared) return { query: `${title} ${asked}`.replace(/\s+/g, ' ').trim(), fanout: input.queries };
+  const place = placeOnScreen(title) || input.subject;
+  const written = input.queries[0] ?? asked;
+  const query = place && !written.toLowerCase().includes(place.toLowerCase()) ? `${place} ${asked}` : written;
+  return { query, fanout: input.queries.slice(1) };
+}
+
 export function parseDecision(raw: unknown): TurnDecision | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const row = raw as { action?: unknown; queries?: unknown; subject?: unknown };
@@ -66,7 +78,7 @@ export function parseDecision(raw: unknown): TurnDecision | undefined {
   const queries = (Array.isArray(row.queries) ? row.queries : [])
     .filter((query): query is string => typeof query === 'string' && query.trim().length > 1)
     .map((query) => query.replace(/\s+/g, ' ').trim())
-    .slice(0, 2);
+    .slice(0, 4);
   const subject = typeof row.subject === 'string' ? row.subject.replace(/\s+/g, ' ').trim().slice(0, 120) : '';
   if (action === 'search' && !queries.length) return undefined;
   return { action, queries: action === 'search' ? queries : [], subject };

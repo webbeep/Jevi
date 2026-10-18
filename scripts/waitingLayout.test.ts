@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { showWaitingLayout } from '../src/card/waitingLayout.ts';
+import { hasArrivedSources, showWaitingLayout } from '../src/card/waitingLayout.ts';
 
 const waiting = {
   filling: true,
@@ -8,13 +8,20 @@ const waiting = {
   answerStarted: false,
   layoutCount: 3,
   needsSources: true,
-  sourcesSettled: true,
+  sourcesReady: true,
 };
 
 test('the plan skeleton shows once sources have settled and the answer has not started', () => {
   assert.equal(showWaitingLayout(waiting), true);
-  assert.equal(showWaitingLayout({ ...waiting, sourcesSettled: false }), false);
-  assert.equal(showWaitingLayout({ ...waiting, needsSources: false, sourcesSettled: false }), true);
+  assert.equal(showWaitingLayout({ ...waiting, sourcesReady: false }), false);
+  assert.equal(showWaitingLayout({ ...waiting, needsSources: false, sourcesReady: false }), true);
+});
+
+test('an empty search is not a source on the card', () => {
+  assert.equal(hasArrivedSources({ results: [] }, []), false);
+  assert.equal(hasArrivedSources(undefined, undefined), false);
+  assert.equal(hasArrivedSources({ results: [{}] }), true);
+  assert.equal(hasArrivedSources(undefined, [{}]), true);
 });
 
 test('a finished card does not fall back to the placeholder when the live stream is cleared', () => {

@@ -82,7 +82,7 @@ import { variantChoices, variantConflict } from './productModel';
 import { recallClips, wantsVideo, withProductClips, withVideos } from './videoSearch';
 import { guessFreshness, preferFresh, staleComplaint, stricter } from './freshness';
 import { isQuoteRow, liveQuote, quoteRow, tickerNode } from './liveQuote';
-import { judgeSources, judgeTurn, placeOnScreen } from './turnJudge';
+import { followSearchPlan, judgeSources, judgeTurn } from './turnJudge';
 import { findTicker } from '../shared/tickerNotes';
 import { splitPeople } from './peopleSplit';
 import { personSteer, pronounFollow, roleFollow, threadPerson, topicOnly, withoutChosen } from './personSteer';
@@ -790,11 +790,14 @@ function applyReview(send: Send, req: DesignRequest, shown: Map<number, CardNode
  * inside the three-call cap (two rewrites leave no room for Wikipedia).
  * Rewritten follow-ups already say what they mean, so they skip the understanding step.
  */
-async function searchAndDesign(send: Send, env: Env, query: string, freshness: Freshness, context: string | undefined, started: number, scope: AskScope, rewritten = false, seedRows?: SearchResult[], steer?: { avoid: Set<string>; rejected: string }, keepTicker?: CardNode, priorBody?: CardNode[], priorImages?: ImageResult[]) {
+async function searchAndDesign(send: Send, env: Env, query: string, freshness: Freshness, context: string | undefined, started: number, scope: AskScope, rewritten = false, seedRows?: SearchResult[], steer?: { avoid: Set<string>; rejected: string }, keepTicker?: CardNode, priorBody?: CardNode[], priorImages?: ImageResult[], fanout: string[] = []) {
   const unglued = withoutGluedPerson(query);
   if (unglued !== query.trim()) query = unglued;
-  // The search the card is about, shown before its sources arrive.
-  send('intent', { intent: query, queries: [query] });
+  const extra = fanout.map((item) => item.trim()).filter((item) => item && item.toLowerCase() !== query.toLowerCase());
+  const sideList = compareSideQueries(query);
+  const shown = [...sideList, ...extra].filter((item, index, all) => all.findIndex((q) => q.toLowerCase() === item.toLowerCase()) === index);
+  // The search the card is about, shown before its sources arrive. A comparison lists each product.
+  send('intent', { intent: query, queries: shown.length ? shown : [query] });
   const located = queryWithPlace(query, scope.place);
   if (located !== query) {
     send('rewrite', { query: located });
@@ -860,7 +863,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   const statLine = playerStatRow(query);
   // Searches that need no model ("$rdw" → "RDW stock news today") lead the rewrites.
   const instant = [...tickerQueries(query), ...formalNameQueries(query), ...workplaceQueries(query)];
-  const sides = compareSideQueries(query);
+  const sides = sideList;
   if (!rewritten) {
     // SPD2 (t457): every ask searches its literal words at once; the understood rewrites join the same
     // engine when the intent read lands (~1 s), instead of the whole search waiting for it. A time-sensitive
@@ -869,17 +872,17 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     const later = understood.then((x) => {
       if (x) send('intent', { intent: x.intent, queries: x.queries });
       const extras = extraQueries(query, x).filter((item) => !scope.bound || !foreignName(item, `${query}\n${scope.bound}`));
-      return { more: withHops([...sides, ...instant, ...extras]), freshness: freshness === 'any' ? x?.freshness ?? literalFresh : freshness };
+      return { more: withHops([...extra, ...sides, ...instant, ...extras]), freshness: freshness === 'any' ? x?.freshness ?? literalFresh : freshness };
     });
     // A price ask is answered by the live quote; the rewrites only add the news around it.
-    found = await searchWithLate({ q: queriesForAsk(query, []), more: withHops([...sides, ...instant]), later, freshness: literalFresh, count: 20, waitExtras: deep && !paper, extrasCutMs: quoteAsk(query) ? QUOTE_EXTRAS_MS : extraWait, onLiteral }, env, scope);
+    found = await searchWithLate({ q: queriesForAsk(query, []), more: withHops([...extra, ...sides, ...instant]), later, freshness: literalFresh, count: 20, waitExtras: deep && !paper, extrasCutMs: quoteAsk(query) ? QUOTE_EXTRAS_MS : extraWait, onLiteral }, env, scope);
     mark(scope.ledger, 'found');
     u = await understood;
   } else {
     u = undefined;
     // Literal question first. Planner rewrites are the later calls, still inside the cap.
     const q = queriesForAsk(query, instant);
-    const more = withHops([...sides, ...instant]);
+    const more = withHops([...extra, ...sides, ...instant]);
     found = await searchWithLate({ q, more, freshness: freshness === 'any' ? guessFreshness(query) : freshness, count: 20, extrasCutMs: extraWait, onLiteral }, env, scope);
   }
   let results = applyPickGate(query, applyRelevance(query, { ...found.response, query }, scope.ledger));
@@ -1617,13 +1620,10 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
       ? `This turn is about ${decision.subject}, the subject already on screen. Answer the new question about that subject.`
       : '';
     if (decision.action === 'search') {
-      const place = placeOnScreen(onScreen?.title) || decision.subject;
-      const asked = req.question.replace(/^(?:and|so)\s+/i, '').trim();
-      const written = decision.queries[0] ?? asked;
-      const query = place && !written.toLowerCase().includes(place.toLowerCase()) ? `${place} ${asked}` : written;
+      const planned = followSearchPlan({ title: onScreen?.title, question: req.question, queries: decision.queries, subject: decision.subject });
       scope.bound = `${decision.subject}\n${req.question}`;
-      send('rewrite', { query });
-      await searchAndDesign(send, env, query, 'any', [lock, context].filter(Boolean).join('\n') || undefined, started, scope, true);
+      send('rewrite', { query: planned.query });
+      await searchAndDesign(send, env, planned.query, 'any', [lock, context].filter(Boolean).join('\n') || undefined, started, scope, true, undefined, undefined, undefined, undefined, undefined, planned.fanout);
       return;
     }
     const plan = await planPromise;

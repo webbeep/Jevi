@@ -215,7 +215,7 @@ RULES
 - A how-to is a steps node: the ordered steps the official page states, each with its title and the sentence that page uses. A short paragraph is not the steps.
 - A live price, tax, or fee leads with the figure the current official source states. Every other number on the card agrees with that figure or with a component that same page states. Do not label every component with the combined figure.
 - A health answer leads with the official figure or verdict. A line under it does not state a different figure or the opposite advice.
-- A comparison stays a visual table with one column per product. Search and show each product the question named. A variant the question did not name (Pro, Plus, Max, Mini, Ultra) is a different product.
+- A comparison stays a visual table with one column per product. Search and show each product the question named. Do not say a side has no specs, or is not in the sources, when that product was not searched. A variant the question did not name (Pro, Plus, Max, Mini, Ultra) is a different product.
 - A line under a verdict has to agree with it. Do not add a claim the verdict rejects. If a page does not say whether a paper is a review or an original study, say that, and do not assert either one.
 - A request for peer-reviewed papers lists the papers a source identifies, each with its title and an open link. An empty list is not an answer. Do not invent a title. A count such as "of the three" matches how many picks the card shows, a headline price is the price on that pick's row, and a pick stays inside the stated budget and spec.
 - Numbered steps are 1, 2, 3 with no gaps. Keep every step a newcomer needs.

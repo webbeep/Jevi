@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { parseDecision, parseSourceDecision, placeOnScreen } from '../server/turnJudge.ts';
+import { followSearchPlan, parseDecision, parseSourceDecision, placeOnScreen } from '../server/turnJudge.ts';
 
 test('a follow-up decision is a search, an answer, or a calculation', () => {
   assert.deepEqual(parseDecision({
@@ -17,6 +17,25 @@ test('a follow-up decision is a search, an answer, or a calculation', () => {
   assert.equal(parseDecision({ action: 'calculate', queries: [], subject: 'North Pier' })?.action, 'calculate');
   assert.equal(parseDecision({ action: 'search', queries: [], subject: 'North Pier' }), undefined);
   assert.equal(parseDecision({ action: 'rewrite' }), undefined);
+});
+
+test('a comparison follow-up searches every product named on the card', () => {
+  const plan = followSearchPlan({
+    title: 'Harbor Slate vs Northwatch 2',
+    question: 'Compare specs',
+    queries: ['Harbor Slate specs', 'Northwatch 2 specs'],
+    subject: 'Harbor Slate',
+  });
+  assert.match(plan.query, /Harbor Slate vs Northwatch 2/);
+  assert.match(plan.query, /Compare specs/);
+  assert.deepEqual(plan.fanout, ['Harbor Slate specs', 'Northwatch 2 specs']);
+  const one = followSearchPlan({
+    title: 'Harbor Slate vs Northwatch 2',
+    question: 'Compare specs',
+    queries: ['Harbor Slate specs'],
+    subject: 'Harbor Slate',
+  });
+  assert.match(one.query, /Northwatch 2/);
 });
 
 test('the place on the card stays in front of a qualifier', () => {
