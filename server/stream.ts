@@ -618,7 +618,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   const arrived = pendingReview
     ? await Promise.race([
         pendingReview.then((review) => ({ ready: true as const, review })),
-        Promise.resolve({ ready: false as const, review: undefined }),
+        new Promise<{ ready: false; review: undefined }>((resolve) => setTimeout(() => resolve({ ready: false, review: undefined }), 1200)),
       ])
     : { ready: true as const, review: undefined };
   const settleComparison = () => {

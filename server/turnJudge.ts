@@ -18,7 +18,7 @@ export interface SourceDecision {
 
 const TURN = `You decide the next action for a follow-up in a search conversation. Reply as JSON: {"action":"search"|"answer"|"calculate","queries":string[],"subject":string}
 - subject: the thing this turn is about. Keep the subject already on screen unless the person clearly changes topic. A place or business named only as a qualifier (from X, in X, for a visitor) is not a new subject. If they challenge the subject and the card rejected that name, keep the subject the card affirmed, not the name they proposed.
-- action "answer" when the card and the sources already state the fact this turn asks. queries is empty.
+- action "answer" when the card and the sources already state the fact this turn asks. queries is empty. A different case of the same subject (another visitor, another city, another option) is not answered by the previous case's figure. If that case is not already stated, action is "search" and the query names it.
 - action "search" when they do not. queries is 1 or 2 web searches, the new words plus that subject, each 3-12 words. A comparison searches each product as its own name, never glued into one token. A variant (Pro, Plus, Max, Mini, Ultra) is a different product: search the exact model asked, not a different variant. A how-to, a requested quote, a live price, a tax, a fee, or a health question searches the official page for that subject.
 - action "calculate" when they ask to split, multiply, or apply a rate or price already on the card. queries is empty. The figure on the card is the figure to use.
 - Do not add a person, place, or business that the follow-up and the subject do not name.`;
