@@ -2164,6 +2164,121 @@ function alignFee(
   }
 }
 
+const CHARGE_GENERIC = new Set([
+  'adult', 'minor', 'mail', 'form', 'optional', 'extra', 'added', 'service', 'processing',
+  'renewal', 'cost', 'costs', 'total', 'payable', 'state', 'regular', 'standard', 'current',
+]);
+
+/** The charge a row names. "Expedited" and "Expedited add-on" are one charge. "Book" and "book and card" are not. */
+function chargeName(label: string): string | undefined {
+  const words = label.toLowerCase().replace(/\+/g, ' and ').split(/[^a-z0-9]+/).flatMap((word) => {
+    if (word.length < 4 || FEE_GENERIC.has(word) || CHARGE_GENERIC.has(word)) return [];
+    if (/^expedit/.test(word)) return ['expedite'];
+    return [word];
+  });
+  const forms = [...label.matchAll(/\b[a-z]{1,4}-\d{2,}\b/gi)].map((match) => match[0].toLowerCase());
+  const parts = [...new Set([...words, ...forms])].sort();
+  return parts.length ? parts.join('|') : undefined;
+}
+
+/** Keep the first row that names a charge. The same name, or the same word at the same amount, is not added again. */
+function keepCharge(label: string, text: string, seen: Set<string>): boolean {
+  if (!MONEY.test(text) && !MONEY.test(label)) return true;
+  const name = chargeName(label);
+  if (!name) return true;
+  const amount = moneyValue((text.match(MONEY) ?? label.match(MONEY))?.[0] ?? '');
+  const tokens = name.split('|');
+  const repeated = seen.has(name) || (Number.isFinite(amount) && tokens.some((token) => seen.has(`${token}@${amount}`)));
+  if (repeated) return false;
+  seen.add(name);
+  if (Number.isFinite(amount)) for (const token of tokens) seen.add(`${token}@${amount}`);
+  return true;
+}
+
+function dropRepeatCharge(node: CardNode, seen: Set<string>): CardNode | undefined {
+  switch (node.type) {
+    case 'stack':
+    case 'grid':
+    case 'section':
+    case 'scroller': {
+      const children = node.children.flatMap((child) => {
+        const next = dropRepeatCharge(child, seen);
+        return next ? [next] : [];
+      });
+      return children.length ? { ...node, children } : undefined;
+    }
+    case 'tabs':
+      return {
+        ...node,
+        tabs: node.tabs.map((tab) => ({
+          ...tab,
+          children: tab.children.flatMap((child) => {
+            const next = dropRepeatCharge(child, seen);
+            return next ? [next] : [];
+          }),
+        })),
+      };
+    case 'tile':
+    case 'stat':
+      return keepCharge(node.label, `${node.value ?? ''} ${node.type === 'tile' ? node.sub ?? '' : ''}`, seen) ? node : undefined;
+    case 'keyvalue': {
+      const items = node.items.filter((item) => keepCharge(item.label, item.value, seen));
+      return items.length ? (items.length === node.items.length ? node : { ...node, items }) : undefined;
+    }
+    case 'table': {
+      const rows = node.rows.filter((row) => keepCharge(row[0] ?? '', row.slice(1).join(' '), seen));
+      return rows.length ? (rows.length === node.rows.length ? node : { ...node, rows }) : undefined;
+    }
+    case 'list': {
+      const items = node.items.filter((item) => keepCharge(item.text, `${item.text} ${item.meta ?? ''}`, seen));
+      return items.length ? (items.length === node.items.length ? node : { ...node, items }) : undefined;
+    }
+    case 'text':
+    case 'callout':
+    case 'quote':
+    case 'draft':
+    case 'heading':
+    case 'hero':
+    case 'timeline':
+    case 'profile':
+    case 'steps':
+    case 'accordion':
+    case 'proscons':
+    case 'badges':
+    case 'actions':
+    case 'choices':
+    case 'links':
+    case 'citations':
+    case 'chart':
+    case 'pricing':
+    case 'scaler':
+    case 'slider':
+    case 'reveal':
+    case 'image':
+    case 'gallery':
+    case 'video':
+    case 'code':
+    case 'divider':
+    case 'progress':
+    case 'rating':
+    case 'diagram':
+    case 'ticker':
+    case 'slot':
+      return node;
+    default: {
+      const unreachable: never = node;
+      return unreachable;
+    }
+  }
+}
+
+/** One row per named charge, across the whole card. The hero is the answer, not a second copy of a row. */
+export function oneNamedCharge(query: string, nodes: readonly (CardNode | undefined)[]): (CardNode | undefined)[] {
+  if (!FEE_ASK.test(query) || TAX_ASK.test(query)) return [...nodes];
+  const seen = new Set<string>();
+  return nodes.map((node) => (node ? dropRepeatCharge(node, seen) : node));
+}
+
 /** The last pass: every percent on a tax card is the official rate, including nodes added after the first bind. */
 export function agreeOfficialRate(node: CardNode, query: string, sources: readonly ClaimSource[]): CardNode {
   const tax = salesTax(query, sources);

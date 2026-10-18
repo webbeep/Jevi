@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { bindClaims, budgetAmounts, claimSources, groundMembers, officialCharge, priceFor, retargetCites, salesTax, shoppingAsk, type ClaimSource } from '../server/claims.ts';
+import { bindClaims, budgetAmounts, claimSources, groundMembers, officialCharge, oneNamedCharge, priceFor, retargetCites, salesTax, shoppingAsk, type ClaimSource } from '../server/claims.ts';
 import { Grounding, groundNodes } from '../server/ground.ts';
 import { sanitizeNodes } from '../server/sanitize.ts';
 import { finishQuality } from '../server/sourceQuality.ts';
@@ -405,6 +405,41 @@ test('an add-on row uses the line that names it, not the base charge', () => {
   assert.match(prose?.type === 'text' ? prose.text : '', /\$42/);
   assert.doesNotMatch(prose?.type === 'text' ? prose.text : '', /Expedited service is \$42/);
   assert.doesNotMatch(prose?.type === 'text' ? prose.text : '', /DS-82 renewal is \$15/);
+});
+
+test('a second row for the same named charge is dropped', () => {
+  const query = 'What is the harbor book renewal fee?';
+  const nodes = oneNamedCharge(query, [
+    { type: 'hero', value: '$42', label: 'Harbor book renewal' },
+    {
+      type: 'grid',
+      cols: 2,
+      children: [
+        { type: 'tile', label: 'Harbor book', value: '$42', sub: 'Adult renewal' },
+        { type: 'tile', label: 'Expedited add-on', value: '$15', sub: 'Optional' },
+      ],
+    },
+    {
+      type: 'grid',
+      cols: 2,
+      children: [
+        { type: 'tile', label: 'Book + card', value: '$80' },
+        { type: 'tile', label: 'Expedited', value: '$15', sub: 'Extra fee' },
+        { type: 'tile', label: 'First-time book', value: '$42' },
+        { type: 'tile', label: 'Minor book', value: '$27' },
+      ],
+    },
+  ]);
+  const rows = nodes.flatMap((node) => (node?.type === 'grid' ? node.children : []));
+  const labels = rows.map((node) => (node.type === 'tile' ? node.label : ''));
+  assert.deepEqual(labels, ['Harbor book', 'Expedited add-on', 'Book + card', 'Minor book']);
+  const compared = oneNamedCharge('Fitbit Edge vs Mi Band 10', [
+    { type: 'grid', cols: 2, children: [
+      { type: 'tile', label: 'Fitbit Edge', value: '$179' },
+      { type: 'tile', label: 'Mi Band 10', value: '$53' },
+    ] },
+  ]);
+  assert.equal(compared[0]?.type === 'grid' ? compared[0].children.length : 0, 2);
 });
 
 test('an exempt price does not keep a tax dollar from another line', () => {

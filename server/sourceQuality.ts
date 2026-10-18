@@ -4,7 +4,7 @@
  */
 import type { CardNode } from '../shared/card';
 import { joinSpacedDecimals } from '../shared/text';
-import { budgetAmounts, shoppingAsk } from './claims';
+import { budgetAmounts, oneNamedCharge, shoppingAsk } from './claims';
 import { agreeShopping } from './cardAgree';
 import { restoreCutDecimals } from './polish';
 import { isPaperAsk, isPreprintAsk, leadPreprints } from './scholarly';
@@ -1118,5 +1118,5 @@ function dropUnnamedFacts(nodes: readonly (CardNode | undefined)[]): (CardNode |
 export function finishQuality(query: string, nodes: readonly (CardNode | undefined)[], lead = ''): (CardNode | undefined)[] {
   const cleaned = nodes.map((node) => (node ? cleanNode(query, node) : node));
   const settled = agreeShopping(shoppingAsk(query), budgetAmounts(query), restoreCutDecimals(alignVerdicts(withoutSettledDisputes(dropSpecMissLead(query, dropUnpricedProductLead(query, cleaned))))));
-  return dropUnnamedFacts(sayOnce(settled, lead));
+  return oneNamedCharge(query, dropUnnamedFacts(sayOnce(settled, lead)));
 }
