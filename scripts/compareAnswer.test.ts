@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import type { CardNode } from '../shared/card.ts';
 import type { SearchResponse } from '../shared/types.ts';
 import { asksToCompare } from '../server/askGuard.ts';
-import { acceptProductPhoto, answersComparison, appendAskedFact, comparisonNodes, comparisonRepair, comparisonTitle, dropShownDenials, keepComparedProducts, mentionsSide, missingSideNode, nameForms, restoreSideTiles, sameProduct, showsComparison } from '../server/compareAnswer.ts';
+import { acceptProductPhoto, answersComparison, appendAskedFact, comparisonNodes, comparisonRepair, comparisonTitle, dropShownDenials, keepComparedProducts, mentionsSide, missingSideNode, nameForms, placeSidePhotos, restoreSideTiles, sameProduct, showsComparison } from '../server/compareAnswer.ts';
 import { candidates } from '../server/extract.ts';
 import { compareSideQueries, compareSides, withoutLeadVerb } from '../server/patterns.ts';
 import { Polisher, completeSentences, emptyFigure, withoutEmptySlots } from '../server/polish.ts';
@@ -345,6 +345,27 @@ test('a promo page is not a product photo, and a stated spec fills a blank cell'
   assert.equal(acceptProductPhoto('Harbor Slate', 'Harbor Slate on a white table', 'A product photo.'), true);
   assert.equal(acceptProductPhoto('Harbor Slate', 'Earn rewards every day', 'The Harbor Slate is mentioned in this airdrop.'), false);
   assert.equal(acceptProductPhoto('Harbor Slate', 'Harbor Slate vs Northwatch 2', 'Both bands.'), false);
+  assert.equal(acceptProductPhoto('Northwatch X-9 II', 'X-9 II review', ''), true);
+  assert.equal(acceptProductPhoto('Northwatch X-9 II', 'Northwatch X-9 review', ''), false);
+  assert.equal(acceptProductPhoto('Northwatch X-9 II', 'Harbor Slate', ''), false);
+  const placed = placeSidePhotos('Northwatch X-9 II vs Harbor Slate', new Map([[0, {
+    type: 'grid',
+    cols: 2,
+    children: [
+      { type: 'tile', label: 'Northwatch X-9 II', value: '$999', imageSrc: 'https://img.example/slate.jpg' },
+      { type: 'tile', label: 'Harbor Slate', value: '$179.99', imageSrc: 'https://img.example/slate.jpg' },
+    ],
+  }]]), [
+    { url: 'https://example.com/x9', thumb: 'https://img.example/x9.jpg', title: 'Northwatch X-9 II', source: 'example.com', license: 'source' },
+    { url: 'https://example.com/slate', thumb: 'https://img.example/slate.jpg', title: 'Harbor Slate on a white table', source: 'example.com', license: 'source' },
+  ]);
+  const grid = placed?.[0]?.node;
+  assert.equal(grid?.type, 'grid');
+  if (grid?.type !== 'grid') return;
+  assert.equal(grid.children[0]?.type === 'tile' ? grid.children[0].imageSrc : '', 'https://img.example/x9.jpg');
+  assert.equal(grid.children[0]?.type === 'tile' ? grid.children[0].value : '', '$999');
+  assert.equal(grid.children[1]?.type === 'tile' ? grid.children[1].imageSrc : '', 'https://img.example/slate.jpg');
+  assert.equal(grid.children[1]?.type === 'tile' ? grid.children[1].value : '', '$179.99');
   const ask = 'Harbor Slate versus Northwatch 2';
   const table: CardNode = {
     type: 'table',

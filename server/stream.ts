@@ -71,7 +71,7 @@ import { domainOf } from './util';
 import { choicesIn, distinctActions, subjectWords } from './chips';
 import { anchoredFollowup, asksToCompare, comparisonFollow, cryptographyHint, faithfulQuery, followSearchQuery, foreignName, isWritingAsk, lockChainQuery, needsOwnSearch, ownQuestion, personQuestion, quickPlan, quoteFollowQuery, sameSubjectQuery, screenSubject, scrubLeak, sourcesCover, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
 import { calculationAnswer, isCalculationAsk, rateOnAmount } from './calculate';
-import { acceptProductPhoto, appendAskedFact, comparisonRepair, comparisonTitle, dropShownDenials, keepComparedProducts, mentionsSide, missingSideNode, nameForms, restoreSideTiles, stickerPrice } from './compareAnswer';
+import { acceptProductPhoto, appendAskedFact, comparisonRepair, comparisonTitle, dropShownDenials, keepComparedProducts, mentionsSide, missingSideNode, nameForms, placeSidePhotos, restoreSideTiles, stickerPrice } from './compareAnswer';
 import { cardGaps, citeForGap, gapSearchQuery, settleGap, type PieceGap } from './gapFill';
 import { unblendObjects } from './objectFacts';
 import { withFinishedSentences } from './polish';
@@ -942,6 +942,14 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     alignRates();
     restoreKeptProducts();
     separateObjects();
+    const question = compareSides(designReq.query).length >= 2 ? designReq.query : (designReq.followup?.question ?? designReq.query);
+    const photos = placeSidePhotos(question, shown, designReq.search.images);
+    if (photos) {
+      for (const patch of photos) {
+        shown.set(patch.index, patch.node);
+        send('node', { index: patch.index, node: patch.node });
+      }
+    }
     republishFees();
     mark(scope.ledger, 'reviewed');
   } else if (pendingReview) {
@@ -1532,9 +1540,21 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
 
 /** A preview URL the browser can actually show. A blocked page image is not a photo. */
 async function imageLoads(url: string): Promise<boolean> {
+  const headers = { 'User-Agent': BROWSER_UA, Accept: 'image/*' };
+  const picture = (res: Response) => res.ok && (res.headers.get('content-type') ?? '').toLowerCase().includes('image');
   try {
-    const res = await fetch(url, { method: 'HEAD', headers: { 'User-Agent': BROWSER_UA, Accept: 'image/*' }, signal: AbortSignal.timeout(1200), redirect: 'follow' });
-    return res.ok && (res.headers.get('content-type') ?? '').includes('image');
+    const head = await fetch(url, { method: 'HEAD', headers, signal: AbortSignal.timeout(1200), redirect: 'follow' });
+    if (picture(head)) return true;
+    const type = (head.headers.get('content-type') ?? '').toLowerCase();
+    if (head.ok && type && !type.includes('image')) return false;
+  } catch {
+    // Some image hosts reject HEAD and still serve the file.
+  }
+  try {
+    const get = await fetch(url, { method: 'GET', headers, signal: AbortSignal.timeout(1800), redirect: 'follow' });
+    const ok = picture(get);
+    await get.body?.cancel().catch(() => undefined);
+    return ok;
   } catch {
     return false;
   }
@@ -1592,6 +1612,16 @@ async function searchNamedSides(query: string, results: SearchResponse, env: Env
       }
     }
     rows = [...rows, ...(await specSearch)];
+    // A price already on the card does not answer which page shows this product. One search of the name does.
+    const named = [...rows, ...results.results].some((row) => acceptProductPhoto(side, row.title ?? '', `${row.snippet ?? ''} ${row.domain ?? ''}`));
+    if (!named) {
+      const form = forms[0] ?? side;
+      searchRoom(scope);
+      const again = await searchWithLate({ q: form, freshness: 'any', count: 5, lite: true }, env, scope);
+      const about = again.response.results.filter((row) => acceptProductPhoto(side, row.title ?? '', `${row.snippet ?? ''} ${row.domain ?? ''}`));
+      rows = [...rows, ...about];
+      images = [...(again.response.images ?? []).filter((image) => acceptProductPhoto(side, `${image.title} ${image.source}`)), ...images];
+    }
     const photo = await productPhoto(side, [...rows, ...results.results]);
     images = images.filter((image) => acceptProductPhoto(side, `${image.title} ${image.source}`));
     if (photo) images = [photo, ...images];

@@ -565,7 +565,7 @@ export function Tile({ node }: { node: Of<'tile'> }) {
       {showPicture && (
         <span data-picture-slot="" className="pointer-events-none relative mb-1 flex aspect-square w-full max-w-24 items-center justify-center rounded-lg bg-muted">
           {pending && <Skeleton className="absolute inset-0 rounded-lg" />}
-          {img && <img src={img} alt={plain(node.label)} loading="lazy" className="absolute inset-0 size-full rounded-[inherit] object-cover animate-in fade-in" onError={onImgError} />}
+          {img && <img src={img} alt={plain(node.label)} loading="lazy" referrerPolicy="no-referrer" className="absolute inset-0 size-full rounded-[inherit] object-cover animate-in fade-in" onError={onImgError} />}
           {img && <PhotoCredit src={img} className="right-1 top-1" />}
         </span>
       )}

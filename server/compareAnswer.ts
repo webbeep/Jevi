@@ -283,20 +283,98 @@ function priceForSide(side: string, rows: { text: string }[]): string | undefine
 }
 
 const PROMO = /\b(?:promo(?:tion)?|giveaway|airdrop|rewards?)\b/i;
+const ROMAN = /^(?:ii|iii|iv|vi|vii|viii|ix)$/;
+
+/** Model marks that separate this product from the one next to it ("X-9" and "II", not the brand alone). */
+function productMarks(side: string): string[] {
+  return side.toLowerCase().split(/[^a-z0-9]+/).filter((word) => /\d/.test(word) || ROMAN.test(word) || (word.length >= 2 && word.length <= 3));
+}
+
+function hasMark(mark: string, title: string): boolean {
+  const words = title.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  if (words.includes(mark)) return true;
+  return mark.length >= 3 && words.join('').includes(mark);
+}
+
+/**
+ * The page is about this product. The brand alone is not enough when the name has a model
+ * ("X-9 II" is not "X-9"). A title that carries the model still counts when it omits the brand.
+ */
+function pageNamesProduct(side: string, title: string): boolean {
+  const marks = productMarks(side);
+  if (marks.length && !marks.every((mark) => hasMark(mark, title))) return false;
+  if (mentionsSide(side, title) || mentionsJoined(side, title)) return true;
+  const words = side.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  const compact = title.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean).join('');
+  if (words.join('').length >= 5 && compact.includes(words.join(''))) return true;
+  for (let i = 0; i < words.length; i++) {
+    let acc = '';
+    for (let j = i; j < words.length && j < i + 3; j++) {
+      acc += words[j]!;
+      if (j > i && acc.length >= 3 && /\d/.test(acc) && compact.includes(acc)) return true;
+    }
+  }
+  return false;
+}
 
 /** A picture of this product, from a page about this product. A promo or a versus roundup is not that picture. */
 export function acceptProductPhoto(side: string, title: string, extra = ''): boolean {
   const page = title.replace(/\s+/g, ' ').trim();
-  if (!page || !mentionsSide(side, page)) return false;
-  if (/\b(?:vs\.?|versus)\b/i.test(page)) return false;
+  if (!page || /\b(?:vs\.?|versus)\b/i.test(page)) return false;
   const blob = `${page} ${extra}`;
   if (PROMO.test(blob) && !PROMO.test(side)) return false;
-  return true;
+  return pageNamesProduct(side, page);
 }
 
 function imageForSide(side: string, images: SearchResponse['images']): string | undefined {
   const hit = images.find((image) => acceptProductPhoto(side, `${image.title} ${image.source}`));
   return hit?.thumb || undefined;
+}
+
+/**
+ * Each side keeps a photo from a page about that side. A photo already recorded for a
+ * different side is taken off. A price already written on the tile stays.
+ */
+export function placeSidePhotos(question: string, nodes: Map<number, CardNode>, images: SearchResponse['images']): { index: number; node: CardNode }[] | undefined {
+  const sides = compareSides(question).map((side) => cleanSideName(side));
+  if (sides.length < 2 || !images?.length) return undefined;
+  const owner = new Map<string, string>();
+  for (const image of images) {
+    if (!image.thumb || owner.has(image.thumb)) continue;
+    const side = sides.find((item) => acceptProductPhoto(item, `${image.title} ${image.source}`));
+    if (side) owner.set(image.thumb, side);
+  }
+  if (!owner.size) return undefined;
+  const photoFor = (side: string) => images.find((image) => image.thumb && owner.get(image.thumb) === side)?.thumb;
+  const patches: { index: number; node: CardNode }[] = [];
+  const visit = (node: CardNode): CardNode => {
+    if (node.type === 'tile') {
+      const side = sides.find((item) => mentionsSide(item, node.label) || pageNamesProduct(item, node.label));
+      if (!side) return node;
+      const own = photoFor(side);
+      const borrowed = !!node.imageSrc && owner.has(node.imageSrc) && owner.get(node.imageSrc) !== side;
+      if (borrowed && !own) return { ...node, imageSrc: undefined, imageRef: undefined, imageQuery: undefined };
+      const imageSrc = borrowed ? own : node.imageSrc || own;
+      if (!imageSrc || imageSrc === node.imageSrc) return node;
+      return { ...node, imageSrc, imageRef: undefined, imageQuery: undefined };
+    }
+    if ('children' in node && Array.isArray(node.children)) {
+      const children = node.children.map(visit);
+      return children.some((child, index) => child !== node.children[index]) ? { ...node, children } as CardNode : node;
+    }
+    if (node.type === 'tabs') {
+      const tabs = node.tabs.map((tab) => ({ ...tab, children: tab.children.map(visit) }));
+      return tabs.some((tab, index) => tab.children.some((child, childIndex) => child !== node.tabs[index]?.children[childIndex]))
+        ? { ...node, tabs }
+        : node;
+    }
+    return node;
+  };
+  for (const [index, node] of nodes) {
+    const next = visit(node);
+    if (next !== node) patches.push({ index, node: next });
+  }
+  return patches.length ? patches : undefined;
 }
 
 export function comparisonNodes(question: string, search: SearchResponse): CardNode[] {
