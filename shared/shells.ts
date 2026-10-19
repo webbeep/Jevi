@@ -10,6 +10,7 @@ const blankCell = (cell: string) => cell !== GAP_MARK && hollow(cell);
 
 /** A value that says there is no value ("Unavailable", "None yet", "N/A"). */
 const NON_ANSWER = /^(?:unavailable|not available|none(?: yet| listed| found| reported)?|n\/?a|tbd|tba|unknown|not (?:yet )?(?:stated|reported|listed|announced|found)|not in (?:the |these )?sources|no data|pending)\.?$/i;
+const PRICE_LEFTOVER = /^(?:~|≈|under|over|from|around|about|approx\.?|up to|starting at|less than|more than|below|above)$/i;
 const saysNothing = (value: string | undefined) => hollow(value) || NON_ANSWER.test(value!.replace(/\[\d+\]/g, '').trim());
 
 /**
@@ -61,6 +62,8 @@ export function withoutShells(node: CardNode): CardNode | undefined {
     case 'tile':
       // A tile whose figure is "Unavailable" fills a row with nothing; a tile with no value at all is a name and stays.
       if (node.value !== undefined && node.value.trim() && NON_ANSWER.test(node.value.replace(/\[\d+\]/g, '').trim())) return undefined;
+      // "Under", "From" or "~" is what is left of a price that was removed.
+      if (node.value !== undefined && (hollow(node.value) || PRICE_LEFTOVER.test(node.value.replace(/\[\d+\]/g, '').trim()))) return withoutShells({ ...node, value: undefined });
       return node.sub !== undefined && hollow(node.sub) ? { ...node, sub: undefined } : node;
     default:
       return node;

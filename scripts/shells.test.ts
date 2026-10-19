@@ -37,3 +37,8 @@ test('an empty detail, a repeated item, a citation-only caption and a cite past 
   // A cell value with a number in brackets that is not a cite is left alone only when it is in range; refs nodes are untouched.
   assert.deepEqual(withinSources({ type: 'citations', refs: [1, 30] }, 12), { type: 'citations', refs: [1, 30] });
 });
+
+test('a tile value left as "Under" or "~" after its price went is removed, and the name stays', () => {
+  assert.deepEqual(withoutShells({ type: 'tile', label: '2. Soundcore Space One', value: 'Under', sub: 'Great ANC' }), { type: 'tile', label: '2. Soundcore Space One', value: undefined, sub: 'Great ANC' });
+  assert.deepEqual(withoutShells({ type: 'tile', label: 'Soundcore Space Q45', value: '~ [1]' }), { type: 'tile', label: 'Soundcore Space Q45', value: undefined });
+});

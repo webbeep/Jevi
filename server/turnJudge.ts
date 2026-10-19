@@ -176,6 +176,12 @@ export function followSearchPlan(input: { title?: string; question: string; quer
     const fanout = intro ? [intro.name, ...sides] : next.map((side) => (attribute ? `${side} ${attribute}` : side));
     return { query, fanout, added: intro?.name };
   }
+  // "What about Google?" on "AI News Today" asks the card's question about Google: "Google AI News Today", not "Google".
+  const swapped = asked.match(/^(?:what|how)\s+about\s+(.+?)[?.!]*$/i)?.[1]?.trim();
+  if (swapped && title && !title.toLowerCase().includes(swapped.toLowerCase())) {
+    const query = `${swapped} ${title}`;
+    return { query, fanout: input.queries.map(withoutLeadVerb).filter((item) => item.toLowerCase() !== query.toLowerCase()).slice(0, 2), subject: swapped };
+  }
   const place = placeOnScreen(title) || input.subject;
   const written = withoutLeadVerb(input.queries[0] ?? asked);
   // "When did it open?" names the place in the pronoun's spot, not glued in front.

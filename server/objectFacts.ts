@@ -55,7 +55,8 @@ function edit(node: CardNode, objects: ReturnType<typeof threadObjects>, sources
     let next = node;
     if (next.value && foreignNumber(next.label, next.value, objects) && !statedFor(next.label, next.value, sources)) {
       const value = clearMoney(next.value);
-      next = value ? { ...next, value } : { ...next, value: undefined };
+      // "Under $100" without its price is "Under": a value that was a price says nothing once the price goes.
+      next = value && /\d/.test(value) ? { ...next, value } : { ...next, value: undefined };
     }
     if (next.imageSrc) {
       const owner = objects.find((object) => object.facts.includes(`photo ${next.imageSrc}`));

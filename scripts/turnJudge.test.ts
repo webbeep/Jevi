@@ -126,3 +126,11 @@ test('without the turn judge, a pronoun becomes the subject on screen', async ()
   assert.equal(fallbackQuery('What are the hours?', 'Met Museum'), 'Met Museum What are the hours');
   assert.equal(fallbackQuery('Is the Met Museum open Monday?', 'Met Museum'), 'Is the Met Museum open Monday');
 });
+
+test('"what about X?" asks the card\'s question about X, keeping the topic', () => {
+  const plan = followSearchPlan({ title: 'AI News Today', question: 'what about Google?', queries: ['Google'], subject: 'Google' });
+  assert.equal(plan.query, 'Google AI News Today');
+  assert.equal(plan.subject, 'Google');
+  const same = followSearchPlan({ title: 'Google AI News', question: 'what about Google?', queries: ['Google AI news'], subject: 'Google' });
+  assert.equal(same.query, 'Google AI news');
+});
