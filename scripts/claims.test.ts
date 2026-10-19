@@ -948,3 +948,11 @@ test('a rate the row places somewhere else keeps its figure', async () => {
   const bound = bindClaims(grid, sources as never, 'What would I pay with sales tax in New York City?');
   assert.deepEqual(bound.type === 'grid' ? bound.children.map((tile) => (tile.type === 'tile' ? tile.value : '')) : [], ['8.875% [1]', '8.375% [1]']);
 });
+
+test('a fee percentage is not rewritten to the sales tax rate', async () => {
+  const { bindClaims } = await import('../server/claims.ts');
+  const sources = [{ n: 1, text: 'NYC sales tax. The combined sales tax rate in New York City is 8.875%. Nintendo charges a 1.5% recycling fee, capped at $15.' }];
+  const text: CardNode = { type: 'text', text: 'Nintendo adds a separate fee of 1.5% of the retail price, capped at $15 [1].' };
+  const bound = bindClaims(text, sources as never, 'What would I pay with sales tax in New York City?');
+  assert.equal(bound.type === 'text' ? bound.text : '', 'Nintendo adds a separate fee of 1.5% of the retail price, capped at $15 [1].');
+});

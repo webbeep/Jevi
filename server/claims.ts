@@ -970,6 +970,8 @@ export function fixTaxLines(text: string, query: string, sources: readonly Claim
   }).join(' ');
 }
 
+const NOT_TAX_RATE = /\b(?:fee|fees|interest|apr|apy|discount|tip|tips|gratuity|commission|cash ?back|rebate|off)\b/i;
+
 function applyTaxText(text: string, query: string, pick: TaxPick, _keep: ReadonlySet<number>): string {
   const price = query.match(/\$\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)/);
   const amount = price ? Number(price[1]!.replace(/,/g, '')) : undefined;
@@ -980,6 +982,8 @@ function applyTaxText(text: string, query: string, pick: TaxPick, _keep: Readonl
   // rate, or lists several rates, gives its parts or a range. Rewriting each to 8.875% made "4.5%" read "8.875%".
   const RATE = /(\d{1,2}(?:\.\d+)?)\s*(?:%|percent\b)/gi;
   let out = text.split(/(?<=[.!?])\s+/).map((sentence) => {
+    // "Nintendo adds a fee of 1.5% of the sale price": a fee, interest or discount rate is not the sales tax.
+    if (NOT_TAX_RATE.test(sentence) && !/\btax\b/i.test(sentence.replace(NOT_TAX_RATE, ''))) return sentence;
     const rates = [...sentence.matchAll(RATE)].map((match) => Number(match[1]));
     if (rates.some((rate) => Math.abs(rate - pick.rate) <= 0.001) || new Set(rates).size >= 2) return sentence;
     return sentence.replace(RATE, (raw, num) => {
@@ -1978,6 +1982,7 @@ let breakdown = new WeakSet<object>();
  */
 function componentRate(row: object): boolean {
   if (breakdown.has(row)) return true;
+  if (NOT_TAX_RATE.test((row as { label?: string }).label ?? '')) return true;
   // "Purchase, NY · Outside NYC, lower rate": a rate the row itself places somewhere else is that place's, not the lead.
   const own = row as { label?: string; sub?: string; caption?: string };
   return OTHER_PLACE.test(`${own.label ?? ''} ${own.sub ?? ''} ${own.caption ?? ''}`);
