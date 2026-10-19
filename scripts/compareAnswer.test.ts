@@ -659,3 +659,19 @@ test('the fallback comparison takes each spec only from pages that name that pro
   const text = JSON.stringify(nodes);
   assert.ok(!/Redmi/.test(text), 'the Redmi phone page is not the Mi Band');
 });
+
+test('a carrier deal is not the phone\'s price', () => {
+  const row = (title: string, snippet: string) => ({ title, url: `https://example.com/${encodeURIComponent(title)}`, snippet, domain: 'example.com', engines: ['web'] });
+  const search = {
+    query: 'iphone 17 vs pixel 10', freshness: 'any', images: [], discussions: [], engines: [],
+    results: [
+      row('The Apple iPhone 17 is (almost) free with T-Mobile', 'The iPhone 17 is under $100 when you bring your number on an Experience More plan.'),
+      row('iPhone 17 review', 'The iPhone 17 starts at $799 with 256 GB.'),
+    ],
+  } as unknown as SearchResponse;
+  const nodes = comparisonNodes('iphone 17 vs pixel 10', search);
+  const grid = nodes.find((node) => node.type === 'grid');
+  assert.ok(grid && grid.type === 'grid');
+  const iphone = grid.children.find((tile) => tile.type === 'tile' && tile.label === 'Iphone 17');
+  assert.equal(iphone && iphone.type === 'tile' ? iphone.value : '', '$799');
+});

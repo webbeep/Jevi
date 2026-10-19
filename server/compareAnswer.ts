@@ -246,7 +246,8 @@ function specFromSources(label: string, side: string, search: SearchResponse, ot
   }
   return undefined;
 }
-const RELATIVE_PRICE = /\b(?:cheaper|cost(?:s|ing)? more|more expensive|less expensive|saving|saves|discount|between|than)\b|(?:\$|€|£|¥)\s?\d[\d,]*(?:\.\d{2})?\s*[–-]\s*(?:\$|€|£|¥)?\s?\d/i;
+// A deal is not the product's price: "under $100 when you bring your number on a plan", "$100 off", "with trade-in".
+const RELATIVE_PRICE = /\b(?:cheaper|cost(?:s|ing)? more|more expensive|less expensive|saving|saves|discount|between|than|under|free|off|trade-?in|bring your number|rebate|gift card|deal)\b|(?:\$|€|£|¥)\s?\d[\d,]*(?:\.\d{2})?\s*[–-]\s*(?:\$|€|£|¥)?\s?\d/i;
 const NO_PRICE = /\bno price stated\b|\bprice (?:is )?not stated\b|\bno specs or price\b/i;
 const DENIES_PRICE = /\b(?:no|not|n't|without)\b(?:\s+\w+){0,8}\s+price\b/i;
 
