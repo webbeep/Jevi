@@ -717,3 +717,13 @@ test('a sentence denying a figure another row with the same label word shows is 
   const patches = dropShownDenials(new Map([[0, callout], [1, table]]));
   assert.ok(patches?.some((patch) => patch.index === 0));
 });
+
+test('two rows for one fact become the fuller one, and a tile detail that denies a shown figure goes', () => {
+  const table: CardNode = { type: 'table', columns: ['Factor', 'iPhone 17', 'Pixel 10'], rows: [['Battery capacity', '3692 mAh [7]', 'Not stated'], ['Battery claim', '3692 mAh', '4970 mAh']] };
+  const grid: CardNode = { type: 'grid', cols: 2, children: [{ type: 'tile', label: 'Pixel 10', value: 'All-day battery', sub: 'No capacity figure stated [11]' }] };
+  const patches = dropShownDenials(new Map([[0, grid], [1, table]]));
+  const fixedTable = patches?.find((patch) => patch.index === 1)?.node;
+  assert.deepEqual(fixedTable?.type === 'table' ? fixedTable.rows : [], [['Battery claim', '3692 mAh [7]', '4970 mAh']]);
+  const fixedGrid = patches?.find((patch) => patch.index === 0)?.node;
+  assert.equal(fixedGrid?.type === 'grid' && fixedGrid.children[0]?.type === 'tile' ? fixedGrid.children[0].sub : 'x', undefined);
+});

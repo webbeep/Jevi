@@ -1016,6 +1016,12 @@ function deniesShown(sentence: string, facts: readonly ShownFact[]): boolean {
 }
 
 function withoutDenial(node: CardNode, facts: readonly ShownFact[]): CardNode | undefined {
+  // A tile's detail can deny too ("Pixel 10 · No capacity figure stated" beside a 4970 mAh cell).
+  if (node.type === 'tile' && node.sub && deniesShown(`${node.label} ${node.sub}`, facts)) return { ...node, sub: undefined };
+  if (node.type === 'table') {
+    const rows = mergedFactRows(node.rows);
+    return rows === node.rows ? node : { ...node, rows };
+  }
   if (node.type === 'callout' || node.type === 'text' || node.type === 'heading') {
     const text = node.text.split(/(?<=[.!?])\s+/).map((sentence) => sentence.trim()).filter((sentence) => sentence && !deniesShown(sentence, facts)).join(' ');
     if (node.type === 'callout') {
@@ -1039,6 +1045,46 @@ function withoutDenial(node: CardNode, facts: readonly ShownFact[]): CardNode | 
     return { ...node, tabs };
   }
   return node;
+}
+
+/**
+ * Two rows for one fact ("Battery capacity | 3692 mAh [7] | Not stated" and "Battery claim | 3692 mAh | 4970 mAh"):
+ * when they share a label word and agree wherever both have a figure, the fuller row stands alone and takes the other
+ * row's citations. Rows that disagree on a figure both stay.
+ */
+function mergedFactRows(rows: readonly string[][]): string[][] {
+  const out = rows.map((row) => [...row]);
+  const gone = new Set<number>();
+  const figure = (cell: string | undefined) => measureNumbers(cell ?? '').join(' ');
+  for (let a = 0; a < out.length; a++) {
+    for (let b = 0; b < out.length; b++) {
+      if (a === b || gone.has(a) || gone.has(b)) continue;
+      const keysA = labelKeys(out[a]![0] ?? '');
+      if (!keysA.length || !labelKeys(out[b]![0] ?? '').some((key) => keysA.includes(key))) continue;
+      const width = Math.max(out[a]!.length, out[b]!.length);
+      let agree = true;
+      let fuller = false;
+      let shared = 0;
+      for (let col = 1; col < width; col++) {
+        const fa = figure(out[a]![col]);
+        const fb = figure(out[b]![col]);
+        if (fa && fb) {
+          if (fa !== fb) agree = false;
+          shared++;
+        }
+        if (fb && !fa) fuller = true;
+        if (fa && !fb) agree = false;
+      }
+      if (!agree || !fuller || !shared) continue;
+      // b has every figure a has, and more: a goes, and its citations move to b's matching cells.
+      for (let col = 1; col < width; col++) {
+        const cites = (out[a]![col] ?? '').match(/\[\d+\]/g) ?? [];
+        if (cites.length && figure(out[b]![col]) && !/\[\d+\]/.test(out[b]![col] ?? '')) out[b]![col] = `${out[b]![col]} ${cites.join('')}`;
+      }
+      gone.add(a);
+    }
+  }
+  return gone.size ? out.filter((_, i) => !gone.has(i)) : (rows as string[][]);
 }
 
 /** A cited measurement and a “not in the sources” line cannot both stand for the same fact. */
