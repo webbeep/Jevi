@@ -47,3 +47,11 @@ export function savedCardDegraded(card: unknown): DegradedReason | undefined {
   if (/"type":"citations"/.test(text) || /\[\d+\]/.test(text)) return undefined;
   return 'no_sources';
 }
+
+/** Fewer web pages than this (Wikipedia filler aside) and a search is thin: its rewrites are the recall path. */
+export const THIN_WEB = 4;
+
+/** A search with only a page or two from the web, padded with Wikipedia articles that share its words. */
+export function thinSearch(search: Pick<SearchResponse, 'results'>): boolean {
+  return (search.results ?? []).filter((row) => !wikiOnly(row)).length < THIN_WEB;
+}

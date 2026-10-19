@@ -12,7 +12,7 @@ import { newLedger } from './budget';
 import { searchTtlS } from '../shared/cacheTtl';
 import { cacheDb, packSearch, readSearchCache, searchCacheKey, writeSearchCache } from './cache';
 import { type WebHit, cascadeWeb } from './cascade';
-import { searchDegraded } from './degraded';
+import { searchDegraded, thinSearch } from './degraded';
 import { diversify } from './diversify';
 import { withinOneEdit } from './entity';
 import { gateResults } from './relevanceGate';
@@ -274,6 +274,7 @@ const emptyLate = (): LateExtras => ({ content: new Map(), images: [] });
 export async function searchWithLate(q: Query, env: Env, scope?: AskScope): Promise<SearchWithLate> {
   const ask: AskScope = scope ?? { ledger: newLedger(), bypass: false };
   const key = searchCacheKey(q.q, q.freshness, q.count);
+  const rewrites = !!(q.later || q.more?.length);
   const db = cacheDb(env);
 
   if (q.ungated) {
@@ -285,7 +286,9 @@ export async function searchWithLate(q: Query, env: Env, scope?: AskScope): Prom
   } else {
     const cached = await readSearchCache(db, key, Date.now(), searchTtlS(q.q, q.freshness) * 1000);
     // T424: a degraded cached search (0 sources / Wikipedia-only / provider errors) is a miss.
-    if (cached.kind === 'hit' && !searchDegraded(cached.response)) {
+    // A thin cached search is a miss for an ask with rewrites: it was saved by a call whose rewrites never ran or
+    // came late ("How much is a subway ride in NYC?" → the MTA page and five Wikipedia articles, for a day).
+    if (cached.kind === 'hit' && !searchDegraded(cached.response) && !(rewrites && thinSearch(cached.response))) {
       ask.ledger.cache = 'hit';
       const hit = gateResults(q.q, cached.response.results);
       ask.ledger.relevanceDropped = (ask.ledger.relevanceDropped ?? 0) + hit.dropped;
@@ -360,7 +363,7 @@ export async function searchWithLate(q: Query, env: Env, scope?: AskScope): Prom
   const degraded = searchDegraded(response);
   if (degraded) Object.assign(response, { degraded: true, degradedReason: degraded });
   // T424: never cache a degraded search.
-  if (!q.ungated && !ask.bypass && ask.ledger.cache === 'miss' && db && response.results.length && !degraded) {
+  if (!q.ungated && !ask.bypass && ask.ledger.cache === 'miss' && db && response.results.length && !degraded && !(rewrites && thinSearch(response))) {
     const payload = packSearch(response);
     const pending = writeSearchCache(db, key, payload).catch(() => undefined);
     if (ask.waitUntil) ask.waitUntil(pending);
