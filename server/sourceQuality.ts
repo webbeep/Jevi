@@ -247,6 +247,8 @@ function probeWords(text: string): string {
  */
 const TOPIC_AUTHORITIES: readonly (readonly [RegExp, readonly string[]])[] = [
   [/\b(?:raw (?:chicken|meat|poultry|eggs?|fish|pork|beef)|undercooked|food safety|food poisoning|salmonella|e\.? coli|listeria|internal temperature|safe (?:to eat|temperature))\b/i, ['fsis.usda.gov', 'foodsafety.gov', 'fda.gov']],
+  // The Physical Activity and Dietary Guidelines for Americans are published by ODPHP on health.gov.
+  [/\b(?:physical activity|exercise (?:guidelines?|do adults need|per week)|dietary guidelines|added sugars?|sodium intake)\b/i, ['health.gov', 'odphp.health.gov', 'cdc.gov', 'nih.gov']],
   [/\b(?:aspirin|statins?|(?:cancer|lung|colon|colorectal|breast|cervical|prostate|health) screenings?|screening (?:tests?|age|guidelines?)|vaccines?|vaccinat\w*|booster shots?|mammograms?|colonoscopy|blood pressure|cholesterol|diabetes|prediabetes|dietary supplements?|vitamin [a-z]\d?|daily dose|side effects?|pregnan\w*|caffeine|added sugars?|sodium intake|physical activity|exercise (?:guidelines?|do adults need|per week)|sleep do adults need)\b/i, ['uspreventiveservicestaskforce.org', 'cdc.gov', 'health.gov', 'nih.gov']],
   // Case matters: "IRA" is the account, "Ira" a name.
   [/\b(?:[Rr]oth|IRAs?|401\(?k\)?|403\(?b\)?|HSA|[Cc]apital gains|[Tt]ax brackets?|[Ss]tandard deduction|[Tt]ax (?:return|refund)s?|W-?2|1099|[Ee]stimated tax)\b/, ['irs.gov']],
