@@ -77,6 +77,7 @@ import { cardGaps, citeForGap, gapSearchQuery, settleGap, type PieceGap } from '
 import { factsElsewhere, quoteCorpus, withinSources, withoutRepeatedFacts, withoutShells, withVerbatimQuotes } from '../shared/shells';
 import { fxQuote, liveQuoteFacts, withinFx, withinQuote } from '../shared/fxCard';
 import { forecastHigh, withinForecast } from '../shared/weatherCard';
+import { withSourcedMonths } from '../shared/monthClaims';
 import { unblendObjects } from './objectFacts';
 import { withFinishedSentences } from './polish';
 import { queryWithPlace, readerPlace, settleReadings } from './readings';
@@ -600,12 +601,21 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   const live = liveQuoteFacts(shownTicker);
   /** Sources a later search appended after the ones the card was designed from; their cites run past the first list. */
   let addedSources = 0;
+  let addedRows: typeof designReq.search.results = [];
+  // A month written next to a figure is one its cited source states: "the revised price from May" with no month
+  // on Nintendo's page was invented. The question, the conversation and today's month are the person's own.
+  const monthAsked = [req.query, req.followup?.question ?? '', req.context ?? '', req.followup?.baseCard ? JSON.stringify(req.followup.baseCard) : ''].join('\n');
+  const monthSources = () => [...designReq.search.results, ...addedRows].map((row, i) => {
+    const page = designReq.pages.find((item) => item.n === i + 1);
+    return `${row.title ?? ''} ${row.snippet ?? ''} ${row.content ?? ''} ${row.date ?? ''} ${page?.text ?? ''}`;
+  });
   const publish: Publish = (index, raw) => {
     // A component whose figures were all removed is collapsed, not shown as an empty shell.
     const fitted = withinSources(raw, designReq.search.results.length + addedSources);
     const quoted0 = fx ? withinFx(fitted, fx) : live ? withinQuote(fitted, live) : fitted;
     const agreed = quoted0 && forecast ? withinForecast(quoted0, forecast) : quoted0;
-    const quoted = agreed ? withVerbatimQuotes(agreed, quotes()) : undefined;
+    const dated = agreed ? withSourcedMonths(agreed, { sources: monthSources(), asked: monthAsked, now: new Date() }) : undefined;
+    const quoted = dated ? withVerbatimQuotes(dated, quotes()) : undefined;
     const tidy = withoutShells(quoted ?? { type: 'stack', children: [] });
     const node = (tidy && withoutRepeatedFacts(tidy, factsElsewhere(shown, index))) ?? { type: 'stack', children: [] };
     shown.set(index, node);
@@ -771,6 +781,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       const add = rows.filter((row) => row.url && !have.has(row.url)).slice(0, 4);
       if (add.length) {
         addedSources = add.length;
+        addedRows = add;
         send('search', { ...designReq.search, results: [...designReq.search.results, ...add] });
         send('peek', add.slice(0, 4).map(({ title, url, domain, date }) => ({ title, url, domain, date })));
       }
