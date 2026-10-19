@@ -130,3 +130,17 @@ test('Jayson Tatum preseason stats keeps the stat line instead of an empty resul
   const gated = gateResults(q, [career, lineups, finals, nba, real, fox]);
   assert.deepEqual(gated.kept.map((r) => r.title), [nba.title, real.title, fox.title, career.title, lineups.title, finals.title]);
 });
+
+test('Wikipedia articles found by title words never outvote the web pages into being dropped', () => {
+  const q = 'How much is a subway ride in New York City?';
+  const web = [
+    ['https://www.mta.info/fares-tolls', 'Fares and tolls', 'Subway and bus fares The fare is $3 for most riders on subways and local buses.'],
+    ['https://omny.info/fare-cap', 'Weekly Fare Cap', 'If you spend $35 on subways and local buses in any seven-day period, every other ride is free.'],
+    ['https://portal.311.nyc.gov/article/?kanumber=KA-01136', 'Buses and Subways · NYC311 - NYC.gov', 'Cost and Payment Methods ; Subways, local buses: $3.00'],
+    ['https://en.wikipedia.org/wiki/New_York_City_transit_fares', 'New York City transit fares', 'New York City Subway fares are in US dollars.'],
+  ].map(([url, title, snippet]) => ({ url, title, snippet, domain: new URL(url).hostname, engines: ['serper'] }));
+  const filler = ['History of the New York City Subway', 'New York City', 'List of New York City Subway yards', 'R44 (New York City Subway car)']
+    .map((t) => ({ url: `https://en.wikipedia.org/wiki/${t.replace(/ /g, '_')}`, title: t, snippet: `The ${t} in New York City.`, domain: 'en.wikipedia.org', engines: ['wikipedia'] }));
+  const kept = gateResults(q, [...web, ...filler]).kept.map((row) => row.url);
+  for (const row of web) assert.ok(kept.includes(row.url), row.url);
+});

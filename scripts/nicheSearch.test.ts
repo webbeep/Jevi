@@ -294,3 +294,11 @@ describe('cascade rewrites', { concurrency: 1 }, () => {
     });
   }
 });
+
+test('a page that writes "NYC" covers "New York City" in the ask', () => {
+  const q = 'How much is a subway ride in New York City?';
+  const page = { title: 'Navigating NYC | Your Guide to Subway, Bus', snippet: 'A single subway or bus trip costs $3.', url: 'https://www.nyctourism.com/articles/navigating-nyc-subway-bus/' };
+  assert.ok(coverage(q, page, true) >= 0.5);
+  // Initials alone are not the place: "nyc" inside a longer word does not count.
+  assert.ok(coverage(q, { title: 'Bus guide', snippet: 'Fares for the bus', url: 'https://example.com/nycx' }, true) < 0.5);
+});

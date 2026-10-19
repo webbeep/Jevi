@@ -106,7 +106,11 @@ export function coverage(query: string, hit: Pick<Hit, 'title' | 'snippet' | 'ur
   const text = `${hit.title} ${hit.snippet} ${hit.url} ${(hit.content ?? '').slice(0, 800)}`.toLowerCase();
   const long = text.split(/[^a-z0-9]+/).filter((w) => w.length >= 6);
   // "bleuflame" covers a page that says "blueflame".
-  const found = words.filter((w) => text.includes(w) || (w.length >= 6 && long.some((t) => withinOneEdit(w, t)))).length;
+  // "NYC" on a page covers "New York City" in the ask.
+  const named = new Set((query.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+){2,}/g) ?? [])
+    .filter((phrase) => new RegExp(`\\b${phrase.split(/\s+/).map((word) => word[0]).join('').toLowerCase()}\\b`).test(text))
+    .flatMap((phrase) => phrase.toLowerCase().split(/\s+/).map(stem)));
+  const found = words.filter((w) => named.has(w) || text.includes(w) || (w.length >= 6 && long.some((t) => withinOneEdit(w, t)))).length;
   const share = found / words.length;
   return typed && found >= Math.max(2, Math.ceil(words.length / 3)) ? Math.max(0.5, share) : share;
 }

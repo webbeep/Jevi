@@ -170,6 +170,12 @@ function sharesTerms(profile: Profile, hits: number): boolean {
   return profile.weights.length < 3 || hits >= 2;
 }
 
+/** A row the Wikipedia title search added because it shares the ask's words, not one a web engine ranked. */
+const wikiFiller = (row: GateHit) => {
+  const engines = (row as { engines?: string[] }).engines;
+  return !!engines?.length && engines.every((engine) => engine === 'wikipedia');
+};
+
 function judge(query: string, profile: Profile, row: GateHit): { pass: boolean; hard: boolean; score: number; hits: number } {
   const title = norm(row.title);
   const hay = `${title} ${norm(row.snippet ?? '')} ${norm(row.url)}`;
@@ -244,8 +250,10 @@ export function gateResults<T extends GateHit>(query: string, rows: readonly T[]
   const passing = judged.filter((j) => j.pass).length;
   let kept: T[];
   if (passing > 0) {
-    const soft = judged.filter((j) => !j.pass && !j.hard).length;
-    const dropSoft = soft * 2 < pool.length;
+    // Wikipedia articles found by title words pass easily; they never outvote the web pages into being dropped.
+    const counted = pool.map((row, i) => ({ row, j: judged[i] })).filter(({ row }) => !wikiFiller(row));
+    const soft = counted.filter(({ j }) => !j.pass && !j.hard).length;
+    const dropSoft = soft * 2 < counted.length;
     kept = pool.filter((_, i) => {
       const j = judged[i];
       if (j.hard) return false;
