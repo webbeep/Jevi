@@ -78,3 +78,12 @@ test('a figure a source states for both objects together stays on each', () => {
   const table = patches?.[0]?.node;
   assert.equal(table?.type === 'table' ? table.rows[0]?.[2] : 'kept', '');
 });
+
+test('a thousands figure on one object is not foreign to another because both end in 000', () => {
+  const next = new Map<number, CardNode>([[0, {
+    type: 'table',
+    columns: ['Factor', 'Roth IRA', 'Traditional IRA'],
+    rows: [['Income limits', 'Full contribution under $153,000 single [1]', 'Deduction phases out $81,000–$91,000 single [2]']],
+  }]]);
+  assert.equal(unblendObjects(next, [], [{ title: 'IRA limits', snippet: 'Roth phase-out starts at $153,000.' }]), undefined);
+});

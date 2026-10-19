@@ -194,7 +194,7 @@ function journalHosts(query: string): string[] {
 /** Capitals that name a job, a currency, a format or a gadget, not a body with its own site. */
 const NOT_AGENCY = new Set([
   'doi', 'pdf', 'url', 'ceo', 'cfo', 'coo', 'cto', 'cmo', 'usd', 'eur', 'gbp', 'jpy', 'cny', 'inr', 'cad', 'aud', 'chf', 'btc', 'eth',
-  'etf', 'ipo', 'faq', 'api', 'usa', 'nyc', 'mba', 'phd', 'diy', 'html', 'json', 'csv', 'suv', 'gpu', 'cpu', 'ram', 'ssd', 'usb', 'hdmi', 'oled', 'led', 'lcd',
+  'etf', 'ipo', 'faq', 'api', 'mba', 'phd', 'diy', 'html', 'json', 'csv', 'suv', 'gpu', 'cpu', 'ram', 'ssd', 'usb', 'hdmi', 'oled', 'led', 'lcd',
 ]);
 
 function orgTokens(query: string): string[] {

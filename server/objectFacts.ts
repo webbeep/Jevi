@@ -9,8 +9,13 @@ interface SourceRow {
   content?: string;
 }
 
+/** "$153,000" is one number, 153000: its "000" is not a figure another object shares. */
+function joinThousands(text: string): string {
+  return text.replace(/(\d),(?=\d{3}(?!\d))/g, '$1');
+}
+
 function numbersOf(text: string): string[] {
-  const bare = text.replace(/\s*\[(?:\d+\s*,\s*)*\d+\]/g, ' ');
+  const bare = joinThousands(text.replace(/\s*\[(?:\d+\s*,\s*)*\d+\]/g, ' '));
   return [...bare.matchAll(/\d+(?:\.\d+)?/g)].map((match) => match[0]);
 }
 
@@ -43,7 +48,7 @@ function statedFor(name: string, value: string, sources: readonly SourceRow[], o
   const nums = numbersOf(value);
   if (!nums.length) return true;
   return sources.some((source) => {
-    const blob = `${source.title ?? ''}. ${source.snippet ?? ''} ${source.content ?? ''}`;
+    const blob = joinThousands(`${source.title ?? ''}. ${source.snippet ?? ''} ${source.content ?? ''}`);
     for (const sentence of blob.split(/(?<=[.!?])\s+/)) {
       if (namedTogether(name, others, sentence) && nums.every((num) => sentence.includes(num))) return true;
       for (const clause of sentence.split(/\s*(?:;|\band\b|\bwith\b|,(?!\d))\s*/i)) {

@@ -406,6 +406,8 @@ test('a topic with a known US authority probes that authority when the ask names
   // A job title or a currency is not an agency.
   assert.equal(officialProbe('Bitcoin price in USD'), '');
   assert.doesNotMatch(officialProbe('Who is the CEO of the IRS?'), /site:ceo\./);
+  // A city or the national portal is a body with its own site.
+  assert.match(officialProbe('NYC sales tax rate'), /site:nyc\./);
 });
 
 test('at most two Wikipedia pages lead; the rest go to the back', () => {
