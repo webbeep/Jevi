@@ -136,11 +136,14 @@ function groundNode(node: CardNode, g: Grounding): CardNode | undefined {
     case 'rating':
       return g.ok(node.value) ? node : undefined;
     case 'table': {
-      // An unbacked cell is blanked, not the whole row: the row's other sourced cells still answer, and a lone
-      // gap reads "—". A row whose label or every value is unbacked goes.
-      const rows = node.rows
-        .map((r) => (r.every((cell) => g.ok(cell)) ? r : r.map((cell, i) => (i === 0 || g.ok(cell) ? cell : ''))))
-        .filter((r) => g.ok(r[0]) && (r.length < 2 || r.slice(1).some((cell) => cell.trim())));
+      // A row with an unbacked cell goes, so the table shows no holes. When that would take most of the table (a spec
+      // table where every row has one unbacked cell), the cell is blanked instead and the sourced cells stay.
+      const whole = node.rows.filter((r) => r.every((cell) => g.ok(cell)));
+      const rows = whole.length * 2 >= node.rows.length
+        ? whole
+        : node.rows
+          .map((r) => (r.every((cell) => g.ok(cell)) ? r : r.map((cell, i) => (i === 0 || g.ok(cell) ? cell : ''))))
+          .filter((r) => g.ok(r[0]) && (r.length < 2 || r.slice(1).some((cell) => cell.trim())));
       return rows.length ? { ...node, rows } : undefined;
     }
     case 'timeline': {

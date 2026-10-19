@@ -76,7 +76,7 @@ import { acceptProductPhoto, appendAskedFact, comparisonRepair, comparisonTitle,
 import { cardGaps, citeForGap, gapSearchQuery, settleGap, type PieceGap } from './gapFill';
 import { factsElsewhere, quoteCorpus, withinSources, withoutRepeatedFacts, withoutShells, withVerbatimQuotes } from '../shared/shells';
 import { fxQuote, feedPcts, liveQuoteFacts, withinFx, withinQuote } from '../shared/fxCard';
-import { forecastHigh, withinForecast } from '../shared/weatherCard';
+import { asksForHigh, forecastHigh, withinForecast } from '../shared/weatherCard';
 import { withSourcedMonths } from '../shared/monthClaims';
 import { isBlankLayout } from '../shared/liveBody';
 import { unblendObjects } from './objectFacts';
@@ -568,6 +568,14 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     snippetCorpus,
     ...pages.map((page) => `${req.search.results[page.n - 1]?.title ?? ''} ${page.text}`),
   ].join('\n');
+  // Every header this card sends ("Chair and CEO since October 2014") keeps each role at the date its sources give.
+  const sendRaw = send;
+  send = (event, data) => {
+    const head = data as { subtitle?: unknown } | undefined;
+    if (event !== 'head' || typeof head?.subtitle !== 'string') return sendRaw(event, data);
+    const subtitle = withRoleDates(head.subtitle, factCorpus);
+    sendRaw(event, subtitle === head.subtitle ? data : { ...head, subtitle });
+  };
   // A ratio's two lengths sit next to their names in the snippets. Page text often
   // separates them, so a ratio trusts the snippets first.
   const ratio = /\bif\b[\s\S]+?\b(?:took place|were held|was held|happened|ran) on\b/i.test(req.query);
@@ -616,7 +624,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     // A component whose figures were all removed is collapsed, not shown as an empty shell.
     const fitted = withinSources(raw, designReq.search.results.length + addedSources);
     const quoted0 = fx ? withinFx(fitted, fx) : live ? withinQuote(fitted, live) : fitted;
-    const agreed = quoted0 && forecast ? withinForecast(quoted0, forecast) : quoted0;
+    const agreed = quoted0 && forecast ? withinForecast(quoted0, forecast, asksForHigh(`${designReq.query} ${designReq.followup?.question ?? ''}`)) : quoted0;
     const monthsChecked = agreed ? withSourcedMonths(agreed, { sources: monthSources(), asked: monthAsked, now: new Date() }) : undefined;
     const roleJson = monthsChecked ? JSON.stringify(monthsChecked) : '';
     const roleFixed = roleJson ? withRoleDates(roleJson, factCorpus) : '';

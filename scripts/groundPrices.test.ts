@@ -49,3 +49,10 @@ test('a citation marker in a table cell is not a figure, and "cols" is a table h
   const [table] = sanitizeNodes([{ type: 'table', cols: ['Feature', 'Roth IRA', 'Traditional IRA'], rows: [['Limit', '$7,500', '$7,500']] }], 0);
   assert.deepEqual(table?.type === 'table' ? table.columns : [], ['Feature', 'Roth IRA', 'Traditional IRA']);
 });
+
+test('a table keeps whole rows when most rows are backed, and blanks cells only to save most of it', async () => {
+  const { groundNodes } = await import('../server/ground.ts');
+  const g = new Grounding('Battery 3692 mAh and 4970 mAh. Weight 177 g and 204 g. Apple A19.');
+  const [mostly] = groundNodes([{ type: 'table', columns: ['', 'A', 'B'], rows: [['Battery', '3692 mAh', '4970 mAh'], ['Weight', '177 g', '204 g'], ['Chip', 'A19', 'G5']] }], g);
+  assert.deepEqual(mostly?.type === 'table' ? mostly.rows : [], [['Battery', '3692 mAh', '4970 mAh'], ['Weight', '177 g', '204 g']]);
+});

@@ -510,9 +510,11 @@ function groundCompareNode(node: CardNode, sides: string[], search: SearchRespon
       const side = sides.find((item) => mentionsSide(item, sentence) || sideWord(item, sentence));
       const price = side ? shown.get(side) || stickerPrice(side, search) : undefined;
       if (price && (NO_PRICE.test(sentence) || DENIES_PRICE.test(sentence))) return '';
-      if (!RELATIVE_PRICE.test(sentence)) return sentence;
-      if (!price) return sentence.replace(RELATIVE_PRICE, '').replace(/\s{2,}/g, ' ').trim();
-      return sentence.replace(RELATIVE_PRICE, price);
+      // A deal or a price difference ("under $100 with a plan", "$100 cheaper") is never spliced into: swapping a word
+      // for a price wrote "tax-$7,500 withdrawals". A sentence whose amounts no source states goes; any other stays.
+      if (!side || !RELATIVE_PRICE.test(sentence)) return sentence;
+      const amounts = moneyAmounts(sentence);
+      return amounts.every((amount) => sourcesState(amount, search)) ? sentence : '';
     }).filter(Boolean).join(' ');
     return text === node.text ? node : { ...node, text };
   }
@@ -533,7 +535,8 @@ function groundCompareNode(node: CardNode, sides: string[], search: SearchRespon
     const rows = node.rows.map((row) => row.map((cell, index) => {
       const side = sides.find((item) => mentionsSide(item, node.columns[index] ?? ''));
       if (!side || moneyIn(cell)) return cell;
-      if (priceRow(row[0] ?? '') || RELATIVE_PRICE.test(cell)) {
+      // Only a price row's cell is a price to repair: "tax-free growth" or "MAGI under $153,000" is not a deal.
+      if (priceRow(row[0] ?? '')) {
         const blocked = [...shown.entries()].filter(([name]) => name !== side).map(([, price]) => price);
         const found = statedPrice(side, search, blocked);
         if (found) return found;
@@ -569,6 +572,13 @@ const OFFER_WORD = /\b(?:carrier|verizon|at&t|t-mobile|tmobile|sprint|monthly|pe
 
 function moneyAmounts(text: string): string[] {
   return [...text.matchAll(STICKER)].map((match) => match[0].replace(/\s/g, ''));
+}
+
+/** The sources state this amount ("$7,500" as 7,500 or 7500). */
+function sourcesState(amount: string, search: SearchResponse): boolean {
+  const digits = amount.replace(/[^\d.]/g, '');
+  if (!digits) return true;
+  return search.results.some((row) => `${row.title ?? ''} ${row.snippet ?? ''} ${row.content ?? ''}`.replace(/(\d),(\d{3})/g, '$1$2').includes(digits));
 }
 
 function sameMoney(a: string, b: string): boolean {

@@ -77,3 +77,13 @@ test('the quote feed\'s own 24-hour change is not a contradiction of the widget\
   assert.equal(withinQuote(range, btc), range);
   assert.equal(withinQuote({ type: 'text', text: 'BTC fell 0.2% over 24 hours [3].' }, btc), undefined);
 });
+
+test('a question for the high leads with the official high, not another page\'s current reading', async () => {
+  const { forecastHigh, withinForecast, asksForHigh } = await import('../shared/weatherCard.ts');
+  const forecast = forecastHigh([{ engines: ['web'] }, { engines: ['nws'], snippet: 'Tonight: Mostly clear, with a low around 47. Monday: Sunny. High near 65, with temperatures falling.' }]);
+  assert.deepEqual(forecast, { day: 'Monday', high: 65, ref: 2 });
+  const hero: CardNode = { type: 'hero', value: '71', unit: '°F', caption: 'Partly cloudy [3]' };
+  const asked = withinForecast(hero, forecast!, asksForHigh("What's the forecast high in New York City today?"));
+  assert.equal(asked?.type === 'hero' ? `${asked.value} ${asked.label}` : '', '65 High Monday');
+  assert.equal(withinForecast(hero, forecast!, asksForHigh('weather in nyc right now')), hero);
+});
