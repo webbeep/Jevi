@@ -222,17 +222,41 @@ function yearOf(row: RankedHit): number {
 }
 
 /**
+ * The US authorities for a kind of question, for an ask that names no agency: "Should I start taking aspirin?" is
+ * answered by the USPSTF, "Should I rinse raw chicken?" by USDA food safety, an IRA limit by the IRS. People rarely
+ * name the agency; the probe looks there anyway.
+ */
+const TOPIC_AUTHORITIES: readonly (readonly [RegExp, readonly string[]])[] = [
+  [/\b(?:raw (?:chicken|meat|poultry|eggs?|fish|pork|beef)|undercooked|food safety|food poisoning|salmonella|e\.? coli|listeria|internal temperature|safe (?:to eat|temperature))\b/i, ['fsis.usda.gov', 'foodsafety.gov', 'fda.gov']],
+  [/\b(?:aspirin|statins?|(?:cancer|lung|colon|colorectal|breast|cervical|prostate|health) screenings?|screening (?:tests?|age|guidelines?)|vaccines?|vaccinat\w*|booster shots?|mammograms?|colonoscopy|blood pressure|cholesterol|diabetes|prediabetes|dietary supplements?|vitamin [a-z]\d?|daily dose|side effects?|pregnan\w*|caffeine|added sugars?|sodium intake|physical activity|exercise (?:guidelines?|do adults need|per week)|sleep do adults need)\b/i, ['uspreventiveservicestaskforce.org', 'cdc.gov', 'health.gov', 'nih.gov']],
+  // Case matters: "IRA" is the account, "Ira" a name.
+  [/\b(?:[Rr]oth|IRAs?|401\(?k\)?|403\(?b\)?|HSA|[Cc]apital gains|[Tt]ax brackets?|[Ss]tandard deduction|[Tt]ax (?:return|refund)s?|W-?2|1099|[Ee]stimated tax)\b/, ['irs.gov']],
+  [/\b(?:passports?|visas?)\b/i, ['travel.state.gov']],
+  [/\b(?:bill becomes? (?:a )?law|(?:pocket )?veto(?:es|ed)?|filibuster|legislative process|how laws are made)\b/i, ['congress.gov', 'house.gov', 'senate.gov']],
+];
+
+function topicHosts(query: string): string[] {
+  return TOPIC_AUTHORITIES.find(([ask]) => ask.test(query))?.[1].slice() ?? [];
+}
+
+/** The agencies a question names. An account or a form in capitals ("Roth IRA", "HSA") is a topic, not an agency. */
+function agencyTokens(query: string): string[] {
+  return orgTokens(query).filter((org) => !TOPIC_AUTHORITIES.some(([ask]) => ask.test(org.toUpperCase())));
+}
+
+/**
  * One extra search when the question names an agency or asks a place for a count or a rule,
  * and that body's own site is not already in the results. The acronym is tried on the
  * official endings search engines actually rank (.gov, .org, .int, .ch).
  */
 export function officialProbe(query: string): string {
-  const orgs = orgTokens(query);
+  const orgs = agencyTokens(query);
   const places = placeHosts(query);
   const journals = journalHosts(query);
   const count = OFFICIAL_ASK.test(query);
-  if (!orgs.length && !places.length && !journals.length && !count) return '';
-  const sites: string[] = [];
+  const topics = orgs.length || journals.length || places.length ? [] : topicHosts(query);
+  if (!orgs.length && !places.length && !journals.length && !count && !topics.length) return '';
+  const sites: string[] = topics.map((host) => `site:${host}`);
   // A named journal is the page to fetch. An all-caps token in the same question ("GLP-1") is not an agency.
   for (const host of journals) sites.push(`site:${host}`);
   for (const place of places) sites.push(`site:${place.replace(/^\./, '')}`);
@@ -254,10 +278,13 @@ export function officialProbe(query: string): string {
 
 /** True when a result is the agency or the place named in the question, or the question names neither. A training or course page on that site does not count: the public page is the one still missing. */
 export function hasOfficialHit(query: string, rows: readonly { domain?: string; url?: string; title?: string }[]): boolean {
-  const orgs = orgTokens(query);
+  const orgs = agencyTokens(query);
   const places = placeHosts(query);
   const journals = journalHosts(query);
   const primary = (row: { url?: string; title?: string }) => !secondaryPage(row.url || '', row.title || '');
+  // A topic's authority (the USPSTF for aspirin) is in hand when one of its sites is.
+  const topics = orgs.length || journals.length || places.length ? [] : topicHosts(query);
+  if (topics.length && !rows.some((row) => topics.some((host) => endsWithHost((row.domain || hostOf(row.url || '')).toLowerCase().replace(/^www\./, ''), host)) && primary(row))) return false;
   if (orgs.length || places.length || journals.length) {
     return rows.some((row) => officialLead(row.domain || hostOf(row.url || ''), orgs, places, journals) === 0 && primary(row));
   }
@@ -431,7 +458,7 @@ export function preferSources<T extends RankedHit>(query: string, rows: readonly
   // question leads with papers and official pages. Other asks keep the engine's order, with
   // free-host pages that had to stay sunk to the back.
   const promote = /\b(who|whom|whose|biography|nobel|scores?|scoreboard|standings)\b/i.test(query);
-  const orgs = orgTokens(query);
+  const orgs = agencyTokens(query);
   const places = placeHosts(query);
   const journals = journalHosts(query);
   const paper = isPaperAsk(query);
@@ -514,7 +541,19 @@ export function preferSources<T extends RankedHit>(query: string, rows: readonly
   } else {
     pool.sort((a, b) => byLead(a, b) || (promote ? a.tier - b.tier : Number(a.tier === 3) - Number(b.tier === 3)) || a.index - b.index);
   }
-  return leadPreprints(query, pool.map((item) => item.row));
+  return leadPreprints(query, fewEncyclopedia(query, pool.map((item) => item.row)));
+}
+
+/**
+ * At most two Wikipedia pages lead, the best-ranked two; the rest go to the back. Its list pages and language editions
+ * all rank as an encyclopedia, and four of them crowded out the primary sources that state the figure.
+ */
+function fewEncyclopedia<T extends RankedHit>(query: string, rows: T[]): T[] {
+  if (/\bwiki(?:pedia)?\b/i.test(query)) return rows;
+  const wiki = (row: T) => /(?:^|\.)wikipedia\.org$/i.test(domainOf(row.domain || hostOf(row.url)));
+  let seen = 0;
+  const extra = new Set(rows.filter((row) => wiki(row) && ++seen > 2));
+  return extra.size ? [...rows.filter((row) => !extra.has(row)), ...extra] : rows;
 }
 
 function keepSentences(query: string, text: string): string {

@@ -380,3 +380,33 @@ test('a word the rewrites left out sinks the rows named after it', () => {
   const many = [...rows, row('apnews.com', 'AP top stories'), row('bbc.com', 'BBC News'), row('wkrn.com', "Today's top stories")];
   assert.deepEqual(sinkFormatWords('news tldr today', rewrites, many).map((r) => r.domain), ['nytimes.com', 'euronews.com', 'apnews.com', 'bbc.com', 'wkrn.com']);
 });
+
+test('a topic with a known US authority probes that authority when the ask names none', () => {
+  const aspirin = 'Should I start taking a daily low-dose aspirin?';
+  const probe = officialProbe(aspirin);
+  assert.match(probe, /site:uspreventiveservicestaskforce\.org/);
+  assert.match(probe, /aspirin/);
+  assert.equal(hasOfficialHit(aspirin, [{ domain: 'www.healthline.com', url: 'https://www.healthline.com/aspirin' }]), false);
+  assert.equal(hasOfficialHit(aspirin, [{ domain: 'www.uspreventiveservicestaskforce.org', url: 'https://www.uspreventiveservicestaskforce.org/uspstf/recommendation/aspirin' }]), true);
+  assert.match(officialProbe('Should I rinse raw chicken before cooking?'), /site:fsis\.usda\.gov/);
+  assert.match(officialProbe('What is the Roth IRA contribution limit?'), /site:irs\.gov/);
+  assert.match(officialProbe('What happens if the president does a pocket veto?'), /site:congress\.gov/);
+  // A name, a film screening and an agency the ask names are not these topics.
+  assert.equal(officialProbe('Who is Ira Glass married to?'), '');
+  assert.equal(officialProbe('Dune screening times tonight'), '');
+  assert.doesNotMatch(officialProbe('What does the WHO say about aspirin?'), /uspreventiveservicestaskforce/);
+});
+
+test('at most two Wikipedia pages lead; the rest go to the back', () => {
+  const ranked = preferSources('Who directed the most Oscar-winning films?', [
+    hit('en.wikipedia.org', 'Academy Award for Best Director', 'List'),
+    hit('en.wikipedia.org', 'List of Academy Award records', 'Records'),
+    hit('en.wikipedia.org', 'List of directors', 'Directors'),
+    hit('www.oscars.org', 'Oscars history', 'Official'),
+    hit('www.imdb.com', 'Most Oscar wins', 'Lists'),
+    hit('www.britannica.com', 'Academy Awards', 'Encyclopedia'),
+  ]);
+  assert.equal(ranked.slice(0, 5).filter((row) => row.domain === 'en.wikipedia.org').length, 2);
+  assert.equal(ranked.at(-1)?.title, 'List of directors');
+  assert.equal(ranked.length, 6);
+});
