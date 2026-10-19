@@ -526,7 +526,9 @@ function groundCompareNode(node: CardNode, sides: string[], search: SearchRespon
     const price = statedPrice(side, search, blocked);
     const image = imageForSide(side, search.images ?? []);
     const missing = !node.value || NOT_STATED.test(node.value) || /not in sources|no specs/i.test(node.value);
-    const relative = !!node.value && (RELATIVE_PRICE.test(node.value) || !moneyIn(node.value));
+    // A word in place of a price ("Costs more", "Premium") takes the stated price; a measurement ("1,776 ft") is
+    // that side's answer, not a missing price.
+    const relative = !!node.value && (RELATIVE_PRICE.test(node.value) || (!moneyIn(node.value) && !/\d/.test(node.value)));
     const value = price && (missing || relative) ? price : node.value;
     const imageSrc = node.imageSrc || image;
     if (value === node.value && imageSrc === node.imageSrc) return node;

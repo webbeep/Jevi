@@ -757,3 +757,29 @@ test('a word that starts with a unit is not a measurement', () => {
   const patches = comparisonRepair(ask, found, new Map([[0, table]]));
   assert.doesNotMatch(JSON.stringify(patches ?? []), /18 wh/);
 });
+
+test('a measured tile value is not replaced by a price a source states', () => {
+  const ask = 'Northwatch 2 versus Glowband 4';
+  const tiles: CardNode = {
+    type: 'grid',
+    cols: 2,
+    children: [
+      { type: 'tile', label: 'Northwatch 2', value: '1,776 ft' },
+      { type: 'tile', label: 'Glowband 4', value: 'Costs more' },
+    ],
+  };
+  const found: SearchResponse = {
+    query: ask,
+    freshness: 'any',
+    results: [
+      { title: 'Northwatch 2', url: 'https://example.com/north', snippet: 'Northwatch 2 deck tickets are $35.93.', domain: 'example.com', engines: ['web'] },
+      { title: 'Glowband 4', url: 'https://example.com/glow', snippet: 'The Glowband 4 is $79.00.', domain: 'example.com', engines: ['web'] },
+    ],
+    images: [],
+    discussions: [],
+    engines: ['web'],
+  };
+  const blob = JSON.stringify(comparisonRepair(ask, found, new Map([[0, tiles]])) ?? []);
+  assert.doesNotMatch(blob, /\$35\.93/);
+  assert.match(blob, /\$79\.00/);
+});
