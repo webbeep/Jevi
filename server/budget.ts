@@ -17,7 +17,7 @@ export type SearchEngine = (typeof SEARCH_ENGINES)[number];
 
 export interface CallLedger {
   search: Record<SearchEngine, number>;
-  pages: { jina: number; keyless: number; direct: number };
+  pages: { deepseek?: number; jina: number; keyless: number; direct: number };
   cache: 'hit' | 'miss' | 'bypass' | 'off';
   fellThrough: string[];
   /** Extra calls allowed after an empty result, for relaxed and entity retries. Unset on the normal path. */

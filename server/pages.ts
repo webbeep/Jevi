@@ -9,6 +9,7 @@ import { isGenericPreview } from './images';
 import { type LateExtras, normalizeUrl } from './search';
 import { hasCatalogCopy } from './scholarly';
 import { HttpStatusError, type Env, stripHtml } from './util';
+import { deepseekFetch } from './deepseekTools';
 
 export const BROWSER_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36';
 
@@ -208,9 +209,12 @@ async function jinaRead(url: string, signal: AbortSignal, key?: string): Promise
   return cleanMarkdown(await res.text(), 20000);
 }
 
-function bump(scope: AskScope | undefined, kind: 'jina' | 'keyless' | 'direct'): void {
-  if (scope) scope.ledger.pages[kind] += 1;
+function bump(scope: AskScope | undefined, kind: 'deepseek' | 'jina' | 'keyless' | 'direct'): void {
+  if (scope) scope.ledger.pages[kind] = (scope.ledger.pages[kind] ?? 0) + 1;
 }
+
+/** How long DeepSeek's fetch gets before the Jina and direct readers take over. */
+const DEEPSEEK_READ_MS = 2500;
 
 /**
  * One reader, not a race. Keyed Jina when the key is set and not recently dead.
@@ -229,6 +233,15 @@ async function readReadable(url: string, env: Env, signal: AbortSignal, images: 
   const key = env.JINA_API_KEY;
   const skips = await loadSkips(env);
   const skipped = (name: string) => engineDead(name) || (skips[name] ?? 0) > Date.now();
+  // DeepSeek's fetch tool reads first: it reaches pages that turn datacenter fetches away and needs no Jina credit.
+  // A miss (empty, short, a bot wall, a slow call) falls through to the readers below.
+  if (env.DEEPSEEK_API_KEY && !signal.aborted) {
+    bump(scope, 'deepseek');
+    const doc = await deepseekFetch(env, url, scope?.ledger ?? env, scope?.ledger, DEEPSEEK_READ_MS).catch(() => undefined);
+    const text = doc ? cleanMarkdown(doc.content, 20000) : '';
+    if (text.length >= MIN_TEXT && !isBlockPage(text)) return text;
+    scope?.ledger.fellThrough.push(`deepseek-fetch:${doc ? 'short' : 'miss'}`);
+  }
   let straightToDirect = false;
   if (key && !skipped('jina')) {
     bump(scope, 'jina');
