@@ -20,6 +20,7 @@ import { preferSources } from './sourceQuality';
 import { commons, openverse, permitted } from './images';
 import { maybeBluesky, socialSources } from './social';
 import { UA, domainOf, fetchJson, hedge, type Env } from './util';
+import { capBucket } from './providerCap';
 
 interface Query {
   q: string;
@@ -297,7 +298,7 @@ export async function searchWithLate(q: Query, env: Env, scope?: AskScope): Prom
     ask.ledger.cache = cached.kind === 'off' ? 'off' : 'miss';
   }
 
-  const webPromise = cascadeWeb(q, env, ask.ledger, ask.waitUntil, ask.eval ? 'eval' : 'prod');
+  const webPromise = cascadeWeb(q, env, ask.ledger, ask.waitUntil, capBucket(ask));
   // ZO_SOCIAL=1 only: one keyless Bluesky call beside the cascade, not counted as a web engine. No-op on error.
   const socialTask = maybeBluesky(q, env);
   const graceOver = webPromise.then(() => new Promise<void>((r) => setTimeout(r, EXTRAS_GRACE_MS)));

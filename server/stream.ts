@@ -102,7 +102,7 @@ import { personSteer, pronounFollow, roleFollow, threadPerson, topicOnly, withou
 import type { Send } from './sse';
 import { extraQueries, understand } from './understand';
 import { cacheBypass, testForce, validTestToken, wantsRefresh } from './token';
-import { SERPER_ANON_SHARE } from './providerCap';
+import { SERPER_ANON_SHARE, capBucket, testHost } from './providerCap';
 import type { Env } from './util';
 
 export { guessFreshness } from './freshness';
@@ -199,7 +199,7 @@ function rowImagePlan(req: DesignArgs, env: Env, scope: AskScope): RowImagePlan 
       (once ??= req.boost
         ? req.boost
         : serperServed && !scope.ledger.force
-          ? serperImages(req.query, env, scope.eval ? 'eval' : 'prod', () => { scope.ledger.imageCalls = 1; })
+          ? serperImages(req.query, env, capBucket(scope), () => { scope.ledger.imageCalls = 1; })
           : Promise.resolve([])),
     og: (url) => ogImageOf(url, 2000),
     onFilled: ({ filled, og }) => { if (filled || og) scope.ledger.rowPics = { filled, og }; },
@@ -220,7 +220,7 @@ function imageBoost(pattern: string, search: SearchResponse, env: Env, scope: As
   // Only when Serper served this search. Cap reached (or Serper skipped/dead): no /images call and no other image provider; og:image or nothing.
   if (!search.engines.some((e) => e.name === 'serper' && e.ok)) return undefined;
   // T443: card-level pictures must mention the subject; a wrong picture is worse than none.
-  return serperImages(query, env, scope.eval ? 'eval' : 'prod', () => { scope.ledger.imageCalls = 1; }).then((imgs) => imgs.filter((i) => mentionsAny(query, i)));
+  return serperImages(query, env, capBucket(scope), () => { scope.ledger.imageCalls = 1; }).then((imgs) => imgs.filter((i) => mentionsAny(query, i)));
 }
 
 /** How many pages to read and how long to wait for them before designing. At most five pages per ask. */
@@ -2389,6 +2389,7 @@ export async function runStream(raw: StreamRequest, env: Env, rawSend: Send, opt
     refresh: opts?.request ? wantsRefresh(opts.request) : false,
     waitUntil: opts?.waitUntil,
     eval: opts?.request ? validTestToken(opts.request.headers.get('x-zo-test-token'), env.ZO_TEST_TOKEN) : false,
+    test: testHost(opts?.request?.url),
     place: readerPlace(requestCf(opts?.request)),
   };
   try {

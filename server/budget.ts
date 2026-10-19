@@ -59,6 +59,8 @@ export interface AskScope {
   waitUntil?: (promise: Promise<unknown>) => void;
   /** Valid `x-zo-test-token` only. Selects the eval daily-cap bucket. */
   eval?: boolean;
+  /** An ask on the test deployment (jevi.pages.dev). Selects the test daily-cap bucket. */
+  test?: boolean;
   /** Engine that answered, when a search ran. */
   served?: string;
   /** Reader's city from the edge, when the network supplied one. */

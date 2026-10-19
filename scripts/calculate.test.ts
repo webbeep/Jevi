@@ -292,3 +292,15 @@ test('a rate stated in a sentence still gives the taxed total', async () => {
   const split = splitShare({ question: 'If my brother and I split it, how much does each of us pay?', card: { title: 'Switch 2', body } });
   assert.equal(split?.nodes[0]?.type === 'hero' ? split.nodes[0].value : '', '$272.18 each');
 });
+
+test('the test deployment counts searches in its own daily bucket', async () => {
+  const { capBucket, testHost, capFor } = await import('../server/providerCap.ts');
+  assert.equal(testHost('https://jevi.pages.dev/api/stream'), true);
+  assert.equal(testHost('https://bb006651.jevi.pages.dev/api/stream'), true);
+  assert.equal(testHost('https://zo.fyi/api/stream'), false);
+  assert.equal(testHost('https://notjevi.pages.dev/'), false);
+  assert.equal(capBucket({ test: true }), 'test');
+  assert.equal(capBucket({}), 'prod');
+  assert.equal(capFor({} as never, 'serper', 'test'), 2000);
+  assert.equal(capFor({} as never, 'exa', 'test'), 0);
+});

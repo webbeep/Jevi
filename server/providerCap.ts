@@ -1,7 +1,25 @@
 import { d1 } from './auth/env';
 import type { Env } from './util';
 
-export type CapBucket = 'eval' | 'prod';
+export type CapBucket = 'eval' | 'prod' | 'test';
+
+/**
+ * The test site (jevi.pages.dev) shares this database with production. Its asks count in their own bucket, so a
+ * benchmark run there never spends the daily search quota zo.fyi's visitors draw on.
+ */
+export function capBucket(scope: { eval?: boolean; test?: boolean }): CapBucket {
+  return scope.eval ? 'eval' : scope.test ? 'test' : 'prod';
+}
+
+/** A request to the test deployment: jevi.pages.dev or one of its preview hosts. */
+export function testHost(url: string | undefined): boolean {
+  try {
+    const host = new URL(url ?? '').hostname;
+    return host === 'jevi.pages.dev' || host.endsWith('.jevi.pages.dev');
+  } catch {
+    return false;
+  }
+}
 
 const SLOT_SQL = `INSERT INTO provider_usage (day, provider, bucket, count) VALUES (?1, ?2, ?3, 1) ON CONFLICT(day, provider, bucket) DO UPDATE SET count = count + 1 WHERE count < ?4 RETURNING count`;
 // At the cap the update is a no-op and returns no row, so refused calls never push `used` past `cap`.
@@ -22,16 +40,16 @@ function readCap(raw: string | undefined): number | undefined {
  * the per-person ask gates.
  */
 const DEFAULT_CAPS: Record<string, Record<CapBucket, number>> = {
-  serper: { prod: 10000, eval: 200 },
-  langsearch: { prod: 300, eval: 300 },
+  serper: { prod: 10000, eval: 200, test: 2000 },
+  langsearch: { prod: 300, eval: 300, test: 100 },
   // You.com keyless MCP free profile (~100/day total). Stored under bucket 'shared'
   // so prod+eval share one counter (the free MCP is ~100/day per IP, not 200).
-  'you-keyless': { prod: 100, eval: 100 },
+  'you-keyless': { prod: 100, eval: 100, test: 100 },
   // Exa is the paid last resort: a strict prod cap and none for eval traffic.
-  exa: { prod: 10, eval: 0 },
+  exa: { prod: 10, eval: 0, test: 0 },
   // Free tiers: Tavily ~1,000 credits a month (~30/day), Firecrawl 500 one-time credits. Late fallbacks only.
-  tavily: { prod: 30, eval: 0 },
-  firecrawl: { prod: 10, eval: 0 },
+  tavily: { prod: 30, eval: 0, test: 0 },
+  firecrawl: { prod: 10, eval: 0, test: 0 },
 };
 
 /**
@@ -39,7 +57,7 @@ const DEFAULT_CAPS: Record<string, Record<CapBucket, number>> = {
  * else the built-in default for Serper/LangSearch. Other providers are uncapped unless the variable is set.
  */
 export function capFor(env: Env, provider: string, bucket: CapBucket): number | undefined {
-  const name = `${provider.toUpperCase()}_${bucket === 'eval' ? 'EVAL_' : ''}DAILY_CAP`;
+  const name = `${provider.toUpperCase()}_${bucket === 'eval' ? 'EVAL_' : bucket === 'test' ? 'TEST_' : ''}DAILY_CAP`;
   // 'off' removes even a built-in cap (tests and emergencies).
   if (env[name]?.trim().toLowerCase() === 'off') return undefined;
   return readCap(env[name]) ?? DEFAULT_CAPS[provider]?.[bucket];
@@ -134,13 +152,14 @@ export async function usageToday(env: Env, now = Date.now()): Promise<Record<str
       const used = Number(rows.find((r) => r.provider === p && r.bucket === 'shared')?.count
         ?? rows.filter((r) => r.provider === p).reduce((n, r) => n + Number(r.count || 0), 0));
       const cap = (env.YOU_KEYLESS_DAILY_CAP?.trim().toLowerCase() === 'off' ? null : readCap(env.YOU_KEYLESS_DAILY_CAP) ?? DEFAULT_CAPS[p]?.prod ?? null);
-      out[p] = { prod: { used, cap }, eval: { used, cap } };
+      out[p] = { prod: { used, cap }, eval: { used, cap }, test: { used, cap } };
       continue;
     }
     const used = (b: CapBucket) => Number(rows.find((r) => r.provider === p && r.bucket === b)?.count ?? 0);
     out[p] = {
       prod: { used: used('prod'), cap: capFor(env, p, 'prod') ?? null },
       eval: { used: used('eval'), cap: capFor(env, p, 'eval') ?? null },
+      test: { used: used('test'), cap: capFor(env, p, 'test') ?? null },
     };
     if (p === 'serper') {
       const c = out[p].prod.cap;
