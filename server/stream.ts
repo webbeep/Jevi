@@ -2123,6 +2123,10 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
     // The thread's own figures stand unless a newer dated source states otherwise: "visitor from Ohio" is not $25 from a
     // 2022 article when the card on screen just said $30.
     const thread = onScreen ? `The card on screen ("${onScreen.title}") says: ${cardLead(onScreen).slice(0, 300)}. Keep those figures for this subject unless a newer, dated source states a different one, and say which date it is from.` : '';
+    // "What would I pay with sales tax in New York City?" needs the rate as much as the price: a search for the
+    // product with "sales tax" in it returns price pages, so the place's rate is always one of the searches.
+    const taxPlace = req.question.match(/\bsales tax\b[^?.]*?\bin ([A-Z][\w.'-]*(?:\s+[A-Z][\w.'-]*)*)/)?.[1];
+    if (planned && taxPlace && !planned.fanout.some((query) => /\btax rate\b/i.test(query))) planned.fanout = [...planned.fanout, `${taxPlace} sales tax rate`];
     if (decision.action === 'search' && planned) {
       scope.bound = `${subject}\n${req.question}`;
       send('rewrite', { query: planned.query });
