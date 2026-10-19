@@ -138,3 +138,62 @@ export function factsElsewhere(shown: ReadonlyMap<number, CardNode>, slot: numbe
   for (const [index, node] of shown) if (index !== slot) keysOf(node, out);
   return out;
 }
+
+const quoteNorm = (text: string) => text.toLowerCase().replace(/[’']/g, "'").replace(/[^a-z0-9%$.' ]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+/**
+ * Whether every quotation in this text is the sources' own words. An ellipsis may join fragments of one passage; each
+ * fragment of three or more words must appear as written. A page title wrapped in quote marks ("Exercise " Physical
+ * activity guidelines for adults aged 19 to 64".") is not a quotation.
+ */
+function quotesVerbatim(text: string, corpus: string): boolean {
+  // Stray quote marks are a broken quotation, not punctuation: a closing mark after a space ("Exercise " Physical…)
+  // or marks around bare punctuation (".").
+  if (/\w\s+["”](?=\s|$)/.test(text) || /["”][.,;:]["“]/.test(text)) return false;
+  for (const match of text.matchAll(/["“]([^"”]{12,})["”]/g)) {
+    const fragments = match[1]!.split(/\s*(?:\.\.\.|…)\s*/).map(quoteNorm).filter((part) => part.split(' ').length >= 3);
+    if (!fragments.length || fragments.some((part) => !corpus.includes(part))) return false;
+  }
+  return true;
+}
+
+/** Items and sentences whose quotations are not in the sources are dropped. `corpus` is quoteNorm'd source text. */
+export function withVerbatimQuotes(node: CardNode, corpus: string): CardNode | undefined {
+  const ok = (text: string | undefined) => !text || quotesVerbatim(text.replace(/\[\d+\]/g, ''), corpus);
+  switch (node.type) {
+    case 'stack':
+    case 'grid':
+    case 'section':
+    case 'scroller': {
+      const children = node.children.map((child) => withVerbatimQuotes(child, corpus)).filter((child): child is CardNode => !!child);
+      if (children.length === node.children.length && children.every((child, i) => child === node.children[i])) return node;
+      return children.length ? { ...node, children } : undefined;
+    }
+    case 'keyvalue': {
+      const items = node.items.filter((item) => ok(item.value));
+      if (items.length === node.items.length) return node;
+      return items.length ? { ...node, items } : undefined;
+    }
+    case 'list': {
+      const items = node.items.filter((item) => ok(item.text) && ok(item.meta));
+      if (items.length === node.items.length) return node;
+      return items.length ? { ...node, items } : undefined;
+    }
+    case 'tile':
+      return ok(node.value) && ok(node.sub) ? node : undefined;
+    case 'text':
+    case 'callout': {
+      // A sentence ends at its full stop and any citations after it ("activity.” [4] It also…").
+      const kept = node.text.split(/(?<=[.!?”"](?:\s*\[\d+\])*)\s+(?=[A-Z“"])/).filter((sentence) => ok(sentence)).join(' ').trim();
+      if (kept === node.text) return node;
+      return kept ? { ...node, text: kept } : undefined;
+    }
+    default:
+      return node;
+  }
+}
+
+/** The text a card's quotations are checked against. */
+export function quoteCorpus(rows: readonly { title?: string; snippet?: string; content?: string }[], pages: readonly { text: string }[]): string {
+  return quoteNorm([...rows.map((row) => `${row.title ?? ''} ${row.snippet ?? ''} ${row.content ?? ''}`), ...pages.map((page) => page.text)].join(' \n '));
+}

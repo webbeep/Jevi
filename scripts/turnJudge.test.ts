@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { addedComparison, followSearchPlan, parseDecision, parseSourceDecision, placeOnScreen } from '../server/turnJudge.ts';
+import { addedComparison, fallbackQuery, followSearchPlan, parseDecision, parseSourceDecision, placeOnScreen } from '../server/turnJudge.ts';
 
 test('a follow-up decision is a search, an answer, or a calculation', () => {
   assert.deepEqual(parseDecision({
@@ -159,4 +159,8 @@ test('a follow-up that names its own subject is searched as asked, and a title i
   assert.equal(placeOnScreen('JWST Distance From Earth'), 'JWST');
   const mirror = followSearchPlan({ title: 'JWST Distance From Earth', question: "How big is its main mirror compared with Hubble's?", queries: [], subject: '' });
   assert.match(mirror.query, /^How big is JWST's main mirror/);
+});
+
+test('a possessive subject is not made possessive twice', () => {
+  assert.equal(fallbackQuery("How big is its main mirror compared with Hubble's?", "Webb's"), "How big is Webb's main mirror compared with Hubble's");
 });

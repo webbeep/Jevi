@@ -33,3 +33,12 @@ test('a comparison of account rules skips the product searches, a product compar
   assert.equal(rulesCompare('iphone 17 vs pixel 10'), false);
   assert.equal(rulesCompare('fitbit edge vs mi band 10 specs'), false);
 });
+
+test('a follow-up on a new topic the card never mentions searches, one that points back does not', async () => {
+  const { newTopic } = await import('../server/stream.ts');
+  const card = 'How mRNA Vaccines Work\nmRNA teaches cells to make a spike protein. Moderna, Pfizer vaccine sources.';
+  assert.equal(newTopic('What is photosynthesis?', card), true);
+  assert.equal(newTopic('explain it like I am 10', card), false);
+  assert.equal(newTopic('Can I use rye flour instead?', 'Sourdough starter: mix flour and water, feed daily.'), false);
+  assert.equal(newTopic('which one has better battery life?', 'iPhone 17 vs Pixel 10'), false);
+});

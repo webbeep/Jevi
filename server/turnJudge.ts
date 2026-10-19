@@ -235,7 +235,8 @@ export function fallbackQuery(question: string, subject: string): string {
   const name = subject.trim();
   if (!name) return asked;
   if (asked.toLowerCase().includes(name.toLowerCase())) return asked;
-  if (/\bits\b/i.test(asked) && !/\b(?:it|it's)\b/i.test(asked)) return asked.replace(/\bits\b/i, `${name}'s`);
+  // "Webb's" is already possessive: "its main mirror" is "Webb's main mirror", not "Webb's's".
+  if (/\bits\b/i.test(asked) && !/\b(?:it|it's)\b/i.test(asked)) return asked.replace(/\bits\b/i, /['’]s$/i.test(name) ? name : `${name}'s`);
   if (/\bit's\b/i.test(asked)) return asked.replace(/\bit's\b/i, `${name} is`);
   if (/\b(?:it|he|she|they|them|him|her)\b/i.test(asked)) return asked.replace(/\b(?:it|he|she|they|them|him|her)\b/i, name);
   return `${name} ${asked}`;

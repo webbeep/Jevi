@@ -67,3 +67,18 @@ test('a numbered pick with no figure stays in its ranking', () => {
   const row: CardNode = { type: 'stack', children: [{ type: 'tile', label: '2. Soundcore Life Q30', value: 'Best value' }, { type: 'tile', label: '3. Sony WH-CH720N', sub: 'Budget ANC' }] };
   assert.equal(withoutShells(row), row);
 });
+
+test('a quotation stays only when its words are in the sources', async () => {
+  const { withVerbatimQuotes, quoteCorpus } = await import('../shared/shells.ts');
+  const corpus = quoteCorpus([
+    { title: 'Physical activity guidelines for adults aged 19 to 64', snippet: 'do strengthening activities that work all the major muscle groups (legs, hips, back, abdomen, chest, shoulders and arms) on at least 2 days a week; spread exercise evenly over 4 to 5 days a week' },
+    { title: 'The Physical Activity Guidelines for Americans', snippet: 'Adults should do at least 150 minutes to 300 minutes a week of moderate-intensity aerobic physical activity.' },
+  ], []);
+  const kv: CardNode = { type: 'keyvalue', items: [
+    { label: 'Strength training', value: '"do strengthening activities that work all the major muscle groups ... on at least 2 days a week" [5]' },
+    { label: 'Spread over', value: '"Exercise " Physical activity guidelines for adults aged 19 to 64"." [5]' },
+  ] };
+  assert.deepEqual(withVerbatimQuotes(kv, corpus), { type: 'keyvalue', items: [kv.type === 'keyvalue' ? kv.items[0]! : { label: '', value: '' }] });
+  const line: CardNode = { type: 'text', text: 'The guideline says “Adults should do at least 150 minutes to 300 minutes a week of moderate-intensity aerobic physical activity.” [4] It also says “adults must jog daily for an hour” [9].' };
+  assert.deepEqual(withVerbatimQuotes(line, corpus), { type: 'text', text: 'The guideline says “Adults should do at least 150 minutes to 300 minutes a week of moderate-intensity aerobic physical activity.” [4]' });
+});

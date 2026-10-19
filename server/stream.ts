@@ -74,7 +74,7 @@ import { anchoredFollowup, asksToCompare, comparisonFollow, cryptographyHint, fa
 import { calculationAnswer, isCalculationAsk, leadTaxedTotal, rateOnAmount, splitShare } from './calculate';
 import { acceptProductPhoto, appendAskedFact, comparisonRepair, comparisonTitle, dropShownDenials, keepComparedProducts, mentionsSide, missingSideNode, nameForms, placeSidePhotos, restoreSideTiles, stickerPrice } from './compareAnswer';
 import { cardGaps, citeForGap, gapSearchQuery, settleGap, type PieceGap } from './gapFill';
-import { factsElsewhere, withinSources, withoutRepeatedFacts, withoutShells } from '../shared/shells';
+import { factsElsewhere, quoteCorpus, withinSources, withoutRepeatedFacts, withoutShells, withVerbatimQuotes } from '../shared/shells';
 import { fxQuote, liveQuoteFacts, withinFx, withinQuote } from '../shared/fxCard';
 import { unblendObjects } from './objectFacts';
 import { withFinishedSentences } from './polish';
@@ -587,6 +587,9 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
    * a repeat of what is already on screen is not sent again.
    */
   // An exchange-rate card keeps to the pair and direction asked, at the live quote's rate.
+  // Quotations on the card are checked against the sources' own words, built once on first use.
+  let quoteText: string | undefined;
+  const quotes = () => (quoteText ??= quoteCorpus(designReq.search.results, designReq.pages));
   // A follow-up ("why is it moving today?") answers under the quote already on screen, so it agrees with that one.
   const shownTicker = designReq.ticker ?? findTicker(designReq.priorBody ?? []);
   const fx = fxQuote(shownTicker);
@@ -598,7 +601,8 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     // A component whose figures were all removed is collapsed, not shown as an empty shell.
     const fitted = withinSources(raw, designReq.search.results.length + addedSources);
     const agreed = fx ? withinFx(fitted, fx) : live ? withinQuote(fitted, live) : fitted;
-    const tidy = withoutShells(agreed ?? { type: 'stack', children: [] });
+    const quoted = agreed ? withVerbatimQuotes(agreed, quotes()) : undefined;
+    const tidy = withoutShells(quoted ?? { type: 'stack', children: [] });
     const node = (tidy && withoutRepeatedFacts(tidy, factsElsewhere(shown, index))) ?? { type: 'stack', children: [] };
     shown.set(index, node);
     if (!arrival.includes(index)) arrival.push(index);
@@ -1753,6 +1757,18 @@ export function rulesCompare(query: string): boolean {
   return RULES_WORDS.test(query) && !PRODUCT_WORDS.test(query);
 }
 
+const TOPIC_STOP = new Set(['what', 'which', 'where', 'when', 'about', 'does', 'have', 'with', 'that', 'this', 'there', 'their', 'would', 'could', 'should', 'explain', 'tell', 'more', 'like', 'much', 'many', 'instead', 'other', 'than', 'they', 'them', 'make', 'shorter', 'longer', 'simpler', 'again']);
+const POINTS_BACK = /\b(?:it|its|it's|they|them|their|this|that|these|those|he|she|his|her|one|ones)\b/i;
+
+/** A follow-up about something the card and its sources never mention, with nothing pointing back at them. */
+export function newTopic(question: string, onScreen: string): boolean {
+  if (POINTS_BACK.test(question)) return false;
+  const words = question.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 4 && !TOPIC_STOP.has(word));
+  if (!words.length) return false;
+  const seen = onScreen.toLowerCase();
+  return !words.some((word) => seen.includes(word.replace(/(?:ies|es|s)$/, '')));
+}
+
 /** How many of the card's own sources a same-subject follow-up keeps beside its new search. */
 const CARRIED_ROWS = 4;
 
@@ -1954,11 +1970,16 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
       card: cardText,
       sources: sourceText,
     });
-    const decision = judged ?? {
+    const judgedOrFallback = judged ?? {
       action: 'search' as const,
       queries: [fallbackQuery(req.question, hint)],
       subject: hint,
     };
+    // "What is photosynthesis?" under an mRNA card names a new topic that neither the card nor its sources mention: it is
+    // a search, not an answer from those sources ("these sources cover vaccines, not photosynthesis").
+    const decision = judgedOrFallback.action !== 'search' && newTopic(req.question, `${cardText}\n${sourceText}`)
+      ? { action: 'search' as const, queries: [req.question.replace(/[?!.]+$/, '')], subject: '' }
+      : judgedOrFallback;
     console.log(JSON.stringify({ zo: 'judge-turn', action: decision.action, subject: decision.subject, queries: decision.queries, model: !!judged }));
     const planned = decision.action === 'search'
       ? followSearchPlan({ title: onScreen?.title, question: req.question, queries: decision.queries, subject: decision.subject, lead: onScreen ? cardLead(onScreen) : '' })

@@ -241,6 +241,7 @@ const SYSTEM_WHOLE = `${DESIGNER}
 - Start from the SKELETON layout given in the TASK. Replace every slot with real components; you may add, drop or rearrange nodes if it serves the answer better.
 - Lead with the answer: the first body node must be small and already useful on its own (a hero or a one-sentence answer), so it appears on screen immediately.
 - Every figure or item the question asks for goes in the body when a source states it. An action or a choice offers a next step; it never holds an answer the body leaves out.
+- A date, "today", "now" or a store name goes next to a figure only when that figure's source states it. An undated deal is not today's price, and a month the source does not give is not added.
 - Include at least one interactive node (choices, slider, scaler, pricing, accordion or reveal) whenever the answer has something worth adjusting, exploring or testing. For plan prices, the interactive node is pricing.
 - Finish with an actions node (2-4 useful next steps; prefer "refine" for changes to this card; never repeat an option the choices node already offers) and a citations node when sources were used.
 
