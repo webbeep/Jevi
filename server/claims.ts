@@ -970,10 +970,17 @@ function applyTaxText(text: string, query: string, pick: TaxPick, _keep: Readonl
   const shown = [...text.matchAll(/(\d{1,2}(?:\.\d+)?)\s*(?:%|percent\b)/gi)].map((match) => Number(match[1]));
   const wrong = shown.find((rate) => Math.abs(rate - pick.rate) > 0.001);
   if (wrong === undefined) return text;
-  let out = text.replace(/(\d{1,2}(?:\.\d+)?)\s*(?:%|percent\b)/gi, (raw, num) => {
-    if (Math.abs(Number(num) - pick.rate) <= 0.001) return raw;
-    return raw.includes('%') ? `${pick.rate}%` : `${pick.rate} percent`;
-  });
+  // "The 8.875% combines the 4% state, 4.5% city and 0.375% MCTD rates": a sentence that already states the combined
+  // rate, or lists several rates, gives its parts or a range. Rewriting each to 8.875% made "4.5%" read "8.875%".
+  const RATE = /(\d{1,2}(?:\.\d+)?)\s*(?:%|percent\b)/gi;
+  let out = text.split(/(?<=[.!?])\s+/).map((sentence) => {
+    const rates = [...sentence.matchAll(RATE)].map((match) => Number(match[1]));
+    if (rates.some((rate) => Math.abs(rate - pick.rate) <= 0.001) || new Set(rates).size >= 2) return sentence;
+    return sentence.replace(RATE, (raw, num) => {
+      if (Math.abs(Number(num) - pick.rate) <= 0.001) return raw;
+      return raw.includes('%') ? `${pick.rate}%` : `${pick.rate} percent`;
+    });
+  }).join(' ');
   out = out.replace(/\[(\d+)\]/g, `[${pick.n}]`);
   if (amount === undefined) return out;
   const due = amount * pick.rate / 100;

@@ -890,3 +890,14 @@ test('a slightly reworded quote becomes the sentence the source wrote', async ()
     '"WHO recommends adults and children reduce their daily intake of free sugars to less than 10% of their total energy intake." 1',
   );
 });
+
+test('a line that already gives the combined rate keeps its parts and ranges', () => {
+  const pages: ClaimSource[] = [
+    { n: 1, text: 'The combined sales tax rate in New York City is 8.875%: 4% state, 4.5% city and 0.375% MCTD. Rates in New York State range from 7% to 8.875%.' },
+  ];
+  const ask = 'What would I pay with sales tax in New York City on a $499.99 console?';
+  const parts = bindClaims({ type: 'text', text: 'The 8.875% combines the 4% state rate, 4.5% city rate and 0.375% MCTD surcharge [1].' }, pages, ask);
+  assert.match(parts.type === 'text' ? parts.text : '', /4\.5%/);
+  const range = bindClaims({ type: 'text', text: 'Rates in New York State range from 7% to 8.875% [1].' }, pages, ask);
+  assert.match(range.type === 'text' ? range.text : '', /from 7% to 8\.875%/);
+});
