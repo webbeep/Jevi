@@ -1,6 +1,8 @@
 import type { CardNode } from './card';
 
 const CURRENCIES = ['USD', 'EUR', 'JPY', 'GBP', 'CNY', 'CAD', 'AUD', 'CHF', 'INR', 'KRW', 'MXN', 'BRL', 'HKD', 'SGD', 'SEK', 'NOK', 'NZD', 'KWD', 'ZAR', 'TRY', 'RUB'];
+/** Currency names that are never the dollar, yen, euro or pound of a pair asked about. */
+const OTHER_MONEY = /\b(?:ringgit|dinars?|fils|pesos?|rupees?|yuan|renminbi|baht|rupiah|lira|rand|kron[ae]|kronor|dirhams?|riyals?|shekels?|zloty|forint|koruna|dong|hryvnia|naira|cedi|kwacha|taka|tenge|lari)\b/i;
 const SIGN: Record<string, string> = { '£': 'GBP', '€': 'EUR', '₹': 'INR', '₩': 'KRW' };
 
 export interface FxQuote {
@@ -31,6 +33,11 @@ function offStory(text: string, fx: FxQuote): boolean {
   const codes = new Set([...text.toUpperCase().matchAll(/\b([A-Z]{3})\b/g)].map((match) => match[1]!).filter((code) => CURRENCIES.includes(code)));
   for (const [sign, code] of Object.entries(SIGN)) if (text.includes(sign)) codes.add(code);
   if ([...codes].some((code) => code !== fx.base && code !== fx.quote)) return true;
+  // "Ringgit cross 4.082 MYR per USD", "Kuwait cross 308 fils per USD": a cross rate or another currency, by name or
+  // by any code priced per the pair's currency.
+  if (/\bcross(?:\s+rates?)?\b/i.test(text) || OTHER_MONEY.test(text)) return true;
+  const per = [...text.matchAll(/\b([A-Z]{3})\s+(?:per|\/)\s+([A-Z]{3})\b/g)];
+  if (per.some((match) => ![fx.base, fx.quote].includes(match[1]!) || ![fx.base, fx.quote].includes(match[2]!))) return true;
   const inverse = 1 / fx.price;
   const nums = numbers(text);
   if (nums.some((n) => n > 0 && n < 1 && Math.abs(n - inverse) / inverse < 0.05)) return true;

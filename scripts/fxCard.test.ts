@@ -126,3 +126,14 @@ test('an earlier session\'s close, a day high under the live price and a stat da
   assert.equal(withinQuote(stat, quote), undefined);
   assert.ok(withinQuote({ type: 'stat', label: 'Day change', value: '+2.44', unit: '%' }, quote));
 });
+
+test('a dollar-yen card drops cross rates and other currencies named in words', () => {
+  const tiles: CardNode = { type: 'scroller', children: [
+    { type: 'tile', label: 'Mid-market', value: '158.02', sub: 'xe.com' },
+    { type: 'tile', label: 'Ringgit cross', value: '4.082', sub: 'MYR per USD' },
+    { type: 'tile', label: 'Kuwait cross', value: '308.000', sub: 'fils per USD' },
+    { type: 'tile', label: 'Previous close', value: '157.99 JPY' },
+  ] };
+  const kept = withinFx(tiles, fx);
+  assert.deepEqual(kept?.type === 'scroller' ? kept.children.map((tile) => (tile.type === 'tile' ? tile.label : '')) : [], ['Mid-market', 'Previous close']);
+});
