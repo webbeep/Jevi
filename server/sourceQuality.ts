@@ -258,6 +258,11 @@ function topicHosts(query: string): string[] {
   return TOPIC_AUTHORITIES.find(([ask]) => ask.test(query))?.[1].slice() ?? [];
 }
 
+/** The ask is answered by a known authority it does not name (aspirin → USPSTF): its probe is worth a short wait. */
+export function topicAuthorityAsk(query: string): boolean {
+  return !agencyTokens(query).length && !journalHosts(query).length && !placeHosts(query).length && topicHosts(query).length > 0;
+}
+
 /** The agencies a question names. An account or a form in capitals ("Roth IRA", "HSA") is a topic, not an agency. */
 function agencyTokens(query: string): string[] {
   return orgTokens(query).filter((org) => !TOPIC_AUTHORITIES.some(([ask]) => ask.test(org.toUpperCase())));

@@ -83,7 +83,7 @@ import { unblendObjects } from './objectFacts';
 import { withFinishedSentences } from './polish';
 import { queryWithPlace, readerPlace, settleReadings } from './readings';
 import { isKeepOnly, keptBody } from './refine';
-import { finishQuality, hasOfficialHit, hostTier, officialProbe, preferSources, sinkFormatWords } from './sourceQuality';
+import { finishQuality, hasOfficialHit, hostTier, officialProbe, preferSources, sinkFormatWords, topicAuthorityAsk } from './sourceQuality';
 import { isOwnSite, orcidSite, pickOwnSite, probeOwnSite, RESEARCH_ASK, withOwnSite } from './ownSite';
 import { quoteAsk } from '../shared/quoteAsk';
 import { dropClinicPages, dropStrayDois, isPaperAsk, leadPreprints, scholarlyResults, withScholarly } from './scholarly';
@@ -368,6 +368,13 @@ async function foldBrandPrice(results: SearchResponse, early: (EarlyOfficial & {
   const rest = results.results.filter((row) => !add.some((item) => normalizeUrl(item.url) === normalizeUrl(row.url)));
   console.log(JSON.stringify({ zo: 'brand-price', host: early.host, added: add.length }));
   return { ...results, results: [...add, ...rest] };
+}
+
+/** Merges the authority search, waiting up to `ms` for it: the page that answers ("USPSTF: do not start aspirin") is often a beat behind. */
+async function foldOfficialWithin(query: string, results: SearchResponse, early: EarlyOfficial | undefined, ms: number): Promise<SearchResponse> {
+  if (!early || !results.results.length || hasOfficialHit(query, results.results)) return results;
+  if (!early.ready()) await Promise.race([early.promise, new Promise((resolve) => setTimeout(resolve, ms))]);
+  return foldReadyOfficial(query, results, early);
 }
 
 /** Merges a public-page search that has already finished. Never waits. */
@@ -1635,7 +1642,9 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   const chargeAsk = /\b(?:tax|taxes|fee|fees|fine|fines|toll|tolls|duty|duties|surcharge|levy|levies)\b/i.test(query);
   const official = chargeAsk
     ? await attachOfficial(query, results, env, scope, officialEarly)
-    : foldReadyOfficial(query, results, officialEarly);
+    : topicAuthorityAsk(query)
+      ? await foldOfficialWithin(query, results, officialEarly, 700)
+      : foldReadyOfficial(query, results, officialEarly);
   if (official !== results) results = official;
   // The pages the card on screen cited stay sources for the follow-up on the same subject: "with NYC sales tax"
   // still has the page that states the Switch 2's $499.99, after the new search found only tax pages.

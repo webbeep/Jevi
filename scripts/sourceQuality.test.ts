@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { CardNode } from '../shared/card.ts';
-import { finishQuality, hasOfficialHit, hostTier, latinQuery, officialProbe, preferSources, sinkFormatWords } from '../server/sourceQuality.ts';
+import { finishQuality, hasOfficialHit, hostTier, latinQuery, officialProbe, preferSources, sinkFormatWords, topicAuthorityAsk } from '../server/sourceQuality.ts';
 
 const hit = (domain: string, title: string, snippet = title) => ({ url: `https://${domain}/x`, domain, title, snippet });
 
@@ -393,6 +393,9 @@ test('a topic with a known US authority probes that authority when the ask names
   assert.match(officialProbe('What happens if the president does a pocket veto?'), /site:congress\.gov/);
   // A name, a film screening and an agency the ask names are not these topics.
   assert.equal(officialProbe('Who is Ira Glass married to?'), '');
+  assert.equal(topicAuthorityAsk('Should I rinse raw chicken before I cook it?'), true);
+  assert.equal(topicAuthorityAsk('What does the CDC say about raw chicken?'), false);
+  assert.equal(topicAuthorityAsk('Best budget headphones'), false);
   assert.equal(officialProbe('Dune screening times tonight'), '');
   assert.doesNotMatch(officialProbe('What does the WHO say about aspirin?'), /uspreventiveservicestaskforce/);
   // Who is asking drops out, and the topic word survives the cut.
