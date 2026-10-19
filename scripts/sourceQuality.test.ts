@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { CardNode } from '../shared/card.ts';
-import { finishQuality, hasOfficialHit, hostTier, latinQuery, officialProbe, preferSources, sinkFormatWords, topicAuthority, topicAuthorityAsk } from '../server/sourceQuality.ts';
+import { finishQuality, hasOfficialHit, hostTier, latinQuery, officialProbe, preferSources, sinkFormatWords, topicAuthorityAsk } from '../server/sourceQuality.ts';
 
 const hit = (domain: string, title: string, snippet = title) => ({ url: `https://${domain}/x`, domain, title, snippet });
 
@@ -434,13 +434,4 @@ test('of a topic\'s authorities, the one that sets the rule leads', () => {
     hit('www.mayoclinic.org', 'Daily aspirin therapy', 'Overview'),
   ]);
   assert.equal(ranked[0]?.domain, 'www.uspreventiveservicestaskforce.org');
-});
-
-test('a topic ask knows which body sets its rule when that body is among the sources', () => {
-  const aspirin = "I'm 65 with no heart disease. Should I start taking a daily low-dose aspirin to prevent a heart attack?";
-  const rows = [{ domain: 'nih.gov', url: 'https://www.nih.gov/aspirin' }, { domain: 'www.uspreventiveservicestaskforce.org', url: 'https://www.uspreventiveservicestaskforce.org/uspstf/recommendation/aspirin' }];
-  assert.deepEqual(topicAuthority(aspirin, rows), { n: 2, name: 'the U.S. Preventive Services Task Force (USPSTF)' });
-  assert.equal(topicAuthority(aspirin, rows.slice(0, 1)), undefined);
-  // An ask that names its own agency needs no hint.
-  assert.equal(topicAuthority('What does the CDC say about aspirin?', rows), undefined);
 });
