@@ -710,3 +710,10 @@ test('a spec row takes a whole number in a unit that fits it, and an instalment 
   assert.ok(!/\["Battery life"[^\]]*mAh/.test(text), 'a capacity is not battery life');
   assert.ok(/\["Weight"[^\]]*7\.2 oz/.test(text), JSON.stringify(table));
 });
+
+test('a sentence denying a figure another row with the same label word shows is dropped', () => {
+  const table: CardNode = { type: 'table', columns: ['', 'iPhone 17', 'Pixel 10'], rows: [['Battery claim', '3692 mAh', '4970 mAh'], ['Battery capacity', '3692 mAh [7]', 'Not stated']] };
+  const callout: CardNode = { type: 'callout', text: 'Sources give the iPhone 17 battery but no Pixel 10 capacity, so a direct winner cannot be named.' };
+  const patches = dropShownDenials(new Map([[0, callout], [1, table]]));
+  assert.ok(patches?.some((patch) => patch.index === 0));
+});

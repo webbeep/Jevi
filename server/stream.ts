@@ -1909,7 +1909,7 @@ function cardLead(card: AnswerCard): string {
 }
 
 /** A follow-up that only reshapes what the card says: fresh sources would not change it. */
-const RESHAPE = /\b(?:simpler|simply|simplify|shorter|shorten|longer|summar(?:y|ize|ise)|tl;?dr|rephrase|reword|rewrite|translate|in (?:spanish|french|german|chinese|japanese|korean|italian|portuguese|plain english)|like i'?m (?:\d+|five|ten|a kid)|eli5|bullet(?: points)?|as a (?:list|table)|one (?:line|sentence)|again)\b/i;
+const RESHAPE = /\b(?:simpler|simply|simplify|shorter|shorten|longer|summar(?:y|ize|ise)|tl;?dr|rephrase|reword|rewrite|translate|in (?:spanish|french|german|chinese|japanese|korean|italian|portuguese|plain english)|like (?:i'?m|i am) (?:\d+|five|ten|a kid|a child)|eli5|bullet(?: points)?|as a (?:list|table)|one (?:line|sentence)|again)\b/i;
 const SUPPLEMENT_ROWS = 5;
 const SUPPLEMENT_MS = 3500;
 

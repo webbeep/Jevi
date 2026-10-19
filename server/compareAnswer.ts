@@ -949,7 +949,7 @@ function askedLabel(question: string): string | undefined {
   return word[0]!.toUpperCase() + word.slice(1);
 }
 
-const FACT_DENIAL = /\b(?:not stated|not in (?:the |these )?sources|unavailable|none of the sources|no sources?|neither|don'?t state|do not state|does not state|doesn'?t state)\b|\bno\b[^.]{0,48}\b(?:rating|figure|spec)\b/i;
+const FACT_DENIAL = /\b(?:not stated|not in (?:the |these )?sources|unavailable|none of the sources|no sources?|neither|don'?t state|do not state|does not state|doesn'?t state)\b|\bno\b[^.]{0,48}\b(?:rating|figure|spec|capacity|number|value|data|measurement)s?\b/i;
 const BLANKET_DENIAL = /\b(?:neither|either|both|all of them|every one|none of the)\b/i;
 
 interface ShownFact {
@@ -987,7 +987,18 @@ function shownFacts(nodes: Iterable<CardNode>): ShownFact[] {
     if (node.type === 'tabs') node.tabs.forEach((tab) => tab.children.forEach(walk));
   };
   for (const node of nodes) walk(node);
-  return [...facts.values()].filter((fact) => fact.filled.length > 0);
+  // "Battery claim | 3692 mAh | 4970 mAh" and "Battery capacity | 3692 mAh | Not stated" are one fact: a row that
+  // shares a label word with a filled row counts that row's sides as shown, so "no Pixel 10 capacity" is a denial.
+  const all = [...facts.values()];
+  for (const fact of all) {
+    const keys = labelKeys(fact.label);
+    for (const other of all) {
+      if (other === fact || !labelKeys(other.label).some((key) => keys.includes(key))) continue;
+      for (const side of other.filled) if (!fact.filled.includes(side)) fact.filled.push(side);
+    }
+    fact.empty = fact.empty.filter((side) => !fact.filled.includes(side));
+  }
+  return all.filter((fact) => fact.filled.length > 0);
 }
 
 /** A sentence that says the fact is missing, while a cell already states it. A line about only the empty side can stay. */
