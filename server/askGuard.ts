@@ -1,3 +1,4 @@
+import { titleSubject } from '../shared/titleSubject';
 import { askFacet, personName } from '../shared/askAbout';
 import type { CardNode, FollowupMode, LayoutPlan } from '../shared/card';
 import { quoteAsk, QUOTE_MAX } from '../shared/quoteAsk';
@@ -171,7 +172,7 @@ export function screenSubject(title: string | undefined, original: string): stri
     if (/\b(it|its|this|that|they|them)\b/i.test(text)) return '';
     return text;
   };
-  return pick(title ?? '') || pick(original) || namedSubject(title ?? '') || namedSubject(original);
+  return pick(titleSubject(title ?? '')) || pick(original) || namedSubject(title ?? '') || namedSubject(original);
 }
 
 /** The first run of capitalised words, skipping a leading question word. "When did North Pier open?" → "North Pier". */

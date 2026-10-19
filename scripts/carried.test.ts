@@ -1,0 +1,22 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { citedRows, sameThread } from '../server/stream.ts';
+import type { AnswerCard } from '../shared/card.ts';
+import type { SearchResult } from '../shared/types.ts';
+
+const row = (n: number): SearchResult => ({ title: `Page ${n}`, url: `https://example.com/${n}`, snippet: '', domain: 'example.com', engines: ['web'] });
+
+test('a card carries the rows it cites, in the order it cites them, and nothing out of range', () => {
+  const card: AnswerCard = { title: 'Nintendo Switch 2 Price', body: [
+    { type: 'hero', value: '$499.99', label: 'US MSRP', caption: 'From Sep 1, 2026 [3]' },
+    { type: 'text', text: 'Raised from $449.99 [3][1]. Resale is lower [9].' },
+    { type: 'citations', refs: [3, 2] },
+  ] };
+  assert.deepEqual(citedRows(card, [1, 2, 3, 4].map(row)).map((r) => r.url), ['https://example.com/3', 'https://example.com/1', 'https://example.com/2']);
+});
+
+test('a follow-up on the same subject keeps the card\'s sources, a new topic does not', () => {
+  assert.equal(sameThread('Nintendo Switch 2 price with sales tax in New York City', 'Nintendo Switch 2 Price'), true);
+  assert.equal(sameThread('What is photosynthesis', 'How mRNA Vaccines Work'), false);
+  assert.equal(sameThread('Google AI News Today', 'AI News Today'), true);
+});

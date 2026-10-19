@@ -977,7 +977,7 @@ function applyReview(send: Send, publish: Publish, req: DesignRequest, shown: Ma
  * inside the three-call cap (two rewrites leave no room for Wikipedia).
  * Rewritten follow-ups already say what they mean, so they skip the understanding step.
  */
-async function searchAndDesign(send: Send, env: Env, query: string, freshness: Freshness, context: string | undefined, started: number, scope: AskScope, rewritten = false, seedRows?: SearchResult[], steer?: { avoid: Set<string>; rejected: string }, keepTicker?: CardNode, priorBody?: CardNode[], priorImages?: ImageResult[], fanout: string[] = [], followQuestion = '') {
+async function searchAndDesign(send: Send, env: Env, query: string, freshness: Freshness, context: string | undefined, started: number, scope: AskScope, rewritten = false, seedRows?: SearchResult[], steer?: { avoid: Set<string>; rejected: string }, keepTicker?: CardNode, priorBody?: CardNode[], priorImages?: ImageResult[], fanout: string[] = [], followQuestion = '', carried: SearchResult[] = []) {
   const unglued = withoutGluedPerson(query);
   if (unglued !== query.trim()) query = unglued;
   const extra = fanout.map((item) => item.trim()).filter((item) => item && item.toLowerCase() !== query.toLowerCase());
@@ -1530,6 +1530,13 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     ? await attachOfficial(query, results, env, scope, officialEarly)
     : foldReadyOfficial(query, results, officialEarly);
   if (official !== results) results = official;
+  // The pages the card on screen cited stay sources for the follow-up on the same subject: "with NYC sales tax"
+  // still has the page that states the Switch 2's $499.99, after the new search found only tax pages.
+  if (carried.length) {
+    const have = new Set(results.results.map((row) => normalizeUrl(row.url)));
+    const add = carried.filter((row) => !have.has(normalizeUrl(row.url))).slice(0, CARRIED_ROWS);
+    if (add.length) results = { ...results, results: [...results.results, ...add] };
+  }
   send('search', results);
   const boost = imageBoost(pattern, results, env, scope, boostQuery, portraitAgain);
   const crypto = cryptographyHint(query, results.results);
@@ -1728,6 +1735,28 @@ function engineErrors(engines: EngineStatus[]): string[] {
 }
 
 /** What a card settles: its subtitle and the first hero or sentence, where a verdict like "No — One WTC is still the tallest" sits. */
+/** How many of the card's own sources a same-subject follow-up keeps beside its new search. */
+const CARRIED_ROWS = 4;
+
+/** The rows a card cites, by its [n] markers and its citations node, in the order they are first cited. */
+export function citedRows(card: AnswerCard, rows: readonly SearchResult[]): SearchResult[] {
+  const json = JSON.stringify(card.body);
+  const order: number[] = [];
+  for (const match of json.matchAll(/\[(\d+)\]/g)) order.push(Number(match[1]));
+  for (const node of card.body) if (node.type === 'citations') order.push(...node.refs);
+  const seen = new Set<number>();
+  return order.filter((n) => n >= 1 && n <= rows.length && !seen.has(n) && seen.add(n)).map((n) => rows[n - 1]!);
+}
+
+const THREAD_STOP = new Set(['what', 'when', 'where', 'which', 'with', 'would', 'does', 'much', 'many', 'more', 'than', 'from', 'that', 'this', 'their', 'about', 'price', 'cost', 'today', 'there', 'they', 'have', 'each', 'compare', 'versus']);
+const threadWords = (text: string) => new Set(text.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 4 && !THREAD_STOP.has(word)));
+
+/** The follow-up search still names what the card on screen is about ("Nintendo Switch 2 with NYC sales tax"). */
+export function sameThread(query: string, title: string): boolean {
+  const asked = threadWords(query);
+  return [...threadWords(title)].some((word) => asked.has(word));
+}
+
 function cardLead(card: AnswerCard): string {
   const first = (nodes: readonly CardNode[]): string => {
     for (const node of nodes) {
@@ -1923,7 +1952,8 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
     if (decision.action === 'search' && planned) {
       scope.bound = `${subject}\n${req.question}`;
       send('rewrite', { query: planned.query });
-      await searchAndDesign(send, env, planned.query, 'any', [lock, context].filter(Boolean).join('\n') || undefined, started, scope, true, undefined, undefined, undefined, onScreen?.body, req.search?.images, planned.fanout, req.question);
+      const carried = onScreen && sameThread(planned.query, onScreen.title) ? citedRows(onScreen, req.search?.results ?? []) : [];
+      await searchAndDesign(send, env, planned.query, 'any', [lock, context].filter(Boolean).join('\n') || undefined, started, scope, true, undefined, undefined, undefined, onScreen?.body, req.search?.images, planned.fanout, req.question, carried);
       return;
     }
     const plan = await planPromise;

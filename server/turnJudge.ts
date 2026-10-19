@@ -1,3 +1,4 @@
+import { titleSubject } from '../shared/titleSubject';
 import { cleanSideName, sameObject } from '../shared/objects';
 import { hasLlm, llmJson } from './llm';
 import { compareSides, withoutLeadVerb } from './patterns';
@@ -58,7 +59,8 @@ export function placeOnScreen(title: string | undefined): string {
   }
   const ofAt = out.indexOf('of');
   const name = ofAt >= 0 && out.length > ofAt + 1 ? out.slice(0, ofAt + 2) : out.slice(0, 4);
-  return name.join(' ');
+  // "Empire State Building Height" is about the Empire State Building.
+  return titleSubject(name.join(' '));
 }
 
 const ADD_LEAD = /^(?:please\s+)?(?:add|include|also(?:\s+add)?|plus)\b[\s,:.-]*/i;

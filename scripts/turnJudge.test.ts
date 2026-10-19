@@ -87,7 +87,7 @@ test('switching to a different object searches only that object', () => {
 
 test('the place on the card stays in front of a qualifier', () => {
   assert.equal(placeOnScreen('Art Institute of Chicago Illinois Resident Admission Price'), 'Art Institute of Chicago');
-  assert.equal(placeOnScreen('Willis Tower Opening'), 'Willis Tower Opening');
+  assert.equal(placeOnScreen('Willis Tower Opening'), 'Willis Tower');
   assert.equal(placeOnScreen("No — It's the Willis Tower"), 'Willis Tower');
 });
 
@@ -133,4 +133,15 @@ test('"what about X?" asks the card\'s question about X, keeping the topic', () 
   assert.equal(plan.subject, 'Google');
   const same = followSearchPlan({ title: 'Google AI News', question: 'what about Google?', queries: ['Google AI news'], subject: 'Google' });
   assert.equal(same.query, 'Google AI news');
+});
+
+test('a follow-up names the thing a card title is about, not the attribute it showed', async () => {
+  const { titleSubject } = await import('../shared/titleSubject.ts');
+  assert.equal(titleSubject('Empire State Building Height'), 'Empire State Building');
+  assert.equal(titleSubject('Nintendo Switch 2 Price'), 'Nintendo Switch 2');
+  assert.equal(titleSubject('Met Museum Hours'), 'Met Museum');
+  assert.equal(titleSubject('Price'), 'Price');
+  assert.equal(placeOnScreen('Empire State Building Height'), 'Empire State Building');
+  const plan = followSearchPlan({ title: 'Empire State Building Height', question: 'When did it open?', queries: [], subject: '' });
+  assert.equal(plan.query, 'When did Empire State Building open');
 });
