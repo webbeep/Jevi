@@ -25,9 +25,10 @@ Flag only real errors that would mislead the reader:
 - a stated fact, number or date is not supported by the results, or is attributed to the wrong thing;
 - it carries over facts from the conversation that belong to a different subject;
 - two nodes show the same fact, number or chart (fix the later one with something else the results support, or a short text node);
-- a suggested follow-up or action assumes something false or unsupported: an event that didn't happen, an older event presented as today's, a number the card doesn't show.
+- a suggested follow-up or action assumes something false or unsupported: an event that didn't happen, an older event presented as today's, a number the card doesn't show;
+- it leaves out a fact the goal needs that the results state (often in the "More results"): the threshold that keeps it safe (a cooking temperature), the fee or limit a step or rule sets, or an exception the official page names. Add it to the node where it belongs, citing the result that states it; never invent it.
 You see the result snippets and the page text the writer read (clipped). A fact found in neither may come from a part of a page you can't see: flag it only when the results contradict it, or when it is a current value (price, score, date of an event) that nothing supports.
-Style, wording, layout and missing nice-to-haves are not errors. For a "today" or "latest" ask, anything from the past 36 hours is current: don't flag it, and don't warn that nothing is dated exactly today.
+Style, wording, layout and nice-to-haves the goal does not need are not errors. For a "today" or "latest" ask, anything from the past 36 hours is current: don't flag it, and don't warn that nothing is dated exactly today.
 Reply as JSON: {"verdict":"ok"|"fix","problems":[string],"fixes":[{"node":number,"replace":object}],"note":string,"followups":[string]}
 - problems: one short line per error, naming the node number.
 - fixes: for each wrong node you can correct from the results, a full replacement node in the same JSON shape as the original (same "type" when possible), with facts only from the results and citations like [2]. Keep every supported fact of the original; never blank a value out with "—" or drop a comparison side. At most 3.
@@ -129,6 +130,8 @@ export async function reviewCard(
     head?: Omit<AnswerCard, 'body'>;
     nodes: Map<number, CardNode>;
     followups?: string[];
+    /** Rows a search for a missing key fact found, numbered after `results`. */
+    extra?: SearchResult[];
   },
   env: Env,
   timeoutMs = 2200,
@@ -142,6 +145,7 @@ export async function reviewCard(
     args.brief?.stale.length ? `Outdated results: ${args.brief.stale.map((n) => `[${n}]`).join(' ')}` : '',
     args.brief?.offTopic.length ? `Off-topic results: ${args.brief.offTopic.map((n) => `[${n}]`).join(' ')}` : '',
     `Results:\n${args.results.slice(0, BRIEF_ROWS).map((r, i) => rowLine(r, i, args.isLive(r))).join('\n')}`,
+    args.extra?.length ? `More results, from a search for a key fact the first results lacked:\n${args.extra.map((r, i) => rowLine(r, args.results.length + i, false)).join('\n')}` : '',
     args.pages?.length ? `Page text the writer read:\n${args.pages.slice(0, 5).map((p) => `[${p.n}] ${p.text.replace(/\s+/g, ' ').slice(0, PAGE_CHARS)}`).join('\n')}` : '',
     `CARD\n${cardText(args.head, args.nodes)}`,
     args.followups?.length ? `Suggested follow-ups:\n${args.followups.map((f, i) => `${i + 1}. ${f}`).join('\n')}` : '',

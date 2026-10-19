@@ -19,6 +19,8 @@ export interface SourceBrief {
   conflicts: string[];
   /** What the person asked that no source answers. */
   missing?: string;
+  /** Searches for a key fact a complete answer needs that no result states (a fee, a limit, an exception). */
+  gaps?: string[];
   /** Some of the sources the card is written from were not judged (they arrived after the check ran). */
   partial?: boolean;
 }
@@ -49,18 +51,20 @@ export function remapBrief(brief: SourceBrief, judged: SearchResult[], results: 
     offTopic: map(brief.offTopic),
     conflicts,
     missing: partial ? undefined : brief.missing,
+    ...(brief.gaps?.length ? { gaps: brief.gaps } : {}),
     ...(partial ? { partial } : {}),
   };
 }
 
 const SYSTEM = `You check web search results before an assistant answers from them. Judge them against what the person actually wants, today's date and the conversation.
-Reply as JSON: {"goal": string, "use": number[], "stale": number[], "offTopic": number[], "conflicts": string[], "missing": string}
+Reply as JSON: {"goal": string, "use": number[], "stale": number[], "offTopic": number[], "conflicts": string[], "missing": string, "gaps": string[]}
 - goal: one sentence naming what a right answer must give (e.g. "Bitcoin's current USD price and today's move", "Who Ed Chu of BlueFlame AI is and his role"). Use the conversation to resolve references.
 - use: result numbers that directly answer the goal and are current enough for it, best first.
 - stale: results whose information is outdated for this goal: an old price, last season's stats, a superseded version, news older than the ask allows. Judge by the result's date and content against today's date. An evergreen fact (a definition, a birth date) is not stale. For a "today" or "latest" ask, the past 36 hours count as today.
 - offTopic: results about something else: another person or company with the same name, a different product, place or time period, or results that only share words with the ask.
 - conflicts: at most 3 short notes where results disagree on a fact that matters, naming the results and their dates, e.g. "[3] says 71,360 on Jun 2; live quote [1] says 82,290". A conflict counts only when two results worth citing (an encyclopedia, an official site, a major publication) state different values. A blog, slideshow, classroom page, or page in another language that differs from those is offTopic, not a conflict.
 - missing: what the person asked that no result answers, or "" when the results cover it.
+- gaps: at most 2 web searches (3-8 words each) for a specific fact a complete answer needs that no result states: a fee or price, a limit or cap, a safe temperature or dose, who is eligible, an exception to the usual path. [] when the results state them. Name the fact, never guess its value.
 - A result marked LIVE is real-time data fetched seconds ago: it beats any other result on the current value.
 Be strict: a result that is only loosely related is not in "use".`;
 
@@ -71,6 +75,7 @@ interface Raw {
   offTopic?: unknown;
   conflicts?: unknown;
   missing?: unknown;
+  gaps?: unknown;
 }
 
 const nums = (v: unknown, count: number): number[] =>
@@ -86,7 +91,10 @@ export function readBrief(raw: Raw | undefined, count: number): SourceBrief | un
   const stale = nums(raw.stale, count).filter((n) => !use.includes(n) && !offTopic.includes(n));
   const conflicts = Array.isArray(raw.conflicts) ? raw.conflicts.map((c) => text(c, 200)).filter(Boolean).slice(0, 3) : [];
   const missing = text(raw.missing, 200) || undefined;
-  return { goal, use, stale, offTopic, conflicts, missing };
+  const gaps = Array.isArray(raw.gaps)
+    ? [...new Set(raw.gaps.map((g) => text(g, 90)).filter((g) => g.split(/\s+/).length >= 2))].slice(0, 2)
+    : [];
+  return { goal, use, stale, offTopic, conflicts, missing, ...(gaps.length ? { gaps } : {}) };
 }
 
 /** Sources the card must not take facts or numbers from, unless that would leave nothing to answer from. */
@@ -117,7 +125,7 @@ export async function briefSources(
     args.shown ? `Already on the card, outside these results (never "missing"): ${args.shown}` : '',
     `Results:\n${rows.map((r, i) => rowLine(r, i, args.isLive(r))).join('\n')}`,
   ].filter(Boolean).join('\n');
-  const call = llmJson<Raw>(env, SYSTEM, user, 400).catch((err) => {
+  const call = llmJson<Raw>(env, SYSTEM, user, 460).catch((err) => {
     console.log(JSON.stringify({ zo: 'brief', failed: String(err).slice(0, 120) }));
     return undefined;
   });

@@ -83,7 +83,7 @@ import { unblendObjects } from './objectFacts';
 import { withFinishedSentences } from './polish';
 import { queryWithPlace, readerPlace, settleReadings } from './readings';
 import { isKeepOnly, keptBody } from './refine';
-import { finishQuality, hasOfficialHit, hostTier, officialProbe, preferSources, sinkFormatWords, topicAuthorityAsk } from './sourceQuality';
+import { finishQuality, hasOfficialHit, hostTier, isSocialHost, isVideoHost, officialProbe, preferSources, sinkFormatWords, topicAuthorityAsk } from './sourceQuality';
 import { isOwnSite, orcidSite, pickOwnSite, probeOwnSite, RESEARCH_ASK, withOwnSite } from './ownSite';
 import { quoteAsk } from '../shared/quoteAsk';
 import { dropClinicPages, dropStrayDois, isPaperAsk, leadPreprints, scholarlyResults, withScholarly } from './scholarly';
@@ -453,6 +453,28 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   const briefing = !newSearch || chat || isPaperAsk(req.query) ? undefined
     : req.earlyBrief ? req.earlyBrief.then((early) => early ? remapBrief(early.brief, early.judged, req.search.results) : undefined)
     : briefSources({ query: req.query, intent: req.intent, context: req.context, results: req.search.results, isLive: isQuoteRow, shown: req.ticker ? TICKER_SHOWN : undefined }, env);
+  // A key fact the brief finds no result stating (a fee, a cap, a safe temperature) is searched while the card is
+  // written; the review adds it from those rows. Nothing waits on it.
+  const gapRows: Promise<SearchResult[]> = briefing
+    ? briefing.then(async (brief) => {
+      const queries = (brief?.gaps ?? []).slice(0, 2);
+      if (!queries.length) return [];
+      scope.ledger.bonus = (scope.ledger.bonus ?? 0) + queries.length;
+      const found = await Promise.all(queries.map((q) => searchWithLate({ q, freshness: 'any', count: 6, lite: true }, env, scope).catch(() => undefined)));
+      const have = new Set(req.search.results.map((row) => normalizeUrl(row.url)));
+      const rows: SearchResult[] = [];
+      for (const hit of found) {
+        for (const row of (hit?.response.results ?? []).slice(0, 3)) {
+          const key = normalizeUrl(row.url);
+          if (have.has(key) || isVideoHost(row.domain) || isSocialHost(row.domain)) continue;
+          have.add(key);
+          rows.push(row);
+        }
+      }
+      console.log(JSON.stringify({ zo: 'gap-search', queries, rows: rows.length }));
+      return rows;
+    }).catch(() => [])
+    : Promise.resolve([]);
   // A fee, tax, spec, or quote whose kept page has a thin snippet is read with DeepSeek
   // while the usual page budget runs. This does not start during the Serper fan-out.
   const asked = req.followup?.question ?? req.query;
@@ -767,17 +789,29 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     },
     credit: (credit) => send('credit', credit),
     beginReview: !chat && req.followup?.mode !== 'refine' ? () => {
-      pendingReview = reviewCard({
-        query: designReq.followup?.question ?? designReq.query,
-        context: designReq.context,
-        brief: designReq.brief,
-        results: designReq.search.results,
-        pages: designReq.pages,
-        isLive: isQuoteRow,
-        head,
-        nodes: shown,
-        followups,
-      }, env);
+      pendingReview = (async () => {
+        // The gap search had the whole design to finish; a late one is skipped, never waited for.
+        const found = await Promise.race([gapRows, new Promise<SearchResult[]>((resolve) => setTimeout(() => resolve([]), 150))]);
+        const have = new Set([...designReq.search.results, ...addedRows].map((row) => normalizeUrl(row.url)));
+        const extra = found.filter((row) => !have.has(normalizeUrl(row.url)));
+        if (extra.length) {
+          addedRows = [...addedRows, ...extra];
+          addedSources = addedRows.length;
+          send('search', { ...designReq.search, results: [...designReq.search.results, ...addedRows] });
+        }
+        return reviewCard({
+          query: designReq.followup?.question ?? designReq.query,
+          context: designReq.context,
+          brief: designReq.brief,
+          results: designReq.search.results,
+          extra: addedRows,
+          pages: designReq.pages,
+          isLive: isQuoteRow,
+          head,
+          nodes: shown,
+          followups,
+        }, env);
+      })();
     } : undefined,
   });
   mark(scope.ledger, 'designed');
@@ -810,15 +844,15 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       ]);
       const rows = found?.response.results ?? [];
       if (!rows.length) return;
-      const have = new Set(designReq.search.results.map((row) => row.url));
+      const have = new Set([...designReq.search.results, ...addedRows].map((row) => row.url));
       const add = rows.filter((row) => row.url && !have.has(row.url)).slice(0, 4);
+      const base = designReq.search.results.length + addedRows.length;
       if (add.length) {
-        addedSources = add.length;
-        addedRows = add;
-        send('search', { ...designReq.search, results: [...designReq.search.results, ...add] });
+        addedRows = [...addedRows, ...add];
+        addedSources = addedRows.length;
+        send('search', { ...designReq.search, results: [...designReq.search.results, ...addedRows] });
         send('peek', add.slice(0, 4).map(({ title, url, domain, date }) => ({ title, url, domain, date })));
       }
-      const base = designReq.search.results.length;
       const byIndex = new Map<number, PieceGap[]>();
       for (const gap of gaps) {
         const list = byIndex.get(gap.index) ?? [];
