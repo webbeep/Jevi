@@ -908,3 +908,13 @@ test('a draft keeps its own times and amounts: it is writing, not a sourced clai
   const next = bindClaims({ type: 'draft', text }, pages, 'make it shorter');
   assert.equal(next.type === 'draft' ? next.text : '', text);
 });
+
+test('a dash between two phrases is punctuation, and a dash where a figure belongs is a hole', async () => {
+  const { withoutEmptySlots } = await import('../server/polish.ts');
+  assert.equal(withoutEmptySlots('STEP 4 — continued semaglutide vs placebo for weight-loss maintenance'), 'STEP 4 — continued semaglutide vs placebo for weight-loss maintenance');
+  assert.equal(withoutEmptySlots('Lisa Su — AMD chief executive — joined in 2012.'), 'Lisa Su — AMD chief executive — joined in 2012.');
+  assert.equal(withoutEmptySlots('He was born in — and moved to Paris.'), 'He was born and moved to Paris.');
+  assert.equal(withoutEmptySlots('Rates rose to — percent last year.'), '');
+  assert.equal(withoutEmptySlots('The tower is — feet tall.'), '');
+  assert.equal(withoutEmptySlots('Population — [3].'), '');
+});

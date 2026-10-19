@@ -274,9 +274,10 @@ export function dropInventedTitles(query: string, text: string, sources: readonl
 }
 
 /** On a peer-reviewed ask, a list row stays only when a source states that paper and an open identifier. */
-export function peerPaperItems<T extends { text: string }>(query: string, items: readonly T[], sources: readonly { text: string; domain?: string }[]): T[] {
+export function peerPaperItems<T extends { text: string; meta?: string }>(query: string, items: readonly T[], sources: readonly { text: string; domain?: string }[]): T[] {
   if (!wantsPeerPapers(query)) return [...items];
-  return items.filter((item) => sourceBacksPaper(item.text, sources));
+  // The identifier often sits in the row's detail ("DOI: 10.1001/jama.2021.3224") beside a short name in its text.
+  return items.filter((item) => sourceBacksPaper(item.text, sources) || (!!item.meta && OPEN_ID.test(item.meta) && sourceBacksPaper(item.meta, sources)));
 }
 
 export interface PaperSource {

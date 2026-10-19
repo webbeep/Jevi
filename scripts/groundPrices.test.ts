@@ -31,3 +31,13 @@ test('a figure rounded from a source figure is grounded, and a small whole numbe
   assert.equal(g.ok('12 drivers'), false);
   assert.equal(g.ok('81,950'), false);
 });
+
+test('a figure written short is backed by the full figure, and one bad table cell is blanked, not its row', async () => {
+  const g = new Grounding('Support sits at $80,500 and resistance at $87,000. Market cap 1,650,000,000,000 USD. The A19 chip, 3692 mAh.');
+  assert.equal(g.ok('Pinned between $80.5K support and $87K resistance'), true);
+  assert.equal(g.ok('Market cap $1.65T'), true);
+  assert.equal(g.ok('$90K resistance'), false);
+  const { groundNodes } = await import('../server/ground.ts');
+  const [table] = groundNodes([{ type: 'table', columns: ['', 'iPhone 17', 'Pixel 10'], rows: [['Chip', 'A19', 'Tensor G5'], ['Battery', '3692 mAh', '4970 mAh']] }], g);
+  assert.deepEqual(table?.type === 'table' ? table.rows : [], [['Chip', 'A19', ''], ['Battery', '3692 mAh', '']]);
+});

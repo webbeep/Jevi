@@ -19,6 +19,9 @@ function moneyIn(text: string): string[] {
   return (text.match(MONEY) ?? []).flatMap((amount) => numberTokens(amount));
 }
 
+const SCALE: Record<string, number> = { k: 1e3, thousand: 1e3, m: 1e6, mn: 1e6, million: 1e6, b: 1e9, bn: 1e9, billion: 1e9, t: 1e12, tn: 1e12, trillion: 1e12 };
+const SCALED = /(\d[\d,]*(?:\.\d+)?)\s?(k|thousand|mn?|million|bn?|billion|tn?|trillion)\b/gi;
+
 export class Grounding {
   private readonly known: Set<string>;
 
@@ -56,7 +59,13 @@ export class Grounding {
     const text = String(s);
     // A paper's DOI is checked as a record the sources name. Its digits are not figures.
     if (!identifiersIn(text).filter(isRecord).every((id) => this.records.has(recordKey(id)))) return false;
-    return numberTokens(withoutIdentifiers(text)).every((n) => this.known.has(n) || Number(n) <= FREE_NUMBER_MAX);
+    // "$80.5K" and "$1.65T" are 80,500 and 1,650,000,000,000 written short: either form in the sources backs them.
+    const scaled = new Set<string>();
+    for (const match of text.matchAll(SCALED)) {
+      const n = Number(match[1]!.replace(/,/g, '')) * SCALE[match[2]!.toLowerCase()]!;
+      if (this.known.has(String(Math.round(n))) || this.known.has(String(n))) scaled.add(numberTokens(match[1]!)[0]!);
+    }
+    return numberTokens(withoutIdentifiers(text)).every((n) => this.known.has(n) || scaled.has(n) || Number(n) <= FREE_NUMBER_MAX);
   }
 
   /** Keeps only sentences whose numbers are all backed by the sources. */
@@ -126,7 +135,11 @@ function groundNode(node: CardNode, g: Grounding): CardNode | undefined {
     case 'rating':
       return g.ok(node.value) ? node : undefined;
     case 'table': {
-      const rows = node.rows.filter((r) => r.every((cell) => g.ok(cell)));
+      // An unbacked cell is blanked, not the whole row: the row's other sourced cells still answer, and a lone
+      // gap reads "—". A row whose label or every value is unbacked goes.
+      const rows = node.rows
+        .map((r) => (r.every((cell) => g.ok(cell)) ? r : r.map((cell, i) => (i === 0 || g.ok(cell) ? cell : ''))))
+        .filter((r) => g.ok(r[0]) && (r.length < 2 || r.slice(1).some((cell) => cell.trim())));
       return rows.length ? { ...node, rows } : undefined;
     }
     case 'timeline': {

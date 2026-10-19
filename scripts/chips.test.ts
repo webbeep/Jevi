@@ -58,3 +58,9 @@ test('a highlights button keeps its label when the query was about stats', () =>
   assert.equal(node.items[0]?.query, 'AJ Dybantsa Wizards washington Preseason highlights');
   assert.equal(node.items[1]?.query, 'Make this shorter');
 });
+
+test('a text node written with "value" keeps its sentence', async () => {
+  const { sanitizeNodes } = await import('../server/sanitize.ts');
+  const [node] = sanitizeNodes([{ type: 'text', value: 'Nintendo raised the US MSRP to $499.99 [3].' }], 0);
+  assert.equal(node?.type === 'text' ? node.text : '', 'Nintendo raised the US MSRP to $499.99 [3].');
+});

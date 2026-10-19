@@ -143,7 +143,8 @@ function sanitizeNode(raw: unknown, imageCount: number, depth: number, ctx?: { s
       return text ? { type, text, eyebrow: str(n.eyebrow, 60), level: oneOf(num(n.level), [1, 2, 3] as const) } : undefined;
     }
     case 'text': {
-      const text = str(n.text, 1200);
+      // A text node keyed like a tile ({"type":"text","value":"…"}) still carries its sentence.
+      const text = str(n.text, 1200) ?? str(n.value, 1200) ?? str(n.content, 1200);
       return text ? { type, text, tone: tone(n.tone), size: oneOf(n.size, ['sm', 'md', 'lg'] as const) } : undefined;
     }
     case 'stat': {

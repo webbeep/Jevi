@@ -53,6 +53,8 @@ export function emptyFigure(value: string | undefined): boolean {
   return /^(?:unknown|n\/?a|tbd|none|[—–\-?]|\[(?:year|name|count|date|number|amount)\])$/i.test(v);
 }
 
+const HOLE_DASH = /\b(?:in|on|at|of|by|from|since|during|until|to|than|about|around|nearly|over|under|is|was|are|were|be|been|the|a|an|with|for|between|and|or)\s+[—–_]+(?=\s|[.,;:!?)]|$)|[—–_]+\s+(?:%|percent|years?|months?|days?|hours?|minutes?|people|points?|miles?|km|kg|lbs?|feet|ft|meters?|mph|°)(?![a-z])|\s[—–_]+\s*(?:\[\d+\]\s*)*[.!?]?\s*$|^\s*[—–_]+\s/i;
+
 function repairHole(sentence: string): string {
   let s = sentence.replace(/\[(?!\d+\])[^\]]+\]/g, '');
   s = s.replace(/\b(?:in|on|at|during|since|from|by)\s+[—–_]+(?:\s+|$)/gi, ' ');
@@ -70,7 +72,9 @@ function repairHole(sentence: string): string {
   if (/\[(?!\d+\])[^\]]+\]/.test(s)) return '';
   if (/\b(?:in|on|at|of|by|from|since|during)\s+(?:he|she|they|it|we)\b/i.test(bare)) return '';
   if (/\b(?:in|on|at|by|from)\s*[.,;:]/i.test(bare)) return '';
-  if (/\s[—–_]\s/.test(bare)) return '';
+  // A dash where a figure or name should be ("born in — and", "rose to — percent", "is — feet tall"). A dash
+  // between two phrases ("STEP 4 — continued semaglutide vs placebo") is punctuation, not a hole.
+  if (HOLE_DASH.test(bare)) return '';
   // A count that lost its number: "has about wolves" / "about  people". "around the clock" is not one.
   if (!/\d/.test(bare) && /\b(?:about|approximately|around|nearly)\s+(?!(?:the|a|an|to|of|which|this|that)\b)[A-Za-z]/i.test(bare)) return '';
   return s;
