@@ -5,6 +5,7 @@ import type { SearchResult } from '../shared/types';
 import { BRIEF_ROWS, rowLine, type SourceBrief } from './brief';
 import { hasLlm, llmJson } from './llm';
 import type { Env } from './util';
+import { fitContext } from '../shared/contextFit';
 
 /**
  * After the card is written and before it is saved: one model read of the finished card against the goal,
@@ -135,7 +136,7 @@ export async function reviewCard(
   if (!hasLlm(env) || !args.nodes.size) return undefined;
   const user = [
     `Today is ${new Date().toISOString().slice(0, 10)} (UTC).`,
-    args.context ? `Conversation so far:\n${args.context.slice(0, 1200)}` : '',
+    args.context ? `Conversation so far:\n${fitContext(args.context, 1200)}` : '',
     `Asked: ${args.query}`,
     args.brief ? `Goal: ${args.brief.goal}` : '',
     args.brief?.stale.length ? `Outdated results: ${args.brief.stale.map((n) => `[${n}]`).join(' ')}` : '',

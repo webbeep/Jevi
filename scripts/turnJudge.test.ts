@@ -12,8 +12,10 @@ test('a follow-up decision is a search, an answer, or a calculation', () => {
     queries: ['North Pier admission for a visitor from Ohio'],
     subject: 'North Pier',
   });
-  assert.equal(parseDecision({ action: 'answer', queries: ['ignored'], subject: 'North Pier' })?.action, 'answer');
-  assert.deepEqual(parseDecision({ action: 'answer', queries: ['ignored'], subject: 'North Pier' })?.queries, []);
+  assert.equal(parseDecision({ action: 'answer', queries: ['North Pier hours'], subject: 'North Pier' })?.action, 'answer');
+  // An answer keeps its queries: they fetch fresh sources beside the card's.
+  assert.deepEqual(parseDecision({ action: 'answer', queries: ['North Pier hours'], subject: 'North Pier' })?.queries, ['North Pier hours']);
+  assert.deepEqual(parseDecision({ action: 'calculate', queries: ['ignored'], subject: 'North Pier' })?.queries, []);
   assert.equal(parseDecision({ action: 'calculate', queries: [], subject: 'North Pier' })?.action, 'calculate');
   assert.equal(parseDecision({ action: 'search', queries: [], subject: 'North Pier' }), undefined);
   assert.equal(parseDecision({ action: 'rewrite' }), undefined);

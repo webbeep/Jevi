@@ -2,6 +2,7 @@ import type { SearchResult } from '../shared/types';
 import { hasLlm, llmJson } from './llm';
 import { normalizeUrl } from './search';
 import type { Env } from './util';
+import { fitContext } from '../shared/contextFit';
 
 /** Sources the designer sees, numbered the same way (see `sourcesBlock`). */
 export const BRIEF_ROWS = 12;
@@ -110,7 +111,7 @@ export async function briefSources(
   if (!hasLlm(env) || rows.length < 2) return undefined;
   const user = [
     `Today is ${new Date().toISOString().slice(0, 10)} (UTC).`,
-    args.context ? `Conversation so far:\n${args.context.slice(0, 1200)}` : '',
+    args.context ? `Conversation so far:\n${fitContext(args.context, 1200)}` : '',
     `Asked: ${args.query}`,
     args.intent ? `Read as: ${args.intent}` : '',
     args.shown ? `Already on the card, outside these results (never "missing"): ${args.shown}` : '',

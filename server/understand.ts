@@ -5,6 +5,7 @@ import { hasLlm, llmJson } from './llm';
 import { isPaperAsk } from './scholarly';
 import { type LateExtras, normalizeUrl } from './search';
 import type { Env } from './util';
+import { fitContext } from '../shared/contextFit';
 
 export interface Understanding {
   /** One sentence: what the person wants to see. */
@@ -28,7 +29,7 @@ Reply as JSON: {"intent": string, "queries": string[], "freshness": "day"|"week"
 export async function understand(query: string, env: Env, context?: string, timeoutMs = 1800): Promise<Understanding | undefined> {
   if (!hasLlm(env)) return undefined;
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
-  const call = llmJson<Partial<Understanding>>(env, SYSTEM, `Today is ${today}.\n${context ? `Conversation so far:\n${context.slice(0, 1500)}\n` : ''}Typed: ${query}`, 160);
+  const call = llmJson<Partial<Understanding>>(env, SYSTEM, `Today is ${today}.\n${context ? `Conversation so far:\n${fitContext(context, 1500)}\n` : ''}Typed: ${query}`, 160);
   const timeout = new Promise<undefined>((r) => setTimeout(() => r(undefined), timeoutMs));
   const out = await Promise.race([call.catch(() => undefined), timeout]);
   if (!out || typeof out.intent !== 'string') return undefined;

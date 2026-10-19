@@ -104,6 +104,8 @@ import { extraQueries, understand } from './understand';
 import { cacheBypass, testForce, validTestToken, wantsRefresh } from './token';
 import { SERPER_ANON_SHARE, capBucket, testHost } from './providerCap';
 import type { Env } from './util';
+import { fitContext } from '../shared/contextFit';
+import { cardPlainText } from '../shared/digest';
 
 export { guessFreshness } from './freshness';
 
@@ -583,7 +585,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     ? factAnswer(req.query, snippetCorpus) ?? factAnswer(req.query, factCorpus)
     : factAnswer(req.query, factCorpus) ?? factAnswer(req.query, snippetCorpus);
   if (facts) console.log(JSON.stringify({ zo: 'facts', lead: facts.lead }));
-  const designReq: DesignRequest = { ...req, pages, brief, facts, context: req.context?.slice(0, 4000), rowImages };
+  const designReq: DesignRequest = { ...req, pages, brief, facts, context: fitContext(req.context, 4000) || undefined, rowImages };
   const shown = new Map<number, CardNode>();
   const subject = subjectWords(req.query, req.followup?.question);
   let head: Omit<AnswerCard, 'body'> | undefined;
@@ -1904,13 +1906,38 @@ function cardLead(card: AnswerCard): string {
   return [card.subtitle ?? '', first(card.body)].join(' ').trim();
 }
 
+/** A follow-up that only reshapes what the card says: fresh sources would not change it. */
+const RESHAPE = /\b(?:simpler|simply|simplify|shorter|shorten|longer|summar(?:y|ize|ise)|tl;?dr|rephrase|reword|rewrite|translate|in (?:spanish|french|german|chinese|japanese|korean|italian|portuguese|plain english)|like i'?m (?:\d+|five|ten|a kid)|eli5|bullet(?: points)?|as a (?:list|table)|one (?:line|sentence)|again)\b/i;
+const SUPPLEMENT_ROWS = 5;
+const SUPPLEMENT_MS = 3500;
+
+/**
+ * Fresh rows for a follow-up answered from the card's sources: one quick search, added after the card's own rows so
+ * every [n] the card cites still points at the same page. A slow or empty search leaves the sources as they were.
+ */
+async function supplementSources(search: SearchResponse, query: string, env: Env, scope: AskScope): Promise<SearchResponse> {
+  if (!query.trim()) return search;
+  try {
+    const found = await Promise.race([
+      searchWithLate({ q: query, freshness: 'any', count: 6, lite: true }, env, scope),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), SUPPLEMENT_MS)),
+    ]);
+    const have = new Set(search.results.map((row) => normalizeUrl(row.url)));
+    const add = (found?.response.results ?? []).filter((row) => row.url && !have.has(normalizeUrl(row.url))).slice(0, SUPPLEMENT_ROWS);
+    console.log(JSON.stringify({ zo: 'follow-supplement', query, added: add.length }));
+    return add.length ? { ...search, results: [...search.results, ...add] } : search;
+  } catch {
+    return search;
+  }
+}
+
 async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind: 'followup' }>, started: number, scope: AskScope) {
   const cleaned = plainFollowup(req.question);
   if (cleaned !== req.question) req = { ...req, question: cleaned };
   // "Watch on YouTube" is a search for the video, even when the button was marked ask.
   if (req.intent === 'ask' && wantsVideo(req.question)) req = { ...req, intent: 'search' };
   const refLine = req.ref ? refContext(req.ref) : '';
-  const context = scrubLeak([req.context?.slice(0, 4000), refLine].filter(Boolean).join('\n')) || undefined;
+  const context = scrubLeak([fitContext(req.context, 4000), refLine].filter(Boolean).join('\n')) || undefined;
   const from = req.cards.find((c) => c.id === req.from);
 
   // Writing ("draft an email") is answered directly. A planner that calls it a search, then a rewriter,
@@ -2063,7 +2090,7 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
       original: req.original,
       context,
       title: onScreen?.title,
-      card: cardText,
+      card: onScreen ? cardPlainText(onScreen, 1500) : '',
       sources: sourceText,
     });
     const judgedOrFallback = judged ?? {
@@ -2092,9 +2119,26 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
     if (decision.action === 'search' && planned) {
       scope.bound = `${subject}\n${req.question}`;
       send('rewrite', { query: planned.query });
-      const carried = onScreen && sameThread(planned.query, onScreen.title) ? citedRows(onScreen, req.search?.results ?? []) : [];
-      await searchAndDesign(send, env, planned.query, 'any', [lock, carried.length ? thread : '', context].filter(Boolean).join('\n') || undefined, started, scope, true, undefined, undefined, undefined, onScreen?.body, req.search?.images, planned.fanout, req.question, carried);
+      // A new topic ("What is photosynthesis?" under an mRNA card) starts clean: the earlier cards' facts, body and
+      // pictures stay out, so nothing from the old subject is mixed into the new answer. Only the topic line remains,
+      // marked as earlier, for a question that leans on it.
+      const related = !onScreen || sameThread(planned.query, onScreen.title);
+      const carried = onScreen && related ? citedRows(onScreen, req.search?.results ?? []) : [];
+      const earlierTopic = topicOnly(context);
+      const turnContext = related
+        ? context
+        : [earlierTopic ? `Earlier in this conversation — ${earlierTopic}. This question starts a new topic: answer it on its own, with no facts from the earlier cards.` : '', refLine].filter(Boolean).join('\n') || undefined;
+      await searchAndDesign(send, env, planned.query, 'any', [lock, carried.length ? thread : '', turnContext].filter(Boolean).join('\n') || undefined, started, scope, true, undefined, undefined, undefined, related ? onScreen?.body : undefined, related ? req.search?.images : undefined, planned.fanout, req.question, carried);
       return;
+    }
+    // An answer from the card still gets fresh sources beside the card's own, unless the turn only reshapes what is on
+    // the card ("simpler", "shorter"). The new rows go after the old ones, so the card's [n] citations keep their pages.
+    const supplemented = decision.action === 'answer' && req.search && !RESHAPE.test(req.question)
+      ? await supplementSources(req.search, decision.queries[0] || fallbackQuery(req.question, hint), env, scope)
+      : req.search;
+    if (supplemented && supplemented !== req.search) {
+      req = { ...req, search: supplemented };
+      send('search', supplemented);
     }
     const plan = await planPromise;
     const rows = (req.search?.results ?? []).slice(0, 8);

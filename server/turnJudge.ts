@@ -3,6 +3,7 @@ import { cleanSideName, sameObject } from '../shared/objects';
 import { hasLlm, llmJson } from './llm';
 import { compareSides, withoutLeadVerb } from './patterns';
 import type { Env } from './util';
+import { fitContext } from '../shared/contextFit';
 
 /**
  * One model call decides the next action. The card templates and the loading
@@ -21,8 +22,8 @@ export interface SourceDecision {
 
 const TURN = `You decide the next action for a follow-up in a search conversation. Reply as JSON: {"action":"search"|"answer"|"calculate","queries":string[],"subject":string}
 - subject: the thing this turn is about. Keep the subject already on screen unless the person clearly changes topic. A place or business named only as a qualifier (from X, in X, for a visitor) is not a new subject. If they challenge the subject and the card rejected that name, keep the subject the card affirmed, not the name they proposed.
-- action "answer" when the card and the sources already state the fact this turn asks. queries is empty. A different case of the same subject (another visitor, another city, another option) is not answered by the previous case's figure. If that case is not already stated, action is "search" and the query names it.
-- action "search" when they do not. queries is 1 to 4 web searches, the new words plus that subject, each 3-12 words. When the card is a comparison and the follow-up asks for specs, prices, or a table, return one query per product already named on the card: that product's name plus the new words. Do not drop a side, and do not glue the names into one token. When they add an object or switch to a different one, one query is that object's name alone. Do not append the follow-up sentence onto a product name. A variant (Pro, Plus, Max, Mini, Ultra) is a different product: search the exact model asked, not a different variant. A how-to, a requested quote, a live price, a tax, a fee, or a health question searches the official page for that subject.
+- action "answer" only when the follow-up reshapes what the card already says (simpler, shorter, a summary, a rephrase, a translation, another format) or asks for a fact the card itself states word for word. Still give 1 to 2 queries for that fact: fresh sources are added beside the card's. A different case of the same subject (another visitor, another city, another option) is not answered by the previous case's figure. If that case is not already stated, action is "search" and the query names it.
+- action "search" in every other case, and whenever in doubt: a new fact, more detail, a why or how, a newer figure, another case, or anything the card only touches on is better answered with new sources. queries is 1 to 4 web searches, the new words plus that subject, each 3-12 words. When the card is a comparison and the follow-up asks for specs, prices, or a table, return one query per product already named on the card: that product's name plus the new words. Do not drop a side, and do not glue the names into one token. When they add an object or switch to a different one, one query is that object's name alone. Do not append the follow-up sentence onto a product name. A variant (Pro, Plus, Max, Mini, Ultra) is a different product: search the exact model asked, not a different variant. A how-to, a requested quote, a live price, a tax, a fee, or a health question searches the official page for that subject.
 - action "calculate" when they ask to split, multiply, or apply a rate or price already on the card. queries is empty. The figure on the card is the figure to use.
 - Do not add a person, place, or business that the follow-up and the subject do not name.`;
 
@@ -252,7 +253,8 @@ export function parseDecision(raw: unknown): TurnDecision | undefined {
     .slice(0, 4);
   const subject = typeof row.subject === 'string' ? row.subject.replace(/\s+/g, ' ').trim().slice(0, 120) : '';
   if (action === 'search' && !queries.length) return undefined;
-  return { action, queries: action === 'search' ? queries : [], subject };
+  // An answer keeps its queries too: they fetch fresh sources beside the card's.
+  return { action, queries: action === 'calculate' ? [] : queries, subject };
 }
 
 export function parseSourceDecision(raw: unknown): SourceDecision | undefined {
@@ -298,8 +300,8 @@ export async function judgeTurn(env: Env, input: {
   const user = [
     `Conversation started with: ${input.original}`,
     input.title ? `Card on screen: ${input.title}` : '',
-    input.card ? `Card text:\n${input.card.slice(0, 900)}` : '',
-    input.context ? `Conversation:\n${input.context.slice(0, 1200)}` : '',
+    input.card ? `Card text:\n${input.card.slice(0, 1500)}` : '',
+    input.context ? `Conversation:\n${fitContext(input.context, 1600)}` : '',
     input.sources ? `Sources already in hand:\n${input.sources.slice(0, 900)}` : '',
     `Follow-up: ${input.question}`,
   ].filter(Boolean).join('\n');

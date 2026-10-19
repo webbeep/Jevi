@@ -74,3 +74,31 @@ export function cardDigest(card: AnswerCard, max = 420): string {
   const text = `${card.title}${card.subtitle ? ` — ${card.subtitle}` : ''}${facts.length ? `. ${facts.join('; ')}` : ''}`.replace(/\[\d+\]/g, '');
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
+
+/** Keys whose strings are styling, links or layout, never something the card says. */
+const NOT_SAID = new Set(['type', 'icon', 'imageSrc', 'imageQuery', 'imageRef', 'url', 'href', 'src', 'image', 'tone', 'accent', 'kind', 'style', 'shape', 'direction', 'gap', 'align', 'size', 'variant', 'trend', 'feed', 'symbol', 'currency', 'query', 'prompt']);
+
+/**
+ * Everything a card says, in reading order, as plain text: title, subtitle, labels, values, cells and sentences.
+ * A judge deciding whether the card already answers a follow-up needs the table rows, not "compares A vs B".
+ */
+export function cardPlainText(card: AnswerCard, max = 1500): string {
+  const out: string[] = [card.title, card.subtitle ?? ''];
+  const walk = (value: unknown, key = ''): void => {
+    if (out.join(' · ').length > max) return;
+    if (typeof value === 'string') {
+      if (!NOT_SAID.has(key) && value.trim()) out.push(value.trim());
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((item) => walk(item, key));
+      return;
+    }
+    if (value && typeof value === 'object') {
+      if ((value as { type?: string }).type === 'ticker' || (value as { type?: string }).type === 'actions') return;
+      for (const [k, v] of Object.entries(value)) if (!NOT_SAID.has(k)) walk(v, k);
+    }
+  };
+  card.body.forEach((node) => walk(node));
+  return out.filter(Boolean).join(' · ').slice(0, max);
+}
