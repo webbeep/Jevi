@@ -98,7 +98,7 @@ export function liveQuoteFacts(ticker: CardNode | undefined): LiveQuoteFacts | u
 }
 
 /** Words that mark a figure as another time or another quantity, not the price right now. */
-const HISTORY = /\b(?:low|high|range|close[ds]?|closing|open(?:ed)?|week|weeks|month|months|year|years|52|ago|since|target|forecast|record|all-time|ath|peak|earlier|previous|prior|ipo|q[1-4]|quarter|average|support|resistance|cap|volume|revenue|earnings|eps|guidance|dividend|yield|yesterday|last (?:week|month|year))\b/i;
+const HISTORY = /\b(?:low|high|range|close[ds]?|closing|open(?:ed)?|week|weeks|month|months|year|years|52|ago|since|target|forecast|record|all-time|ath|peak|earlier|previous|prior|ipo|q[1-4]|quarter|average|support|resistance|cap|volume|revenue|earnings|eps|guidance|dividend|yield|yesterday|last (?:week|month|year)|whether|pullback|breaks?|breakdown|breakout|levels?|retest|reclaim)\b/i;
 const DAY_MOVE = /\b(?:today|24h|24-hour|24 hours|day|session|intraday|now|currently|this morning|this afternoon)\b/i;
 
 const moneyFigures = (text: string) => [...text.replace(/\[\d+\]/g, ' ').matchAll(/[$€£¥]\s?(\d[\d,]*(?:\.\d+)?)\s*(k|K|m|M|b|B)?\b/g)]

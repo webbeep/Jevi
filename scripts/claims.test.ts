@@ -918,3 +918,9 @@ test('a dash between two phrases is punctuation, and a dash where a figure belon
   assert.equal(withoutEmptySlots('The tower is — feet tall.'), '');
   assert.equal(withoutEmptySlots('Population — [3].'), '');
 });
+
+test('a hero written with a title and subtitle leads with its title', async () => {
+  const { sanitizeNodes } = await import('../server/sanitize.ts');
+  const [hero] = sanitizeNodes([{ type: 'hero', title: 'Anker Soundcore Space Q45', subtitle: 'The best budget noise cancelling headphones we have tested [8]' }], 0);
+  assert.equal(hero?.type === 'hero' ? `${hero.value} | ${hero.caption}` : '', 'Anker Soundcore Space Q45 | The best budget noise cancelling headphones we have tested [8]');
+});

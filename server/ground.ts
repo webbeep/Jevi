@@ -66,7 +66,16 @@ export class Grounding {
       const n = Number(match[1]!.replace(/,/g, '')) * SCALE[match[2]!.toLowerCase()]!;
       if (this.known.has(String(Math.round(n))) || this.known.has(String(n))) scaled.add(numberTokens(match[1]!)[0]!);
     }
-    return numberTokens(withoutIdentifiers(text)).every((n) => this.known.has(n) || scaled.has(n) || Number(n) <= FREE_NUMBER_MAX);
+    // "About 2.7 times wider — 6.5 m against 2.4 m": a ratio worked out from two backed figures in the same line.
+    const tokens = numberTokens(withoutIdentifiers(text));
+    const backed = tokens.filter((n) => this.known.has(n)).map(Number).filter((n) => n > 0);
+    for (const match of text.matchAll(/(\d+(?:\.\d+)?)\s*(?:times|x|×)\b/gi)) {
+      const ratio = Number(match[1]);
+      const places = (match[1]!.split('.')[1] ?? '').length;
+      const tolerance = 0.5 * 10 ** -places + 1e-9;
+      if (backed.some((a) => backed.some((b) => a !== b && Math.abs(a / b - ratio) <= tolerance))) scaled.add(numberTokens(match[1]!)[0]!);
+    }
+    return tokens.every((n) => this.known.has(n) || scaled.has(n) || Number(n) <= FREE_NUMBER_MAX);
   }
 
   /** Keeps only sentences whose numbers are all backed by the sources. */

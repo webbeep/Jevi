@@ -96,3 +96,9 @@ test('a live quote row\'s ranges become tiles cited to it, and a callout titled 
   const { withoutCharts } = await import('../shared/tickerNotes.ts');
   assert.equal(withoutCharts({ type: 'callout', title: 'No live price available', text: 'Check a live market source for the real-time price.' }), undefined);
 });
+
+test('a level to watch is not a claim about the price now', async () => {
+  const { withinQuote } = await import('../shared/fxCard.ts');
+  const watch: CardNode = { type: 'callout', text: 'Whether BTC holds $81,300–$81,500 on any pullback; a break below would weaken the rebound case [7].' };
+  assert.equal(withinQuote(watch, { price: 82505, pct: 0.5 }), watch);
+});

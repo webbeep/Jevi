@@ -56,3 +56,10 @@ test('a table keeps whole rows when most rows are backed, and blanks cells only 
   const [mostly] = groundNodes([{ type: 'table', columns: ['', 'A', 'B'], rows: [['Battery', '3692 mAh', '4970 mAh'], ['Weight', '177 g', '204 g'], ['Chip', 'A19', 'G5']] }], g);
   assert.deepEqual(mostly?.type === 'table' ? mostly.rows : [], [['Battery', '3692 mAh', '4970 mAh'], ['Weight', '177 g', '204 g']]);
 });
+
+test('a ratio worked out from two backed figures in the line is grounded', () => {
+  const g = new Grounding('JWST has a 6.5 m segmented primary mirror. Hubble has a 2.4 m mirror.');
+  assert.equal(g.ok("JWST's mirror is about 2.7 times wider than Hubble's — a 6.5 m segmented mirror against Hubble's 2.4 m."), true);
+  assert.equal(g.ok("JWST's mirror is about 3.1 times wider than Hubble's — 6.5 m against 2.4 m."), false);
+  assert.equal(g.ok("JWST's mirror is 3 times wider."), false);
+});

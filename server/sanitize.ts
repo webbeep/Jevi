@@ -130,10 +130,12 @@ function sanitizeNode(raw: unknown, imageCount: number, depth: number, ctx?: { s
       return { type };
     case 'hero': {
       const label = str(n.label, 80);
-      const measure = valueUnit(str(n.value, 120), str(n.unit, 200));
+      // A hero written like a heading ({"title": "Anker Soundcore Space Q45", "subtitle": "…"}) leads with its title.
+      const measure = valueUnit(str(n.value, 120) ?? str(n.title, 120), str(n.unit, 200));
       const value = measure.value;
+      const captionText = typeof n.caption === 'string' ? n.caption : n.value === undefined && typeof n.subtitle === 'string' ? n.subtitle : undefined;
       // Repair before markup cleanup. An unmatched quote is removed, and the decimal it was holding goes with the signal.
-      const said = typeof n.caption === 'string' ? str(completeCutDecimal(n.caption, [value, label]), 200) : undefined;
+      const said = captionText !== undefined ? str(completeCutDecimal(captionText, [value, label]), 200) : undefined;
       // "of total energy intake" is what the figure is a share of. It reads in the caption, never cut to fit as a unit.
       const caption = measure.phrase ? [measure.phrase[0]!.toUpperCase() + measure.phrase.slice(1), said].filter(Boolean).join(' · ') : said;
       return value ? { type, value, unit: measure.unit, label, caption, icon: icon(n.icon), tone: tone(n.tone) } : undefined;
