@@ -968,3 +968,25 @@ test('the finished-card rate pass keeps a breakdown\'s parts', async () => {
   const next = agreeOfficialRate(grid, 'What would I pay with sales tax in New York City?', sources as never);
   assert.deepEqual(next.type === 'grid' ? next.children.map((tile) => (tile.type === 'tile' ? tile.value : '')) : [], ['4.5% [4]', '4% [4]', '0.375% [4]']);
 });
+
+test('a breakdown written as stats keeps each part, with the percent sign in its unit', async () => {
+  const { agreeOfficialRate, bindClaims } = await import('../server/claims.ts');
+  const sources = [{ n: 2, text: 'NYC sales tax. The combined sales tax rate in New York City is 8.875%: 4% New York State, 4.5% city, and 0.375% MCTD.' }];
+  const grid: CardNode = { type: 'grid', cols: 2, children: [
+    { type: 'stat', label: 'NYC combined tax', value: '8.875', unit: '%' },
+    { type: 'stat', label: 'City portion', value: '4.5', unit: '%' },
+    { type: 'stat', label: 'State portion', value: '4', unit: '%' },
+  ] };
+  const ask = 'What would I pay with sales tax in New York City?';
+  for (const next of [bindClaims(grid, sources as never, ask), agreeOfficialRate(grid, ask, sources as never)]) {
+    assert.deepEqual(next.type === 'grid' ? next.children.map((stat) => (stat.type === 'stat' ? stat.value : '')) : [], ['8.875', '4.5', '4']);
+  }
+});
+
+test('a fee tile keeps its own percent under the label', async () => {
+  const { bindClaims } = await import('../server/claims.ts');
+  const sources = [{ n: 1, text: 'NYC sales tax. The combined sales tax rate in New York City is 8.875%. Nintendo charges a 1.5% recycling fee, capped at $15.' }];
+  const tile: CardNode = { type: 'tile', label: 'Nintendo fee cap', value: '$15', sub: '1.5% of retail [1]' };
+  const bound = bindClaims(tile, sources as never, 'What would I pay with sales tax in New York City?');
+  assert.equal(bound.type === 'tile' ? bound.sub : '', '1.5% of retail [1]');
+});

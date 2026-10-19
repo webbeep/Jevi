@@ -1050,7 +1050,8 @@ function applyTax(node: CardNode, query: string, pick: TaxPick, keep: ReadonlySe
     }
     case 'tile': {
       const value = node.value && !componentRate(node) ? applyTaxText(node.value, query, pick, keep) : node.value;
-      const sub = node.sub ? applyTaxText(node.sub, query, pick, keep) : node.sub;
+      // A fee's or a part's own detail ("1.5% of retail" under "Nintendo fee cap") is that charge's rate, not the tax.
+      const sub = node.sub && !componentRate(node) ? applyTaxText(node.sub, query, pick, keep) : node.sub;
       const label = applyTaxText(node.label, query, pick, keep);
       return value === node.value && sub === node.sub && label === node.label ? node : { ...node, value, sub, label, source: node.source ?? pick.n };
     }
@@ -1990,8 +1991,9 @@ function componentRate(row: object): boolean {
 const OTHER_PLACE = /\b(?:outside|elsewhere|other (?:counties|cities|areas|states)|lower rate|higher rate|instead of|compared with|compared to)\b/i;
 
 function markBreakdown(node: CardNode): void {
-  const mark = (rows: { label?: string; value?: string }[]) => {
-    const parts = rows.filter((row) => row.label && PART_LABEL.test(row.label) && !WHOLE_LABEL.test(row.label) && hasRate(row.value));
+  // A stat keeps its percent sign in `unit` ("4.5" with unit "%"): that is a rate too.
+  const mark = (rows: { label?: string; value?: string; unit?: string }[]) => {
+    const parts = rows.filter((row) => row.label && PART_LABEL.test(row.label) && !WHOLE_LABEL.test(row.label) && hasRate(`${row.value ?? ''}${row.unit ? ` ${row.unit}` : ''}`));
     if (parts.length >= 2) parts.forEach((row) => breakdown.add(row));
   };
   if (node.type === 'keyvalue') mark(node.items);
