@@ -137,3 +137,12 @@ test('a dollar-yen card drops cross rates and other currencies named in words', 
   const kept = withinFx(tiles, fx);
   assert.deepEqual(kept?.type === 'scroller' ? kept.children.map((tile) => (tile.type === 'tile' ? tile.label : '')) : [], ['Mid-market', 'Previous close']);
 });
+
+test('a live stock card drops a move in the other direction, a 52-wk high under the price, and a denial of the price', () => {
+  const quote = { price: 217.09, pct: 1.38, previousClose: 214.13 };
+  assert.equal(withinQuote({ type: 'text', text: 'NVDA closed at $214.13 and the latest session was −1.4% [2].' }, quote), undefined);
+  assert.equal(withinQuote({ type: 'tile', label: '52-wk high', value: '$164.27' }, quote), undefined);
+  assert.equal(withinQuote({ type: 'callout', text: 'Live price not in sources.' }, quote), undefined);
+  assert.ok(withinQuote({ type: 'tile', label: 'Day change', value: '+1.38%' }, quote));
+  assert.ok(withinQuote({ type: 'tile', label: '52-wk high', value: '$243.37' }, quote));
+});

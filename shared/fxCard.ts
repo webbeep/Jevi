@@ -120,12 +120,14 @@ const moneyFigures = (text: string) => [...text.replace(/\[\d+\]/g, ' ').matchAl
  */
 function contradictsQuote(text: string, quote: LiveQuoteFacts): boolean {
   const bare = text.replace(/\[\d+\]/g, ' ');
+  // "Live price not in sources" beside the live widget says the opposite of what is on screen.
+  if (/\b(?:live |current )?(?:price|quote)\b[^.]{0,30}\b(?:not (?:in|stated|given|listed|available)|unavailable)\b|\bno (?:live|current) (?:price|quote)\b/i.test(bare)) return true;
   const figure = moneyFigures(bare)[0] ?? Number(bare.match(/\b(\d{1,3}(?:,\d{3})*\.\d{2})\b/)?.[1]?.replace(/,/g, '') ?? NaN);
   if (Number.isFinite(figure) && figure > quote.price * 0.4 && figure < quote.price * 2.5) {
     // "Prev close $217.23" beside a widget that counts from 214.13 is an earlier session's close.
     if (quote.previousClose && /\b(?:prev(?:ious)?\.?|prior|last|yesterday['’]?s?)\s+close\b/i.test(bare) && Math.abs(figure - quote.previousClose) / quote.previousClose > 0.005) return true;
     // A day or 52-week high under the live price, or a low above it, is from before the price got here.
-    const span = /\b(?:day|today['’]?s?|session|intraday|52[- ]?week)\b[^.]{0,12}\b(high|low)\b|^\s*(high|low)\b/i.exec(bare);
+    const span = /\b(?:day|today['’]?s?|session|intraday|52[- ]?(?:week|wk))\b[^.]{0,12}\b(high|low)\b|^\s*(high|low)\b/i.exec(bare);
     const side = (span?.[1] ?? span?.[2])?.toLowerCase();
     if (side === 'high' && figure < quote.price * 0.997) return true;
     if (side === 'low' && figure > quote.price * 1.003) return true;
@@ -146,6 +148,10 @@ function contradictsQuote(text: string, quote: LiveQuoteFacts): boolean {
     if (HISTORY.test(clause)) return false;
     if (moneyFigures(clause).some((m) => m > quote.price * 0.4 && m < quote.price * 2.5 && Math.abs(m - quote.price) / quote.price > 0.01)) return true;
     if (!DAY_MOVE.test(clause)) return false;
+    // A move the clause calls down (−1.43%, "fell", "lower") beside a widget that is up is another session's.
+    const down = /(?:^|\s)[-−]\d|\b(?:down|fell|fall(?:s|ing)?|lower|drop(?:ped|s)?|declin\w*|slid|lost|trending-down)\b/i.test(clause);
+    const up = /(?:^|\s)\+\d|\b(?:up|rose|rise[sn]?|higher|gain(?:ed|s)?|climb\w*|trending-up)\b/i.test(clause);
+    if (Math.abs(quote.pct) > 0.1 && ((quote.pct > 0 && down && !up) || (quote.pct < 0 && up && !down)) && /\d\s?%/.test(clause)) return true;
     const pcts = [...clause.matchAll(/([+-−]?\d{1,2}(?:\.\d+)?)\s?%/g)].map((match) => Math.abs(Number(match[1]!.replace('−', '-'))));
     // The widget counts from midnight; the feed's own 24-hour change is another window of the same live price.
     return pcts.some((pct) => Math.abs(pct - Math.abs(quote.pct)) > 0.15 && !(quote.feedPcts ?? []).some((feed) => Math.abs(feed - pct) < 0.02));
