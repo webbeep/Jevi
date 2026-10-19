@@ -157,6 +157,17 @@ export function sideNamed(lead: string, side: string): boolean {
   });
 }
 
+const QUALIFIER_LEAD = /^(?:for|in|at|near|with|without|on|during|from|by|if|under|over)\b/i;
+const PLACE_STOP = new Set(['the', 'and', 'for', 'of', 'new', 'state', 'city', 'today', 'near']);
+
+/** The search names the subject on screen: in full, or by a distinctive word of it ("Met" of "NY State Met"). */
+function mentionsPlace(written: string, place: string): boolean {
+  const text = written.toLowerCase();
+  if (text.includes(place.toLowerCase())) return true;
+  const words = text.split(/[^a-z0-9]+/);
+  return place.toLowerCase().split(/[^a-z0-9]+/).some((word) => word.length >= 3 && !PLACE_STOP.has(word) && words.includes(word));
+}
+
 const POINTER = /\b(?:it|its|it's|they|them|their|this|that|these|those|he|she|his|her)\b/i;
 const SINGULAR_POINTER = /\b(?:it|its|it's|he|she|his|her)\b/i;
 
@@ -198,9 +209,14 @@ export function followSearchPlan(input: { title?: string; question: string; quer
   }
   const place = placeOnScreen(title) || input.subject;
   const written = withoutLeadVerb(input.queries[0] ?? asked);
-  // "When did it open?" names the place in the pronoun's spot, not glued in front.
-  const query = place && !written.toLowerCase().includes(place.toLowerCase()) ? fallbackQuery(withoutLeadVerb(asked), place) : written;
-  return { query, fanout: input.queries.slice(1).map(withoutLeadVerb) };
+  const fanout = input.queries.slice(1).map(withoutLeadVerb);
+  // "And for a visitor from Ohio?" on "Met Admission" asks the card's whole question again with a new qualifier:
+  // the fact asked ("Admission") stays in the search, not only the place.
+  if (QUALIFIER_LEAD.test(asked) && title && !mentionsPlace(written, place)) return { query: `${title} ${asked.replace(/[?.!]+$/, '')}`, fanout };
+  // "When did it open?" names the place in the pronoun's spot, not glued in front. A judge's search that already
+  // names it in other words ("Met Museum admission" for "NY State Met") stays.
+  const query = place && !mentionsPlace(written, place) ? fallbackQuery(withoutLeadVerb(asked), place) : written;
+  return { query, fanout };
 }
 
 export function parseDecision(raw: unknown): TurnDecision | undefined {

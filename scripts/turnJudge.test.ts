@@ -164,3 +164,10 @@ test('a follow-up that names its own subject is searched as asked, and a title i
 test('a possessive subject is not made possessive twice', () => {
   assert.equal(fallbackQuery("How big is its main mirror compared with Hubble's?", "Webb's"), "How big is Webb's main mirror compared with Hubble's");
 });
+
+test('a follow-up that only changes the qualifier keeps the fact asked', () => {
+  const ohio = followSearchPlan({ title: 'NY State Met Admission', question: 'And for a visitor from Ohio?', queries: [], subject: '' });
+  assert.equal(ohio.query, 'NY State Met Admission for a visitor from Ohio');
+  const judged = followSearchPlan({ title: 'NY State Met Admission', question: 'And for a visitor from Ohio?', queries: ['Met Museum admission price for out-of-state visitors'], subject: 'The Met' });
+  assert.equal(judged.query, 'Met Museum admission price for out-of-state visitors');
+});
