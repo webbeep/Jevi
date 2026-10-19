@@ -123,7 +123,7 @@ export interface DesignRequest {
   /** Which sources answer the goal as of today, judged before designing. */
   brief?: SourceBrief;
   /** A figure the sources already imply (an age, a quotient, the newest score, a year, a century). */
-  facts?: { lead: string; note: string };
+  facts?: { lead: string; note: string; hint?: boolean };
   /** Server-built lead (live price and chart) the card opens with; the model designs what follows. */
   ticker?: CardNode;
   /** Products already compared. A follow-up that adds one keeps their price and picture. */
@@ -330,7 +330,7 @@ function taskBlock(req: DesignRequest): string {
     `- ${DEPTH_HINT[req.depth]}`,
     req.intent ? `- What the person wants: ${req.intent} Answer that; sources that only match their words but not this are background at most.` : '',
     req.simple ? '- Write for a 10-year-old: plain words and a friendly analogy.' : '',
-    req.facts ? `- The sources already imply the answer. Lead with ${req.facts.lead}. ${req.facts.note}` : '',
+    req.facts ? (req.facts.hint ? `- The sources imply part of the answer: ${req.facts.lead}. ${req.facts.note}` : `- The sources already imply the answer. Lead with ${req.facts.lead}. ${req.facts.note}`) : '',
     timeRules(req),
     productPriceRule(asked),
     liveQuoteRule(req),
@@ -359,6 +359,8 @@ export function corpusOf(req: DesignRequest): string {
   const rejected = rejectedSources(req.brief, Math.min(req.search.results.length, BRIEF_ROWS));
   return [
     req.query,
+    // A figure worked out from the sources' own facts (an age, the years since a start date) is grounded by them.
+    req.facts?.lead ?? '',
     req.followup?.question ?? '',
     req.followup?.baseCard ? JSON.stringify(req.followup.baseCard) : '',
     ...req.search.results.filter((_, i) => !rejected.has(i + 1)).map((r) => `${r.title} ${r.snippet} ${r.date ?? ''}`),

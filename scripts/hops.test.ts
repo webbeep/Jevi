@@ -333,3 +333,21 @@ test('a derived age stays on the card when the pages state the two dates', () =>
   const kept = bindClaims(hero, sources, AGE);
   assert.equal(kept.type === 'hero' ? kept.value : '', '52');
 });
+
+test('how long someone has held a role is the years since the current holder started', () => {
+  const now = new Date(Date.UTC(2026, 9, 19));
+  const corpus = [
+    'Rory Read was named CEO in August 2011.',
+    'Su joined AMD in January 2012 and became president and CEO in October 2014, succeeding Rory Read.',
+    'She was elected chair in February 2022 and has been CEO since 2014.',
+  ].join('\n');
+  const answer = factAnswer('Who is the CEO of AMD, and how long has she held the job?', corpus, now);
+  assert.equal(answer?.lead, '12 years');
+  assert.equal(answer?.hint, true);
+  assert.match(answer?.note ?? '', /October 2014/);
+  // Only the year: the month decides between two counts.
+  assert.equal(factAnswer('How long has Jensen Huang been CEO of Nvidia?', 'Huang has been CEO since 1993.', now)?.lead, '32 or 33 years');
+  // A role the sources never start is not computed, and a question without a role is not a tenure.
+  assert.equal(factAnswer('How long has she held the job as CEO?', 'She is a former CEO who left in 2019.', now), undefined);
+  assert.equal(factAnswer('How long has it been raining?', 'Rain began in October 2026.', now), undefined);
+});

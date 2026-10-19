@@ -838,6 +838,8 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     // A computed figure uses the facts the card already shows. A figure from the raw pages,
     // or a hero the model wrote without those facts, changes from draw to draw.
     const grounded = cardFacts(req.query, nodes);
+    // Half of a two-part answer ("who is the CEO, and how long") does not replace the hero that answers the other half.
+    if (grounded?.hint) return;
     if (!grounded) {
       const abstained = abstainComputed(req.query, nodes);
       abstained?.forEach((node, i) => {

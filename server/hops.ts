@@ -19,6 +19,8 @@ export interface FactAnswer {
   keep?: string[];
   /** Other values the sources also support. A card that already states one keeps it. */
   accept?: string[];
+  /** Part of the answer, not all of it ("who is the CEO, and how long"): the designer is told, but no hero is replaced. */
+  hint?: boolean;
 }
 
 const STOP = new Set(['a', 'an', 'the', 'of', 'in', 'on', 'at', 'to', 'for', 'from', 'with', 'and', 'or', 'when', 'that', 'this', 'was', 'were', 'got', 'did', 'does', 'after', 'before', 'exactly', 'originally', 'current', 'name', 'day', 'year', 'years']);
@@ -660,8 +662,69 @@ export function nextHop(query: string, corpus: string, ctx: HopContext = {}): st
   return candidates[0];
 }
 
+const TENURE_ASK = /\bhow long\b[^?]*?\b(?:held|been|served|led|run|lead|lasted|in (?:office|charge|power|the (?:job|role|post|position)))\b/i;
+const ROLE = /\b(?:ceo|chief executive(?: officer)?|president|prime minister|chair(?:man|woman|person)?|head coach|coach|manager|director|governor|mayor|commissioner|chancellor|minister|pope|editor|captain)\b/i;
+const ROLE_START = /\b(?:since|became|become|named|appointed|took over|assumed|elected|promoted|took the helm|took office|sworn in|has led|has been|has served)\b/i;
+const ROLE_ENDED = /\b(?:until|former|formerly|stepped down|resigned|retired|left|succeeded by|will become|predecessor|interim)\b/i;
+const MONTH_YEAR = new RegExp(`\\b(?:(${MONTH})\\.?\\s+(?:\\d{1,2}(?:st|nd|rd|th)?,?\\s+)?)?((?:19|20)\\d{2})\\b`, 'gi');
+
+/** "Chief executive" is the CEO. */
+function roleIn(role: string, text: string): boolean {
+  const ceo = /^(?:ceo|chief executive(?: officer)?)$/i.test(role);
+  return ceo ? /\b(?:ceo|chief executive)\b/i.test(text) : new RegExp(`\\b${escapeReg(role)}\\b`, 'i').test(text);
+}
+
+/**
+ * "How long has she held the job?" with "became CEO in October 2014" in the sources: the years to today. Several
+ * holders can be named ("Rory Read was named CEO in 2011"); the current one started last.
+ */
+function tenureAnswer(query: string, corpus: string, now: Date): FactAnswer | undefined {
+  if (!TENURE_ASK.test(query)) return undefined;
+  const role = query.match(ROLE)?.[0];
+  if (!role) return undefined;
+  let best: { year: number; month?: number; raw: string } | undefined;
+  for (const sentence of corpus.split(/(?<=[.!?])\s+|\n+/)) {
+    for (const clause of sentence.split(/\s*[,;]\s*|\s+and\s+(?=(?:was|has|is|had|became|served|later|then)\b)/i)) {
+      if (!roleIn(role, clause) || ROLE_ENDED.test(clause)) continue;
+      const start = clause.match(ROLE_START);
+      if (!start) continue;
+      const after = clause.slice((start.index ?? 0));
+      for (const match of after.matchAll(MONTH_YEAR)) {
+        const year = Number(match[2]);
+        const month = match[1] ? MONTHS[match[1].toLowerCase()] : undefined;
+        if (year > now.getFullYear() || (year === now.getFullYear() && month !== undefined && month > now.getMonth())) continue;
+        const later = !best || year > best.year || (year === best.year && (month ?? -1) > (best.month ?? -1));
+        if (later) best = { year, month, raw: match[0].trim() };
+        break;
+      }
+    }
+  }
+  if (!best) return undefined;
+  const asOf = `${now.toLocaleString('en-US', { month: 'long', timeZone: 'UTC' })} ${now.getFullYear()}`;
+  const tail = 'Give each role its own start date: a role taken later is never put under the earlier date.';
+  if (best.month !== undefined) {
+    const years = Math.floor(((now.getFullYear() - best.year) * 12 + now.getMonth() - best.month) / 12);
+    if (years < 1) return undefined;
+    const lead = `${years} year${years === 1 ? '' : 's'}`;
+    return { lead, label: 'Time in role', note: `The sources say ${role} since ${best.raw}. As of ${asOf} that is ${lead}. ${tail}`, hint: true, keep: [String(best.year)] };
+  }
+  const most = now.getFullYear() - best.year;
+  if (most < 2) return undefined;
+  return {
+    lead: `${most - 1} or ${most} years`,
+    label: 'Time in role',
+    note: `The sources say ${role} since ${best.raw}, without the month. As of ${asOf} that is ${most - 1} or ${most} years. ${tail}`,
+    hint: true,
+    accept: [`${most - 1} years`, `${most} years`],
+    keep: [String(best.year)],
+  };
+}
+
 /** The answer implied by facts the sources already state. Undefined when a needed fact is absent. */
-export function factAnswer(query: string, corpus: string): FactAnswer | undefined {
+export function factAnswer(query: string, corpus: string, now = new Date()): FactAnswer | undefined {
+  const tenure = tenureAnswer(query, corpus, now);
+  if (tenure) return tenure;
+
   const age = query.match(AGE);
   if (age) {
     const birth = birthOf(corpus, age[1]!);
