@@ -480,20 +480,27 @@ function comparisonTokens(query: string): Set<string> {
   return tokens;
 }
 
-/** The pages write this word as a name: capitalized (or with a digit) more often than not. */
+/**
+ * The pages write this word as a name: capitalized mid-sentence in their text more often than not (or with a digit).
+ * Titles are Title Case and a sentence's first word is capitalized anyway, so neither counts.
+ */
 function writtenAsName(word: string, rows: readonly { title?: string; snippet?: string; url?: string }[]): boolean {
   if (/\d/.test(word)) return true;
   const key = word.toLowerCase();
   let upper = 0;
   let lower = 0;
   for (const row of rows) {
-    for (const token of `${row.title ?? ''} ${row.snippet ?? ''}`.split(/[^A-Za-z0-9]+/)) {
-      if (token.toLowerCase() !== key) continue;
-      if (/^[A-Z]/.test(token)) upper++;
+    for (const match of (row.snippet ?? '').matchAll(/[A-Za-z0-9]+/g)) {
+      if (match[0].toLowerCase() !== key) continue;
+      const before = (row.snippet ?? '').slice(0, match.index).trimEnd();
+      if (!before || /[.!?:…]$/.test(before)) continue;
+      if (/^[A-Z]/.test(match[0])) upper++;
       else lower++;
     }
   }
-  return upper > lower;
+  if (upper || lower) return upper > lower;
+  // Only titles use it: a title is Title Case, so only a name's own casing there counts ("NVIDIA", "iPhone").
+  return rows.some((row) => (row.title ?? '').split(/[^A-Za-z0-9]+/).some((token) => token.toLowerCase() === key && token.length >= 3 && !/^[A-Z]?[a-z]+$/.test(token)));
 }
 
 export function spellingQuery(query: string, rows: readonly { title?: string; snippet?: string; url?: string }[]): string {

@@ -1506,3 +1506,11 @@ test('an everyday word one letter from another is not a misspelling', () => {
   ];
   assert.equal(spellingQuery('How much does a Nintendo Switch 2 cost in the US right now', pages), '');
 });
+
+test('a Title Case page title does not make an everyday word a name', () => {
+  const pages = [
+    { title: 'Smart Ways to Take Aspirin Safely', url: 'https://example.com/a', snippet: 'Aspirin can help some adults. Ask before you begin.' },
+    { title: 'Aspirin Use to Prevent Heart Disease', url: 'https://www.uspreventiveservicestaskforce.org/', snippet: 'The USPSTF recommends against initiating low-dose aspirin.' },
+  ];
+  assert.equal(spellingQuery('Should I start taking a daily low-dose aspirin', pages), '');
+});

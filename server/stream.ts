@@ -941,15 +941,42 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   // them for a note instead; they go under the first component, so what is already on screen above them stays put.
   const settleQuoteRanges = () => {
     if (!live || !feedRow) return;
-    const indexes = [...shown.keys()].sort((a, b) => a - b);
-    if (/day range|52-week/i.test(indexes.map((index) => JSON.stringify(shown.get(index))).join(' '))) return;
     const ticker = shownTicker?.type === 'ticker' ? shownTicker : undefined;
     const grid = quoteRanges(`${feedRow.snippet ?? ''}`, designReq.search.results.indexOf(feedRow) + 1, ticker?.currency);
-    if (!grid) return;
+    if (!grid || grid.type !== 'grid') return;
+    const indexes = [...shown.keys()].sort((a, b) => a - b);
+    // A range tile the model left without a figure ("Day range | USD") takes the feed's.
+    const feedTile = (label: string) => grid.children.find((tile) => tile.type === 'tile' && tile.label.toLowerCase() === label.toLowerCase().replace(/\s+/g, ' ').trim());
+    let filled = false;
+    const fill = (node: CardNode): CardNode => {
+      if (node.type === 'tile' && !node.value?.trim()) {
+        const from = feedTile(node.label);
+        if (from?.type === 'tile') {
+          filled = true;
+          return { ...node, value: from.value, sub: node.sub || from.sub, source: from.source };
+        }
+      }
+      if ('children' in node && Array.isArray(node.children)) {
+        const children = node.children.map(fill);
+        return children.some((child, i) => child !== node.children[i]) ? ({ ...node, children } as CardNode) : node;
+      }
+      return node;
+    };
+    for (const index of indexes) {
+      const node = shown.get(index)!;
+      const next = fill(node);
+      if (next !== node) publish(index, next);
+    }
+    if (filled) return;
+    // Chips and citations can name a range ("Day range" as a search to try); only the answer itself counts as showing one.
+    const answer = indexes.map((index) => shown.get(index)!).filter((node) => !['actions', 'citations', 'choices'].includes(node.type));
+    if (/day range|52-week/i.test(answer.map((node) => JSON.stringify(node)).join(' '))) return;
     const lead = indexes.find((index) => !['citations', 'actions', 'ticker', 'choices'].includes(shown.get(index)!.type));
-    if (lead === undefined) return;
-    const node = shown.get(lead)!;
-    publish(lead, isBlankLayout(node) ? grid : { type: 'stack', direction: 'col', gap: 'md', children: [node, grid] });
+    // A card that is only the widget and chips takes the ranges under the widget, in its own slot.
+    const at = lead ?? indexes.find((index) => shown.get(index)!.type === 'ticker');
+    if (at === undefined) return;
+    const node = shown.get(at)!;
+    publish(at, isBlankLayout(node) ? grid : { type: 'stack', direction: 'col', gap: 'md', children: [node, grid] });
   };
   const republishFees = () => {
     const question = questionOf();
