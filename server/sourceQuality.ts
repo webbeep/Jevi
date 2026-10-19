@@ -191,9 +191,15 @@ function journalHosts(query: string): string[] {
   return hosts;
 }
 
+/** Capitals that name a job, a currency, a format or a gadget, not a body with its own site. */
+const NOT_AGENCY = new Set([
+  'doi', 'pdf', 'url', 'ceo', 'cfo', 'coo', 'cto', 'cmo', 'usd', 'eur', 'gbp', 'jpy', 'cny', 'inr', 'cad', 'aud', 'chf', 'btc', 'eth',
+  'etf', 'ipo', 'faq', 'api', 'usa', 'nyc', 'mba', 'phd', 'diy', 'html', 'json', 'csv', 'suv', 'gpu', 'cpu', 'ram', 'ssd', 'usb', 'hdmi', 'oled', 'led', 'lcd',
+]);
+
 function orgTokens(query: string): string[] {
   // A research code ("GLP-1") is not an agency: the letters sit next to a hyphenated number.
-  return [...query.matchAll(/\b[A-Z]{3,8}\b(?!-\d)/g)].map((match) => match[0].toLowerCase()).filter((word) => !LEAGUE.has(word) && word !== 'doi' && word !== 'pdf' && word !== 'url');
+  return [...query.matchAll(/\b[A-Z]{3,8}\b(?!-\d)/g)].map((match) => match[0].toLowerCase()).filter((word) => !LEAGUE.has(word) && !NOT_AGENCY.has(word));
 }
 
 function placeHosts(query: string): string[] {
@@ -219,6 +225,16 @@ function yearOf(row: RankedHit): number {
   const years = row.title.match(/\b(?:19|20)\d{2}\b/g);
   if (!years?.length) return 0;
   return Math.max(...years.map(Number));
+}
+
+/** A question cut to the words a site search needs: no acronyms, question words or quoting asks. */
+function probeWords(text: string): string {
+  return text
+    .replace(/\b[A-Z]{2,8}\b/g, ' ')
+    .replace(/\b(?:what|does|do|did|the|is|are|say|says|said|about|how|many|much|live|lives|living|in|of|a|an|by|for|to|on|from|likely|according|quote|quotes|quoting|exact|line|lines|page|pages)\b/gi, ' ')
+    .replace(/[^a-z0-9\s-]/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 /**
@@ -266,14 +282,11 @@ export function officialProbe(query: string): string {
     }
   }
   if (!sites.length && count) sites.push('site:.gov');
-  const topic = query
-    .replace(/\b[A-Z]{2,8}\b/g, ' ')
-    .replace(/\b(?:what|does|do|did|the|is|are|say|says|said|about|how|many|much|live|lives|living|in|of|a|an|by|for|to|on|from|likely|according|quote|quotes|quoting|exact|line|lines|page|pages)\b/gi, ' ')
-    .replace(/[^a-z0-9\s-]/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 70);
-  return `${topic} (${sites.slice(0, 4).join(' OR ')})`.trim();
+  const topic = probeWords(query);
+  // The topic word leads when the question puts it late: "I'm 65 … should I start taking aspirin".
+  const word = topics.length ? probeWords(TOPIC_AUTHORITIES.map(([ask]) => query.match(ask)?.[0]).find(Boolean) ?? '') : '';
+  const head = word && !topic.slice(0, 70).includes(word) ? `${word} ${topic}` : topic;
+  return `${head.slice(0, 70).trim()} (${sites.slice(0, 4).join(' OR ')})`.trim();
 }
 
 /** True when a result is the agency or the place named in the question, or the question names neither. A training or course page on that site does not count: the public page is the one still missing. */
