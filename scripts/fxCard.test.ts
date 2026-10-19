@@ -102,3 +102,10 @@ test('a level to watch is not a claim about the price now', async () => {
   const watch: CardNode = { type: 'callout', text: 'Whether BTC holds $81,300–$81,500 on any pullback; a break below would weaken the rebound case [7].' };
   assert.equal(withinQuote(watch, { price: 82505, pct: 0.5 }), watch);
 });
+
+test('a hero restating the widget\'s price is not shown twice', async () => {
+  const { withinQuote } = await import('../shared/fxCard.ts');
+  const card: CardNode = { type: 'stack', children: [{ type: 'hero', value: '$214.13', label: 'NVDA per share', caption: 'Down 1.43% on the day [2]' }, { type: 'text', text: 'Latest close $214.13 on Oct 16 [5].' }] };
+  const kept = withinQuote(card, { price: 214.13, pct: -1.43 });
+  assert.deepEqual(kept?.type === 'stack' ? kept.children.map((child) => child.type) : [], ['text']);
+});

@@ -147,8 +147,12 @@ export function withinQuote(node: CardNode, quote: LiveQuoteFacts): CardNode | u
       return contradictsQuote(`${node.label} ${node.value ?? ''} ${node.sub ?? ''}`, quote) ? undefined : node;
     case 'stat':
       return contradictsQuote(`${node.label} ${node.value} ${node.delta ?? ''}`, quote) ? undefined : node;
-    case 'hero':
+    case 'hero': {
+      // The widget above already shows the price large: a hero restating it is the same number twice.
+      const amount = Number(node.value.replace(/[^\d.]/g, ''));
+      if (/^\s*[$€£¥]?\s?\d[\d,]*(?:\.\d+)?\s*$/.test(node.value) && amount > 0 && Math.abs(amount - quote.price) / quote.price < 0.005) return undefined;
       return contradictsQuote(`${node.label ?? ''} ${node.value} ${node.caption ?? ''}`, quote) ? undefined : node;
+    }
     case 'keyvalue': {
       const items = node.items.filter((item) => !contradictsQuote(`${item.label} ${item.value}`, quote));
       if (items.length === node.items.length) return node;
