@@ -823,6 +823,10 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
         new Promise<{ ready: false; review: undefined }>((resolve) => setTimeout(() => resolve({ ready: false, review: undefined }), 1200)),
       ])
     : { ready: true as const, review: undefined };
+  // A review fix may cite a row a later search added (the fee a gap search found); it is grounded against those too.
+  const withAdded = (): DesignRequest => (addedRows.length
+    ? { ...designReq, search: { ...designReq.search, results: [...designReq.search.results, ...addedRows] } }
+    : designReq);
   const separateObjects = () => {
     publishAll(unblendObjects(shown, designReq.priorBody ?? [], designReq.search.results));
   };
@@ -1030,7 +1034,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     const next = presentNamedCharges(question, oneNamedCharge(question, indexes.map((index) => shown.get(index))), sources);
     indexes.forEach((index, i) => publish(index, next[i] ?? EMPTY_STACK));
   };
-  if (arrived.ready && arrived.review) applyReview(send, publish, designReq, shown, arrived.review, started);
+  if (arrived.ready && arrived.review) applyReview(send, publish, withAdded(), shown, arrived.review, started);
   settleComparison();
   settleFacts();
   settleMembers();
@@ -1053,7 +1057,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   send('done', { ...summary, pagesRead: pages.length, ms: Date.now() - started });
   if (pendingReview && !arrived.ready) {
     const review = await pendingReview;
-    if (review) applyReview(send, publish, designReq, shown, review, started);
+    if (review) applyReview(send, publish, withAdded(), shown, review, started);
     settleComparison();
     settleFacts();
     settleMembers();
