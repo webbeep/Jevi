@@ -12,6 +12,13 @@ export function numberTokens(s: string): string[] {
 /** A DOI or an arXiv paper, the identifiers a card must take from its sources rather than write. */
 const isRecord = (id: string) => /^10\.|doi\.org|arxiv/i.test(id);
 
+const MONEY = /(?:[$€£¥]\s?\d[\d,]*(?:\.\d+)?|\d[\d,]*(?:\.\d+)?\s?(?:USD|EUR|GBP|dollars|euros|pounds)\b)/gi;
+
+/** The amounts of money a line states, as number tokens. */
+function moneyIn(text: string): string[] {
+  return (text.match(MONEY) ?? []).flatMap((amount) => numberTokens(amount));
+}
+
 export class Grounding {
   private readonly known: Set<string>;
 
@@ -20,15 +27,22 @@ export class Grounding {
 
   private readonly lenient: boolean;
 
+  /** Even a lenient check drops a price nobody stated: set for an answer with no sources to take one from. */
+  private readonly prices: boolean;
+
   /** `lenient` turns checks off, for answers that come from reasoning rather than sources. `links` are the source URLs. */
-  constructor(corpus: string, lenient = false, links = '') {
+  constructor(corpus: string, lenient = false, links = '', prices = false) {
+    this.prices = prices;
     this.known = new Set(numberTokens(corpus));
     this.records = new Set(identifiersIn(`${corpus} ${links}`).filter(isRecord).map(recordKey));
     this.lenient = lenient;
   }
 
   ok(s: string | number | undefined): boolean {
-    if (s === undefined || this.lenient) return true;
+    if (s === undefined) return true;
+    // A reasoned answer may work out its own numbers, but a price is a fact about today: it comes from the
+    // sources or the conversation, never from memory ("$299" for a tracker that sells for $179.99).
+    if (this.lenient) return !this.prices || moneyIn(String(s)).every((n) => this.known.has(n));
     const text = String(s);
     // A paper's DOI is checked as a record the sources name. Its digits are not figures.
     if (!identifiersIn(text).filter(isRecord).every((id) => this.records.has(recordKey(id)))) return false;

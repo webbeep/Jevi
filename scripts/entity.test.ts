@@ -5,6 +5,7 @@ import {
   entityContextLine,
   entityHintFor,
   isPersonAsk,
+  nameWithWorkplace,
   matchesEntity,
   pickSeeds,
   priorEntity,
@@ -1488,4 +1489,13 @@ test('a picked person whose page spells the workplace as two words still has tha
   assert.equal(personSourceOk(q, row), true);
   assert.equal(personSourceOk(q, longer), false);
   assert.deepEqual(pickSeeds(q, [row, longer]).seeds, [0]);
+});
+
+test('a scores, standings, ticker or news ask is not a person or a name at a workplace', () => {
+  for (const q of ['NBA scores tonight', 'AI news today', 'AAPL stock', 'TSLA earnings', 'NVDA price', 'NBA standings', 'Premier League table', 'Lakers score']) {
+    assert.equal(isPersonAsk(q), false, q);
+    assert.equal(nameWithWorkplace(q), false, q);
+  }
+  for (const q of ['who is Northwind Tim', 'Northwind AI Sam', 'Tim from Blueflame AI', 'who is Tim from Blueflame']) assert.equal(nameWithWorkplace(q), true, q);
+  assert.equal(isPersonAsk('Taylor Swift'), true);
 });

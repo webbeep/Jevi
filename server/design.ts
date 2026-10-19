@@ -340,7 +340,7 @@ function taskBlock(req: DesignRequest): string {
       : '',
     req.search.results.length ? '' : nameWithWorkplace(asked)
       ? '- No page names a person by that given name at that workplace. Say that no matching person was found. Do not guess a job, a handle, or a public role.'
-      : '- No web sources were found for this; answer from general knowledge, say it may be out of date, and do not cite sources.',
+      : '- No web sources were found for this; answer from general knowledge, say it may be out of date, and do not cite sources. Do not state prices or other figures that change over time, and never say what sources show or agree on.',
     req.context ? `- Conversation so far (use it to resolve references like "it" or "the cheaper one"; don't repeat it):\n${req.context}` : '',
   ]
     .filter((l) => l && l !== '- ')
@@ -437,7 +437,7 @@ function parseLine(line: string, g: Grounding, imageCount: number, query: string
 /** A node written outside the design stream (the answer review) passes the same sanitize and grounding gates. */
 export function gateNode(raw: unknown, req: DesignRequest): CardNode | undefined {
   const chat = req.followup?.mode === 'chat';
-  const g = new Grounding(corpusOf(req), chat, linksOf(req));
+  const g = new Grounding(chat ? `${corpusOf(req)} ${req.context ?? ''}` : corpusOf(req), chat, linksOf(req), !req.search.results.length);
   const claims = chat ? [] : claimSources(req.search.results, req.pages);
   const parsed = parseLine(JSON.stringify(raw), g, Math.min(req.search.images.length, 12), req.query, priceSources(req), req.followup?.question ?? req.query, claims, corpusOf(req));
   const node = parsed?.kind === 'node' ? emitReady(parsed.node, req.search.results.length === 0) : undefined;
@@ -473,7 +473,7 @@ export async function designStream(req: DesignRequest, env: Env, on: DesignEvent
   const chat = req.followup?.mode === 'chat';
   const corpus = corpusOf(req);
   const claims = chat ? [] : claimSources(req.search.results, req.pages);
-  const g = new Grounding(corpus, chat, linksOf(req));
+  const g = new Grounding(chat ? `${corpus} ${req.context ?? ''}` : corpus, chat, linksOf(req), !req.search.results.length);
   const polish = new Polisher(textCap(req));
   const pictures = new PictureResolver(env, req.search.images, on.credit, req.query, undefined, req.rowImages && { ...req.rowImages, results: req.search.results });
   const emitNode = bindVerdict(req, on.node);

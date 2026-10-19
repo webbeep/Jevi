@@ -74,6 +74,7 @@ import { anchoredFollowup, asksToCompare, comparisonFollow, cryptographyHint, fa
 import { calculationAnswer, isCalculationAsk, leadTaxedTotal, rateOnAmount, splitShare } from './calculate';
 import { acceptProductPhoto, appendAskedFact, comparisonRepair, comparisonTitle, dropShownDenials, keepComparedProducts, mentionsSide, missingSideNode, nameForms, placeSidePhotos, restoreSideTiles, stickerPrice } from './compareAnswer';
 import { cardGaps, citeForGap, gapSearchQuery, settleGap, type PieceGap } from './gapFill';
+import { withoutShells } from '../shared/shells';
 import { unblendObjects } from './objectFacts';
 import { withFinishedSentences } from './polish';
 import { queryWithPlace, readerPlace, settleReadings } from './readings';
@@ -584,7 +585,9 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
    * Every component reaches the client through here. A fix replaces only its own slot;
    * a repeat of what is already on screen is not sent again.
    */
-  const publish: Publish = (index, node) => {
+  const publish: Publish = (index, raw) => {
+    // A component whose figures were all removed is collapsed, not shown as an empty shell.
+    const node = withoutShells(raw) ?? { type: 'stack', children: [] };
     shown.set(index, node);
     if (!arrival.includes(index)) arrival.push(index);
     const key = JSON.stringify(node);

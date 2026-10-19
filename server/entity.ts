@@ -699,8 +699,12 @@ function namesPlace(row: EntityRow, place: string[]): boolean {
 const GIVEN_NAME = (word: string) => NICK_OF.has(word.toLowerCase());
 
 /** A capitalised word that can be a person's given name, not a role or a company token. */
+/** When an ask is about, not who: "NBA scores tonight" names no one called Tonight. */
+const TIME_WORD = /^(?:today|tonight|tomorrow|yesterday|now|live|latest|weekend|week|month|year|morning|evening|night)$/i;
+
 function likelyGivenName(word: string): boolean {
   const key = word.toLowerCase();
+  if (TIME_WORD.test(key)) return false;
   if (ROLE1.has(key) || ROLE_TAIL.has(key) || DESCRIPTOR_WORDS.has(key) || looksLikeOrgToken(word) || ORG_TAIL.test(word) || COMMON.has(key)) return false;
   if (GIVEN_NAME(word)) return true;
   return /^[A-Za-z][a-z'’-]{1,}$/.test(word) && word.length >= 3;
@@ -729,6 +733,8 @@ function readWorkplaceFirst(query: string): { given: string; place: string[]; pl
   const givenWord = words[words.length - 1]!;
   const placeRaw = words.slice(0, -1);
   if (!placeRaw.length || !likelyGivenName(givenWord) || !earlierIsWorkplace(placeRaw, givenWord)) return undefined;
+  // Without "who is", a lowercase last word is a topic ("NBA standings", "Premier League table"), unless it is a known first name.
+  if (!WHO_IS.test(query.trim()) && !ABOUT.test(query.trim()) && !GIVEN_NAME(givenWord) && !/^[A-Z]/.test(givenWord)) return undefined;
   const place = [...new Set(placeRaw.flatMap((w) => tokens(w)).filter((t) => t.length >= 3 && !COMMON.has(t) && !GENERIC_PLACE_WORD.has(t)))];
   if (!place.length) return undefined;
   const given = givenWord[0]!.toUpperCase() + givenWord.slice(1);
@@ -867,8 +873,12 @@ export function isPersonAsk(query: string, pattern?: string): boolean {
   // product far more often than a person; and money or launch words make it a business topic, so the
   // person gate would drop every news page about it (live tapped ask-about chip → "couldn't find more").
   if (wordCount(subject) < 2 || BUSINESS_TOPIC.test(query)) return false;
+  // "Lakers score" and "Premier League table" ask for a thing about a team or league, not a person.
+  if (TOPIC_TAIL.test(query.trim())) return false;
   return subject !== '' && nameLike(subject);
 }
+
+const TOPIC_TAIL = /\b(?:scores?|table|standings|schedule|fixtures|results|roster|lineups?|odds|rankings?|weather|forecast|price|prices|tickets|score today|score tonight)\s*\??$/i;
 
 const BUSINESS_TOPIC = /[$€£]\s?\d|\b\d+(?:\.\d+)?\s?(?:[mbk]|million|billion)\b|\b(funding|raises?|raised|series [a-f]|seed round|valuation|ipo|acquisition|acquires?|acquired|merger|earnings|revenue|stock|shares|launch(?:es|ed)?|release[sd]?|model|startup|company|layoffs?)\b/i;
 

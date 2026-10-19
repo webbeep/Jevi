@@ -180,7 +180,16 @@ function unmaskQuotes(text: string, quotes: readonly string[]): string {
   return text.replace(/\uE000(\d+)\uE001/g, (_, index) => quotes[Number(index)] ?? '');
 }
 
-function stripNums(text: string, nums: readonly string[]): string {
+/** A unit written on a number ("6.3″", "256 GB", "120-nit", "48 MP"). It means nothing once the number goes. */
+const UNIT_AFTER = String.raw`(?:\s?-?(?:inch(?:es)?|mm|cm|km|kg|lbs?|oz|g|GB|TB|MB|mAh|Wh|W|Hz|kHz|MHz|GHz|nits?|MP|fps|ms|hours?|hrs?|days?|mins?|minutes?|mph|°[CF]?|x)\b|\s?[″"°])?`;
+
+export function stripNums(text: string, nums: readonly string[]): string {
+  // "6.3″ · 256 GB · 8 GB RAM": a spec line loses the whole item whose number went, not just the digits.
+  const items = text.split(/\s+[·•|]\s+/);
+  if (items.length >= 2) {
+    const kept = items.filter((item) => !nums.some((num) => shownNumber(num).test(maskQuotes(item).text)));
+    if (kept.length < items.length) return kept.length ? stripNums(kept.join(' · '), nums) : '';
+  }
   const masked = maskQuotes(text);
   let out = masked.text;
   for (const num of nums) {
@@ -188,7 +197,8 @@ function stripNums(text: string, nums: readonly string[]): string {
     // "A 2024 imaging" loses the year and must not stay "A imaging". Only the article that sat on that number goes.
     out = out.replace(new RegExp(`\\bA\\s+${bare}\\s+(?=[aeiou])`, 'gi'), '');
     out = out.replace(new RegExp(`\\bAn\\s+${bare}\\s+(?=[bcdfghjklmnpqrstvwxyz])`, 'gi'), '');
-    out = out.replace(shownNumber(num), ' ');
+    // The currency sign before it and the unit after it go with the number ("the £ Amazon price", "-nit display").
+    out = out.replace(new RegExp(`(?:[€£¥]\\s?)?${shownNumber(num).source}${UNIT_AFTER}`, 'g'), ' ');
   }
   out = unmaskQuotes(out, masked.quotes);
   out = out.replace(/\s{2,}/g, ' ').replace(/\s+([,.;:)])/g, '$1').replace(/\(\s*\)/g, '').trim();
