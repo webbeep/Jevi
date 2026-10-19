@@ -919,11 +919,16 @@ export function splitCount(question: string): number | undefined {
 }
 
 /** "If my brother and I split it, how much does each of us pay?" — the card's total, divided. Undefined when the card has no amount. */
-export function splitShare(input: { question: string; card?: AnswerCard }): CalculationCard | undefined {
+export function splitShare(input: { question: string; card?: AnswerCard; earlier?: readonly AnswerCard[] }): CalculationCard | undefined {
   if (!SPLIT_ASK.test(input.question) || !input.card) return undefined;
   const people = splitCount(input.question);
   if (!people || people < 2) return undefined;
-  const { price, rate, total } = cardPriceAndTax(input.card.body);
+  const own = cardPriceAndTax(input.card.body);
+  // A card that shows only the tax rate splits the price the card before it stated, taxed at that rate.
+  const price = own.price ?? (own.total === undefined
+    ? (input.earlier ?? []).map((card) => cardPriceAndTax(card.body).price).find((value) => value !== undefined)
+    : undefined);
+  const { rate, total } = own;
   const taxed = total ?? (price !== undefined && rate !== undefined ? Math.round(price * (1 + rate / 100) * 100) / 100 : undefined);
   const amount = taxed ?? price;
   if (amount === undefined) return undefined;
@@ -956,9 +961,18 @@ const TAX_TOTAL_ASK = /\b(?:with|after|including|plus|incl\.?)\b[^?]{0,30}\btax(
  * and the tax rate but no total, the lead becomes that total, worked from the most precise rate on the card.
  * Undefined when the question is not that ask, a figure is missing, or the card already shows the total.
  */
-export function leadTaxedTotal(question: string, nodes: readonly CardNode[]): CardNode[] | undefined {
+export function leadTaxedTotal(
+  question: string,
+  nodes: readonly CardNode[],
+  fallback: { priorNodes?: readonly CardNode[]; officialRate?: number } = {},
+): CardNode[] | undefined {
   if (!TAX_TOTAL_ASK.test(question)) return undefined;
-  const { price, rate, total } = cardPriceAndTax(nodes);
+  const own = cardPriceAndTax(nodes);
+  // "What would I pay with sales tax in NYC?" under the $499.99 card: a new card that states only the rate still
+  // prices the thing on the card before it, and a card that states only the price takes the official page's rate.
+  const price = own.price ?? (fallback.priorNodes ? cardPriceAndTax(fallback.priorNodes).price : undefined);
+  const rate = own.rate ?? fallback.officialRate;
+  const { total } = own;
   if (price === undefined || rate === undefined) return undefined;
   const taxed = Math.round(price * (1 + rate / 100) * 100) / 100;
   if (total !== undefined && Math.abs(total - taxed) <= 0.02) return undefined;
@@ -976,7 +990,21 @@ export function leadTaxedTotal(question: string, nodes: readonly CardNode[]): Ca
     }
     return node;
   };
-  const next = nodes.map(swap);
+  // A line saying the rate or the total can't be found is wrong once the card works the total out.
+  const kept = nodes.map((node) => withoutTotalDenial(node) ?? { type: 'stack', children: [] } as CardNode);
+  const next = kept.map(swap);
   if (placed) return next;
-  return nodes.length ? [{ type: 'stack', direction: 'col', gap: 'md', children: [hero, nodes[0]!] }, ...nodes.slice(1)] : [hero];
+  return kept.length ? [{ type: 'stack', direction: 'col', gap: 'md', children: [hero, kept[0]!] }, ...kept.slice(1)] : [hero];
+}
+
+const TOTAL_DENIAL = /\b(?:don['’]t|do not|doesn['’]t|does not|can['’]t|cannot|no)\b[^.]{0,80}\b(?:tax(?:-inclusive)?|rate|total)\b|\b(?:tax|rate|total)\b[^.]{0,60}\b(?:not (?:stated|given|listed|found|in (?:the |these )?sources)|can['’]t be (?:confirmed|calculated))/i;
+
+function withoutTotalDenial(node: CardNode): CardNode | undefined {
+  if (node.type === 'callout' || node.type === 'text') return TOTAL_DENIAL.test(node.text) ? undefined : node;
+  if (node.type === 'stack' || node.type === 'grid' || node.type === 'section') {
+    const children = node.children.map(withoutTotalDenial).filter((child): child is CardNode => !!child);
+    if (children.length === node.children.length) return node;
+    return children.length ? { ...node, children } : undefined;
+  }
+  return node;
 }

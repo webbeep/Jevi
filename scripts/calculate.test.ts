@@ -332,3 +332,30 @@ test('a lone state rate is the rate', async () => {
   const { cardPriceAndTax } = await import('../server/calculate.ts');
   assert.equal(cardPriceAndTax([{ type: 'hero', value: '$100', label: 'Price' }, { type: 'stat', label: 'Texas state sales tax', value: '6.25%' }]).rate, 6.25);
 });
+
+test('a tax card that states only the rate prices the previous card, and a price-only card takes the official rate', () => {
+  const ask = 'What would I pay with sales tax in New York City?';
+  const priceCard: CardNode[] = [{ type: 'hero', value: '$499.99', label: 'Switch 2 US MSRP' }];
+  const rateOnly: CardNode[] = [
+    { type: 'hero', value: '8.875%', label: 'NYC combined sales tax' },
+    { type: 'keyvalue', items: [{ label: 'State rate', value: '4%' }, { label: 'NYC local rate', value: '4.5%' }] },
+  ];
+  const fromPrior = leadTaxedTotal(ask, rateOnly, { priorNodes: priceCard });
+  assert.match(JSON.stringify(fromPrior), /\$544\.36/);
+  const priceOnly: CardNode[] = [
+    { type: 'callout', text: "The results don't give a NYC sales-tax rate or a tax-inclusive total, so the exact amount can't be confirmed." },
+    { type: 'tile', label: 'Console MSRP', value: '$499.99' },
+  ];
+  const fromOfficial = leadTaxedTotal(ask, priceOnly, { officialRate: 8.875 });
+  const blob = JSON.stringify(fromOfficial);
+  assert.match(blob, /\$544\.36/);
+  assert.doesNotMatch(blob, /don't give/);
+  assert.equal(leadTaxedTotal(ask, rateOnly), undefined);
+});
+
+test('a split under a rate-only card takes the price from the card before it', () => {
+  const rateCard = { title: 'NYC Sales Tax', body: [{ type: 'hero', value: '8.875%', label: 'NYC combined sales tax' }] } as AnswerCard;
+  const priceCard = { title: 'Switch 2 Price', body: [{ type: 'hero', value: '$499.99', label: 'Switch 2 US MSRP' }] } as AnswerCard;
+  const split = splitShare({ question: 'If my brother and I split it, how much does each of us pay?', card: rateCard, earlier: [priceCard] });
+  assert.match(JSON.stringify(split), /\$272\.18 each/);
+});

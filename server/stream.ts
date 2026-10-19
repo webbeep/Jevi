@@ -48,7 +48,7 @@ import type { EngineStatus, Freshness, ImageResult, SearchResponse, SearchResult
 import { rewriteQuery } from './ai';
 import { type DesignRequest, designParallel, designStream, gateNode } from './design';
 import { BRIEF_ROWS, briefSources, remapBrief, type SourceBrief } from './brief';
-import { agreeOfficialRate, claimSources, groundMembers, oneNamedCharge, presentNamedCharges } from './claims';
+import { agreeOfficialRate, claimSources, groundMembers, oneNamedCharge, presentNamedCharges, salesTax } from './claims';
 import { answerTitle, fillPaperCard, keepAnswerBody, restoreKeptPapers, wantsNamedQuote } from './cardAgree';
 import { dropDisputedBio, type BioSource } from './bioFacts';
 import { withoutGluedPerson } from './peopleSplit';
@@ -931,7 +931,9 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   const leadTotal = () => {
     const indexes = [...shown.keys()].sort((a, b) => a - b);
     const nodes = indexes.map((index) => shown.get(index)!);
-    const next = leadTaxedTotal(questionOf(), nodes);
+    const asked = designReq.followup?.question ?? designReq.query;
+    const official = salesTax(asked, claimSources(designReq.search.results, pages));
+    const next = leadTaxedTotal(questionOf(), nodes, { priorNodes: designReq.priorBody, officialRate: official?.rate });
     next?.forEach((node, i) => {
       if (node !== nodes[i]) publish(indexes[i]!, node);
     });
@@ -1996,7 +1998,8 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
   // "If my brother and I split it" divides the total already on the card, worked from its most precise tax rate.
   if (req.intent !== 'search' && req.intent !== 'adjust') {
     const priorCard = from?.card ?? [...req.cards].reverse().find((c) => c.card)?.card;
-    const split = splitShare({ question: req.question, card: priorCard });
+    const earlier = [...req.cards].reverse().map((c) => c.card).filter((card): card is AnswerCard => !!card && card !== priorCard);
+    const split = splitShare({ question: req.question, card: priorCard, earlier });
     if (split) {
       const plan = quickPlan(req.original, 'chat');
       send('plan', { ...plan, mode: 'chat' });
