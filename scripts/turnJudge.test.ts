@@ -221,3 +221,15 @@ test('"it" on a two-building comparison follows the judge\'s one subject even wh
   });
   assert.equal(plan.query, 'One World Trade Center opening date');
 });
+
+test('"it" after a rejected guess is the building the card affirmed, even when the title pairs the guess with a place', () => {
+  const plan = followSearchPlan({
+    title: 'Empire State Building vs NYC',
+    question: 'When did it open?',
+    queries: ['Empire State Building vs NYC opening date'],
+    subject: 'Empire State Building vs NYC',
+    lead: 'No One World Trade Center is still No. 1 Height ranking check, October 2026',
+  });
+  assert.match(plan.query, /One World Trade Center/);
+  assert.doesNotMatch(plan.query, /Empire State|NYC/);
+});

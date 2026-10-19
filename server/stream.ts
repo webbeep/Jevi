@@ -1906,7 +1906,8 @@ export function sameThread(query: string, title: string): boolean {
 function cardLead(card: AnswerCard): string {
   const first = (nodes: readonly CardNode[]): string => {
     for (const node of nodes) {
-      if (node.type === 'hero') return `${node.label ?? ''} ${node.value} ${node.caption ?? ''}`;
+      // The verdict leads ("No One World Trade Center is still No. 1"), as the card reads it, so a rejection is seen.
+      if (node.type === 'hero') return `${node.value} ${node.label ?? ''} ${node.caption ?? ''}`;
       if (node.type === 'text') return node.text;
       if ('children' in node && Array.isArray(node.children)) {
         const inner = first(node.children);
@@ -1915,7 +1916,7 @@ function cardLead(card: AnswerCard): string {
     }
     return '';
   };
-  return [card.subtitle ?? '', first(card.body)].join(' ').trim();
+  return [first(card.body), card.subtitle ?? ''].join(' ').replace(/\s+/g, ' ').trim();
 }
 
 /** A follow-up that only reshapes what the card says: fresh sources would not change it. */
