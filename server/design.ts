@@ -95,6 +95,7 @@ function videoLead(req: DesignRequest): CardNode | undefined {
 /** The sentences a complete answer most likely needs, listed so the writer does not skip them. */
 function keyLinesBlock(req: DesignRequest): string {
   const lines = keyLines(req.followup?.question ?? req.query, req.pages);
+  console.log(JSON.stringify({ zo: 'key-lines', pages: req.pages.map((p) => [p.n, p.text.length]), lines: lines.map((l) => `[${l.n}] ${l.line.slice(0, 90)}`) }));
   if (!lines.length) return '';
   return `\n\nKEY LINES (sentences from the page text that state a figure or a rule this question turns on; include each one the answer needs, with its citation)\n${lines.map(({ n, line }) => `[${n}] ${clip(line, 240)}`).join('\n')}`;
 }

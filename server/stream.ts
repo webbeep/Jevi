@@ -226,7 +226,7 @@ function imageBoost(pattern: string, search: SearchResponse, env: Env, scope: As
 }
 
 /** How many pages to read and how long to wait for them before designing. At most five pages per ask. */
-const pageBudget = (readPages: boolean) => (readPages ? { count: 5, need: 3, budgetMs: 1600 } : { count: 3, need: 2, budgetMs: 800 });
+const pageBudget = (readPages: boolean) => (readPages ? { count: 5, need: 3, budgetMs: 2200 } : { count: 3, need: 2, budgetMs: 1500 });
 
 /**
  * How long to keep waiting for the picture search after pages are in. That search started when the
