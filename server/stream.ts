@@ -913,6 +913,8 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     settleMembers();
     publishReadings();
     alignRates();
+    // A late review republishes the model's own lead; the taxed total goes back on top of it.
+    leadTotal();
     restoreKeptProducts();
     separateObjects();
     const question = compareSides(designReq.query).length >= 2 ? designReq.query : (designReq.followup?.question ?? designReq.query);
