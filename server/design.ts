@@ -11,7 +11,7 @@ import { Grounding, groundNodes } from './ground';
 import { constrainNode } from './refine';
 import { PictureResolver, type RowImagePlan } from './pictures';
 import { Polisher } from './polish';
-import type { PageText } from './pages';
+import { keyLines, type PageText } from './pages';
 import { comparisonNodes, comparisonTitle } from './compareAnswer';
 import { compareSides, patternById, patternSkeleton } from './patterns';
 import { asksLocalConditions } from './readings';
@@ -90,6 +90,13 @@ function videoLead(req: DesignRequest): CardNode | undefined {
   if (!wantsVideo(req.followup?.question ?? req.query)) return undefined;
   const at = req.search.results.slice(0, 12).findIndex((r) => isVideo(r.url));
   return at >= 0 ? { type: 'video', source: at + 1 } : undefined;
+}
+
+/** The sentences a complete answer most likely needs, listed so the writer does not skip them. */
+function keyLinesBlock(req: DesignRequest): string {
+  const lines = keyLines(req.followup?.question ?? req.query, req.pages);
+  if (!lines.length) return '';
+  return `\n\nKEY LINES (sentences from the page text that state a figure or a rule this question turns on; include each one the answer needs, with its citation)\n${lines.map(({ n, line }) => `[${n}] ${clip(line, 240)}`).join('\n')}`;
 }
 
 function sourcesBlock(search: SearchResponse, pages: PageText[], pageChars = 2800): string {
@@ -489,7 +496,7 @@ export async function designStream(req: DesignRequest, env: Env, on: DesignEvent
   const base = req.followup?.mode === 'refine' && req.followup.baseCard ? `CURRENT CARD\n${JSON.stringify(req.followup.baseCard).slice(0, 12000)}\n\n` : '';
   const asked = req.followup?.question ?? req.query;
   const diagramTask = diagramsEnabled(env.ZO_DIAGRAMS) && diagramIntent(asked) ? requestDiagram(env, asked, corpusOf(req)) : Promise.resolve(undefined);
-  const user = `${sourcesBlock(req.search, req.pages)}\n\n${base}SKELETON\n${JSON.stringify(patternSkeleton(req.pattern, asked))}\n\nTASK\n${taskBlock(req)}\n\nQUERY: ${asked}`;
+  const user = `${sourcesBlock(req.search, req.pages)}${keyLinesBlock(req)}\n\n${base}SKELETON\n${JSON.stringify(patternSkeleton(req.pattern, asked))}\n\nTASK\n${taskBlock(req)}\n\nQUERY: ${asked}`;
 
   let headSent = false;
   let index = 0;
@@ -610,7 +617,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
   const pictures = new PictureResolver(env, req.search.images, on.credit, req.query, undefined, req.rowImages && { ...req.rowImages, results: req.search.results });
   const emitNode = bindVerdict(req, on.node);
   const polish = new Polisher(textCap(req));
-  const shared = `${sourcesBlock(req.search, req.pages, 2800)}\n\nTASK\n${taskBlock(req)}\n- Card regions, top to bottom:\n${skeleton.map((r, i) => `  R${i + 1}: ${regionPurpose(r)}`).join('\n')}${lead?.type === 'video' ? `\n  (Above R1 the card already plays VIDEO source [${lead.source}]; don't add another video node for it.)` : ''}\n  FINISH: header, interactive control, actions, citations, follow-ups`;
+  const shared = `${sourcesBlock(req.search, req.pages, 2800)}${keyLinesBlock(req)}\n\nTASK\n${taskBlock(req)}\n- Card regions, top to bottom:\n${skeleton.map((r, i) => `  R${i + 1}: ${regionPurpose(r)}`).join('\n')}${lead?.type === 'video' ? `\n  (Above R1 the card already plays VIDEO source [${lead.source}]; don't add another video node for it.)` : ''}\n  FINISH: header, interactive control, actions, citations, follow-ups`;
   let contentNodes = 0;
   let removed = 0;
 

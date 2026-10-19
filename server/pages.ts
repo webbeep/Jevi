@@ -23,7 +23,8 @@ const SEASON_FOCUS = /\b(pre-?season|post-?season|playoffs?)\b/i;
 export function focusPage(text: string, query: string | undefined, maxChars: number): string {
   const cut = (s: string) => (s.length > maxChars ? `${s.slice(0, maxChars)}…` : s);
   const asked = query && SEASON_FOCUS.exec(query)?.[1]?.toLowerCase().replace('-', '');
-  if (!asked || text.length <= maxChars) return cut(text);
+  if (!asked) return query && text.length > maxChars ? relevantPassages(text, query, maxChars) : cut(text);
+  if (text.length <= maxChars) return cut(text);
   const needle = asked.startsWith('playoff') ? 'playoff' : asked;
   const lower = text.toLowerCase();
   // Stop before the season-average table that usually follows the bio, so that table
@@ -34,6 +35,85 @@ export function focusPage(text: string, query: string | undefined, maxChars: num
   const start = Math.max(headLen, at - 160);
   const merged = `${text.slice(0, headLen)}\n…\n${text.slice(start, at + 700)}`;
   return cut(merged);
+}
+const PASSAGE_STOP = new Set('what when where which who whom whose why how does do did is are was were the and for with from that this these those into about your you should could would will can much many more most than then them they their there here have has had been being some any each also just only over under after before between its'.split(' '));
+/** A figure with its unit or sign: "165°F", "$35", "2/3", "8.875%", "150 minutes". */
+const FIGURE = /(?:[$€£¥]\s?\d|\d\s?(?:%|°|percent\b|degrees?\b|minutes?\b|hours?\b|days?\b|years?\b|mg\b|g\b|kg\b|lbs?\b|miles?\b|km\b|feet\b|ft\b)|\btwo-thirds\b|\b\d+\/\d+\b)/i;
+/** Words that mark a rule's edge: the exception, the limit, the cost, who it applies to. */
+const RULE_EDGE = /\b(?:except|exception|unless|however|only if|cap(?:ped|s)?|limit(?:s|ed)?|maximum|minimum|at least|no more than|fee|fees|cost|costs|eligib\w*|requir\w*|must|veto|override|safe|internal temperature|deadline)\b/i;
+
+/**
+ * A long page cut to what the question needs: its opening, then the passages that share the most words with the
+ * question, best first, each a sentence with its neighbours. A sentence stating a figure or a rule's edge (a fee, a
+ * cap, a safe temperature, an exception) ranks higher. The first part of a page is often navigation and an intro;
+ * the fact asked for ("cook it to 165°F", "a pocket veto cannot be overridden") is usually further down.
+ */
+/** How well one sentence answers the question: shared words, then a figure, then a rule's edge. */
+export function lineScore(sentence: string, stems: readonly string[]): number {
+  const low = sentence.toLowerCase();
+  const hits = stems.filter((stem) => low.includes(stem)).length;
+  return hits === 0 ? 0 : hits + (FIGURE.test(sentence) ? 1.5 : 0) + (RULE_EDGE.test(sentence) ? 1 : 0);
+}
+
+export function questionStems(query: string): string[] {
+  const words = [...new Set(query.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 3 && !PASSAGE_STOP.has(w)))];
+  return words.map((w) => w.replace(/(?:ing|ed|es|s)$/, '').slice(0, 6)).filter((w) => w.length >= 3);
+}
+
+/**
+ * The sources' sentences that state a figure or a rule the question turns on ("cook it to an internal temperature
+ * of 165°F", "a pocket veto cannot be overridden"), best first, at most two per source.
+ */
+export function keyLines(query: string, pages: readonly { n: number; text: string }[], max = 5): { n: number; line: string }[] {
+  const stems = questionStems(query);
+  if (!stems.length) return [];
+  const found: { n: number; line: string; score: number }[] = [];
+  for (const page of pages) {
+    const lines = page.text.split(/(?<=[.!?])\s+(?=[A-Z0-9"“(])|\n+/).map((x) => x.trim()).filter((x) => x.length >= 30 && x.length <= 320);
+    const best = lines
+      .map((line) => ({ line, score: lineScore(line, stems) }))
+      .filter((item) => item.score >= 3 && FIGURE.test(item.line) || item.score >= 3.5)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 2);
+    for (const item of best) found.push({ n: page.n, ...item });
+  }
+  const seen = new Set<string>();
+  return found
+    .sort((a, b) => b.score - a.score)
+    .filter((item) => {
+      const key = item.line.toLowerCase().replace(/[^a-z0-9]+/g, ' ').slice(0, 80);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, max)
+    .map(({ n, line }) => ({ n, line }));
+}
+
+export function relevantPassages(text: string, query: string, maxChars: number): string {
+  const stems = questionStems(query);
+  if (!stems.length) return `${text.slice(0, maxChars)}…`;
+  const headLen = Math.min(900, Math.floor(maxChars / 4));
+  const head = text.slice(0, headLen);
+  const sentences = text.slice(headLen).split(/(?<=[.!?])\s+(?=[A-Z0-9"“(])|\n+/).map((x) => x.trim()).filter((x) => x.length >= 25 && x.length <= 600);
+  const scored = sentences.map((sentence, i) => ({ i, score: lineScore(sentence, stems) })).filter((item) => item.score >= 2).sort((a, b) => b.score - a.score || a.i - b.i);
+  const used = new Set<number>();
+  const parts: string[] = [];
+  let size = head.length;
+  for (const { i } of scored) {
+    if (used.has(i)) continue;
+    const window = [i - 1, i, i + 1].filter((j) => j >= 0 && j < sentences.length && !used.has(j));
+    const passage = window.map((j) => sentences[j]).join(' ');
+    if (size + passage.length + 3 > maxChars) {
+      if (size > maxChars * 0.8) break;
+      continue;
+    }
+    window.forEach((j) => used.add(j));
+    parts.push(passage);
+    size += passage.length + 3;
+  }
+  if (!parts.length) return `${text.slice(0, maxChars)}…`;
+  return `${head}…\n${parts.join('\n…\n')}`;
 }
 const MIN_TEXT = 300;
 /** Jina payment/quota failures skip that reader for ~6h (shared KV ENGINE_SKIP), so asks go straight to direct fetch. */
