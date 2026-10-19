@@ -96,3 +96,11 @@ test('a row with a hole goes when two whole rows remain', () => {
   const table = withoutShells({ type: 'table', columns: ['', 'Roth IRA', 'Traditional IRA'], rows: [['2026 limit', '$7,500', ''], ['Taxed', 'No', 'Yes'], ['Deduction', 'No', 'Maybe']] });
   assert.deepEqual(table?.type === 'table' ? table.rows : [], [['Taxed', 'No', 'Yes'], ['Deduction', 'No', 'Maybe']]);
 });
+
+test('a row the question asks about keeps its hole, and one long value is not repeated across tiles', () => {
+  const table = withoutShells({ type: 'table', columns: ['', 'iPhone 17', 'Pixel 10'], rows: [['Battery', '3692 mAh', ''], ['Price', '$799', '$799'], ['Chip', 'A19', 'Tensor G5']] }, 'which one has better battery life?');
+  assert.deepEqual(table?.type === 'table' ? table.rows : [], [['Battery', '3692 mAh', '—'], ['Price', '$799', '$799'], ['Chip', 'A19', 'Tensor G5']]);
+  const quote = '"Free sugars include monosaccharides and disaccharides added to foods" [1]';
+  const grid = withoutShells({ type: 'grid', cols: 2, children: [{ type: 'tile', label: 'Free sugars', value: quote }, { type: 'tile', label: 'Not counted', value: quote }, { type: 'tile', label: 'Limit', value: '<10% of energy' }] });
+  assert.deepEqual(grid?.type === 'grid' ? grid.children.map((tile) => (tile.type === 'tile' ? tile.label : '')) : [], ['Free sugars', 'Limit']);
+});

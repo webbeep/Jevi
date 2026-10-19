@@ -1977,8 +1977,12 @@ let breakdown = new WeakSet<object>();
  * or tiles whose labels name a part. A lone "Harbor State sales tax" hero is the rate asked, not a part.
  */
 function componentRate(row: object): boolean {
-  return breakdown.has(row);
+  if (breakdown.has(row)) return true;
+  // "Purchase, NY · Outside NYC, lower rate": a rate the row itself places somewhere else is that place's, not the lead.
+  const own = row as { label?: string; sub?: string; caption?: string };
+  return OTHER_PLACE.test(`${own.label ?? ''} ${own.sub ?? ''} ${own.caption ?? ''}`);
 }
+const OTHER_PLACE = /\b(?:outside|elsewhere|other (?:counties|cities|areas|states)|lower rate|higher rate|instead of|compared with|compared to)\b/i;
 
 function markBreakdown(node: CardNode): void {
   const mark = (rows: { label?: string; value?: string }[]) => {

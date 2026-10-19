@@ -666,6 +666,8 @@ const TENURE_ASK = /\bhow long\b[^?]*?\b(?:held|been|served|led|run|lead|lasted|
 const ROLE = /\b(?:ceo|chief executive(?: officer)?|president|prime minister|chair(?:man|woman|person)?|head coach|coach|manager|director|governor|mayor|commissioner|chancellor|minister|pope|editor|captain)\b/i;
 const ROLE_START = /\b(?:since|became|become|named|appointed|took over|assumed|elected|promoted|took the helm|took office|sworn in|has led|has been|has served)\b/i;
 const ROLE_ENDED = /\b(?:until|former|formerly|stepped down|resigned|retired|left|succeeded by|will become|predecessor|interim)\b/i;
+/** "Named Time's CEO of the Year 2024", "top CEO award": an honour for the role, not taking it. */
+const ROLE_HONOUR = /\bof the year\b|\baward|\bhonou?r|\branked\b|\blist\b|\bmost powerful\b|\bbest\b/i;
 const MONTH_YEAR = new RegExp(`\\b(?:(${MONTH})\\.?\\s+(?:\\d{1,2}(?:st|nd|rd|th)?,?\\s+)?)?((?:19|20)\\d{2})\\b`, 'gi');
 
 /** "Chief executive" is the CEO. */
@@ -685,7 +687,7 @@ function roleStart(role: string, corpus: string, now: Date): RoleStart | undefin
   let best: RoleStart | undefined;
   for (const sentence of corpus.split(/(?<=[.!?])\s+|\n+/)) {
     for (const clause of sentence.split(/\s*[,;]\s*|\s+and\s+(?=(?:was|has|is|had|became|served|later|then)\b)/i)) {
-      if (!roleIn(role, clause) || ROLE_ENDED.test(clause)) continue;
+      if (!roleIn(role, clause) || ROLE_ENDED.test(clause) || ROLE_HONOUR.test(clause)) continue;
       const start = clause.match(ROLE_START);
       if (!start) continue;
       const after = clause.slice((start.index ?? 0));

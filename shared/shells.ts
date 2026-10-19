@@ -21,7 +21,7 @@ const saysNothing = (value: string | undefined) => hollow(value) || cutMoney(val
  * a key with no value, a sentence that is only "[8]" and a subtitle that is only " · " are dropped, and a
  * single missing table cell reads "—". Undefined when nothing is left to show.
  */
-export function withoutShells(node: CardNode): CardNode | undefined {
+export function withoutShells(node: CardNode, asked = ''): CardNode | undefined {
   switch (node.type) {
     case 'stack':
     case 'grid':
@@ -29,9 +29,19 @@ export function withoutShells(node: CardNode): CardNode | undefined {
     case 'scroller': {
       // Beside tiles that carry a figure, a tile with no figure and no picture is a hole ("Pro · per user/mo" with no price).
       const valued = node.children.some((child) => child.type === 'tile' && !!child.value?.trim());
+      // The same long value on several tiles ("Free sugars", "Not counted", "Hidden sugars" each holding one WHO
+      // quote) is one fact shown as several: the first keeps it.
+      const seenValue = new Set<string>();
       const children = node.children
-        .map(withoutShells)
+        .map((child) => withoutShells(child, asked))
         .filter((child): child is CardNode => !!child)
+        .filter((child) => {
+          if (child.type !== 'tile' || !child.value || child.value.replace(/\[\d+\]/g, '').trim().length < 30) return true;
+          const key = child.value.replace(/\[\d+\]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+          if (seenValue.has(key)) return false;
+          seenValue.add(key);
+          return true;
+        })
         // A numbered pick ("3. Sony WH-CH720N") is a name in a ranking; dropping it would leave "1, 2, 4, 5".
         .filter((child) => !(valued && child.type === 'tile' && !child.value?.trim() && !child.imageSrc && child.imageRef === undefined && !/^\s*#?\d+[.)]/.test(child.label)));
       if (children.length === node.children.length && children.every((child, i) => child === node.children[i])) return node;
@@ -53,9 +63,12 @@ export function withoutShells(node: CardNode): CardNode | undefined {
       const valued = node.rows.filter((row) => row.length < 2 || row.slice(1).some((cell) => !blankCell(cell)));
       // A row with a hole goes when at least two whole rows remain: a "—" beside a figure the card states elsewhere
       // reads as missing data. A table that would be gutted keeps its rows and shows the hole as "—".
-      const whole = valued.filter((row) => !row.slice(1).some(blankCell));
+      // A row the question asks about ("battery" on "which has better battery life?") stays with its hole.
+      const askedWords = new Set(asked.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 4).map((word) => word.slice(0, 5)));
+      const askedRow = (row: readonly string[]) => (row[0] ?? '').toLowerCase().split(/[^a-z0-9]+/).some((word) => word.length >= 4 && askedWords.has(word.slice(0, 5)));
+      const whole = valued.filter((row) => !row.slice(1).some(blankCell) || askedRow(row));
       const rows = whole.length >= 2
-        ? whole
+        ? whole.map((row) => (row.slice(1).some(blankCell) ? [row[0]!, ...row.slice(1).map((cell) => (blankCell(cell) ? '—' : cell))] : row))
         : valued.map((row) => (row.slice(1).some(blankCell) ? [row[0]!, ...row.slice(1).map((cell) => (blankCell(cell) ? '—' : cell))] : row));
       if (rows.length === node.rows.length && rows.every((row, i) => row === node.rows[i])) return node;
       return rows.length ? { ...node, rows } : undefined;

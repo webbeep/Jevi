@@ -360,3 +360,9 @@ test('each role in a joined "since" claim keeps the start date its sources give'
   assert.equal(withRoleDates('President and CEO since October 2014', corpus, now), 'President and CEO since October 2014');
   assert.equal(withRoleDates('CEO since October 2014 · chair since February 2022', corpus, now), 'CEO since October 2014 · chair since February 2022');
 });
+
+test('an honour for the role is not when the role began', () => {
+  const now = new Date(Date.UTC(2026, 9, 19));
+  const corpus = 'Su became CEO in October 2014. She was named Time CEO of the Year in 2024. She was elected chair in February 2022.';
+  assert.equal(factAnswer('Who is the CEO of AMD, and how long has she held the job?', corpus, now)?.lead, '12 years');
+});

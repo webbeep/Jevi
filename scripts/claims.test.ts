@@ -937,3 +937,14 @@ test('a tax card keeps each component rate and aligns only the combined one', as
   const bound = bindClaims(grid, sources as never, 'What would I pay with sales tax in New York City?');
   assert.deepEqual(bound.type === 'grid' ? bound.children.map((tile) => (tile.type === 'tile' ? tile.value : '')) : [], ['8.875% [1]', '4.5% [1]', '4% [1]', '0.375% [1]']);
 });
+
+test('a rate the row places somewhere else keeps its figure', async () => {
+  const { bindClaims } = await import('../server/claims.ts');
+  const sources = [{ n: 1, text: 'NYC sales tax. The combined sales tax rate in New York City is 8.875%. Purchase, NY: 8.375%.' }];
+  const grid: CardNode = { type: 'grid', cols: 2, children: [
+    { type: 'tile', label: 'NYC rate', value: '8.875% [1]' },
+    { type: 'tile', label: 'Purchase, NY rate', value: '8.375% [1]', sub: 'Outside NYC, lower rate' },
+  ] };
+  const bound = bindClaims(grid, sources as never, 'What would I pay with sales tax in New York City?');
+  assert.deepEqual(bound.type === 'grid' ? bound.children.map((tile) => (tile.type === 'tile' ? tile.value : '')) : [], ['8.875% [1]', '8.375% [1]']);
+});

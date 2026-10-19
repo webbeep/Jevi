@@ -630,7 +630,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     const roleFixed = roleJson ? withRoleDates(roleJson, factCorpus) : '';
     const dated = monthsChecked && roleFixed !== roleJson ? (JSON.parse(roleFixed) as CardNode) : monthsChecked;
     const quoted = dated ? withVerbatimQuotes(dated, quotes()) : undefined;
-    const tidy = withoutShells(quoted ?? { type: 'stack', children: [] });
+    const tidy = withoutShells(quoted ?? { type: 'stack', children: [] }, `${designReq.query} ${designReq.followup?.question ?? ''}`);
     const node = (tidy && withoutRepeatedFacts(tidy, factsElsewhere(shown, index))) ?? { type: 'stack', children: [] };
     // Which check emptied a component that arrived with content: the one place to look when a region goes blank.
     if (isBlankLayout(node) && !isBlankLayout(raw)) {
