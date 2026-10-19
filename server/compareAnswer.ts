@@ -200,6 +200,15 @@ function joinSides(sides: string[]): string {
  * A side with nothing gets a plain note instead of another subject's biography.
  */
 const STICKER = /(?:\$|€|£|¥)\s?\d{1,4}(?:,\d{3})*(?:\.\d{2})?/g;
+// "$19.42/mo." and "$5 a week" are instalments, not what the product costs.
+const PER_PERIOD = /^\s*(?:\/\s*|per\s+|a\s+|each\s+)(?:mo|mos|mth|month|wk|week|yr|year|day)\b|^\s*monthly\b/i;
+
+/** The one-off amounts in a text, without instalments. */
+function stickerAmounts(text: string): string[] {
+  return [...text.matchAll(new RegExp(STICKER.source, 'g'))]
+    .filter((match) => !PER_PERIOD.test(text.slice((match.index ?? 0) + match[0].length, (match.index ?? 0) + match[0].length + 16)))
+    .map((match) => match[0].replace(/\s/g, ''));
+}
 const BLANK_CELL = /^[\s—–\-−~]*$/;
 
 function labelKeys(label: string): string[] {
@@ -213,7 +222,21 @@ function mentionsLabel(label: string, sentence: string): boolean {
   return keys.some((key) => words.some((word) => word.startsWith(key)));
 }
 
-const MEASURE = /\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*[x×]\s*\d{1,3}(?:,\d{3})*(?:\.\d+)?)*(?:\s*[-–]?\s*(?:inch(?:es)?|["″]|mm|cm|kg|oz|mah|nits?|atm|px|hours?|days?|shots?|frames?|grams?|g\b))/i;
+// The number starts at a digit run's start, so "4970 mAh" is never read as "970 mAh".
+const MEASURE = /(?<![\d.,])\d+(?:,\d{3})*(?:\.\d+)?(?:\s*[x×]\s*\d+(?:,\d{3})*(?:\.\d+)?)*(?:\s*[-–]?\s*(?:inch(?:es)?|["″]|mm|cm|kg|oz|lbs?|mah|wh|nits?|ppi|hz|atm|px|hours?|hrs?|days?|shots?|frames?|grams?|g\b))/i;
+
+/** The units a row can be measured in: a display is not "7.2 oz", and battery life is hours or days, not mAh. */
+const ROW_UNITS: [RegExp, RegExp][] = [
+  [/\bbattery\s+life\b|\bendurance\b|\bruntime\b/i, /\b(?:hours?|hrs?|days?|shots?|frames?)\b/i],
+  [/\bbattery\b|\bcapacity\b/i, /\b(?:mah|wh|hours?|hrs?|days?|shots?|frames?)\b/i],
+  [/\bdisplay\b|\bscreen\b/i, /(?:inch|["″]|\bppi\b|\bnits?\b|\bhz\b|\bpx\b|\d\s*[x×]\s*\d)/i],
+  [/\bweight\b|\bweighs\b/i, /\b(?:g|grams?|kg|oz|lbs?)\b/i],
+];
+
+function fitsRow(label: string, phrase: string): boolean {
+  const units = ROW_UNITS.find(([row]) => row.test(label))?.[1];
+  return !units || units.test(phrase);
+}
 
 /** The number and unit in a sentence ("1.34-inch", "17.7 g", "16 days"). A bare year is not a spec. */
 function measuredPhrase(sentence: string): string | undefined {
@@ -240,7 +263,7 @@ function specFromSources(label: string, side: string, search: SearchResponse, ot
       for (const clause of clean.split(/\s*(?:,|;|\band\b|\bwith\b)\s*/i)) {
         if (!mentionsLabel(label, clause)) continue;
         const phrase = measuredPhrase(clause);
-        if (phrase) return phrase;
+        if (phrase && fitsRow(label, phrase)) return phrase;
       }
     }
   }
@@ -269,7 +292,8 @@ function statedPrice(side: string, search: SearchResponse, blocked: readonly str
     for (const sentence of blob.split(/(?<=[.!?])\s+/)) {
       for (const clause of sentence.split(/\s*(?:;|\band\b|\bwith\b|,(?!\d))\s*/i)) {
         if (!marks.some((mark) => clause.toLowerCase().includes(mark)) || RELATIVE_PRICE.test(clause)) continue;
-        const amounts = [...clause.matchAll(new RegExp(STICKER.source, 'g'))].map((match) => match[0]);
+        if (OFFER_WORD.test(clause)) continue;
+        const amounts = stickerAmounts(clause);
         if (amounts.length !== 1) continue;
         const price = accept(amounts[0]);
         if (price) return price;
@@ -286,7 +310,7 @@ export function stickerPrice(side: string, search: SearchResponse): string | und
     if (!mentionsSide(side, blob)) continue;
     for (const sentence of blob.split(/(?<=[.!?])\s+/)) {
       if (!mentionsSide(side, sentence) || RELATIVE_PRICE.test(sentence)) continue;
-      const amounts = [...sentence.matchAll(STICKER)].map((match) => match[0].replace(/\s/g, ''));
+      const amounts = stickerAmounts(sentence);
       if (amounts.length === 1) return amounts[0];
     }
   }
@@ -295,7 +319,7 @@ export function stickerPrice(side: string, search: SearchResponse): string | und
 
 function moneyIn(text: string): string | undefined {
   if (RELATIVE_PRICE.test(text)) return undefined;
-  const amounts = [...text.matchAll(STICKER)].map((match) => match[0].replace(/\s/g, ''));
+  const amounts = stickerAmounts(text);
   return amounts.length === 1 ? amounts[0] : undefined;
 }
 
@@ -516,7 +540,7 @@ function groundCompareNode(node: CardNode, sides: string[], search: SearchRespon
         return BLANK_CELL.test(cell) || NOT_STATED.test(cell) ? cell : '';
       }
       if (hasMeasure(cell)) return cell;
-      return specFromSources(row[0] ?? '', side, search) ?? cell;
+      return specFromSources(row[0] ?? '', side, search, sides.filter((other) => other !== side)) ?? cell;
     }));
     const confirmed = rows.map((row, rowIndex) => row.map((cell, index) => {
       if (index === 0 || !hasMeasure(cell)) return cell;
@@ -1048,7 +1072,7 @@ export function appendAskedFact(question: string, sidesQuery: string, nodes: Map
     const cells = columns.map((name, column) => {
       if (column === 0) return label;
       const side = sides.find((item) => mentionsSide(item, name));
-      return side ? specFromSources(label, side, search) ?? '' : '';
+      return side ? specFromSources(label, side, search, sides.filter((other) => other !== side)) ?? '' : '';
     });
     if (!cells.slice(1).some((cell) => cell.trim())) continue;
     const rows = [

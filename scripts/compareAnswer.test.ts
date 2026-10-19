@@ -688,3 +688,25 @@ test('rent or buy is not a list of plans', async () => {
   const { skeletonCard } = await import('../server/patterns.ts');
   assert.notEqual(skeletonCard('is renting or buying a home cheaper in 2026', 'compare').body[0]?.type === 'slot' ? 'table' : 'grid', 'table');
 });
+
+test('a spec row takes a whole number in a unit that fits it, and an instalment is not a price', () => {
+  const row = (title: string, snippet: string) => ({ title, url: `https://example.com/${encodeURIComponent(title)}`, snippet, domain: 'example.com', engines: ['web'] });
+  const search = {
+    query: 'iphone 17 vs pixel 10', freshness: 'any', images: [], discussions: [], engines: [],
+    results: [
+      row('Google Pixel 10 review', 'The Pixel 10 packs a 4970 mAh battery. The Pixel 10 display is bright and weighs 7.2 oz.'),
+      row('Buy iPhone 17', 'iPhone 17 from $19.42/mo. for 36 mo. or $799.'),
+    ],
+  } as unknown as SearchResponse;
+  const nodes = comparisonNodes('iphone 17 vs pixel 10', search);
+  const grid = nodes.find((node) => node.type === 'grid');
+  assert.ok(grid && grid.type === 'grid');
+  const iphone = grid.children.find((tile) => tile.type === 'tile' && /iphone/i.test(tile.label));
+  assert.equal(iphone && iphone.type === 'tile' ? iphone.value : '', '$799');
+  const table = nodes.find((node) => node.type === 'table');
+  const text = JSON.stringify(table ?? {});
+  assert.ok(!/"970 mAh"/.test(text), 'a clipped number is not a spec');
+  assert.ok(!/\["Display"[^\]]*oz/.test(text), 'a weight is not a display spec');
+  assert.ok(!/\["Battery life"[^\]]*mAh/.test(text), 'a capacity is not battery life');
+  assert.ok(/\["Weight"[^\]]*7\.2 oz/.test(text), JSON.stringify(table));
+});
