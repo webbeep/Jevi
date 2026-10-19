@@ -1857,7 +1857,8 @@ export function rulesCompare(query: string): boolean {
 
 const TOPIC_STOP = new Set(['what', 'which', 'where', 'when', 'about', 'does', 'have', 'with', 'that', 'this', 'there', 'their', 'would', 'could', 'should', 'explain', 'tell', 'more', 'like', 'much', 'many', 'instead', 'other', 'than', 'they', 'them', 'make', 'shorter', 'longer', 'simpler', 'again']);
 /** "And for a visitor from Ohio?", "What about Google?", "In Boston?": a follow-up that leans on the card by its form. */
-const ELLIPTICAL = /^(?:and|but|also|so|plus|or|what about|how about|same|for|in|at|from|with|without|on|during|if|by|near|under|over)\b/i;
+// "Which is lightest for travel?" picks from what the card lists, as surely as "which one" does.
+const ELLIPTICAL = /^(?:and|but|also|so|plus|or|what about|how about|same|for|in|at|from|with|without|on|during|if|by|near|under|over|which|whichever)\b/i;
 const POINTS_BACK = /\b(?:it|its|it's|they|them|their|this|that|these|those|he|she|his|her|one|ones)\b/i;
 
 /** A follow-up about something the card and its sources never mention, with nothing pointing back at them. */
@@ -2133,7 +2134,9 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
       // A new topic ("What is photosynthesis?" under an mRNA card) starts clean: the earlier cards' facts, body and
       // pictures stay out, so nothing from the old subject is mixed into the new answer. Only the topic line remains,
       // marked as earlier, for a question that leans on it.
-      const related = !onScreen || sameThread(planned.query, onScreen.title);
+      // Only a question that shares nothing with the card starts clean; a judge's search worded apart from the title
+      // ("Soundcore Space Q45 weight" under "Best Budget ANC Headphones") is still the same thread.
+      const related = !onScreen || !unrelated || sameThread(planned.query, onScreen.title);
       const carried = onScreen && related ? citedRows(onScreen, req.search?.results ?? []) : [];
       const earlierTopic = topicOnly(context);
       const turnContext = related

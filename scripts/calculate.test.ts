@@ -314,3 +314,21 @@ test('a combined rate kept as a stat with its unit apart is the rate, not a surc
   ];
   assert.deepEqual(cardPriceAndTax(nodes), { price: 499.99, rate: 8.875, total: undefined });
 });
+
+test('without a combined rate the card\'s rate parts add up, and one part is never the rate', async () => {
+  const { cardPriceAndTax } = await import('../server/calculate.ts');
+  const parts: CardNode[] = [
+    { type: 'hero', value: '$499.99', label: 'List price' },
+    { type: 'keyvalue', items: [{ label: 'NY State sales tax', value: '4%' }, { label: 'NYC local sales tax', value: '4.5%' }, { label: 'MCTD surcharge', value: '0.375%' }, { label: 'Nintendo recycling fee', value: '1.5%' }] },
+  ];
+  assert.equal(cardPriceAndTax(parts).rate, 8.875);
+  const single: CardNode[] = [{ type: 'hero', value: '$100', label: 'Price' }, { type: 'stat', label: 'Sales tax rate', value: '6.25%' }];
+  assert.equal(cardPriceAndTax(single).rate, 6.25);
+  const onePart: CardNode[] = [{ type: 'hero', value: '$100', label: 'Price' }, { type: 'stat', label: 'MCTD surcharge', value: '0.375%' }];
+  assert.equal(cardPriceAndTax(onePart).rate, undefined);
+});
+
+test('a lone state rate is the rate', async () => {
+  const { cardPriceAndTax } = await import('../server/calculate.ts');
+  assert.equal(cardPriceAndTax([{ type: 'hero', value: '$100', label: 'Price' }, { type: 'stat', label: 'Texas state sales tax', value: '6.25%' }]).rate, 6.25);
+});

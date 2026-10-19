@@ -51,3 +51,8 @@ test('an elliptical follow-up leans on the card and is never a new topic', async
   assert.equal(newTopic('In Boston?', 'Weather in Seattle · 65°F'), false);
   assert.equal(newTopic('What is photosynthesis?', 'How mRNA vaccines work · Spike protein'), true);
 });
+
+test('a "which" question picks from the card and is never a new topic', async () => {
+  const { newTopic } = await import('../server/stream.ts');
+  assert.equal(newTopic('Which is lightest for travel?', 'Best Budget ANC Headphones · Soundcore Space Q45 · JBL Tune 770NC'), false);
+});

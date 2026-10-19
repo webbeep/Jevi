@@ -219,9 +219,9 @@ export function followSearchPlan(input: { title?: string; question: string; quer
   const judged = input.queries[0]?.trim();
   const aboutBoth = /\b(?:each|both|all|either|they|them|their|these|those|compare|vs\.?|versus)\b/i.test(asked);
   if (sides.length >= 2 && pointed.length !== 1 && SINGULAR_POINTER.test(asked) && !aboutBoth && judged) {
+    // The judge names one subject, a listed side or not: "it" is that one thing, searched alone.
     const subject = input.subject.trim();
-    const isSide = (name: string) => sides.some((side) => sameObject(side, name) || sideNamed(name, side));
-    if (subject && !isSide(subject) && !compareSides(subject).length) {
+    if (subject && !compareSides(subject).length) {
       return { query: withoutLeadVerb(judged), fanout: input.queries.slice(1).map(withoutLeadVerb), subject };
     }
   }

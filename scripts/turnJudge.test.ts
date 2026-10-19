@@ -210,3 +210,14 @@ test('"it" under a comparison title follows the judge when it names something ot
   const both = followSearchPlan({ title: 'Harbor Slate vs Northwatch 2', question: 'When did they launch?', queries: ['Harbor Slate launch date'], subject: 'Harbor Slate', lead: '' });
   assert.equal(both.query, 'Harbor Slate vs Northwatch 2');
 });
+
+test('"it" on a two-building comparison follows the judge\'s one subject even when it is a listed side', () => {
+  const plan = followSearchPlan({
+    title: 'Empire State Building vs One WTC',
+    question: 'When did it open?',
+    queries: ['One World Trade Center opening date'],
+    subject: 'One World Trade Center',
+    lead: 'One WTC rises 1,776 ft vs the Empire State Building at 1,454 ft',
+  });
+  assert.equal(plan.query, 'One World Trade Center opening date');
+});

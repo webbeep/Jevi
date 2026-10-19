@@ -882,14 +882,25 @@ export function cardPriceAndTax(nodes: readonly CardNode[]): { price?: number; r
     ?? figures.find((f) => !/\btax|total|fee|split|each|%/i.test(`${f.label} ${f.value}`) && dollarsIn(f.value) !== undefined);
   // "NYC combined sales tax 8.875%" and "Combined NYC rate 8.875%" are both the rate. Of several, the most precise
   // wins ("8.875%" over "almost 9%"), then the largest: the combined rate, not its 0.375% surcharge.
-  const rateRows = figures.filter((f) => /\b(?:tax|rate)\b/i.test(f.label) || /\btax\b/i.test(f.value));
+  // A fee, interest or discount percentage is not the sales tax.
+  const PART = /\b(?:city|state|county|local|mctd|mta|metropolitan|surcharge|district|special|transit|municipal)\b/i;
+  const rateRows = figures.filter((f) => (/\b(?:tax|rate)\b/i.test(f.label) || /\btax\b/i.test(f.value) || (PART.test(f.label) && /%/.test(f.value)))
+    && !/\b(?:fee|fees|interest|apr|discount|tip|commission)\b/i.test(f.label));
   const ratesOf = (rows: typeof figures) => rows
     .flatMap((f) => [...`${f.value} ${f.label}`.matchAll(/(\d{1,2}(?:\.\d+)?)\s*%/g)].map((m) => m[1]!))
     .filter((raw) => Number(raw) > 0 && Number(raw) < 15)
     .sort((a, b) => (b.split('.')[1]?.length ?? 0) - (a.split('.')[1]?.length ?? 0) || Number(b) - Number(a));
   // A rate the card labels combined or total is the rate; a part ("MCTD surcharge 0.375%") never stands in for it.
   const combined = ratesOf(rateRows.filter((f) => /\b(?:combined|total|overall)\b/i.test(f.label)));
-  const rates = combined.length ? combined : ratesOf(rateRows);
+  // Without a combined rate, the parts of one ("City 4.5% · State 4% · MCTD 0.375%") add up to it; one part alone is
+  // never the rate. A rate row that names no part (a single "Sales tax 6.25%") is used as is.
+  const parts = rateRows.filter((f) => PART.test(f.label));
+  const whole = ratesOf(rateRows.filter((f) => !PART.test(f.label)));
+  const partRates = [...new Set(parts.map((f) => ratesOf([f])[0]).filter((rate): rate is string => !!rate))];
+  const summed = partRates.length >= 2 ? [String(Math.round(partRates.reduce((sum, rate) => sum + Number(rate), 0) * 1000) / 1000)] : [];
+  // A lone state, city or county rate is the rate asked; a lone surcharge (MCTD, MTA, district) is only an add-on.
+  const lone = partRates.length === 1 && !parts.some((f) => /\b(?:surcharge|mctd|mta|metropolitan|district|special|transit)\b/i.test(f.label)) ? partRates : [];
+  const rates = combined.length ? combined : whole.length ? whole : summed.length ? summed : lone;
   return { price: price && dollarsIn(price.value), rate: rates[0] ? Number(rates[0]) : undefined, total: total && dollarsIn(total.value) };
 }
 
