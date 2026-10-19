@@ -179,11 +179,12 @@ const SINGULAR_POINTER = /\b(?:it|its|it's|he|she|his|her)\b/i;
  */
 export function rejectionAffirms(lead: string): string | undefined {
   const names = [...lead.matchAll(/\b[A-Z0-9][\w.'’&-]*(?:\s+(?:of\s+|the\s+|de\s+)?[A-Z0-9][\w.'’&-]*)*/g)]
-    .map((match) => ({ name: match[0].replace(/^(?:No|Yes|The)\s+/, '').trim(), after: lead.slice((match.index ?? 0) + match[0].length, (match.index ?? 0) + match[0].length + 24) }))
+    .map((match) => ({ name: match[0].replace(/^(?:No|Yes|The)\s+/, '').trim(), after: lead.slice((match.index ?? 0) + match[0].length, (match.index ?? 0) + match[0].length + 36) }))
     .filter(({ name }) => name && !/^(?:No|Yes|It|That|This|They|He|She|The|You|We|I|A|An)$/.test(name));
-  const rejected = names.filter(({ after }) => /^\s+(?:(?:is|was|are|were)\s+not|isn['’]t|wasn['’]t|aren['’]t)\b/i.test(after));
+  // "The Empire State Building is tall, but not the tallest" rejects it as surely as "is not".
+  const rejected = names.filter(({ after }) => /^\s+(?:(?:is|was|are|were)\s+not|isn['’]t|wasn['’]t|aren['’]t|(?:is|was)\s+[a-z]+,?\s+but\s+not|(?:is|was)\s+no\s+longer)\b/i.test(after));
   if (!rejected.length && !/^\s*No\b/.test(lead)) return undefined;
-  const affirmed = names.find(({ name, after }) => !rejected.some((item) => item.name === name) && /^\s+(?:is|was|still|remains|holds|stands|tops|has|ranks)\b/i.test(after));
+  const affirmed = names.find(({ name, after }) => !rejected.some((item) => item.name === name) && /^\s+(?:is|was|still|remains|holds|stands|tops|has|ranks|reaches|rises|soars|measures)\b/i.test(after));
   return affirmed?.name;
 }
 

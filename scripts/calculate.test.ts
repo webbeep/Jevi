@@ -368,9 +368,10 @@ test('a price the card before called the old one is not the price a tax follow-u
     { type: 'tile', label: 'Tax rate', value: '8.875%', sub: 'Combined City and State' },
   ];
   assert.match(JSON.stringify(leadTaxedTotal(ask, now, { priorNodes: prior })), /\$544\.36/);
-  // A different price the card before never mentioned stays.
+  // A question that names another version keeps that version's price; one that does not prices the card before.
   const other: CardNode[] = [{ type: 'hero', value: '$549.99', label: 'Bundle price' }, { type: 'tile', label: 'Tax rate', value: '8.875% combined' }];
-  assert.match(JSON.stringify(leadTaxedTotal(ask, other, { priorNodes: prior })), /\$598\.80/);
+  assert.match(JSON.stringify(leadTaxedTotal('What would I pay for the bundle with sales tax in New York City?', other, { priorNodes: prior })), /\$598\.80/);
+  assert.match(JSON.stringify(leadTaxedTotal(ask, other, { priorNodes: prior })), /\$544\.36/);
 });
 
 test('a price change tile is not the price a tax follow-up uses', () => {

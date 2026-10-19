@@ -1957,6 +1957,18 @@ export function sameThread(query: string, title: string): boolean {
 }
 
 function cardLead(card: AnswerCard): string {
+  // The hero and the first sentence of text both carry the verdict ("1,454 ft" over "The Empire State Building is
+  // tall, but not the tallest").
+  const firstText = (nodes: readonly CardNode[]): string => {
+    for (const node of nodes) {
+      if (node.type === 'text') return node.text;
+      if ('children' in node && Array.isArray(node.children)) {
+        const inner = firstText(node.children);
+        if (inner) return inner;
+      }
+    }
+    return '';
+  };
   const first = (nodes: readonly CardNode[]): string => {
     for (const node of nodes) {
       // The verdict leads ("No One World Trade Center is still No. 1"), as the card reads it, so a rejection is seen.
@@ -1969,7 +1981,9 @@ function cardLead(card: AnswerCard): string {
     }
     return '';
   };
-  return [first(card.body), card.subtitle ?? ''].join(' ').replace(/\s+/g, ' ').trim();
+  const lead = first(card.body);
+  const text = firstText(card.body);
+  return [lead, text && !lead.includes(text) ? text.slice(0, 300) : '', card.subtitle ?? ''].join(' ').replace(/\s+/g, ' ').trim();
 }
 
 /** A follow-up that only reshapes what the card says: fresh sources would not change it. */

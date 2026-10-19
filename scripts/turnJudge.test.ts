@@ -244,3 +244,14 @@ test('"it" searches the full name the verdict spells out, not the title\'s short
   });
   assert.equal(plan.query, 'When did One World Trade Center open');
 });
+
+test('"it" after a card that says the guess is "tall, but not the tallest" is the building it names instead', () => {
+  const plan = followSearchPlan({
+    title: 'Empire State Building Height',
+    question: 'When did it open?',
+    queries: ['Empire State Building opening date'],
+    subject: 'Empire State Building',
+    lead: '1,454 ft Total height with antenna The Empire State Building is tall, but not the tallest in New York City. One World Trade Center reaches 1,776 ft.',
+  });
+  assert.match(plan.query, /One World Trade Center/);
+});

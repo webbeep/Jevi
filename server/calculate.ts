@@ -974,7 +974,10 @@ export function leadTaxedTotal(
   // prices the thing on the card before it, and a card that states only the price takes the official page's rate.
   // A price the card before called the old one ("up from $449.99") is not the price now.
   const prior = fallback.priorNodes ? cardPriceAndTax(fallback.priorNodes).price : undefined;
-  const price = own.price !== undefined && prior !== undefined && own.price !== prior && calledOld(own.price, fallback.priorNodes ?? [])
+  // "What would I pay with tax?" asks about the thing the card before priced. Only a question that names a new amount
+  // or a different version ("the bundle", "the Pro") is about another price.
+  const newThing = /\$\s?\d|\b(?:bundle|pro|plus|max|mini|ultra|edition|lite|oled|model|version)\b/i.test(question);
+  const price = own.price !== undefined && prior !== undefined && own.price !== prior && (!newThing || calledOld(own.price, fallback.priorNodes ?? []))
     ? prior
     : own.price ?? prior;
   const rate = own.rate ?? fallback.officialRate;

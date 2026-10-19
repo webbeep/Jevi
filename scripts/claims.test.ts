@@ -1000,3 +1000,12 @@ test('a surcharge under one percent is never the sales tax a purchase pays', asy
   assert.equal(salesTax('What would I pay with sales tax in New York City?', sources as never)?.rate, 8.875);
   assert.equal(salesTax('What is the MCTD surcharge in New York City sales tax?', sources as never)?.rate, 0.375);
 });
+
+test('what a purchase pays is the combined rate, not an official page\'s city piece', async () => {
+  const { salesTax } = await import('../server/claims.ts');
+  const sources = [
+    { n: 3, domain: 'www.nyc.gov', text: 'NYC sales tax. Every taxable item in New York City is charged the full 4.5% city rate.' },
+    { n: 5, domain: 'www.avalara.com', text: 'The combined sales tax rate in New York City is 8.875%.' },
+  ];
+  assert.equal(salesTax('What would I pay with sales tax in New York City?', sources as never)?.rate, 8.875);
+});
