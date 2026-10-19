@@ -327,16 +327,20 @@ export function fillPaperCard(query: string, nodes: readonly (CardNode | undefin
     seen.add(key);
     return [{ text }];
   });
-  const stripped = nodes.flatMap((node) => {
-    if (!node) return [node];
-    if (node.type === 'stack' && !node.children.length) return [];
-    if (node.type === 'list' && !node.items.length) return [];
-    return [node];
-  });
-  if (backed.length) return stripped.length ? stripped : [...nodes];
-  if (!fromSources.length) return stripped.length ? stripped : [...nodes];
+  if (backed.length || !fromSources.length) return [...nodes];
+  // Each position is a slot on screen, so the list fills an empty slot or joins the lead component; a node added past
+  // the last slot, or a removed one, would never be shown or would shift every later component into the wrong slot.
   const list: CardNode = { type: 'list', style: 'number', items: fromSources.slice(0, 5) };
-  return [...stripped, list];
+  const out = [...nodes];
+  const empty = out.findIndex((node) => !node || (node.type === 'stack' && !node.children.length) || (node.type === 'list' && !node.items.length));
+  if (empty >= 0) {
+    out[empty] = list;
+    return out;
+  }
+  const lead = out.findIndex((node) => !!node);
+  if (lead < 0) return [list];
+  out[lead] = { type: 'stack', direction: 'col', gap: 'md', children: [out[lead]!, list] };
+  return out;
 }
 
 export function peerPaperSource(query: string, source: { text: string; domain?: string } | undefined): boolean {

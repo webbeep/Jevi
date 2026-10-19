@@ -224,3 +224,21 @@ test('a quote of a named guideline is its own line, not another page reporting i
   assert.match(fixed, /Adults should do at least 150 minutes to 300 minutes/);
   assert.doesNotMatch(fixed, /According to/);
 });
+
+test('the paper list a peer-reviewed card was missing lands in a slot that is shown', async () => {
+  const { fillPaperCard } = await import('../server/cardAgree.ts');
+  const ask = 'List three peer-reviewed randomized trials of semaglutide for weight loss, with DOIs.';
+  const nodes: CardNode[] = [
+    { type: 'hero', value: '3', label: 'Peer-reviewed semaglutide weight-loss trials' },
+    { type: 'actions', items: [{ label: 'More trials', query: 'more semaglutide trials', kind: 'search' }] },
+  ];
+  const sources = [{
+    title: 'Effect of Continued Weekly Subcutaneous Semaglutide vs Placebo on Weight Loss Maintenance',
+    url: 'https://doi.org/10.1001/jama.2021.3224',
+    domain: 'doi.org',
+    text: 'Effect of Continued Weekly Subcutaneous Semaglutide vs Placebo on Weight Loss Maintenance. JAMA 2021. Randomized clinical trial of semaglutide for weight loss. doi:10.1001/jama.2021.3224',
+  }];
+  const next = fillPaperCard(ask, nodes, sources);
+  assert.equal(next.length, nodes.length);
+  assert.match(JSON.stringify(next[0]), /jama\.2021\.3224/);
+});
