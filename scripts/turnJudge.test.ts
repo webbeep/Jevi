@@ -195,3 +195,18 @@ test('a rejected claim is read from a lead that does not start with "No"', async
   assert.equal(rejectionAffirms('No — One World Trade Center is still the tallest'), 'One World Trade Center');
   assert.equal(rejectionAffirms('Lisa Su is the CEO of AMD since 2014'), undefined);
 });
+
+test('"it" under a comparison title follows the judge when it names something other than the sides', () => {
+  const plan = followSearchPlan({
+    title: 'Empire State Building vs NYC',
+    question: 'When did it open?',
+    queries: ['One World Trade Center opening date', 'One World Trade Center when did it open'],
+    subject: 'One World Trade Center',
+    lead: 'No Empire State Building is not the tallest',
+  });
+  assert.equal(plan.query, 'One World Trade Center opening date');
+  assert.equal(plan.subject, 'One World Trade Center');
+  // A question about both still compares the sides.
+  const both = followSearchPlan({ title: 'Harbor Slate vs Northwatch 2', question: 'When did they launch?', queries: ['Harbor Slate launch date'], subject: 'Harbor Slate', lead: '' });
+  assert.equal(both.query, 'Harbor Slate vs Northwatch 2');
+});

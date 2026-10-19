@@ -187,6 +187,12 @@ export function rejectionAffirms(lead: string): string | undefined {
   return affirmed?.name;
 }
 
+/** The lead names this side only to reject it ("Empire State Building is not the tallest"). */
+function rejectedIn(lead: string, side: string): boolean {
+  const name = side.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`${name}\\s+(?:(?:is|was|are|were)\\s+not|isn['’]t|wasn['’]t|aren['’]t)\\b`, 'i').test(lead);
+}
+
 export function followSearchPlan(input: { title?: string; question: string; queries: string[]; subject: string; lead?: string }): { query: string; fanout: string[]; added?: string; subject?: string } {
   const title = input.title?.replace(/\s+/g, ' ').trim() ?? '';
   const asked = input.question.replace(/^(?:and|so)\s+/i, '').trim();
@@ -200,12 +206,24 @@ export function followSearchPlan(input: { title?: string; question: string; quer
   }
   // "When did it open?" on a card whose lead settles one side ("No — One WTC is still the tallest") is about that side.
   const pointed = sides.length >= 2 && SINGULAR_POINTER.test(asked) && !sides.some((side) => sideNamed(asked, side))
-    ? sides.filter((side) => sideNamed(input.lead ?? '', side))
+    ? sides.filter((side) => sideNamed(input.lead ?? '', side) && !rejectedIn(input.lead ?? '', side))
     : [];
   if (pointed.length === 1) {
     const side = pointed[0]!;
     const query = asked.replace(/\bit's\b/i, `${side} is`).replace(SINGULAR_POINTER, side).replace(/[?.!]+$/, '');
     return { query, fanout: [], subject: side };
+  }
+  // "When did it open?" under "Empire State Building vs NYC" points at one thing that is neither listed side settled
+  // by the lead: the judge, which read the whole card, names it ("One World Trade Center opening date"). A question
+  // about both or each sides still searches them side by side.
+  const judged = input.queries[0]?.trim();
+  const aboutBoth = /\b(?:each|both|all|either|they|them|their|these|those|compare|vs\.?|versus)\b/i.test(asked);
+  if (sides.length >= 2 && pointed.length !== 1 && SINGULAR_POINTER.test(asked) && !aboutBoth && judged) {
+    const subject = input.subject.trim();
+    const isSide = (name: string) => sides.some((side) => sameObject(side, name) || sideNamed(name, side));
+    if (subject && !isSide(subject) && !compareSides(subject).length) {
+      return { query: withoutLeadVerb(judged), fanout: input.queries.slice(1).map(withoutLeadVerb), subject };
+    }
   }
   if (sides.length >= 2) {
     const intro = objectPhrase(asked, sides);

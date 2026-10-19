@@ -1804,9 +1804,9 @@ function repairTaxNode(node: CardNode, query: string, sources: readonly ClaimSou
     case 'hero':
       return { ...node, value: line(node.value), caption: node.caption ? line(node.caption) : node.caption };
     case 'tile':
-      return { ...node, value: node.value ? line(node.value) : node.value, sub: node.sub ? line(node.sub) : node.sub };
+      return componentRate(node) ? node : { ...node, value: node.value ? line(node.value) : node.value, sub: node.sub ? line(node.sub) : node.sub };
     case 'stat':
-      return { ...node, value: line(node.value), label: line(node.label) };
+      return componentRate(node) ? node : { ...node, value: line(node.value), label: line(node.label) };
     case 'keyvalue':
     case 'list':
     case 'timeline':
@@ -2601,6 +2601,10 @@ export function presentNamedCharges(query: string, nodes: readonly (CardNode | u
 export function agreeOfficialRate(node: CardNode, query: string, sources: readonly ClaimSource[]): CardNode {
   const tax = salesTax(query, sources);
   if (!tax) return node;
+  // The card's breakdown rows ("City 4.5% · State 4% · MCTD 0.375%") are marked again: this pass runs on the finished
+  // card, after the marks from designing it were made on other objects.
+  breakdown = new WeakSet<object>();
+  markBreakdown(node);
   return alignTax(applyTax(node, query, tax, ratesIn(sources.find((source) => source.n === tax.n))), tax.rate);
 }
 

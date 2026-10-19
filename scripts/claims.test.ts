@@ -956,3 +956,15 @@ test('a fee percentage is not rewritten to the sales tax rate', async () => {
   const bound = bindClaims(text, sources as never, 'What would I pay with sales tax in New York City?');
   assert.equal(bound.type === 'text' ? bound.text : '', 'Nintendo adds a separate fee of 1.5% of the retail price, capped at $15 [1].');
 });
+
+test('the finished-card rate pass keeps a breakdown\'s parts', async () => {
+  const { agreeOfficialRate } = await import('../server/claims.ts');
+  const sources = [{ n: 4, text: 'NYC sales tax. The combined sales tax rate in New York City is 8.875%: 4% New York State, 4.5% city, and 0.375% MCTD.' }];
+  const grid: CardNode = { type: 'grid', cols: 3, children: [
+    { type: 'tile', label: 'NYC local sales tax', value: '4.5% [4]' },
+    { type: 'tile', label: 'NY State sales and use tax', value: '4% [4]' },
+    { type: 'tile', label: 'MCTD surcharge', value: '0.375% [4]' },
+  ] };
+  const next = agreeOfficialRate(grid, 'What would I pay with sales tax in New York City?', sources as never);
+  assert.deepEqual(next.type === 'grid' ? next.children.map((tile) => (tile.type === 'tile' ? tile.value : '')) : [], ['4.5% [4]', '4% [4]', '0.375% [4]']);
+});
