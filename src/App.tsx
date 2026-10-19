@@ -29,7 +29,7 @@ import { WhichOne } from './card/WhichOne';
 import { LogoMark, Wordmark } from './Logo';
 import { buildLibrary } from './library';
 import { FaviconStack, SourcesRail, SourcesSheet } from './Sources';
-import { liveBody, liveSlots } from '../shared/liveBody';
+import { liveBody, liveNode, liveSlots } from '../shared/liveBody';
 import { type SessionActions, type Turn, scrollToTurn, useSession } from './useSession';
 import { readChoices } from '../shared/choices';
 import { loadSnapshot, normalizeAnswerQuery, purgeDegradedSnapshots, saveSnapshot } from '../shared/answerKey';
@@ -1030,8 +1030,8 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
   onResend: (text: string) => void;
 }) {
   const streaming = !!turn.live?.nodes.some(Boolean);
-  // Parallel region calls finish out of order. The first real section replaces the full-card wait.
-  // A slot that does not have its component yet is left out, so its skeleton does not sit beside the sentence.
+  // Parallel region calls finish out of order. The first real section replaces the full-card wait,
+  // and each region still being designed keeps its skeleton until its own component lands.
   const answerStarted = !!turn.live && liveBody(turn.live, true).some((n) => n.type !== 'citations' && n.type !== 'slot');
   const offlinePartial = Boolean(turn.offline && (turn.live?.head || streaming));
   // The research trail stays up until a real component arrives; there is no empty layout in its place.
@@ -1044,8 +1044,9 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
     if (live && (streaming || offlinePartial)) {
       const fillingNow = offlinePartial ? false : turn.filling;
       const streamed = liveSlots(live, fillingNow);
+      const designing = fillingNow && streamed.length > 0;
       const slots = streamed.length ? streamed : liveSlots(live, false);
-      base = { ...skeleton, ...live.head, body: slots.map((slot) => live.nodes[slot]!) };
+      base = { ...skeleton, ...live.head, body: slots.map((slot) => liveNode(live, slot, designing)) };
       keys = slots.map(slotKey);
     } else if (turn.result) {
       base = turn.result.card;
@@ -1067,7 +1068,9 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
   const trail = waiting && searching && !keptOnScreen ? (
     <ResearchTrail question={turn.question} intent={turn.intent} peek={turn.peek} search={turn.search} />
   ) : undefined;
-  const gapTrail = turn.filling && answerStarted && card.body.some(hasGap) ? (
+  // Only a gap the server sent is a search still running; a region's skeleton is just its component on the way.
+  const searchingGap = (turn.live?.nodes ?? []).some((node) => !!node && hasGap(node));
+  const gapTrail = turn.filling && answerStarted && searchingGap ? (
     <ResearchTrail question={turn.question} intent={turn.intent} peek={turn.peek} search={turn.search} />
   ) : undefined;
 

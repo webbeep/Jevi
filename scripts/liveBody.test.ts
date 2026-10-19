@@ -7,20 +7,30 @@ const text = (t: string): CardNode => ({ type: 'text', text: t });
 const slot = (hint: string): CardNode => ({ type: 'slot', hint, shape: 'block' });
 const citations = (refs: number[]): CardNode => ({ type: 'citations', refs });
 
-test('an arrived sentence drops skeletons for slots that do not have their component yet', () => {
+test('an arrived sentence keeps the skeletons of the regions still being designed', () => {
   const regions = [slot('a'), slot('b'), slot('c'), slot('d')];
   const nodes: (CardNode | undefined)[] = [text('0'), text('1')];
-  assert.deepEqual(liveBody({ nodes, regions }, true), [text('0'), text('1')]);
+  assert.deepEqual(liveBody({ nodes, regions }, true), [text('0'), text('1'), slot('c'), slot('d')]);
   nodes[2] = text('2');
-  assert.deepEqual(liveBody({ nodes, regions }, true), [text('0'), text('1'), text('2')]);
+  assert.deepEqual(liveBody({ nodes, regions }, true), [text('0'), text('1'), text('2'), slot('d')]);
 });
 
-test('a later region shows immediately and an empty hole is not left as a skeleton', () => {
+test('a later region shows immediately and the hole above it keeps its skeleton', () => {
   const regions = [slot('0'), slot('1'), slot('2'), slot('3'), slot('4'), slot('5')];
   const nodes: (CardNode | undefined)[] = [text('0'), undefined, text('2'), text('3'), text('4')];
-  assert.deepEqual(liveBody({ nodes, regions }, true), [text('0'), text('2'), text('3'), text('4')]);
+  assert.deepEqual(liveBody({ nodes, regions }, true), [text('0'), slot('1'), text('2'), text('3'), text('4'), slot('5')]);
   nodes[1] = text('1');
-  assert.deepEqual(liveBody({ nodes, regions }, true), [text('0'), text('1'), text('2'), text('3'), text('4')]);
+  assert.deepEqual(liveBody({ nodes, regions }, true), [text('0'), text('1'), text('2'), text('3'), text('4'), slot('5')]);
+});
+
+test('a tile row that arrived short keeps a skeleton for each planned tile still to come', () => {
+  const tileSlot = (hint: string): CardNode => ({ type: 'slot', hint, shape: 'tile' });
+  const regions: CardNode[] = [{ type: 'grid', cols: 2, children: [tileSlot('option 1'), tileSlot('option 2')] }, slot('table')];
+  const fitbit: CardNode = { type: 'tile', label: 'Fitbit Edge', value: '$179.99' };
+  const nodes: (CardNode | undefined)[] = [{ type: 'grid', cols: 2, children: [fitbit] }];
+  assert.deepEqual(liveBody({ nodes, regions }, true), [{ type: 'grid', cols: 2, children: [fitbit, tileSlot('option 2')] }, slot('table')]);
+  // Designing is over: the row is what arrived.
+  assert.deepEqual(liveBody({ nodes, regions }, false), [{ type: 'grid', cols: 2, children: [fitbit] }]);
 });
 
 test('nothing arrived shows nothing: the research trail covers the wait', () => {
@@ -52,7 +62,7 @@ test('actions after the layout show once the finish prefix is contiguous, and a 
   const regions = [slot('a'), slot('b')];
   const actions: CardNode = { type: 'actions', items: [{ label: 'Compare', query: 'Compare them', kind: 'refine' }] };
   const held: (CardNode | undefined)[] = [text('lead'), undefined, undefined, actions, citations([1])];
-  assert.deepEqual(liveBody({ nodes: held, regions }, true), [text('lead')]);
+  assert.deepEqual(liveBody({ nodes: held, regions }, true), [text('lead'), slot('b')]);
   const ready: (CardNode | undefined)[] = [text('lead'), text('rest'), actions, citations([1])];
   assert.deepEqual(liveBody({ nodes: ready, regions }, true), [text('lead'), text('rest'), actions, citations([1])]);
 });
@@ -83,9 +93,10 @@ test('every node arrived while designing shows them all, no skeleton', () => {
 test('each shown component keeps its slot as its identity while others land above it', () => {
   const regions = [slot('0'), slot('1'), slot('2')];
   const nodes: (CardNode | undefined)[] = [undefined, undefined, text('third')];
-  assert.deepEqual(liveSlots({ nodes, regions }, true), [2]);
+  // The regions above keep their skeletons in their own slots, so 'third' never moves when they land.
+  assert.deepEqual(liveSlots({ nodes, regions }, true), [0, 1, 2]);
   nodes[0] = text('first');
-  assert.deepEqual(liveSlots({ nodes, regions }, true), [0, 2]);
+  assert.deepEqual(liveSlots({ nodes, regions }, true), [0, 1, 2]);
   nodes[1] = { type: 'stack', children: [] };
   assert.deepEqual(liveSlots({ nodes, regions }, false), [0, 2]);
 });
