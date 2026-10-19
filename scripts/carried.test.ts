@@ -25,3 +25,11 @@ test('a three-letter name keeps the thread', () => {
   assert.equal(sameThread('NY State Met for a visitor from Ohio', 'Met Admission for New York Residents'), true);
   assert.equal(sameThread('What is photosynthesis', 'How mRNA Vaccines Work'), false);
 });
+
+test('a comparison of account rules skips the product searches, a product comparison keeps them', async () => {
+  const { rulesCompare } = await import('../server/stream.ts');
+  assert.equal(rulesCompare('Make a table comparing a Roth IRA and a traditional IRA for 2026: contribution limit, tax treatment, and income limits.'), true);
+  assert.equal(rulesCompare('Compare the iPhone 17 and Pixel 10 side by side: starting price and base storage.'), false);
+  assert.equal(rulesCompare('iphone 17 vs pixel 10'), false);
+  assert.equal(rulesCompare('fitbit edge vs mi band 10 specs'), false);
+});

@@ -62,3 +62,8 @@ test('beside priced tiles a tile with no figure and no picture goes; a row of na
   const names: CardNode = { type: 'grid', cols: 2, children: [{ type: 'tile', label: 'Fitbit Edge' }, { type: 'tile', label: 'Mi Band 10' }] };
   assert.equal(withoutShells(names), names);
 });
+
+test('a numbered pick with no figure stays in its ranking', () => {
+  const row: CardNode = { type: 'stack', children: [{ type: 'tile', label: '2. Soundcore Life Q30', value: 'Best value' }, { type: 'tile', label: '3. Sony WH-CH720N', sub: 'Budget ANC' }] };
+  assert.equal(withoutShells(row), row);
+});

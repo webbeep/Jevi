@@ -8,11 +8,15 @@ const ATTRIBUTE = new Set([
   'taxes', 'ranking', 'rankings', 'comparison', 'guide', 'overview', 'facts', 'history', 'timeline', 'explained', 'today',
   'now', 'update', 'updates', 'status', 'results', 'stats', 'standouts', 'size', 'distance', 'launch', 'location', 'menu',
   'fees', 'fee', 'rate', 'rates', 'battery', 'storage', 'release', 'date', 'details', 'summary', 'profile', 'news',
+  'tonight', 'distance', 'opening', 'mirror', 'sales',
 ]);
 
-/** The thing a title is about, without trailing attribute words; never empty while the title has a word. */
+/**
+ * The thing a title is about: the words before its first attribute word ("JWST Distance From Earth" is JWST,
+ * "Nintendo Switch 2 Price With NYC Tax" is the Nintendo Switch 2). Never empty while the title has a word.
+ */
 export function titleSubject(title: string): string {
   const words = title.trim().split(/\s+/).filter(Boolean);
-  while (words.length > 1 && ATTRIBUTE.has(words[words.length - 1]!.toLowerCase().replace(/[^a-z]/g, ''))) words.pop();
-  return words.join(' ');
+  const at = words.findIndex((word, i) => i > 0 && ATTRIBUTE.has(word.toLowerCase().replace(/[^a-z]/g, '')));
+  return (at > 0 ? words.slice(0, at) : words).join(' ');
 }

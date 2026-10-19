@@ -157,6 +157,7 @@ export function sideNamed(lead: string, side: string): boolean {
   });
 }
 
+const POINTER = /\b(?:it|its|it's|they|them|their|this|that|these|those|he|she|his|her)\b/i;
 const SINGULAR_POINTER = /\b(?:it|its|it's|he|she|his|her)\b/i;
 
 export function followSearchPlan(input: { title?: string; question: string; queries: string[]; subject: string; lead?: string }): { query: string; fanout: string[]; added?: string; subject?: string } {
@@ -186,6 +187,14 @@ export function followSearchPlan(input: { title?: string; question: string; quer
   if (swapped && title && !title.toLowerCase().includes(swapped.toLowerCase())) {
     const query = `${swapped} ${title}`;
     return { query, fanout: input.queries.map(withoutLeadVerb).filter((item) => item.toLowerCase() !== query.toLowerCase()).slice(0, 2), subject: swapped };
+  }
+  // "What is Cooper Flagg?" names its own subject: the card's subject is not glued onto it. A place after a
+  // preposition ("with sales tax in New York City") qualifies the card's subject, and "it" points back at it.
+  const named = /\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b/.exec(asked.replace(/^[A-Z][a-z]*\b/, (word) => ' '.repeat(word.length)));
+  const before = named ? asked.slice(0, named.index).trim().split(/\s+/).pop()?.toLowerCase() ?? '' : '';
+  const ownName = named && !POINTER.test(asked) && !/^(?:in|at|from|to|for|near|of|on|by|with|vs|versus|than)$/.test(before) ? named[0] : undefined;
+  if (ownName && !title.toLowerCase().includes(ownName.toLowerCase())) {
+    return { query: withoutLeadVerb(input.queries[0] ?? asked), fanout: input.queries.slice(1).map(withoutLeadVerb), subject: ownName };
   }
   const place = placeOnScreen(title) || input.subject;
   const written = withoutLeadVerb(input.queries[0] ?? asked);

@@ -280,3 +280,15 @@ test('a combined rate labeled "rate" is the tax rate, and the split uses the tax
   const led = leadTaxedTotal('What would I pay with sales tax in New York City?', card.body);
   assert.equal(led?.[0]?.type === 'stack' && led[0].children[0]?.type === 'hero' ? led[0].children[0].value : '', '$544.36');
 });
+
+test('a rate stated in a sentence still gives the taxed total', async () => {
+  const { leadTaxedTotal, splitShare } = await import('../server/calculate.ts');
+  const body = [
+    { type: 'keyvalue' as const, items: [{ label: 'Console MSRP', value: '$499.99 [14]' }] },
+    { type: 'section' as const, title: 'Good to know', children: [{ type: 'text' as const, text: 'The statewide rate alone is 4%; local rates push the total as high as 8.875%. [7] A sale shipped to New York City requires 8.875% [10].' }] },
+  ];
+  const led = leadTaxedTotal('What would I pay with sales tax in New York City?', body);
+  assert.equal(led?.[0]?.type === 'stack' && led[0].children[0]?.type === 'hero' ? led[0].children[0].value : '', '$544.36');
+  const split = splitShare({ question: 'If my brother and I split it, how much does each of us pay?', card: { title: 'Switch 2', body } });
+  assert.equal(split?.nodes[0]?.type === 'hero' ? split.nodes[0].value : '', '$272.18 each');
+});

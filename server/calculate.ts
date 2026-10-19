@@ -845,6 +845,16 @@ function labeledFigures(nodes: readonly CardNode[]): { label: string; value: str
       case 'tabs':
         node.tabs.forEach((tab) => tab.children.forEach(walk));
         return;
+      case 'text':
+      case 'callout':
+        // "A sale shipped to New York City requires 8.875%": a rate stated in a sentence is still the card's rate.
+        // Only the rate is read from prose; a price in a sentence is not a labeled figure.
+        for (const sentence of node.text.split(/(?<=[.!?])\s+/)) {
+          if (!/\b(?:tax|rate)\b/i.test(sentence)) continue;
+          const rates = [...sentence.matchAll(/(\d{1,2}(?:\.\d+)?)\s*%/g)].map((m) => `${m[1]}%`);
+          if (rates.length) out.push({ label: 'tax rate', value: rates.join(' ') });
+        }
+        return;
       default:
         if ('children' in node && Array.isArray(node.children)) node.children.forEach(walk);
     }

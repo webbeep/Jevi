@@ -152,3 +152,11 @@ test('a question-shaped title gives its subject with the model number, and the f
   const plan = followSearchPlan({ title: 'Nintendo Switch 2 Price', question: 'What would I pay with sales tax in New York City?', queries: [], subject: '' });
   assert.equal(plan.query, 'Nintendo Switch 2 What would I pay with sales tax in New York City');
 });
+
+test('a follow-up that names its own subject is searched as asked, and a title is cut at its first attribute', () => {
+  const flagg = followSearchPlan({ title: 'NBA Scores Tonight', question: 'What is Cooper Flagg?', queries: ['Cooper Flagg'], subject: 'Cooper Flagg' });
+  assert.equal(flagg.query, 'Cooper Flagg');
+  assert.equal(placeOnScreen('JWST Distance From Earth'), 'JWST');
+  const mirror = followSearchPlan({ title: 'JWST Distance From Earth', question: "How big is its main mirror compared with Hubble's?", queries: [], subject: '' });
+  assert.match(mirror.query, /^How big is JWST's main mirror/);
+});

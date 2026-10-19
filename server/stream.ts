@@ -587,9 +587,11 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
    * a repeat of what is already on screen is not sent again.
    */
   // An exchange-rate card keeps to the pair and direction asked, at the live quote's rate.
-  const fx = fxQuote(designReq.ticker);
+  // A follow-up ("why is it moving today?") answers under the quote already on screen, so it agrees with that one.
+  const shownTicker = designReq.ticker ?? findTicker(designReq.priorBody ?? []);
+  const fx = fxQuote(shownTicker);
   // A stock, crypto or index card states one price right now: its widget's.
-  const live = liveQuoteFacts(designReq.ticker);
+  const live = liveQuoteFacts(shownTicker);
   /** Sources a later search appended after the ones the card was designed from; their cites run past the first list. */
   let addedSources = 0;
   const publish: Publish = (index, raw) => {
@@ -1529,7 +1531,9 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     pattern = 'compare';
     send('plan', { ...plan, pattern, skeleton: skeletonCard(query, pattern) });
   }
-  if (compareSides(query).length >= 2) results = await searchNamedSides(query, results, env, scope, send);
+  // Each side's "price" and "specs" searches are for products. "Roth IRA vs traditional IRA: contribution limit, tax
+  // treatment, income limits" asks about rules, and those searches added six seconds and found nothing to use.
+  if (compareSides(query).length >= 2 && !rulesCompare(query)) results = await searchNamedSides(query, results, env, scope, send);
   results = { ...results, results: leadMemberRows(query, leadPreprints(query, results.results), hopUrls) };
   const chargeAsk = /\b(?:tax|taxes|fee|fees|fine|fines|toll|tolls|duty|duties|surcharge|levy|levies)\b/i.test(query);
   const official = chargeAsk
@@ -1741,6 +1745,14 @@ function engineErrors(engines: EngineStatus[]): string[] {
 }
 
 /** What a card settles: its subtitle and the first hero or sentence, where a verdict like "No — One WTC is still the tallest" sits. */
+const RULES_WORDS = /\b(?:tax|taxes|treatment|limits?|rules?|eligibility|eligible|income|contributions?|interest|rates?|withdrawals?|penalt(?:y|ies)|requirements?|benefits|coverage|deductible|differences?|pros and cons)\b/i;
+const PRODUCT_WORDS = /\b(?:price|prices|cost|costs|specs?|specifications|battery|camera|storage|display|screen|weight|size|buy|deal|review)\b/i;
+
+/** A comparison of rules or terms (accounts, plans, policies), not of products to buy. */
+export function rulesCompare(query: string): boolean {
+  return RULES_WORDS.test(query) && !PRODUCT_WORDS.test(query);
+}
+
 /** How many of the card's own sources a same-subject follow-up keeps beside its new search. */
 const CARRIED_ROWS = 4;
 

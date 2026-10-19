@@ -29,7 +29,8 @@ export function withoutShells(node: CardNode): CardNode | undefined {
       const children = node.children
         .map(withoutShells)
         .filter((child): child is CardNode => !!child)
-        .filter((child) => !(valued && child.type === 'tile' && !child.value?.trim() && !child.imageSrc && child.imageRef === undefined));
+        // A numbered pick ("3. Sony WH-CH720N") is a name in a ranking; dropping it would leave "1, 2, 4, 5".
+        .filter((child) => !(valued && child.type === 'tile' && !child.value?.trim() && !child.imageSrc && child.imageRef === undefined && !/^\s*#?\d+[.)]/.test(child.label)));
       if (children.length === node.children.length && children.every((child, i) => child === node.children[i])) return node;
       return children.length ? { ...node, children } : undefined;
     }
