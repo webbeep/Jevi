@@ -78,6 +78,7 @@ import { factsElsewhere, quoteCorpus, withinSources, withoutRepeatedFacts, witho
 import { fxQuote, feedPcts, liveQuoteFacts, withinFx, withinQuote } from '../shared/fxCard';
 import { forecastHigh, withinForecast } from '../shared/weatherCard';
 import { withSourcedMonths } from '../shared/monthClaims';
+import { isBlankLayout } from '../shared/liveBody';
 import { unblendObjects } from './objectFacts';
 import { withFinishedSentences } from './polish';
 import { queryWithPlace, readerPlace, settleReadings } from './readings';
@@ -623,6 +624,11 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     const quoted = dated ? withVerbatimQuotes(dated, quotes()) : undefined;
     const tidy = withoutShells(quoted ?? { type: 'stack', children: [] });
     const node = (tidy && withoutRepeatedFacts(tidy, factsElsewhere(shown, index))) ?? { type: 'stack', children: [] };
+    // Which check emptied a component that arrived with content: the one place to look when a region goes blank.
+    if (isBlankLayout(node) && !isBlankLayout(raw)) {
+      const stage = !quoted0 ? (fx ? 'fx' : 'quote') : !agreed ? 'forecast' : !quoted ? 'quotes' : !tidy ? 'shells' : 'repeated';
+      console.log(JSON.stringify({ zo: 'collapsed', index, stage, raw: JSON.stringify(raw).slice(0, 400) }));
+    }
     shown.set(index, node);
     if (!arrival.includes(index)) arrival.push(index);
     const key = JSON.stringify(node);

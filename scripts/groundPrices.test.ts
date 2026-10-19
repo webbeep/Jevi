@@ -22,3 +22,12 @@ test('a price the conversation or the question stated stays, and a sourced chat 
   const sourced = new Grounding('split the $120 dinner bill three ways', true, '', false);
   assert.equal(sourced.ok('$40 each'), true);
 });
+
+test('a figure rounded from a source figure is grounded, and a small whole number is not read as a rounding', () => {
+  const g = new Grounding('Live price 82,432.99 USD; day range 81,942.16–82,682.14; 52-week range 57,747.77–116,273.31. Gas averages $4.33 a gallon; 12.4% of drivers.');
+  assert.equal(g.ok('81,942 – 82,682 USD'), true);
+  assert.equal(g.ok('57,748–116,273'), true);
+  assert.equal(g.ok('$4.3'), true);
+  assert.equal(g.ok('12 drivers'), false);
+  assert.equal(g.ok('81,950'), false);
+});

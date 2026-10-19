@@ -34,6 +34,16 @@ export class Grounding {
   constructor(corpus: string, lenient = false, links = '', prices = false) {
     this.prices = prices;
     this.known = new Set(numberTokens(corpus));
+    // A figure rounded from the source's ("81,942" for 81,942.16, "4.3" for 4.33) is that figure. A whole number is
+    // read as a rounding only from 1,000 up, so a small count never matches some unrelated decimal by chance.
+    for (const token of [...this.known]) {
+      const dot = token.indexOf('.');
+      if (dot < 0) continue;
+      const n = Number(token);
+      if (!Number.isFinite(n)) continue;
+      for (let places = token.length - dot - 2; places >= 1; places--) this.known.add(String(Number(n.toFixed(places))));
+      if (Math.abs(n) >= 1000) this.known.add(String(Math.round(n)));
+    }
     this.records = new Set(identifiersIn(`${corpus} ${links}`).filter(isRecord).map(recordKey));
     this.lenient = lenient;
   }

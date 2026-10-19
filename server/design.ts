@@ -435,6 +435,11 @@ function parseLine(line: string, g: Grounding, imageCount: number, query: string
   const bound = fitted && claims?.length ? bindClaims(fitted, claims, asked) : fitted;
   const constrained = bound ? constrainNode(bound, asked, corpus) : undefined;
   const shown = constrained ? dropModelDiagram(constrained) : undefined;
+  if (!shown) {
+    // Which check dropped a component the model wrote: the place to look when a region never shows up.
+    const stage = !clean ? 'sanitize' : !grounded ? 'ground' : !fitted ? 'fit' : !bound ? 'claims' : !constrained ? 'constrain' : 'diagram';
+    console.log(JSON.stringify({ zo: 'dropped', stage, type: String(obj.type), raw: json.slice(0, 400) }));
+  }
   return shown ? { kind: 'node', node: shown } : { kind: 'dropped' };
 }
 
