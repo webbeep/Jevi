@@ -256,6 +256,26 @@ const TOPIC_AUTHORITIES: readonly (readonly [RegExp, readonly string[]])[] = [
   [/\b(?:bill becomes? (?:a )?law|(?:pocket )?veto(?:es|ed)?|filibuster|legislative process|how laws are made)\b/i, ['congress.gov', 'house.gov', 'senate.gov']],
 ];
 
+/** What a topic's lead authority is called, so the answer can say who sets the rule. */
+const AUTHORITY_NAMES: Record<string, string> = {
+  'uspreventiveservicestaskforce.org': 'the U.S. Preventive Services Task Force (USPSTF)',
+  'fsis.usda.gov': "the USDA's Food Safety and Inspection Service",
+  'health.gov': 'HHS (health.gov), which publishes the Physical Activity and Dietary Guidelines for Americans',
+  'irs.gov': 'the IRS',
+  'travel.state.gov': 'the U.S. State Department',
+  'congress.gov': 'Congress.gov',
+};
+
+/** The body that sets the rule for an ask that names none (aspirin → the USPSTF), when one of its pages is among `rows`. */
+export function topicAuthority(query: string, rows: readonly { domain?: string; url?: string }[]): { n: number; name: string } | undefined {
+  if (!topicAuthorityAsk(query)) return undefined;
+  const lead = topicHosts(query)[0];
+  const name = lead && AUTHORITY_NAMES[lead];
+  if (!name) return undefined;
+  const at = rows.findIndex((row) => endsWithHost((row.domain || hostOf(row.url || '')).toLowerCase().replace(/^www\./, ''), lead));
+  return at < 0 ? undefined : { n: at + 1, name };
+}
+
 function topicHosts(query: string): string[] {
   return TOPIC_AUTHORITIES.find(([ask]) => ask.test(query))?.[1].slice() ?? [];
 }
