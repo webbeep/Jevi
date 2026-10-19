@@ -74,7 +74,7 @@ import { anchoredFollowup, asksToCompare, comparisonFollow, cryptographyHint, fa
 import { calculationAnswer, isCalculationAsk, leadTaxedTotal, rateOnAmount, splitShare } from './calculate';
 import { acceptProductPhoto, appendAskedFact, comparisonRepair, comparisonTitle, dropShownDenials, keepComparedProducts, mentionsSide, missingSideNode, nameForms, placeSidePhotos, restoreSideTiles, stickerPrice } from './compareAnswer';
 import { cardGaps, citeForGap, gapSearchQuery, settleGap, type PieceGap } from './gapFill';
-import { withoutShells } from '../shared/shells';
+import { withinSources, withoutShells } from '../shared/shells';
 import { unblendObjects } from './objectFacts';
 import { withFinishedSentences } from './polish';
 import { queryWithPlace, readerPlace, settleReadings } from './readings';
@@ -585,9 +585,11 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
    * Every component reaches the client through here. A fix replaces only its own slot;
    * a repeat of what is already on screen is not sent again.
    */
+  /** Sources a later search appended after the ones the card was designed from; their cites run past the first list. */
+  let addedSources = 0;
   const publish: Publish = (index, raw) => {
     // A component whose figures were all removed is collapsed, not shown as an empty shell.
-    const node = withoutShells(raw) ?? { type: 'stack', children: [] };
+    const node = withoutShells(withinSources(raw, designReq.search.results.length + addedSources)) ?? { type: 'stack', children: [] };
     shown.set(index, node);
     if (!arrival.includes(index)) arrival.push(index);
     const key = JSON.stringify(node);
@@ -750,6 +752,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       const have = new Set(designReq.search.results.map((row) => row.url));
       const add = rows.filter((row) => row.url && !have.has(row.url)).slice(0, 4);
       if (add.length) {
+        addedSources = add.length;
         send('search', { ...designReq.search, results: [...designReq.search.results, ...add] });
         send('peek', add.slice(0, 4).map(({ title, url, domain, date }) => ({ title, url, domain, date })));
       }

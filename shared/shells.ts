@@ -9,7 +9,7 @@ function hollow(text: string | undefined): boolean {
 const blankCell = (cell: string) => cell !== GAP_MARK && hollow(cell);
 
 /** A value that says there is no value ("Unavailable", "None yet", "N/A"). */
-const NON_ANSWER = /^(?:unavailable|not available|none(?: yet)?|n\/?a|tbd|tba|unknown|not (?:yet )?(?:stated|reported|listed|announced|found)|no data|pending)\.?$/i;
+const NON_ANSWER = /^(?:unavailable|not available|none(?: yet| listed| found| reported)?|n\/?a|tbd|tba|unknown|not (?:yet )?(?:stated|reported|listed|announced|found)|not in (?:the |these )?sources|no data|pending)\.?$/i;
 const saysNothing = (value: string | undefined) => hollow(value) || NON_ANSWER.test(value!.replace(/\[\d+\]/g, '').trim());
 
 /**
@@ -42,6 +42,22 @@ export function withoutShells(node: CardNode): CardNode | undefined {
       if (rows.length === node.rows.length && rows.every((row, i) => row === node.rows[i])) return node;
       return rows.length ? { ...node, rows } : undefined;
     }
+    case 'hero':
+      return node.caption !== undefined && hollow(node.caption) ? { ...node, caption: undefined } : node;
+    case 'list': {
+      // An empty detail ("meta": "") is dropped, and an item already listed is not listed again.
+      const seen = new Set<string>();
+      const items = node.items
+        .map((item) => (item.meta !== undefined && hollow(item.meta) ? { ...item, meta: undefined } : item))
+        .filter((item) => {
+          const key = item.text.replace(/\[\d+\]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+          if (!key || seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+      if (items.length === node.items.length && items.every((item, i) => item === node.items[i])) return node;
+      return items.length ? { ...node, items } : undefined;
+    }
     case 'tile':
       // A tile whose figure is "Unavailable" fills a row with nothing; a tile with no value at all is a name and stays.
       if (node.value !== undefined && node.value.trim() && NON_ANSWER.test(node.value.replace(/\[\d+\]/g, '').trim())) return undefined;
@@ -49,4 +65,11 @@ export function withoutShells(node: CardNode): CardNode | undefined {
     default:
       return node;
   }
+}
+
+/** A citation to a source the card does not have ("[30]" on a card with 12) is removed, wherever it sits. */
+export function withinSources(node: CardNode, count: number): CardNode {
+  const json = JSON.stringify(node);
+  const fixed = json.replace(/\s*\[(\d+)\]/g, (cite, n: string) => (Number(n) >= 1 && Number(n) <= count ? cite : ''));
+  return fixed === json ? node : (JSON.parse(fixed) as CardNode);
 }

@@ -26,3 +26,14 @@ test('a tile or key that only says there is no value is not shown', () => {
   const named = { type: 'tile' as const, label: 'Mi Band 10' };
   assert.equal(withoutShells(named), named);
 });
+
+test('an empty detail, a repeated item, a citation-only caption and a cite past the sources go', async () => {
+  const { withinSources } = await import('../shared/shells.ts');
+  assert.deepEqual(withoutShells({ type: 'list', items: [{ text: 'Microsoft pulls out of UK AI data centre [2]', meta: '' }, { text: 'Microsoft pulls out of UK AI data centre', meta: 'Oct' }, { text: 'Nvidia earnings', meta: 'Oct 18' }] }),
+    { type: 'list', items: [{ text: 'Microsoft pulls out of UK AI data centre [2]', meta: undefined }, { text: 'Nvidia earnings', meta: 'Oct 18' }] });
+  assert.deepEqual(withoutShells({ type: 'hero', value: '10 pts', caption: '[7]' }), { type: 'hero', value: '10 pts', caption: undefined });
+  assert.equal(withoutShells({ type: 'tile', label: 'Scores', value: 'Not in sources' }), undefined);
+  assert.deepEqual(withinSources({ type: 'text', text: 'Pick the Pixel [3][30].' }, 12), { type: 'text', text: 'Pick the Pixel [3].' });
+  // A cell value with a number in brackets that is not a cite is left alone only when it is in range; refs nodes are untouched.
+  assert.deepEqual(withinSources({ type: 'citations', refs: [1, 30] }, 12), { type: 'citations', refs: [1, 30] });
+});
