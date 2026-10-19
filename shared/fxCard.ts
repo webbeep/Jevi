@@ -80,6 +80,13 @@ export interface LiveQuoteFacts {
   price: number;
   /** Change over the widget's range, in percent. */
   pct: number;
+  /** Changes the live quote feed itself states ("+0.69%" over 24 hours, beside the widget's change since midnight). */
+  feedPcts?: number[];
+}
+
+/** The percentage changes a live quote row states. */
+export function feedPcts(text: string): number[] {
+  return [...text.matchAll(/([+-−]?\d{1,2}(?:\.\d+)?)\s?%/g)].map((match) => Math.abs(Number(match[1]!.replace('−', '-'))));
 }
 
 /** A stock, crypto, index or commodity widget's price and day change. */
@@ -120,7 +127,8 @@ function contradictsQuote(text: string, quote: LiveQuoteFacts): boolean {
     if (moneyFigures(clause).some((m) => m > quote.price * 0.4 && m < quote.price * 2.5 && Math.abs(m - quote.price) / quote.price > 0.01)) return true;
     if (!DAY_MOVE.test(clause)) return false;
     const pcts = [...clause.matchAll(/([+-−]?\d{1,2}(?:\.\d+)?)\s?%/g)].map((match) => Math.abs(Number(match[1]!.replace('−', '-'))));
-    return pcts.some((pct) => Math.abs(pct - Math.abs(quote.pct)) > 0.15);
+    // The widget counts from midnight; the feed's own 24-hour change is another window of the same live price.
+    return pcts.some((pct) => Math.abs(pct - Math.abs(quote.pct)) > 0.15 && !(quote.feedPcts ?? []).some((feed) => Math.abs(feed - pct) < 0.02));
   });
 }
 

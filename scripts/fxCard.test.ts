@@ -69,3 +69,11 @@ test('a history word dates only its own clause', async () => {
   const yesterday: CardNode = { type: 'text', text: 'It dipped to $80,900 yesterday before recovering [3].' };
   assert.equal(withinQuote(yesterday, btc), yesterday);
 });
+
+test('the quote feed\'s own 24-hour change is not a contradiction of the widget\'s change since midnight', async () => {
+  const { withinQuote } = await import('../shared/fxCard.ts');
+  const btc = { price: 82433, pct: 0.51, feedPcts: [0.69] };
+  const range: CardNode = { type: 'callout', text: 'Bitcoin is up 0.69% over the last day, trading between 81,942.16 and 82,682.14 USD, within a 52-week range of 57,747.77–116,273.31 [1].' };
+  assert.equal(withinQuote(range, btc), range);
+  assert.equal(withinQuote({ type: 'text', text: 'BTC fell 0.2% over 24 hours [3].' }, btc), undefined);
+});

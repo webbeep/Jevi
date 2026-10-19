@@ -75,7 +75,7 @@ import { calculationAnswer, isCalculationAsk, leadTaxedTotal, rateOnAmount, spli
 import { acceptProductPhoto, appendAskedFact, comparisonRepair, comparisonTitle, dropShownDenials, keepComparedProducts, mentionsSide, missingSideNode, nameForms, placeSidePhotos, restoreSideTiles, stickerPrice } from './compareAnswer';
 import { cardGaps, citeForGap, gapSearchQuery, settleGap, type PieceGap } from './gapFill';
 import { factsElsewhere, quoteCorpus, withinSources, withoutRepeatedFacts, withoutShells, withVerbatimQuotes } from '../shared/shells';
-import { fxQuote, liveQuoteFacts, withinFx, withinQuote } from '../shared/fxCard';
+import { fxQuote, feedPcts, liveQuoteFacts, withinFx, withinQuote } from '../shared/fxCard';
 import { forecastHigh, withinForecast } from '../shared/weatherCard';
 import { withSourcedMonths } from '../shared/monthClaims';
 import { unblendObjects } from './objectFacts';
@@ -598,7 +598,9 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   const shownTicker = designReq.ticker ?? findTicker(designReq.priorBody ?? []);
   const fx = fxQuote(shownTicker);
   // A stock, crypto or index card states one price right now: its widget's.
-  const live = liveQuoteFacts(shownTicker);
+  const liveWidget = liveQuoteFacts(shownTicker);
+  const feedRow = designReq.search.results.find(isQuoteRow);
+  const live = liveWidget && feedRow ? { ...liveWidget, feedPcts: feedPcts(`${feedRow.snippet ?? ''} ${feedRow.content ?? ''}`) } : liveWidget;
   /** Sources a later search appended after the ones the card was designed from; their cites run past the first list. */
   let addedSources = 0;
   let addedRows: typeof designReq.search.results = [];
