@@ -183,7 +183,8 @@ function sanitizeNode(raw: unknown, imageCount: number, depth: number, ctx?: { s
       return value !== undefined ? { type, value, max: num(n.max) ?? 5, label: str(n.label, 60) } : undefined;
     }
     case 'table': {
-      const columns = strings(n.columns, 40);
+      // Header cells written as "cols" or "headers" are still the header.
+      const columns = strings(Array.isArray(n.columns) ? n.columns : Array.isArray(n.cols) ? n.cols : n.headers, 40);
       const rows = arr(n.rows).map((r) => strings(r, 120)).filter((r) => r.length);
       return columns.length && rows.length ? { type, columns, rows, highlight: num(n.highlight) } : undefined;
     }

@@ -56,7 +56,8 @@ export class Grounding {
     // A reasoned answer may work out its own numbers, but a price is a fact about today: it comes from the
     // sources or the conversation, never from memory ("$299" for a tracker that sells for $179.99).
     if (this.lenient) return !this.prices || moneyIn(String(s)).every((n) => this.known.has(n));
-    const text = String(s);
+    // A citation marker ("[11]") is a pointer to a source, not a figure.
+    const text = String(s).replace(/\[\d+\]/g, ' ');
     // A paper's DOI is checked as a record the sources name. Its digits are not figures.
     if (!identifiersIn(text).filter(isRecord).every((id) => this.records.has(recordKey(id)))) return false;
     // "$80.5K" and "$1.65T" are 80,500 and 1,650,000,000,000 written short: either form in the sources backs them.

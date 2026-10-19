@@ -41,3 +41,11 @@ test('a figure written short is backed by the full figure, and one bad table cel
   const [table] = groundNodes([{ type: 'table', columns: ['', 'iPhone 17', 'Pixel 10'], rows: [['Chip', 'A19', 'Tensor G5'], ['Battery', '3692 mAh', '4970 mAh']] }], g);
   assert.deepEqual(table?.type === 'table' ? table.rows : [], [['Chip', 'A19', ''], ['Battery', '3692 mAh', '']]);
 });
+
+test('a citation marker in a table cell is not a figure, and "cols" is a table header', async () => {
+  const g = new Grounding('Roth IRA: no deduction now, tax-free growth. The 2026 limit is $7,500.');
+  assert.equal(g.ok('No income tax deduction for contributions; growth is tax-free [1][11]'), true);
+  const { sanitizeNodes } = await import('../server/sanitize.ts');
+  const [table] = sanitizeNodes([{ type: 'table', cols: ['Feature', 'Roth IRA', 'Traditional IRA'], rows: [['Limit', '$7,500', '$7,500']] }], 0);
+  assert.deepEqual(table?.type === 'table' ? table.columns : [], ['Feature', 'Roth IRA', 'Traditional IRA']);
+});
