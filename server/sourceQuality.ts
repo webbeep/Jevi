@@ -305,9 +305,9 @@ export function hasOfficialHit(query: string, rows: readonly { domain?: string; 
   const places = placeHosts(query);
   const journals = journalHosts(query);
   const primary = (row: { url?: string; title?: string }) => !secondaryPage(row.url || '', row.title || '');
-  // A topic's authority (the USPSTF for aspirin) is in hand when one of its sites is.
-  const topics = orgs.length || journals.length || places.length ? [] : topicHosts(query);
-  if (topics.length && !rows.some((row) => topics.some((host) => endsWithHost((row.domain || hostOf(row.url || '')).toLowerCase().replace(/^www\./, ''), host)) && primary(row))) return false;
+  // A topic's authority (the USPSTF for aspirin) is in hand when its lead site is: an NIH news page reports the rule, it does not set it.
+  const lead = orgs.length || journals.length || places.length ? undefined : topicHosts(query)[0];
+  if (lead && !rows.some((row) => endsWithHost((row.domain || hostOf(row.url || '')).toLowerCase().replace(/^www\./, ''), lead) && primary(row))) return false;
   if (orgs.length || places.length || journals.length) {
     return rows.some((row) => officialLead(row.domain || hostOf(row.url || ''), orgs, places, journals) === 0 && primary(row));
   }
