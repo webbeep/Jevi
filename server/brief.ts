@@ -64,7 +64,7 @@ Reply as JSON: {"goal": string, "use": number[], "stale": number[], "offTopic": 
 - offTopic: results about something else: another person or company with the same name, a different product, place or time period, or results that only share words with the ask.
 - conflicts: at most 3 short notes where results disagree on a fact that matters, naming the results and their dates, e.g. "[3] says 71,360 on Jun 2; live quote [1] says 82,290". A conflict counts only when two results worth citing (an encyclopedia, an official site, a major publication) state different values. A blog, slideshow, classroom page, or page in another language that differs from those is offTopic, not a conflict.
 - missing: what the person asked that no result answers, or "" when the results cover it.
-- gaps: at most 2 web searches (3-8 words each) for a specific fact a complete answer needs that no result states: a fee or price, a limit or cap, a safe temperature or dose, who is eligible, an exception to the usual path. [] when the results state them. Name the fact, never guess its value.
+- gaps: at most 2 web searches (3-8 words each) for a specific fact a complete answer needs that no result's snippet states. A how-to, safety, health, money or legal answer states its key figures: the fee or price, the limit or cap, the safe temperature or dose, who is eligible, the exception to the usual path. List a search for each one the snippets don't show; [] only when they do. Name the fact, never guess its value.
 - A result marked LIVE is real-time data fetched seconds ago: it beats any other result on the current value.
 Be strict: a result that is only loosely related is not in "use".`;
 

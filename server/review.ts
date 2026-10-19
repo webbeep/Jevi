@@ -31,6 +31,7 @@ You see the result snippets and the page text the writer read (clipped). A fact 
 Style, wording, layout and nice-to-haves the goal does not need are not errors. For a "today" or "latest" ask, anything from the past 36 hours is current: don't flag it, and don't warn that nothing is dated exactly today.
 Reply as JSON: {"verdict":"ok"|"fix","problems":[string],"fixes":[{"node":number,"replace":object}],"note":string,"followups":[string]}
 - problems: one short line per error, naming the node number.
+- Every problem the results let you fix comes with its fix, and then the verdict is "fix". A problem listed without a fix changes nothing.
 - fixes: for each wrong node you can correct from the results, a full replacement node in the same JSON shape as the original (same "type" when possible), with facts only from the results and citations like [2]. Keep every supported fact of the original; never blank a value out with "—" or drop a comparison side. At most 3.
 - note: only when the results themselves leave the answer uncertain (no current figure, sources disagree, the person can't be identified): one plain sentence for the reader about that uncertainty. Never describe the card's own mistakes in the note (no "the card says…", "the card mixes…"): fix those nodes instead. Otherwise "".
 - followups: only when a suggested follow-up is wrong: the full list of 4 again, with each wrong one replaced by a question the card supports. Otherwise [].
