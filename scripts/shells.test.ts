@@ -91,3 +91,8 @@ test('a price cut off at its figure is not shown, and a cashtag stays', () => {
   const cashtag: CardNode = { type: 'text', text: '$RDW fell 5% today.' };
   assert.equal(withoutShells(cashtag), cashtag);
 });
+
+test('a row with a hole goes when two whole rows remain', () => {
+  const table = withoutShells({ type: 'table', columns: ['', 'Roth IRA', 'Traditional IRA'], rows: [['2026 limit', '$7,500', ''], ['Taxed', 'No', 'Yes'], ['Deduction', 'No', 'Maybe']] });
+  assert.deepEqual(table?.type === 'table' ? table.rows : [], [['Taxed', 'No', 'Yes'], ['Deduction', 'No', 'Maybe']]);
+});

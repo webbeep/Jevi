@@ -50,9 +50,13 @@ export function withoutShells(node: CardNode): CardNode | undefined {
       return items.length ? { ...node, items } : undefined;
     }
     case 'table': {
-      const rows = node.rows
-        .filter((row) => row.length < 2 || row.slice(1).some((cell) => !blankCell(cell)))
-        .map((row) => (row.slice(1).some(blankCell) ? [row[0]!, ...row.slice(1).map((cell) => (blankCell(cell) ? '—' : cell))] : row));
+      const valued = node.rows.filter((row) => row.length < 2 || row.slice(1).some((cell) => !blankCell(cell)));
+      // A row with a hole goes when at least two whole rows remain: a "—" beside a figure the card states elsewhere
+      // reads as missing data. A table that would be gutted keeps its rows and shows the hole as "—".
+      const whole = valued.filter((row) => !row.slice(1).some(blankCell));
+      const rows = whole.length >= 2
+        ? whole
+        : valued.map((row) => (row.slice(1).some(blankCell) ? [row[0]!, ...row.slice(1).map((cell) => (blankCell(cell) ? '—' : cell))] : row));
       if (rows.length === node.rows.length && rows.every((row, i) => row === node.rows[i])) return node;
       return rows.length ? { ...node, rows } : undefined;
     }

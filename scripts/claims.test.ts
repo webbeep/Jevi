@@ -924,3 +924,16 @@ test('a hero written with a title and subtitle leads with its title', async () =
   const [hero] = sanitizeNodes([{ type: 'hero', title: 'Anker Soundcore Space Q45', subtitle: 'The best budget noise cancelling headphones we have tested [8]' }], 0);
   assert.equal(hero?.type === 'hero' ? `${hero.value} | ${hero.caption}` : '', 'Anker Soundcore Space Q45 | The best budget noise cancelling headphones we have tested [8]');
 });
+
+test('a tax card keeps each component rate and aligns only the combined one', async () => {
+  const { bindClaims } = await import('../server/claims.ts');
+  const sources = [{ n: 1, text: 'NYC sales tax. The combined sales tax rate in New York City is 8.875%: 4% New York State, 4.5% city, and 0.375% MCTD.' }];
+  const grid: CardNode = { type: 'grid', cols: 2, children: [
+    { type: 'tile', label: 'Combined rate', value: '8.875% [1]' },
+    { type: 'tile', label: 'City sales tax', value: '4.5% [1]' },
+    { type: 'tile', label: 'NY State sales tax', value: '4% [1]' },
+    { type: 'tile', label: 'MCTD surcharge', value: '0.375% [1]' },
+  ] };
+  const bound = bindClaims(grid, sources as never, 'What would I pay with sales tax in New York City?');
+  assert.deepEqual(bound.type === 'grid' ? bound.children.map((tile) => (tile.type === 'tile' ? tile.value : '')) : [], ['8.875% [1]', '4.5% [1]', '4% [1]', '0.375% [1]']);
+});

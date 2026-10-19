@@ -1041,23 +1041,24 @@ function applyTax(node: CardNode, query: string, pick: TaxPick, keep: ReadonlySe
     case 'hero': {
       const caption = node.caption ? applyTaxText(node.caption, query, pick, keep) : node.caption;
       const label = node.label ? applyTaxText(node.label, query, pick, keep) : node.label;
-      const value = node.unit === '%' || node.unit === 'percent' ? String(pick.rate) : applyTaxText(node.value, query, pick, keep);
+      const value = componentRate(node) ? node.value : node.unit === '%' || node.unit === 'percent' ? String(pick.rate) : applyTaxText(node.value, query, pick, keep);
       return caption === node.caption && label === node.label && value === node.value ? node : { ...node, caption, label, value };
     }
     case 'tile': {
-      const value = node.value ? applyTaxText(node.value, query, pick, keep) : node.value;
+      const value = node.value && !componentRate(node) ? applyTaxText(node.value, query, pick, keep) : node.value;
       const sub = node.sub ? applyTaxText(node.sub, query, pick, keep) : node.sub;
       const label = applyTaxText(node.label, query, pick, keep);
       return value === node.value && sub === node.sub && label === node.label ? node : { ...node, value, sub, label, source: node.source ?? pick.n };
     }
     case 'stat': {
+      if (componentRate(node)) return node;
       const label = applyTaxText(node.label, query, pick, keep);
       const value = node.unit === '%' || node.unit === 'percent' ? String(pick.rate) : applyTaxText(node.value, query, pick, keep);
       return label === node.label && value === node.value ? node : { ...node, label, value };
     }
     case 'keyvalue': {
       const items = node.items.map((item) => {
-        const value = applyTaxText(item.value, query, pick, keep);
+        const value = componentRate(item) ? item.value : applyTaxText(item.value, query, pick, keep);
         return value === item.value ? item : { ...item, value };
       });
       return items.every((item, index) => item === node.items[index]) ? node : { ...node, items };
@@ -1965,6 +1966,33 @@ function withoutBrokenSum(text: string, lead: number): string {
   return kept.join(' ').replace(/\s{2,}/g, ' ').trim();
 }
 
+const PART_LABEL = /\b(?:city|state|county|local|mctd|mta|metropolitan|surcharge|district|special|transit|municipal)\b/i;
+const WHOLE_LABEL = /\b(?:combined|total|overall|effective)\b/i;
+const hasRate = (text: string | undefined) => !!text && /\d(?:\.\d+)?\s*(?:%|percent\b)/i.test(text);
+/** The rows and tiles of a rate breakdown ("City 4.5% · State 4% · MCTD 0.375%"), filled before the tax passes run. */
+let breakdown = new WeakSet<object>();
+
+/**
+ * One part of the combined rate keeps its own figure. A row is a part only inside a breakdown: two or more sibling rows
+ * or tiles whose labels name a part. A lone "Harbor State sales tax" hero is the rate asked, not a part.
+ */
+function componentRate(row: object): boolean {
+  return breakdown.has(row);
+}
+
+function markBreakdown(node: CardNode): void {
+  const mark = (rows: { label?: string; value?: string }[]) => {
+    const parts = rows.filter((row) => row.label && PART_LABEL.test(row.label) && !WHOLE_LABEL.test(row.label) && hasRate(row.value));
+    if (parts.length >= 2) parts.forEach((row) => breakdown.add(row));
+  };
+  if (node.type === 'keyvalue') mark(node.items);
+  if ('children' in node && Array.isArray(node.children)) {
+    mark(node.children.filter((child): child is Extract<CardNode, { type: 'tile' | 'stat' }> => child.type === 'tile' || child.type === 'stat'));
+    node.children.forEach(markBreakdown);
+  }
+  if (node.type === 'tabs') node.tabs.forEach((tab) => tab.children.forEach(markBreakdown));
+}
+
 function withLeadRate(text: string, lead: number): string {
   if (!/(\d{1,2}(?:\.\d+)?)\s*(?:%|percent\b)/i.test(text)) return text;
   return text.replace(/(\d{1,2}(?:\.\d+)?)\s*(?:%|percent\b)/i, (raw) => (raw.includes('%') ? `${lead}%` : `${lead} percent`));
@@ -2016,16 +2044,16 @@ function alignTax(node: CardNode, lead: number): CardNode {
       return text === node.text ? node : { ...node, text };
     }
     case 'hero': {
-      const value = withLeadRate(node.value, lead);
+      const value = componentRate(node) ? node.value : withLeadRate(node.value, lead);
       const caption = node.caption ? withoutBrokenSum(node.caption, lead) : node.caption;
       return value === node.value && caption === node.caption ? node : { ...node, value, caption };
     }
     case 'stat': {
-      const value = withLeadRate(node.value, lead);
+      const value = componentRate(node) ? node.value : withLeadRate(node.value, lead);
       return value === node.value ? node : { ...node, value };
     }
     case 'tile': {
-      const value = node.value ? withLeadRate(node.value, lead) : node.value;
+      const value = node.value && !componentRate(node) ? withLeadRate(node.value, lead) : node.value;
       const sub = node.sub ? withoutBrokenSum(node.sub, lead) : node.sub;
       return value === node.value && sub === node.sub ? node : { ...node, value, sub };
     }
@@ -2572,6 +2600,8 @@ export function bindClaims(node: CardNode, sources: readonly ClaimSource[], quer
   if (!sources.length) return node;
   const aimed = retargetNode(node, sources, query);
   const tax = salesTax(query, sources);
+  breakdown = new WeakSet<object>();
+  if (tax) markBreakdown(aimed);
   const taxed = tax ? alignTax(applyTax(aimed, query, tax, ratesIn(sources.find((source) => source.n === tax.n))), tax.rate) : aimed;
   const lined = TAX_ASK.test(query) ? repairTaxNode(taxed, query, sources) : taxed;
   const fee = officialCharge(query, sources);
