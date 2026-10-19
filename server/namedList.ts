@@ -27,6 +27,33 @@ function titleWord(word: string): boolean {
   return /^[A-Z][a-z]/.test(word) || /^[A-Z][a-z]+(?:-[A-Z][a-z]+)+$/.test(word);
 }
 
+/** Small words inside one name ("Bank of America", "Sergio de Larrea"). "and" and "with" join two names. */
+const NAME_PARTICLE = new Set(['of', 'the', 'de', 'van', 'von', 'da', 'del', 'la', 'le', 'di', 'du', 'bin', 'al']);
+
+/** "A.J.", "C.J." and "Jr." belong to a name ("A.J. Dybantsa", "Jabari Smith Jr."). */
+const INITIALS = /^(?:[A-Z]\.){1,3}$|^[A-Z]\.?[A-Z]\.?$|^(?:Jr|Sr|II|III|IV)\.?$/;
+
+/**
+ * Words a source title or a page's navigation puts in capitals that are never part of a person's or product's name:
+ * "Teams Preseason Results", "Related Content How", "Rookies Make Their Preseason Debuts".
+ */
+const NOT_A_NAME = new Set([
+  'top', 'best', 'new', 'how', 'what', 'why', 'who', 'when', 'where', 'related', 'content', 'more', 'video', 'videos', 'watch',
+  'highlights', 'plays', 'play', 'scores', 'stats', 'results', 'rankings', 'ranking', 'power', 'teams', 'news', 'latest', 'live',
+  'official', 'site', 'action', 'trends', 'tracking', 'ahead', 'make', 'makes', 'their', 'debuts', 'debut', 'moments', 'full',
+  'craziest', 'golden', 'hoops', 'recap', 'recaps', 'preview', 'previews', 'schedule', 'standings', 'report', 'reports', 'guide',
+  'review', 'reviews', 'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october',
+  'november', 'december', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday', 'today', 'tonight',
+  'week', 'weekly', 'daily', 'nba', 'nfl', 'mlb', 'nhl', 'wnba', 'league', 'class', 'draft', 'season', 'game', 'games',
+]);
+
+/** A name a list can show: two to four words, none of them a heading or navigation word. */
+function personLike(name: string): boolean {
+  const words = name.split(/\s+/);
+  if (words.length < 2 || words.length > 4) return false;
+  return !words.some((word) => NOT_A_NAME.has(word.toLowerCase().replace(/[^a-z]/g, '')) || /['’]s$/.test(word));
+}
+
 /** Title-case names in the text that are not just the question's own words. */
 export function citedNames(query: string, texts: readonly string[]): string[] {
   const known = queryWords(query);
@@ -35,7 +62,8 @@ export function citedNames(query: string, texts: readonly string[]): string[] {
   const add = (name: string) => {
     const key = name.toLowerCase();
     if (seen.has(key)) return;
-    const words = key.split(/[^a-z0-9]+/).filter((word) => word.length >= 2 && !SMALL.has(word));
+    // "A.J. Dybantsa" is two words: an initial counts as one.
+    const words = key.split(/\s+/).map((word) => word.replace(/[^a-z0-9]/g, '')).filter((word) => word && !SMALL.has(word));
     if (words.length < 2) return;
     if (words.every((word) => known.has(word) || GENERIC.has(word))) return;
     seen.add(key);
@@ -47,17 +75,24 @@ export function citedNames(query: string, texts: readonly string[]): string[] {
     const flush = () => {
       const kept = run.map((word) => word.replace(/^[^A-Za-z]+|[^A-Za-z.'’-]+$/g, '')).filter(Boolean);
       const body = kept.filter((word) => !SMALL.has(word.toLowerCase()));
-      if (body.length >= 2 && body.some((word) => word.length >= 3)) add(body.join(' '));
+      if (body.length >= 2 && body.length <= 5 && body.some((word) => word.length >= 3)) add(body.join(' '));
       run = [];
     };
     for (const token of tokens) {
-      const word = token.replace(/^[^A-Za-z]+|[^A-Za-z'’-]+$/g, '');
+      const bare = token.replace(/^[^A-Za-z]+/, '');
+      const initial = INITIALS.test(bare.replace(/[,;:!?)"\]]+$/, ''));
+      const word = initial ? bare.replace(/[,;:!?)"\]]+$/, '').replace(/\.$/, '') : token.replace(/^[^A-Za-z]+|[^A-Za-z'’-]+$/g, '');
       if (!word) {
         flush();
         continue;
       }
-      if (titleWord(word) || (run.length && SMALL.has(word.toLowerCase()))) run.push(word);
-      else flush();
+      if (initial || titleWord(word) || (run.length && NAME_PARTICLE.has(word.toLowerCase()))) run.push(word);
+      else {
+        flush();
+        continue;
+      }
+      // "Peterson. Top 3 pick" and "Duren, Detroit": a sentence or list break ends the name.
+      if (!initial && /[.,;:!?)"]$/.test(token)) flush();
     }
     flush();
   }
@@ -72,28 +107,29 @@ export function nameSeekingQuery(question: string, suggested?: string): string {
   return `${base} names`.replace(/\s+/g, ' ').trim();
 }
 
-function plainCard(nodes: readonly CardNode[]): string {
+/** Every piece of text on the card, one field per entry, so a name never runs into the next field. */
+function plainCard(nodes: readonly CardNode[]): string[] {
   const parts: string[] = [];
-  const walk = (node: CardNode) => {
-    if (node.type === 'tile') parts.push(node.label, node.value ?? '', node.sub ?? '');
-    if (node.type === 'list') for (const item of node.items) parts.push(item.text, item.meta ?? '');
-    if (node.type === 'table') for (const row of node.rows) parts.push(...row);
-    if (node.type === 'heading' || node.type === 'text' || node.type === 'callout') parts.push(node.text);
-    if (node.type === 'profile') parts.push(node.name);
-    if ('children' in node && Array.isArray(node.children)) node.children.forEach(walk);
-    if (node.type === 'tabs') for (const tab of node.tabs) tab.children.forEach(walk);
+  const skip = new Set(['type', 'icon', 'tone', 'accent', 'imageSrc', 'imageQuery', 'style', 'kind', 'gap', 'shape', 'url', 'href']);
+  const walk = (value: unknown) => {
+    if (typeof value === 'string') {
+      if (value.trim() && !/^https?:/.test(value)) parts.push(value);
+      return;
+    }
+    if (Array.isArray(value)) return value.forEach(walk);
+    if (value && typeof value === 'object') for (const [key, inner] of Object.entries(value)) if (!skip.has(key)) walk(inner);
   };
   nodes.forEach(walk);
-  return parts.filter(Boolean).join('. ');
+  return parts;
 }
 
-function sourceTexts(results: readonly { title?: string; snippet?: string }[]): string[] {
-  return results.map((row) => `${row.title ?? ''}. ${row.snippet ?? ''}`);
+function sourceTexts(results: readonly { title?: string; snippet?: string; content?: string }[]): string[] {
+  return results.map((row) => `${row.title ?? ''}. ${row.snippet ?? ''} ${row.content ?? ''}`);
 }
 
 /** A name on the card that a source also states. The question's own words do not count. */
-export function cardCitesName(query: string, nodes: readonly CardNode[], results: readonly { title?: string; snippet?: string }[]): boolean {
-  const onCard = citedNames(query, [plainCard(nodes)]);
+export function cardCitesName(query: string, nodes: readonly CardNode[], results: readonly { title?: string; snippet?: string; content?: string }[]): boolean {
+  const onCard = citedNames(query, plainCard(nodes));
   if (!onCard.length) return false;
   const hay = sourceTexts(results).join('\n').toLowerCase();
   return onCard.some((name) => hay.includes(name.toLowerCase()));
@@ -120,6 +156,7 @@ export function namedPicks(query: string, results: readonly { title?: string; sn
     const row = results[index]!;
     const text = `${row.title ?? ''}. ${row.snippet ?? ''}`;
     for (const name of citedNames(query, [text])) {
+      if (!personLike(name)) continue;
       const key = name.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);

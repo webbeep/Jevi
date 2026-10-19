@@ -45,3 +45,29 @@ test('when the sources name nobody, the card says so', () => {
   assert.equal(node.type, 'callout');
   assert.equal(node.type === 'callout' ? node.text : '', 'The sources named none.');
 });
+
+test('names in a hero and in numbered tiles count, and a field never runs into the next one', () => {
+  const ask = '2026 NBA preseason standouts';
+  const card: CardNode[] = [
+    { type: 'hero', value: 'A.J. Dybantsa', label: 'Top preseason standout', caption: 'Washington rookie headlined the 2026 class [3]' },
+    { type: 'stack', children: [
+      { type: 'tile', label: '2. Darryn Peterson', value: 'Top 3 pick', sub: 'Utah Jazz' },
+      { type: 'tile', label: 'Jalen Duren', value: 'Standout', sub: 'Detroit Pistons' },
+    ] },
+  ];
+  const results = [{ title: 'Rookies make their preseason debuts', snippet: "Washington's A.J. Dybantsa, Utah's Darryn Peterson and Memphis' Cameron Boozer debuted." }];
+  assert.equal(cardCitesName(ask, card, results), true);
+  assert.deepEqual(citedNames(ask, ['A.J. Dybantsa']), ['A.J Dybantsa']);
+});
+
+test('a source title or page navigation is not a name to list', () => {
+  const ask = 'NBA preseason standouts 2026';
+  const results = [
+    { title: 'Teams Preseason Results | Stats', snippet: 'Teams Preseason Results | Stats.' },
+    { title: 'Preseason Power Rankings', snippet: 'Preseason Power Rankings How every team looks. Tari Eason and Amen Thompson stood out.' },
+    { title: 'Scores Stats', snippet: 'The official site of the NBA. Related Content How to watch NBA.' },
+  ];
+  const node = namedListNode(ask, results);
+  assert.equal(node.type, 'list');
+  assert.deepEqual(node.type === 'list' ? node.items.map((item) => item.text) : [], ['Tari Eason', 'Amen Thompson']);
+});
