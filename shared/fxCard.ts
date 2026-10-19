@@ -169,3 +169,17 @@ export function withinQuote(node: CardNode, quote: LiveQuoteFacts): CardNode | u
       return node;
   }
 }
+
+/**
+ * The day and 52-week ranges a live quote row states ("day range 81,942.16–82,682.14; 52-week range …"), as tiles
+ * cited to that row. Undefined when the row states neither.
+ */
+export function quoteRanges(text: string, ref: number, currency?: string): CardNode | undefined {
+  const range = (label: RegExp) => text.match(new RegExp(`${label.source}\\s+(\\d[\\d,]*(?:\\.\\d+)?\\s?[–-]\\s?\\d[\\d,]*(?:\\.\\d+)?)`, 'i'))?.[1];
+  const day = range(/\bday(?:'s)? range/);
+  const year = range(/\b52-week range/);
+  const tiles: CardNode[] = [];
+  if (day) tiles.push({ type: 'tile', label: 'Day range', value: day, sub: currency, icon: 'arrow-up-down', source: ref });
+  if (year) tiles.push({ type: 'tile', label: '52-week range', value: year, sub: currency, icon: 'calendar-range', source: ref });
+  return tiles.length ? { type: 'grid', cols: 2, children: tiles } : undefined;
+}

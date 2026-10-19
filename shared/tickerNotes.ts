@@ -26,6 +26,8 @@ export function withoutCharts(node: CardNode | undefined): CardNode | undefined 
   if (!node || node.type === 'chart') return undefined;
   if ((node.type === 'callout' || node.type === 'text') && saysChartMissing(`${node.type === 'callout' ? node.title ?? '' : ''} ${node.text}`)) return undefined;
   if (node.type === 'hero' && deniesPrice(`${node.label ?? ''} ${node.value} ${node.caption ?? ''}`)) return undefined;
+  // "No live price available" as a callout's title: the whole note is that denial.
+  if (node.type === 'callout' && deniesPrice(node.title)) return undefined;
   if ((node.type === 'callout' || node.type === 'text') && deniesPrice(node.text)) {
     const text = withoutPriceDenial(node.text);
     return text ? { ...node, text } : undefined;

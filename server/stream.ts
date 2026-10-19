@@ -75,7 +75,7 @@ import { calculationAnswer, isCalculationAsk, leadTaxedTotal, rateOnAmount, spli
 import { acceptProductPhoto, appendAskedFact, comparisonRepair, comparisonTitle, dropShownDenials, keepComparedProducts, mentionsSide, missingSideNode, nameForms, placeSidePhotos, restoreSideTiles, stickerPrice } from './compareAnswer';
 import { cardGaps, citeForGap, gapSearchQuery, settleGap, type PieceGap } from './gapFill';
 import { factsElsewhere, quoteCorpus, withinSources, withoutRepeatedFacts, withoutShells, withVerbatimQuotes } from '../shared/shells';
-import { fxQuote, feedPcts, liveQuoteFacts, withinFx, withinQuote } from '../shared/fxCard';
+import { fxQuote, feedPcts, liveQuoteFacts, quoteRanges, withinFx, withinQuote } from '../shared/fxCard';
 import { asksForHigh, forecastHigh, withinForecast } from '../shared/weatherCard';
 import { withSourcedMonths } from '../shared/monthClaims';
 import { isBlankLayout } from '../shared/liveBody';
@@ -937,6 +937,20 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   };
   // A review fix or a gap search sends its own node after the collapsed card. Publish the
   // fee rows again so that send is not the one left on screen.
+  // A live quote card shows the day and 52-week ranges its feed states. The model is asked to, and often skips
+  // them for a note instead; they go under the first component, so what is already on screen above them stays put.
+  const settleQuoteRanges = () => {
+    if (!live || !feedRow) return;
+    const indexes = [...shown.keys()].sort((a, b) => a - b);
+    if (/day range|52-week/i.test(indexes.map((index) => JSON.stringify(shown.get(index))).join(' '))) return;
+    const ticker = shownTicker?.type === 'ticker' ? shownTicker : undefined;
+    const grid = quoteRanges(`${feedRow.snippet ?? ''}`, designReq.search.results.indexOf(feedRow) + 1, ticker?.currency);
+    if (!grid) return;
+    const lead = indexes.find((index) => !['citations', 'actions', 'ticker', 'choices'].includes(shown.get(index)!.type));
+    if (lead === undefined) return;
+    const node = shown.get(lead)!;
+    publish(lead, isBlankLayout(node) ? grid : { type: 'stack', direction: 'col', gap: 'md', children: [node, grid] });
+  };
   const republishFees = () => {
     const question = questionOf();
     const indexes = [...shown.keys()].sort((a, b) => a - b);
@@ -952,6 +966,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   alignRates();
   leadTotal();
   restoreKeptProducts();
+  settleQuoteRanges();
   const askedNames = designReq.followup?.question && wantsNamedList(designReq.followup.question)
     ? designReq.followup.question
     : designReq.query;

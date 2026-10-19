@@ -87,3 +87,12 @@ test('a question for the high leads with the official high, not another page\'s 
   assert.equal(asked?.type === 'hero' ? `${asked.value} ${asked.label}` : '', '65 High Monday');
   assert.equal(withinForecast(hero, forecast!, asksForHigh('weather in nyc right now')), hero);
 });
+
+test('a live quote row\'s ranges become tiles cited to it, and a callout titled as a missing price goes', async () => {
+  const { quoteRanges } = await import('../shared/fxCard.ts');
+  const grid = quoteRanges('Live price at 2026-10-19 04:00 UTC: 82,432.99 USD; +0.72% over the last day; day range 81,942.16–82,682.14; 52-week range 57,747.77–116,273.31.', 1, 'USD');
+  assert.deepEqual(grid?.type === 'grid' ? grid.children.map((tile) => (tile.type === 'tile' ? [tile.label, tile.value, tile.source] : [])) : [], [['Day range', '81,942.16–82,682.14', 1], ['52-week range', '57,747.77–116,273.31', 1]]);
+  assert.equal(quoteRanges('Live price 82,432.99 USD.', 1), undefined);
+  const { withoutCharts } = await import('../shared/tickerNotes.ts');
+  assert.equal(withoutCharts({ type: 'callout', title: 'No live price available', text: 'Check a live market source for the real-time price.' }), undefined);
+});
