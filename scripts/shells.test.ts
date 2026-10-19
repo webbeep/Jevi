@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { withoutShells } from '../shared/shells.ts';
+import { factsElsewhere, withoutRepeatedFacts, withoutShells } from '../shared/shells.ts';
 import { GAP_MARK } from '../shared/gap.ts';
 
 test('a table row with no values left is dropped, and a single missing cell reads as a dash', () => {
@@ -103,4 +103,24 @@ test('a row the question asks about keeps its hole, and one long value is not re
   const quote = '"Free sugars include monosaccharides and disaccharides added to foods" [1]';
   const grid = withoutShells({ type: 'grid', cols: 2, children: [{ type: 'tile', label: 'Free sugars', value: quote }, { type: 'tile', label: 'Not counted', value: quote }, { type: 'tile', label: 'Limit', value: '<10% of energy' }] });
   assert.deepEqual(grid?.type === 'grid' ? grid.children.map((tile) => (tile.type === 'tile' ? tile.label : '')) : [], ['Free sugars', 'Limit']);
+});
+
+test('one long quote on several rows is shown once, and not again beside the slot that already shows it', () => {
+  const quote = '"WHO guideline recommends adults and children reduce their daily intake of free sugars to less than 10% of their total energy intake."';
+  const rows = {
+    type: 'keyvalue' as const,
+    items: [
+      { label: 'Free sugars', value: quote },
+      { label: 'Not counted', value: quote },
+      { label: 'Daily limit', value: '<10% of energy' },
+    ],
+  };
+  const once = withoutShells(rows);
+  assert.equal(once?.type === 'keyvalue' ? once.items.length : 0, 2);
+  const shown = new Map([[0, { type: 'text' as const, text: quote }]]);
+  const kept = withoutRepeatedFacts(rows, factsElsewhere(shown, 1));
+  assert.deepEqual(kept?.type === 'keyvalue' ? kept.items.map((item) => item.label) : [], ['Daily limit']);
+  // A short figure shown elsewhere under another label is a different fact and stays.
+  const figures = new Map([[0, { type: 'text' as const, text: 'Keep it under 10%.' }]]);
+  assert.equal(withoutRepeatedFacts(rows, factsElsewhere(figures, 1)), rows);
 });

@@ -55,7 +55,16 @@ export function withoutShells(node: CardNode, asked = ''): CardNode | undefined 
       return kept && !hollow(kept) ? { ...node, text: kept } : undefined;
     }
     case 'keyvalue': {
-      const items = node.items.filter((item) => !saysNothing(item.value));
+      // One long quote on several rows ("Free sugars", "Not counted", "Hidden sugars") is one fact: the first row keeps it.
+      const seenLong = new Set<string>();
+      const items = node.items.filter((item) => {
+        if (saysNothing(item.value)) return false;
+        const key = longKey(item.value);
+        if (!key) return true;
+        if (seenLong.has(key)) return false;
+        seenLong.add(key);
+        return true;
+      });
       if (items.length === node.items.length) return node;
       return items.length ? { ...node, items } : undefined;
     }
@@ -108,9 +117,18 @@ export function withinSources(node: CardNode, count: number): CardNode {
   return fixed === json ? node : (JSON.parse(fixed) as CardNode);
 }
 
+/** A value long enough to be a sentence or a quote, normalized; empty when it is a short figure or label. */
+function longKey(value: string | undefined): string {
+  const key = (value ?? '').replace(/\[\d+\]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  return key.length >= 40 ? key : '';
+}
+
 const factValue = (value: string) => value.replace(/\[\d+\]/g, '').toLowerCase().replace(/[^a-z0-9.$%€£]+/g, ' ').trim();
 const LABEL_STOP = new Set(['the', 'and', 'for', 'with', 'from', 'this', 'that', 'per', 'total', 'value']);
 const labelWords = (label: string) => label.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 3 && !LABEL_STOP.has(word));
+
+/** Prefix of a long text another slot shows; matched by containment, not by label. */
+const LONG = 'long|';
 
 /** The keys one fact is known by: its value with each word of its label. "Joined Microsoft 1992" and "Joined 1992" share one. */
 function factKeys(label: string, value: string): string[] {
@@ -122,8 +140,18 @@ function factKeys(label: string, value: string): string[] {
 
 /** Every fact key a component shows. */
 function keysOf(node: CardNode, out: Set<string>): Set<string> {
+  const long = (text: string | undefined) => {
+    const key = longKey(text);
+    if (key) out.add(`${LONG}${key}`);
+  };
   if (node.type === 'tile' || node.type === 'stat') factKeys(node.label, node.value ?? '').forEach((key) => out.add(key));
-  if (node.type === 'keyvalue') node.items.forEach((item) => factKeys(item.label, item.value).forEach((key) => out.add(key)));
+  if (node.type === 'tile') long(node.value);
+  if (node.type === 'keyvalue') node.items.forEach((item) => {
+    factKeys(item.label, item.value).forEach((key) => out.add(key));
+    long(item.value);
+  });
+  if (node.type === 'text' || node.type === 'callout' || node.type === 'quote') long(node.text);
+  if (node.type === 'hero') long(node.caption);
   if ('children' in node && Array.isArray(node.children)) node.children.forEach((child) => keysOf(child, out));
   return out;
 }
@@ -134,7 +162,13 @@ function keysOf(node: CardNode, out: Set<string>): Set<string> {
  * slot republishing its own fact keeps it. Two products with the same price are different facts: their labels differ.
  */
 export function withoutRepeatedFacts(node: CardNode, elsewhere: ReadonlySet<string>): CardNode | undefined {
-  const repeated = (label: string, value: string) => factKeys(label, value).some((key) => elsewhere.has(key));
+  const shownLong = [...elsewhere].filter((key) => key.startsWith(LONG)).map((key) => key.slice(LONG.length));
+  // A long quote another slot already shows (in its text or caption) is not shown again as a row's value.
+  const repeatsLong = (value: string) => {
+    const key = longKey(value);
+    return !!key && shownLong.some((shown) => shown.includes(key));
+  };
+  const repeated = (label: string, value: string) => factKeys(label, value).some((key) => elsewhere.has(key)) || repeatsLong(value);
   switch (node.type) {
     case 'stack':
     case 'grid':
