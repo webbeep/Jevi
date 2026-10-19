@@ -222,8 +222,10 @@ export function followSearchPlan(input: { title?: string; question: string; quer
     return { query, fanout: [], subject: affirmed };
   }
   // "When did it open?" on a card whose lead settles one side ("No — One WTC is still the tallest") is about that side.
+  // A verdict that affirms one side ("No — One World Trade Center is taller") settles it even when the lead also names the other.
+  const settled = affirmed ? sides.filter((side) => sideNamed(affirmed, side)) : [];
   const pointed = sides.length >= 2 && SINGULAR_POINTER.test(asked) && !sides.some((side) => sideNamed(asked, side))
-    ? sides.filter((side) => sideNamed(input.lead ?? '', side) && !rejectedIn(input.lead ?? '', side))
+    ? settled.length === 1 ? settled : sides.filter((side) => sideNamed(input.lead ?? '', side) && !rejectedIn(input.lead ?? '', side))
     : [];
   if (pointed.length === 1) {
     // The card's own spelled-out name ("One World Trade Center") searches better than the title's short side ("One WTC").

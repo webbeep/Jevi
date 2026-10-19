@@ -264,3 +264,15 @@ test('a pushback that proposes another name is a claim to check', () => {
   assert.equal(challengedWith('What about the Empire State Building?'), undefined);
   assert.equal(challengedWith("That's wrong"), undefined);
 });
+
+test('"it" after a verdict that affirms one of two compared sides is that side', () => {
+  const plan = followSearchPlan({
+    title: 'Empire State Building vs One WTC',
+    question: 'When did it open?',
+    queries: ['Empire State Building One World Trade Center opening dates'],
+    subject: 'Empire State Building vs One WTC',
+    lead: 'No — One World Trade Center is taller. Empire State Building is 1,454 ft with antenna',
+  });
+  assert.equal(plan.subject, 'One World Trade Center');
+  assert.match(plan.query, /^When did One World Trade Center open$/);
+});

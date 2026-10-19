@@ -2198,7 +2198,7 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
     // which is right, rather than profiling the name they proposed.
     const claimed = onScreen ? challengedWith(req.question) : undefined;
     const lock = claimed && onScreen && !sideNamed(cardLead(onScreen), claimed)
-      ? `The person disputes the card on screen ("${onScreen.title}": ${cardLead(onScreen).slice(0, 200)}) and proposes ${claimed}. Check their claim against the sources. Lead with a yes or no that names which one is right, then the figures for both.`
+      ? `The person disputes the card on screen ("${onScreen.title}": ${cardLead(onScreen).slice(0, 200)}) and proposes ${claimed}. Check their claim against the sources. Lead with a yes or no that names which one is right, then the figure that settles it.`
       : planned?.added
       ? `${planned.added} is its own object. Use only a price, photo, spec, or citation from a source that names it. Do not copy those from another object.`
       : subject
