@@ -834,6 +834,9 @@ export function salesTax(query: string, sources: readonly ClaimSource[]): TaxPic
       const forBelow = /\b(under|below|less than|exempt)\b/i.test(sentence);
       const rates = combined && percents.length > 1 ? [Math.max(...percents)] : percents;
       for (const rate of rates) {
+        // A fraction of a percent is a surcharge or a district add-on (NYC's 0.375% MCTD), never the sales tax a
+        // purchase pays, unless the question asks about that surcharge.
+        if (rate < 1 && !/\b(?:surcharge|mctd|district|add-?on)\b/i.test(query)) continue;
         let score = 0;
         if (namesPlace) score += 4;
         // A commercial combined rate does not outrank a figure the official page states.

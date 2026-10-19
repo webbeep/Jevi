@@ -990,3 +990,13 @@ test('a fee tile keeps its own percent under the label', async () => {
   const bound = bindClaims(tile, sources as never, 'What would I pay with sales tax in New York City?');
   assert.equal(bound.type === 'tile' ? bound.sub : '', '1.5% of retail [1]');
 });
+
+test('a surcharge under one percent is never the sales tax a purchase pays', async () => {
+  const { salesTax } = await import('../server/claims.ts');
+  const sources = [
+    { n: 1, domain: 'www.tax.ny.gov', text: 'Metropolitan Commuter Transportation District. New York City: the MCTD surcharge rate is 0.375%.' },
+    { n: 2, domain: 'www.avalara.com', text: 'The combined sales tax rate in New York City is 8.875%.' },
+  ];
+  assert.equal(salesTax('What would I pay with sales tax in New York City?', sources as never)?.rate, 8.875);
+  assert.equal(salesTax('What is the MCTD surcharge in New York City sales tax?', sources as never)?.rate, 0.375);
+});
