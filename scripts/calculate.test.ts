@@ -304,3 +304,13 @@ test('the test deployment counts searches in its own daily bucket', async () => 
   assert.equal(capFor({} as never, 'serper', 'test'), 2000);
   assert.equal(capFor({} as never, 'exa', 'test'), 0);
 });
+
+test('a combined rate kept as a stat with its unit apart is the rate, not a surcharge in the text', async () => {
+  const { cardPriceAndTax } = await import('../server/calculate.ts');
+  const nodes: CardNode[] = [
+    { type: 'hero', value: '$499.99', label: 'List price' },
+    { type: 'stat', label: 'NYC combined rate', value: '8.875', unit: '%' },
+    { type: 'text', text: 'The rate includes a 0.375% MCTD surcharge.' },
+  ];
+  assert.deepEqual(cardPriceAndTax(nodes), { price: 499.99, rate: 8.875, total: undefined });
+});

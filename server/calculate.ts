@@ -827,11 +827,12 @@ function labeledFigures(nodes: readonly CardNode[]): { label: string; value: str
   const out: { label: string; value: string }[] = [];
   const walk = (node: CardNode) => {
     switch (node.type) {
+      // A stat or hero keeps its unit apart ("8.875" with unit "%"): read together, or the rate is missed.
       case 'hero':
-        out.push({ label: `${node.label ?? ''} ${node.caption ?? ''}`, value: node.value });
+        out.push({ label: `${node.label ?? ''} ${node.caption ?? ''}`, value: `${node.value}${node.unit ?? ''}` });
         return;
       case 'stat':
-        out.push({ label: node.label, value: node.value });
+        out.push({ label: node.label, value: `${node.value}${node.unit ?? ''}` });
         return;
       case 'tile':
         out.push({ label: `${node.label} ${node.sub ?? ''}`, value: node.value ?? '' });
@@ -881,11 +882,14 @@ export function cardPriceAndTax(nodes: readonly CardNode[]): { price?: number; r
     ?? figures.find((f) => !/\btax|total|fee|split|each|%/i.test(`${f.label} ${f.value}`) && dollarsIn(f.value) !== undefined);
   // "NYC combined sales tax 8.875%" and "Combined NYC rate 8.875%" are both the rate. Of several, the most precise
   // wins ("8.875%" over "almost 9%"), then the largest: the combined rate, not its 0.375% surcharge.
-  const rates = figures
-    .filter((f) => /\b(?:tax|rate)\b/i.test(f.label) || /\btax\b/i.test(f.value))
+  const rateRows = figures.filter((f) => /\b(?:tax|rate)\b/i.test(f.label) || /\btax\b/i.test(f.value));
+  const ratesOf = (rows: typeof figures) => rows
     .flatMap((f) => [...`${f.value} ${f.label}`.matchAll(/(\d{1,2}(?:\.\d+)?)\s*%/g)].map((m) => m[1]!))
     .filter((raw) => Number(raw) > 0 && Number(raw) < 15)
     .sort((a, b) => (b.split('.')[1]?.length ?? 0) - (a.split('.')[1]?.length ?? 0) || Number(b) - Number(a));
+  // A rate the card labels combined or total is the rate; a part ("MCTD surcharge 0.375%") never stands in for it.
+  const combined = ratesOf(rateRows.filter((f) => /\b(?:combined|total|overall)\b/i.test(f.label)));
+  const rates = combined.length ? combined : ratesOf(rateRows);
   return { price: price && dollarsIn(price.value), rate: rates[0] ? Number(rates[0]) : undefined, total: total && dollarsIn(total.value) };
 }
 
