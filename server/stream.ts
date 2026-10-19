@@ -95,7 +95,7 @@ import { nwsForecastRow } from './weatherService';
 import { brandPriceProbe, probeHost } from './brandPrice';
 import { cleanSideName } from '../shared/objects';
 import { cardCitesName, citedNames, nameSeekingQuery, namedListNode, wantsNamedList } from './namedList';
-import { addedComparison, fallbackQuery, followSearchPlan, judgeSources, judgeTurn } from './turnJudge';
+import { addedComparison, challengedWith, fallbackQuery, followSearchPlan, judgeSources, judgeTurn, sideNamed } from './turnJudge';
 import { deniesPrice, findTicker } from '../shared/tickerNotes';
 import { splitPeople } from './peopleSplit';
 import { personSteer, pronounFollow, roleFollow, threadPerson, topicOnly, withoutChosen } from './personSteer';
@@ -2194,7 +2194,12 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
         ? { query: decision.queries[0] ?? req.question, fanout: decision.queries.slice(1) }
         : followSearchPlan({ title: onScreen?.title, question: req.question, queries: decision.queries, subject: decision.subject, lead: onScreen ? cardLead(onScreen) : '' });
     const subject = planned?.subject ?? decision.subject;
-    const lock = planned?.added
+    // "That's wrong, it's the Empire State Building, right?" disputes the card: the answer checks that claim and says
+    // which is right, rather than profiling the name they proposed.
+    const claimed = onScreen ? challengedWith(req.question) : undefined;
+    const lock = claimed && onScreen && !sideNamed(cardLead(onScreen), claimed)
+      ? `The person disputes the card on screen ("${onScreen.title}": ${cardLead(onScreen).slice(0, 200)}) and proposes ${claimed}. Check their claim against the sources. Lead with a yes or no that names which one is right, then the figures for both.`
+      : planned?.added
       ? `${planned.added} is its own object. Use only a price, photo, spec, or citation from a source that names it. Do not copy those from another object.`
       : subject
         ? `This turn is about ${cleanSideName(subject)}. Answer the new question about that subject. A label is the object name, not the question.`

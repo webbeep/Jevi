@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { addedComparison, fallbackQuery, followSearchPlan, parseDecision, parseSourceDecision, placeOnScreen } from '../server/turnJudge.ts';
+import { addedComparison, challengedWith, fallbackQuery, followSearchPlan, parseDecision, parseSourceDecision, placeOnScreen } from '../server/turnJudge.ts';
 
 test('a follow-up decision is a search, an answer, or a calculation', () => {
   assert.deepEqual(parseDecision({
@@ -254,4 +254,13 @@ test('"it" after a card that says the guess is "tall, but not the tallest" is th
     lead: '1,454 ft Total height with antenna The Empire State Building is tall, but not the tallest in New York City. One World Trade Center reaches 1,776 ft.',
   });
   assert.match(plan.query, /One World Trade Center/);
+});
+
+test('a pushback that proposes another name is a claim to check', () => {
+  assert.equal(challengedWith("That's wrong, it's the Empire State Building, right?"), 'Empire State Building');
+  assert.equal(challengedWith('Are you sure? I thought it was Mount Kilimanjaro'), 'Mount Kilimanjaro');
+  assert.equal(challengedWith("Isn't it Canberra?"), 'Canberra');
+  assert.equal(challengedWith('When did it open?'), undefined);
+  assert.equal(challengedWith('What about the Empire State Building?'), undefined);
+  assert.equal(challengedWith("That's wrong"), undefined);
 });

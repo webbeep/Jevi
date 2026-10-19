@@ -188,6 +188,22 @@ export function rejectionAffirms(lead: string): string | undefined {
   return affirmed?.name;
 }
 
+const PUSHBACK = /^(?:no\b|nope\b|wrong\b|that(?:'s| is| was)\s+(?:wrong|not right|incorrect)|actually\b|are you sure\b|i thought\b|isn['’]t it\b|wasn['’]t it\b|shouldn['’]t it be\b)|,\s*(?:right|correct|no)\s*\?\s*$/i;
+
+/**
+ * The name the person proposes when they dispute the card: "That's wrong, it's the Empire State Building, right?" →
+ * "Empire State Building". Their turn is a claim to check against the card, not a new subject to profile.
+ */
+export function challengedWith(question: string): string | undefined {
+  const asked = question.replace(/\s+/g, ' ').trim();
+  if (!PUSHBACK.test(asked)) return undefined;
+  const body = asked.replace(/^[A-Za-z]+['’]?[a-z]*/, (word) => ' '.repeat(word.length));
+  const names = [...body.matchAll(/\b[A-Z0-9][\w.'’&-]*(?:\s+(?:of\s+|the\s+|de\s+)?[A-Z0-9][\w.'’&-]*)*/g)]
+    .map((match) => match[0].trim())
+    .filter((name) => !/^(?:I|It|It['’]s|That|This|Isn['’]t|Is|Are|No|Yes|Right|Correct)$/.test(name));
+  return names[0];
+}
+
 /** The lead names this side only to reject it ("Empire State Building is not the tallest"). */
 function rejectedIn(lead: string, side: string): boolean {
   const name = side.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
