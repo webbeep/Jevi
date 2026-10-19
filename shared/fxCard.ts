@@ -92,7 +92,7 @@ export function liveQuoteFacts(ticker: CardNode | undefined): LiveQuoteFacts | u
 
 /** Words that mark a figure as another time or another quantity, not the price right now. */
 const HISTORY = /\b(?:low|high|range|close[ds]?|closing|open(?:ed)?|week|weeks|month|months|year|years|52|ago|since|target|forecast|record|all-time|ath|peak|earlier|previous|prior|ipo|q[1-4]|quarter|average|support|resistance|cap|volume|revenue|earnings|eps|guidance|dividend|yield)\b/i;
-const DAY_MOVE = /\b(?:today|24h|24-hour|day|session|intraday|now|currently|this morning|this afternoon)\b/i;
+const DAY_MOVE = /\b(?:today|24h|24-hour|24 hours|day|session|intraday|now|currently|this morning|this afternoon)\b/i;
 
 const moneyFigures = (text: string) => [...text.replace(/\[\d+\]/g, ' ').matchAll(/[$€£¥]\s?(\d[\d,]*(?:\.\d+)?)\s*(k|K|m|M|b|B)?\b/g)]
   .filter((match) => !match[2])
@@ -103,6 +103,16 @@ const moneyFigures = (text: string) => [...text.replace(/\[\d+\]/g, ' ').matchAl
  * $82,423, "Stock hit $14.19 … $13.58" beside $8.39) or a different change today ("+0.84%" beside +0.48%).
  */
 function contradictsQuote(text: string, quote: LiveQuoteFacts): boolean {
+  // "Below the 200-day average at 82,364" while the price is 82,581: a level the price is said to be under (or over)
+  // that the live price is not. This holds even for history words, since it is a claim about the price now.
+  const level = text.replace(/\[\d+\]/g, ' ').match(/\b(below|under|above|over)\b[^.]{0,60}?(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+\.\d+)/i);
+  if (level) {
+    const value = Number(level[2]!.replace(/,/g, ''));
+    if (value > quote.price * 0.5 && value < quote.price * 2) {
+      const under = /^(?:below|under)$/i.test(level[1]!);
+      if ((under && quote.price > value) || (!under && quote.price < value)) return true;
+    }
+  }
   if (HISTORY.test(text)) return false;
   if (moneyFigures(text).some((m) => m > quote.price * 0.4 && m < quote.price * 2.5 && Math.abs(m - quote.price) / quote.price > 0.01)) return true;
   if (!DAY_MOVE.test(text)) return false;

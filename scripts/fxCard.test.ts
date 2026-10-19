@@ -35,3 +35,23 @@ test('a live-quote card drops a different price right now and a different change
   const why: CardNode = { type: 'list', items: [{ text: 'Shares fell 5.84% today after an analyst downgrade [4].' }] };
   assert.equal(withinQuote(why, rdw), why);
 });
+
+test('a 24-hour move and a level the price is not under are checked against the widget', async () => {
+  const { withinQuote } = await import('../shared/fxCard.ts');
+  const btc = { price: 82581, pct: 0.69 };
+  assert.equal(withinQuote({ type: 'text', text: 'BTC fell 0.2% over 24 hours [3].' }, btc), undefined);
+  assert.equal(withinQuote({ type: 'list', items: [{ text: 'Below the 200-day moving average at 82,364.04, which reads as a Sell [5].' }] }, btc), undefined);
+  const support: CardNode = { type: 'list', items: [{ text: 'Holding above the $80,000 support level [2].' }] };
+  assert.equal(withinQuote(support, btc), support);
+});
+
+test('a weather card keeps the official high for today and other days\' readings', async () => {
+  const { forecastHigh, withinForecast } = await import('../shared/weatherCard.ts');
+  const forecast = forecastHigh([{ engines: ['nws'], content: 'Official National Weather Service forecast.\nTonight: Mostly clear, with a low around 47.\nMonday: Sunny, with a high near 65.\nTuesday: Partly sunny, with a high near 65.' }]);
+  assert.deepEqual(forecast, { day: 'Monday', high: 65 });
+  assert.equal(withinForecast({ type: 'hero', value: '72', unit: '°F', label: 'High today', caption: 'Storms expected late Friday' }, forecast!), undefined);
+  const nws: CardNode = { type: 'hero', value: '65', unit: '°F', label: 'High today', caption: 'Sunny' };
+  assert.equal(withinForecast(nws, forecast!), nws);
+  const later: CardNode = { type: 'tile', label: 'Wednesday', value: '62°', sub: 'High' };
+  assert.equal(withinForecast(later, forecast!), later);
+});

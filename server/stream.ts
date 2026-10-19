@@ -76,6 +76,7 @@ import { acceptProductPhoto, appendAskedFact, comparisonRepair, comparisonTitle,
 import { cardGaps, citeForGap, gapSearchQuery, settleGap, type PieceGap } from './gapFill';
 import { factsElsewhere, quoteCorpus, withinSources, withoutRepeatedFacts, withoutShells, withVerbatimQuotes } from '../shared/shells';
 import { fxQuote, liveQuoteFacts, withinFx, withinQuote } from '../shared/fxCard';
+import { forecastHigh, withinForecast } from '../shared/weatherCard';
 import { unblendObjects } from './objectFacts';
 import { withFinishedSentences } from './polish';
 import { queryWithPlace, readerPlace, settleReadings } from './readings';
@@ -587,6 +588,8 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
    * a repeat of what is already on screen is not sent again.
    */
   // An exchange-rate card keeps to the pair and direction asked, at the live quote's rate.
+  // A local-weather card's high for today is the National Weather Service's when its forecast is a source.
+  const forecast = forecastHigh(designReq.search.results);
   // Quotations on the card are checked against the sources' own words, built once on first use.
   let quoteText: string | undefined;
   const quotes = () => (quoteText ??= quoteCorpus(designReq.search.results, designReq.pages));
@@ -600,7 +603,8 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   const publish: Publish = (index, raw) => {
     // A component whose figures were all removed is collapsed, not shown as an empty shell.
     const fitted = withinSources(raw, designReq.search.results.length + addedSources);
-    const agreed = fx ? withinFx(fitted, fx) : live ? withinQuote(fitted, live) : fitted;
+    const quoted0 = fx ? withinFx(fitted, fx) : live ? withinQuote(fitted, live) : fitted;
+    const agreed = quoted0 && forecast ? withinForecast(quoted0, forecast) : quoted0;
     const quoted = agreed ? withVerbatimQuotes(agreed, quotes()) : undefined;
     const tidy = withoutShells(quoted ?? { type: 'stack', children: [] });
     const node = (tidy && withoutRepeatedFacts(tidy, factsElsewhere(shown, index))) ?? { type: 'stack', children: [] };
