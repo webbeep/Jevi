@@ -208,8 +208,21 @@ async function jinaRead(url: string, signal: AbortSignal, key?: string): Promise
   return cleanMarkdown(await res.text(), 20000);
 }
 
-function bump(scope: AskScope | undefined, kind: 'jina' | 'keyless' | 'direct'): void {
-  if (scope) scope.ledger.pages[kind] += 1;
+/** Exa's copy of the page: read from Exa's crawler, so a site that turns away datacenter fetches still reads. */
+async function exaRead(url: string, signal: AbortSignal, key: string): Promise<string> {
+  const res = await fetch('https://api.exa.ai/contents', {
+    method: 'POST',
+    headers: { 'x-api-key': key, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ urls: [url], text: { maxCharacters: 20000 }, livecrawl: 'fallback' }),
+    signal,
+  });
+  if (!res.ok) throw new HttpStatusError(res.status, (await res.text().catch(() => '')).slice(0, 180));
+  const data = (await res.json()) as { results?: { text?: string }[] };
+  return cleanMarkdown(data.results?.[0]?.text ?? '', 20000);
+}
+
+function bump(scope: AskScope | undefined, kind: 'jina' | 'keyless' | 'exa' | 'direct'): void {
+  if (scope) scope.ledger.pages[kind] = (scope.ledger.pages[kind] ?? 0) + 1;
 }
 
 /**
@@ -256,6 +269,17 @@ async function readReadable(url: string, env: Env, signal: AbortSignal, images: 
       if (failure.dead) rememberDead('jina-keyless');
       if (JINA_TRIP.has(failure.reason)) await tripSkip(env, 'jina-keyless', failure.reason, scope?.waitUntil, JINA_SKIP_MS);
       scope?.ledger.fellThrough.push(`jina-keyless:${err instanceof Error && err.message === 'not enough text' ? 'short' : failure.reason}`);
+    }
+  }
+  // Both Jina readers are out (credit or quota): Exa's crawler reads before a direct fetch a site may turn away.
+  if (env.EXA_API_KEY && (straightToDirect || skipped('jina-keyless')) && !skipped('exa-read')) {
+    bump(scope, 'exa');
+    try {
+      return enough(await exaRead(url, signal, env.EXA_API_KEY));
+    } catch (err) {
+      const failure = failureOf(err);
+      if (JINA_TRIP.has(failure.reason)) await tripSkip(env, 'exa-read', failure.reason, scope?.waitUntil, JINA_SKIP_MS);
+      scope?.ledger.fellThrough.push(`exa-read:${err instanceof Error && err.message === 'not enough text' ? 'short' : failure.reason}`);
     }
   }
   bump(scope, 'direct');
