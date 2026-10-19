@@ -382,3 +382,12 @@ test('a price change tile is not the price a tax follow-up uses', () => {
   const now: CardNode[] = [{ type: 'tile', label: 'Console price', value: '$449.99' }, { type: 'tile', label: 'Tax rate', value: '8.875% combined' }];
   assert.match(JSON.stringify(leadTaxedTotal('What would I pay with sales tax in New York City?', now, { priorNodes: prior })), /\$544\.36/);
 });
+
+test('the price a card states is its lead figure, not a previous or resale price beside it', () => {
+  const card: CardNode[] = [
+    { type: 'tile', label: 'Previous MSRP', value: '$449.99', sub: 'Before Sept 1' },
+    { type: 'hero', value: '$499.99', label: 'Switch 2 US MSRP', caption: 'US, before tax [3]' },
+    { type: 'tile', label: 'Resale', value: '$425.00' },
+  ];
+  assert.equal(cardPriceAndTax(card).price, 499.99);
+});
