@@ -1755,7 +1755,9 @@ export function citedRows(card: AnswerCard, rows: readonly SearchResult[]): Sear
 }
 
 const THREAD_STOP = new Set(['what', 'when', 'where', 'which', 'with', 'would', 'does', 'much', 'many', 'more', 'than', 'from', 'that', 'this', 'their', 'about', 'price', 'cost', 'today', 'there', 'they', 'have', 'each', 'compare', 'versus']);
-const threadWords = (text: string) => new Set(text.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 4 && !THREAD_STOP.has(word)));
+// Three letters count: "Met", "NBA" and "IRA" name the thread as surely as "Museum" does.
+const threadWords = (text: string) => new Set(text.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 3 && !THREAD_STOP.has(word) && !SHORT_STOP.has(word)));
+const SHORT_STOP = new Set(['the', 'and', 'for', 'how', 'who', 'why', 'are', 'was', 'can', 'did', 'does', 'you', 'its', 'our', 'out', 'new', 'now', 'per', 'any', 'all', 'one', 'get', 'buy', 'pay', 'use', 'vs']);
 
 /** The follow-up search still names what the card on screen is about ("Nintendo Switch 2 with NYC sales tax"). */
 export function sameThread(query: string, title: string): boolean {
@@ -1955,11 +1957,14 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
       : subject
         ? `This turn is about ${cleanSideName(subject)}. Answer the new question about that subject. A label is the object name, not the question.`
         : '';
+    // The thread's own figures stand unless a newer dated source states otherwise: "visitor from Ohio" is not $25 from a
+    // 2022 article when the card on screen just said $30.
+    const thread = onScreen ? `The card on screen ("${onScreen.title}") says: ${cardLead(onScreen).slice(0, 300)}. Keep those figures for this subject unless a newer, dated source states a different one, and say which date it is from.` : '';
     if (decision.action === 'search' && planned) {
       scope.bound = `${subject}\n${req.question}`;
       send('rewrite', { query: planned.query });
       const carried = onScreen && sameThread(planned.query, onScreen.title) ? citedRows(onScreen, req.search?.results ?? []) : [];
-      await searchAndDesign(send, env, planned.query, 'any', [lock, context].filter(Boolean).join('\n') || undefined, started, scope, true, undefined, undefined, undefined, onScreen?.body, req.search?.images, planned.fanout, req.question, carried);
+      await searchAndDesign(send, env, planned.query, 'any', [lock, carried.length ? thread : '', context].filter(Boolean).join('\n') || undefined, started, scope, true, undefined, undefined, undefined, onScreen?.body, req.search?.images, planned.fanout, req.question, carried);
       return;
     }
     const plan = await planPromise;

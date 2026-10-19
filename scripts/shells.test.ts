@@ -55,3 +55,10 @@ test('a fact another region shows right now is not shown again, and same-price p
   const pair: CardNode = { type: 'grid', cols: 2, children: [{ type: 'tile', label: 'iPhone 17', value: '$799' }, { type: 'tile', label: 'Pixel 10', value: '$799' }] };
   assert.equal(withoutRepeatedFacts(pair, factsElsewhere(new Map(), 0)), pair);
 });
+
+test('beside priced tiles a tile with no figure and no picture goes; a row of names stays', () => {
+  const row: CardNode = { type: 'grid', cols: 2, children: [{ type: 'tile', label: 'Pro', sub: 'Per user/mo, monthly' }, { type: 'tile', label: 'Business+', value: '$18', sub: 'Per user/mo' }] };
+  assert.deepEqual(withoutShells(row), { type: 'grid', cols: 2, children: [{ type: 'tile', label: 'Business+', value: '$18', sub: 'Per user/mo' }] });
+  const names: CardNode = { type: 'grid', cols: 2, children: [{ type: 'tile', label: 'Fitbit Edge' }, { type: 'tile', label: 'Mi Band 10' }] };
+  assert.equal(withoutShells(names), names);
+});

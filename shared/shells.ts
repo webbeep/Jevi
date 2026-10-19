@@ -24,7 +24,12 @@ export function withoutShells(node: CardNode): CardNode | undefined {
     case 'grid':
     case 'section':
     case 'scroller': {
-      const children = node.children.map(withoutShells).filter((child): child is CardNode => !!child);
+      // Beside tiles that carry a figure, a tile with no figure and no picture is a hole ("Pro · per user/mo" with no price).
+      const valued = node.children.some((child) => child.type === 'tile' && !!child.value?.trim());
+      const children = node.children
+        .map(withoutShells)
+        .filter((child): child is CardNode => !!child)
+        .filter((child) => !(valued && child.type === 'tile' && !child.value?.trim() && !child.imageSrc && child.imageRef === undefined));
       if (children.length === node.children.length && children.every((child, i) => child === node.children[i])) return node;
       return children.length ? { ...node, children } : undefined;
     }

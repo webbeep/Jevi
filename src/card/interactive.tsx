@@ -142,8 +142,12 @@ function PriceFacts({ price, seats }: { price: Price | undefined; seats: number 
 
 /** Seat count and billing stay on this card. Nothing here calls the network. */
 export function Pricing({ node }: { node: Of<'pricing'> }) {
-  const [seats, setSeats] = useState(node.seats);
-  const [billing, setBilling] = useState<BillingBasis>(node.billing);
+  // A seat count only means something when a plan is priced per seat; a music or membership plan is one flat price.
+  const perSeat = node.plans.some((plan) => plan.prices.some((price) => price.unit === 'seat'));
+  // The billing toggle only shows when the plans are priced on both bases; otherwise "Annual" is a column of dashes.
+  const bases = new Set(node.plans.flatMap((plan) => plan.prices.map((price) => price.billing)));
+  const [seats, setSeats] = useState(perSeat ? node.seats : 1);
+  const [billing, setBilling] = useState<BillingBasis>(bases.has(node.billing) || !bases.size ? node.billing : [...bases][0]!);
   const min = node.min ?? 1;
   const max = node.max ?? Math.max(50, node.seats);
   const setClamped = (n: number) => setSeats(Math.min(max, Math.max(min, n)));
@@ -151,8 +155,8 @@ export function Pricing({ node }: { node: Of<'pricing'> }) {
     <div className="rounded-xl border bg-card p-3 sm:p-4">
       <div className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="text-xs font-medium text-muted-foreground">{node.label ?? 'Team size'}</span>
-          <ToggleGroup
+          <span className="text-xs font-medium text-muted-foreground">{node.label ?? (perSeat ? 'Team size' : 'Price')}</span>
+          {bases.size > 1 && <ToggleGroup
             type="single"
             variant="outline"
             size="sm"
@@ -164,9 +168,9 @@ export function Pricing({ node }: { node: Of<'pricing'> }) {
           >
             <ToggleGroupItem value="monthly" className="h-11 min-h-11 px-3 text-xs data-[state=on]:bg-foreground data-[state=on]:text-background">Monthly</ToggleGroupItem>
             <ToggleGroupItem value="annual" className="h-11 min-h-11 px-3 text-xs data-[state=on]:bg-foreground data-[state=on]:text-background">Annual</ToggleGroupItem>
-          </ToggleGroup>
+          </ToggleGroup>}
         </div>
-        <div className="flex items-center gap-2">
+        {perSeat && <div className="flex items-center gap-2">
           <Button type="button" variant="outline" size="icon-sm" className="size-11" aria-label="Fewer seats" onClick={() => setClamped(seats - 1)} disabled={seats <= min}>
             <Minus />
           </Button>
@@ -180,7 +184,7 @@ export function Pricing({ node }: { node: Of<'pricing'> }) {
           <Button type="button" variant="outline" size="icon-sm" className="size-11" aria-label="More seats" onClick={() => setClamped(seats + 1)} disabled={seats >= max}>
             <Plus />
           </Button>
-        </div>
+        </div>}
       </div>
       <ul className="mt-3 divide-y">
         {node.plans.map((plan, i) => {
@@ -195,7 +199,7 @@ export function Pricing({ node }: { node: Of<'pricing'> }) {
               </div>
               <div className="shrink-0 sm:text-right">
                 <div className="text-lg font-semibold tabular-nums tracking-[-0.03em]">{total == null ? '—' : `${formatMoney(total, price?.currency)}/mo`}</div>
-                <div className="text-[11px] text-muted-foreground">team total</div>
+                <div className="text-[11px] text-muted-foreground">{perSeat ? 'team total' : 'per month'}</div>
               </div>
             </li>
           );

@@ -683,3 +683,8 @@ test('a comparison that names no options lists every option in a table', async (
   const named = skeletonCard('iphone 17 vs pixel 10', 'compare');
   assert.equal(named.body[0]?.type, 'grid');
 });
+
+test('rent or buy is not a list of plans', async () => {
+  const { skeletonCard } = await import('../server/patterns.ts');
+  assert.notEqual(skeletonCard('is renting or buying a home cheaper in 2026', 'compare').body[0]?.type === 'slot' ? 'table' : 'grid', 'table');
+});

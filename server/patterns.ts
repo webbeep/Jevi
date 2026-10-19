@@ -98,10 +98,13 @@ export function compareCount(query: string): 2 | 3 | 4 {
 }
 
 /** Tiles for each side, then a table with one column per side plus the factor column. */
+/** A comparison across a set the question does not list: "Spotify Premium plan prices", "Costco membership tiers". */
+const SET_ASK = /\b(?:plans|tiers|options|memberships|subscriptions|packages|models|versions|editions|levels|cards|bundles)\b|\b(?:plan|tier|membership|subscription|package)\s+(?:prices|pricing|costs|types|levels)\b/i;
+
 function compareSkeleton(query: string): CardNode[] {
   // "Compare Spotify Premium plan prices" names no options: two tiles made the card pick two of four plans.
   // The options are whatever the sources list, so each gets a row.
-  if (query && compareSides(query).length < 2) {
+  if (query && compareSides(query).length < 2 && SET_ASK.test(query)) {
     return [
       slot('every option the sources list, one row each (not just two): first column the option, then its price and what it includes', 'table', { cols: 3, rows: 5 }),
       slot('verdict: which option fits whom', 'line'),

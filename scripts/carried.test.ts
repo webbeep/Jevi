@@ -20,3 +20,8 @@ test('a follow-up on the same subject keeps the card\'s sources, a new topic doe
   assert.equal(sameThread('What is photosynthesis', 'How mRNA Vaccines Work'), false);
   assert.equal(sameThread('Google AI News Today', 'AI News Today'), true);
 });
+
+test('a three-letter name keeps the thread', () => {
+  assert.equal(sameThread('NY State Met for a visitor from Ohio', 'Met Admission for New York Residents'), true);
+  assert.equal(sameThread('What is photosynthesis', 'How mRNA Vaccines Work'), false);
+});
