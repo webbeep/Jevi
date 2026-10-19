@@ -970,7 +970,11 @@ export function leadTaxedTotal(
   const own = cardPriceAndTax(nodes);
   // "What would I pay with sales tax in NYC?" under the $499.99 card: a new card that states only the rate still
   // prices the thing on the card before it, and a card that states only the price takes the official page's rate.
-  const price = own.price ?? (fallback.priorNodes ? cardPriceAndTax(fallback.priorNodes).price : undefined);
+  // A price the card before called the old one ("up from $449.99") is not the price now.
+  const prior = fallback.priorNodes ? cardPriceAndTax(fallback.priorNodes).price : undefined;
+  const price = own.price !== undefined && prior !== undefined && own.price !== prior && calledOld(own.price, fallback.priorNodes ?? [])
+    ? prior
+    : own.price ?? prior;
   const rate = own.rate ?? fallback.officialRate;
   const { total } = own;
   if (price === undefined || rate === undefined) return undefined;
@@ -995,6 +999,13 @@ export function leadTaxedTotal(
   const next = kept.map(swap);
   if (placed) return next;
   return kept.length ? [{ type: 'stack', direction: 'col', gap: 'md', children: [hero, kept[0]!] }, ...kept.slice(1)] : [hero];
+}
+
+/** The card names this amount as a past price: "Up from $449.99", "was $449.99", "Previous MSRP $449.99". */
+function calledOld(amount: number, nodes: readonly CardNode[]): boolean {
+  const text = JSON.stringify(nodes);
+  const figure = money(amount).replace('$', '\\$').replace('.', '\\.');
+  return new RegExp(`(?:up from|raised from|increased from|was|previous(?:ly)?|prior|old|before|from)[^"]{0,24}${figure}|(?:previous|prior|old|former)[^"]{0,30}"[^"]*"[^"]{0,20}${figure}`, 'i').test(text);
 }
 
 const TOTAL_DENIAL = /\b(?:don['’]t|do not|doesn['’]t|does not|can['’]t|cannot|no)\b[^.]{0,80}\b(?:tax(?:-inclusive)?|rate|total)\b|\b(?:tax|rate|total)\b[^.]{0,60}\b(?:not (?:stated|given|listed|found|in (?:the |these )?sources)|can['’]t be (?:confirmed|calculated))/i;

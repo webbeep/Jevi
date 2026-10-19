@@ -359,3 +359,16 @@ test('a split under a rate-only card takes the price from the card before it', (
   const split = splitShare({ question: 'If my brother and I split it, how much does each of us pay?', card: rateCard, earlier: [priceCard] });
   assert.match(JSON.stringify(split), /\$272\.18 each/);
 });
+
+test('a price the card before called the old one is not the price a tax follow-up uses', () => {
+  const ask = 'What would I pay with sales tax in New York City?';
+  const prior: CardNode[] = [{ type: 'hero', value: '$499.99', label: 'Switch 2 US price', caption: 'Up from $449.99 [3]' }];
+  const now: CardNode[] = [
+    { type: 'tile', label: 'Console MSRP', value: '$449.99' },
+    { type: 'tile', label: 'Tax rate', value: '8.875%', sub: 'Combined City and State' },
+  ];
+  assert.match(JSON.stringify(leadTaxedTotal(ask, now, { priorNodes: prior })), /\$544\.36/);
+  // A different price the card before never mentioned stays.
+  const other: CardNode[] = [{ type: 'hero', value: '$549.99', label: 'Bundle price' }, { type: 'tile', label: 'Tax rate', value: '8.875% combined' }];
+  assert.match(JSON.stringify(leadTaxedTotal(ask, other, { priorNodes: prior })), /\$598\.80/);
+});
