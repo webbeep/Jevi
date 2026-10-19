@@ -480,6 +480,22 @@ function comparisonTokens(query: string): Set<string> {
   return tokens;
 }
 
+/** The pages write this word as a name: capitalized (or with a digit) more often than not. */
+function writtenAsName(word: string, rows: readonly { title?: string; snippet?: string; url?: string }[]): boolean {
+  if (/\d/.test(word)) return true;
+  const key = word.toLowerCase();
+  let upper = 0;
+  let lower = 0;
+  for (const row of rows) {
+    for (const token of `${row.title ?? ''} ${row.snippet ?? ''}`.split(/[^A-Za-z0-9]+/)) {
+      if (token.toLowerCase() !== key) continue;
+      if (/^[A-Z]/.test(token)) upper++;
+      else lower++;
+    }
+  }
+  return upper > lower;
+}
+
 export function spellingQuery(query: string, rows: readonly { title?: string; snippet?: string; url?: string }[]): string {
   const words = query.trim().split(/\s+/);
   const kept = comparisonTokens(query);
@@ -491,6 +507,9 @@ export function spellingQuery(query: string, rows: readonly { title?: string; sn
     if (FUNCTION_WORD.has(low) || kept.has(low)) return word;
     const spell = nearOrgSpelling(low, rows);
     if (!spell || spell === low || isInflection(low, spell.toLowerCase()) || sameLetters(low, spell)) return word;
+    // A mistyped name is corrected to the name the pages write ("Nvdia" → "NVIDIA"). An everyday word one letter
+    // from "right" ("eight") is not a correction: the pages write it in lower case.
+    if (!writtenAsName(spell, rows)) return word;
     // A snippet often repeats the typed query. The title and the address are the page's own spelling.
     const typed = rows.some((row) => tokens(`${row.title ?? ''} ${row.url ?? ''}`).includes(low));
     if (typed) return word;

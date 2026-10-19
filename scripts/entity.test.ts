@@ -1499,3 +1499,10 @@ test('a scores, standings, ticker or news ask is not a person or a name at a wor
   for (const q of ['who is Northwind Tim', 'Northwind AI Sam', 'Tim from Blueflame AI', 'who is Tim from Blueflame']) assert.equal(nameWithWorkplace(q), true, q);
   assert.equal(isPersonAsk('Taylor Swift'), true);
 });
+
+test('an everyday word one letter from another is not a misspelling', () => {
+  const pages = [
+    { title: 'Nintendo Switch 2 - Nintendo', url: 'https://www.nintendo.com/us/switch-2/', snippet: 'Play with up to eight players. The system supports eight controllers.' },
+  ];
+  assert.equal(spellingQuery('How much does a Nintendo Switch 2 cost in the US right now', pages), '');
+});
