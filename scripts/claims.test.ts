@@ -1009,3 +1009,13 @@ test('what a purchase pays is the combined rate, not an official page\'s city pi
   ];
   assert.equal(salesTax('What would I pay with sales tax in New York City?', sources as never)?.rate, 8.875);
 });
+
+test('a combined rate from a commercial page still answers a pay question when an official page states only a piece', async () => {
+  const { salesTax } = await import('../server/claims.ts');
+  const sources = [
+    { n: 1, domain: 'www.tax.ny.gov', text: 'New York State sales and use tax. The state rate is 4%.' },
+    { n: 2, domain: 'www.nyc.gov', text: 'New York City local sales tax is 4.5%.' },
+    { n: 6, domain: 'www.avalara.com', text: 'Sales tax in New York City. The combined rate is 8.875%.' },
+  ];
+  assert.equal(salesTax('What would I pay with sales tax in New York City?', sources as never)?.rate, 8.875);
+});

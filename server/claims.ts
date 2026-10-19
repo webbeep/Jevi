@@ -869,7 +869,10 @@ export function salesTax(query: string, sources: readonly ClaimSource[]): TaxPic
   // What a purchase pays in a place is its combined rate: once a source states it, a city or state piece ("the full
   // 4.5%") never leads, however official its page.
   if (/\b(?:pay|paid|cost|total|with (?:sales )?tax|after tax|out the door)\b/i.test(query) && found.some((cand) => cand.combined && cand.place)) {
-    for (const cand of found) if (!cand.combined) cand.score -= 30;
+    for (const cand of found) {
+      if (!cand.combined) cand.score -= 30;
+      else if (cand.place) cand.score = Math.max(cand.score, 1);
+    }
   }
   let best = found.reduce<RateCand | undefined>((pick, cand) => {
     if (!pick || cand.score > pick.score) return cand;
