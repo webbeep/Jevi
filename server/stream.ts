@@ -2188,7 +2188,7 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
       ? { action: 'search' as const, queries: [req.question.replace(/[?!.]+$/, '')], subject: '' }
       : judgedOrFallback;
     console.log(JSON.stringify({ zo: 'judge-turn', action: decision.action, subject: decision.subject, queries: decision.queries, model: !!judged }));
-    const planned = decision.action !== 'search'
+    let planned = decision.action !== 'search'
       ? undefined
       : unrelated
         ? { query: decision.queries[0] ?? req.question, fanout: decision.queries.slice(1) }
@@ -2197,7 +2197,13 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
     // "That's wrong, it's the Empire State Building, right?" disputes the card: the answer checks that claim and says
     // which is right, rather than profiling the name they proposed.
     const claimed = onScreen ? challengedWith(req.question) : undefined;
-    const lock = claimed && onScreen && !sideNamed(cardLead(onScreen), claimed)
+    const disputed = !!(claimed && onScreen && !sideNamed(cardLead(onScreen), claimed));
+    // The claim is searched against the card's own question, never as "X vs Y": a side-by-side table has no verdict,
+    // and the next "When did it open?" needs the one the verdict named.
+    if (disputed && planned && onScreen) {
+      planned = { query: `${onScreen.title} ${claimed}`, fanout: decision.queries.filter((item) => compareSides(item).length < 2).slice(0, 2) };
+    }
+    const lock = disputed && claimed && onScreen
       ? `The person disputes the card on screen ("${onScreen.title}": ${cardLead(onScreen).slice(0, 200)}) and proposes ${claimed}. Check their claim against the sources. Lead with a yes or no that names which one is right, then the figure that settles it.`
       : planned?.added
       ? `${planned.added} is its own object. Use only a price, photo, spec, or citation from a source that names it. Do not copy those from another object.`
