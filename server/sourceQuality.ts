@@ -486,9 +486,20 @@ export function preferSources<T extends RankedHit>(query: string, rows: readonly
   const paper = isPaperAsk(query);
   const official = OFFICIAL_ASK.test(query) || journals.length > 0;
   const leadOf = (item: (typeof pool)[number]) => officialLead(item.row.domain || hostOf(item.row.url), orgs, places, journals);
+  // Of a topic's authorities, the one listed first sets the rule (the USPSTF for aspirin); the others report it.
+  const topics = orgs.length || journals.length ? [] : topicHosts(query);
+  const topicRank = (item: (typeof pool)[number]) => {
+    const host = domainOf(item.row.domain || hostOf(item.row.url));
+    const at = topics.findIndex((topic) => endsWithHost(host, topic));
+    return at < 0 ? topics.length : at;
+  };
   const byLead = (a: (typeof pool)[number], b: (typeof pool)[number]) => {
     const lead = leadOf(a) - leadOf(b);
     if (lead) return lead;
+    if (topics.length) {
+      const rank = topicRank(a) - topicRank(b);
+      if (rank) return rank;
+    }
     if (deferred.size) {
       const pub = publishRank(a) - publishRank(b);
       if (pub) return pub;

@@ -423,3 +423,13 @@ test('at most two Wikipedia pages lead; the rest go to the back', () => {
   assert.equal(ranked.at(-1)?.title, 'List of directors');
   assert.equal(ranked.length, 6);
 });
+
+test('of a topic\'s authorities, the one that sets the rule leads', () => {
+  const ranked = preferSources('Should I start taking a daily low-dose aspirin?', [
+    hit('newsinhealth.nih.gov', 'Daily aspirin may not benefit healthy older adults', 'News'),
+    hit('www.nih.gov', 'Daily aspirin shows no benefit', 'News release'),
+    hit('www.uspreventiveservicestaskforce.org', 'Recommendation: Aspirin Use to Prevent Cardiovascular Disease', 'Grade D for adults 60 or older'),
+    hit('www.mayoclinic.org', 'Daily aspirin therapy', 'Overview'),
+  ]);
+  assert.equal(ranked[0]?.domain, 'www.uspreventiveservicestaskforce.org');
+});
