@@ -1856,11 +1856,13 @@ export function rulesCompare(query: string): boolean {
 }
 
 const TOPIC_STOP = new Set(['what', 'which', 'where', 'when', 'about', 'does', 'have', 'with', 'that', 'this', 'there', 'their', 'would', 'could', 'should', 'explain', 'tell', 'more', 'like', 'much', 'many', 'instead', 'other', 'than', 'they', 'them', 'make', 'shorter', 'longer', 'simpler', 'again']);
+/** "And for a visitor from Ohio?", "What about Google?", "In Boston?": a follow-up that leans on the card by its form. */
+const ELLIPTICAL = /^(?:and|but|also|so|plus|or|what about|how about|same|for|in|at|from|with|without|on|during|if|by|near|under|over)\b/i;
 const POINTS_BACK = /\b(?:it|its|it's|they|them|their|this|that|these|those|he|she|his|her|one|ones)\b/i;
 
 /** A follow-up about something the card and its sources never mention, with nothing pointing back at them. */
 export function newTopic(question: string, onScreen: string): boolean {
-  if (POINTS_BACK.test(question)) return false;
+  if (POINTS_BACK.test(question) || ELLIPTICAL.test(question.trim())) return false;
   const words = question.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 4 && !TOPIC_STOP.has(word));
   if (!words.length) return false;
   const seen = onScreen.toLowerCase();
@@ -2100,13 +2102,18 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
     };
     // "What is photosynthesis?" under an mRNA card names a new topic that neither the card nor its sources mention: it is
     // a search, not an answer from those sources ("these sources cover vaccines, not photosynthesis").
-    const decision = judgedOrFallback.action !== 'search' && newTopic(req.question, `${cardText}\n${sourceText}`)
+    // The same holds for a search: a question that shares nothing with the card is searched as asked, never with the
+    // card's subject glued on ("How mRNA Vaccines Work What is photosynthesis" when the judge was late).
+    const unrelated = newTopic(req.question, `${cardText}\n${sourceText}`);
+    const decision = unrelated && (judgedOrFallback.action !== 'search' || !judged)
       ? { action: 'search' as const, queries: [req.question.replace(/[?!.]+$/, '')], subject: '' }
       : judgedOrFallback;
     console.log(JSON.stringify({ zo: 'judge-turn', action: decision.action, subject: decision.subject, queries: decision.queries, model: !!judged }));
-    const planned = decision.action === 'search'
-      ? followSearchPlan({ title: onScreen?.title, question: req.question, queries: decision.queries, subject: decision.subject, lead: onScreen ? cardLead(onScreen) : '' })
-      : undefined;
+    const planned = decision.action !== 'search'
+      ? undefined
+      : unrelated
+        ? { query: decision.queries[0] ?? req.question, fanout: decision.queries.slice(1) }
+        : followSearchPlan({ title: onScreen?.title, question: req.question, queries: decision.queries, subject: decision.subject, lead: onScreen ? cardLead(onScreen) : '' });
     const subject = planned?.subject ?? decision.subject;
     const lock = planned?.added
       ? `${planned.added} is its own object. Use only a price, photo, spec, or citation from a source that names it. Do not copy those from another object.`

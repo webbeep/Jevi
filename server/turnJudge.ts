@@ -289,6 +289,12 @@ async function ask<T>(env: Env, system: string, user: string, ms: number): Promi
   return Promise.race([call, timeout]);
 }
 
+/** How long the turn judge may take before the follow-up falls back to a search built from the question. */
+const JUDGE_MS = 1500;
+
+/** The conversation without its line for the card on screen, which the judge already reads as that card's text. */
+const withoutCardLine = (context: string) => context.split('\n').filter((line) => !/^(?:Card they are acting on|Latest card) \(/.test(line)).join('\n');
+
 export async function judgeTurn(env: Env, input: {
   question: string;
   original: string;
@@ -300,12 +306,13 @@ export async function judgeTurn(env: Env, input: {
   const user = [
     `Conversation started with: ${input.original}`,
     input.title ? `Card on screen: ${input.title}` : '',
-    input.card ? `Card text:\n${input.card.slice(0, 1500)}` : '',
-    input.context ? `Conversation:\n${fitContext(input.context, 1600)}` : '',
-    input.sources ? `Sources already in hand:\n${input.sources.slice(0, 900)}` : '',
+    input.card ? `Card text:\n${input.card.slice(0, 900)}` : '',
+    // The card on screen is already above as its text; the conversation adds the turns before it, newest kept first.
+    input.context ? `Conversation:\n${fitContext(withoutCardLine(input.context), 700)}` : '',
+    input.sources ? `Sources already in hand:\n${input.sources.slice(0, 700)}` : '',
     `Follow-up: ${input.question}`,
   ].filter(Boolean).join('\n');
-  return parseDecision(await ask<unknown>(env, TURN, user, 1200));
+  return parseDecision(await ask<unknown>(env, TURN, user, JUDGE_MS));
 }
 
 export async function judgeSources(env: Env, query: string, snippets: string): Promise<SourceDecision | undefined> {

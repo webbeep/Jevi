@@ -42,3 +42,12 @@ test('a follow-up on a new topic the card never mentions searches, one that poin
   assert.equal(newTopic('Can I use rye flour instead?', 'Sourdough starter: mix flour and water, feed daily.'), false);
   assert.equal(newTopic('which one has better battery life?', 'iPhone 17 vs Pixel 10'), false);
 });
+
+test('an elliptical follow-up leans on the card and is never a new topic', async () => {
+  const { newTopic } = await import('../server/stream.ts');
+  const card = 'NY State Met Admission · Pay what you wish · Standard adult $30';
+  assert.equal(newTopic('And for a visitor from Ohio?', card), false);
+  assert.equal(newTopic('What about Google?', 'AI News Today · OpenAI ships a model'), false);
+  assert.equal(newTopic('In Boston?', 'Weather in Seattle · 65°F'), false);
+  assert.equal(newTopic('What is photosynthesis?', 'How mRNA vaccines work · Spike protein'), true);
+});
