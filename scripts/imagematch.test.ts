@@ -121,3 +121,9 @@ test('replay p08 when a fixture is present', (t) => {
   const data = JSON.parse(readFileSync(`${FIXTURES}/${file}`, 'utf8')) as { query: string };
   replay(`${FIXTURES}/${file}`, splitEntities(data.query));
 });
+
+test('a field label is not a name to find a picture of', async () => {
+  const { targetFor } = await import('../server/imageGate.ts');
+  for (const label of ['You need', 'Market cap', 'Scores source', 'What you get']) assert.equal(targetFor(label, 'x').kind, 'none', label);
+  for (const label of ['Espresso Vivace', 'Soundcore Space Q45']) assert.equal(targetFor(label, 'x').kind, 'named', label);
+});

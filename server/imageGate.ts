@@ -163,8 +163,15 @@ const NONE: PicTarget = { kind: 'none', entity: '' };
  * A one-word "name" ("Points", "Efficiency") is only a name when the result text uses it as one:
  * it appears there and never in lowercase. Multi-word name-like labels pass as before.
  */
+/** Lowercase words a real name may carry ("Leonardo da Vinci", "Bank of America"). */
+const NAME_JOINER = /^(?:da|de|del|della|di|du|la|le|van|von|der|den|bin|al|of|the|and|y|e|&|\+)$/i;
+
 export function properName(entity: string, corpus?: string): boolean {
   if (!nameLike(entity)) return false;
+  // "You need", "Market cap" and "What you get" are field labels: a name capitalises each main word
+  // ("Espresso Vivace", "Soundcore Space Q45"; "iPhone" counts), so "You need" is not a picture of anything.
+  const words = entity.trim().split(/\s+/);
+  if (words.length > 1 && !words.every((word, i) => i === 0 || NAME_JOINER.test(word) || /^[A-Z0-9]|^[a-z][A-Z]/.test(word))) return false;
   // "Also at", "Based in": a label that ends on a joining word is a phrase, not a name.
   const last = entity.trim().split(/\s+/).pop()!.toLowerCase();
   if (entity.trim().includes(' ') && STOP.has(last)) return false;

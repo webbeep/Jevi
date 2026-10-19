@@ -183,7 +183,7 @@ function unmaskQuotes(text: string, quotes: readonly string[]): string {
 /** A unit written on a number ("6.3″", "256 GB", "120-nit", "48 MP"). It means nothing once the number goes. */
 const UNIT_AFTER = String.raw`(?:\s?-?(?:inch(?:es)?|mm|cm|km|kg|lbs?|oz|g|GB|TB|MB|mAh|Wh|W|Hz|kHz|MHz|GHz|nits?|MP|fps|ms|hours?|hrs?|days?|mins?|minutes?|mph|°[CF]?|x)\b|\s?[″"°])?`;
 
-export function stripNums(text: string, nums: readonly string[]): string {
+function stripInPlace(text: string, nums: readonly string[]): string {
   // "6.3″ · 256 GB · 8 GB RAM": a spec line loses the whole item whose number went, not just the digits.
   const items = text.split(/\s+[·•|]\s+/);
   if (items.length >= 2) {
@@ -208,6 +208,26 @@ export function stripNums(text: string, nums: readonly string[]): string {
   // "no scores for October,." and "University of Paris," lose the comma that led to the removed figure.
   out = out.replace(/,+\s*([.;:!?])/g, '$1').replace(/^[,;:\s]+/, '').replace(/[,;:]+$/, '').trim();
   return withoutEmptySlots(out);
+}
+
+const YEAR = /^(?:19|20)\d\d$/;
+
+/**
+ * Takes out figures no source backs. A year goes in place ("DNR 2025" is "DNR", "In 2021 he founded" is "He founded"),
+ * so the fact beside it stays. Any other figure takes its whole sentence or spec item with it: "Friday, Oct. in the
+ * finale", "at ppi" and a price tile reading "Under" are broken, and a competitor never shows half a sentence.
+ * A sentence with a quotation keeps its quoted words and loses only the figure.
+ */
+export function stripNums(text: string, nums: readonly string[]): string {
+  const figures = nums.filter((num) => !YEAR.test(num));
+  const holds = (part: string) => figures.some((num) => new RegExp(shownNumber(num).source).test(maskQuotes(part).text));
+  // "Sales tax is 4% ($6)": an aside in parentheses goes on its own and the sentence stays.
+  text = text.replace(/\s*\([^()]*\)/g, (aside) => (holds(aside) ? '' : aside));
+  const items = text.split(/\s+[·•|]\s+/);
+  if (items.length >= 2) return stripInPlace(items.filter((item) => !holds(item)).join(' · '), nums);
+  const sentences = joinSpacedDecimals(text).split(/(?<=[.!?])\s+(?=[A-Z"“(])/);
+  const kept = sentences.filter((sentence) => !holds(sentence) || maskQuotes(sentence).quotes.length > 0);
+  return kept.length ? stripInPlace(kept.join(' '), nums) : '';
 }
 
 /** A number the sources imply: an age, a rounded quotient, a century, the newest score, the event's year. */
