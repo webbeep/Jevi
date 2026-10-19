@@ -228,7 +228,8 @@ const MEASURE = /(?<![\d.,])\d+(?:,\d{3})*(?:\.\d+)?(?:\s*[x×]\s*\d+(?:,\d{3})*
 /** The units a row can be measured in: a display is not "7.2 oz", and battery life is hours or days, not mAh. */
 const ROW_UNITS: [RegExp, RegExp][] = [
   [/\bbattery\s+life\b|\bendurance\b|\bruntime\b/i, /\b(?:hours?|hrs?|days?|shots?|frames?)\b/i],
-  [/\bbattery\b|\bcapacity\b/i, /\b(?:mah|wh|hours?|hrs?|days?|shots?|frames?)\b/i],
+  [/\bcapacity\b/i, /\b(?:mah|wh)\b/i],
+  [/\bbattery\b/i, /\b(?:mah|wh|hours?|hrs?|days?|shots?|frames?)\b/i],
   [/\bdisplay\b|\bscreen\b/i, /(?:inch|["″]|\bppi\b|\bnits?\b|\bhz\b|\bpx\b|\d\s*[x×]\s*\d)/i],
   [/\bweight\b|\bweighs\b/i, /\b(?:g|grams?|kg|oz|lbs?)\b/i],
 ];
@@ -1075,8 +1076,10 @@ function mergedFactRows(rows: readonly string[][]): string[][] {
         if (fb && !fa) fuller = true;
         if (fa && !fb) agree = false;
       }
-      if (!agree || !fuller || !shared) continue;
-      // b has every figure a has, and more: a goes, and its citations move to b's matching cells.
+      // The same figures twice ("Battery claim" and "Battery" both 3692 / 4970 mAh) are one row too: the later goes.
+      const same = !fuller && agree && b < a;
+      if (!agree || (!fuller && !same) || !shared) continue;
+      // b has every figure a has (and maybe more): a goes, and its citations move to b's matching cells.
       for (let col = 1; col < width; col++) {
         const cites = (out[a]![col] ?? '').match(/\[\d+\]/g) ?? [];
         if (cites.length && figure(out[b]![col]) && !/\[\d+\]/.test(out[b]![col] ?? '')) out[b]![col] = `${out[b]![col]} ${cites.join('')}`;

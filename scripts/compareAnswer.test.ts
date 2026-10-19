@@ -727,3 +727,11 @@ test('two rows for one fact become the fuller one, and a tile detail that denies
   const fixedGrid = patches?.find((patch) => patch.index === 0)?.node;
   assert.equal(fixedGrid?.type === 'grid' && fixedGrid.children[0]?.type === 'tile' ? fixedGrid.children[0].sub : 'x', undefined);
 });
+
+test('rows with the same figures under different battery labels are one row', () => {
+  const table: CardNode = { type: 'table', columns: ['Factor', 'iPhone 17', 'Pixel 10'], rows: [['Battery capacity', '3692 mAh [8]', '4970 mAh'], ['Battery claim', '3692 mAh', '4970 mAh'], ['Chip', 'A19 [8]', 'Tensor G5 [7]'], ['Battery', '3692 mAh', '4970 mAh [7]']] };
+  const patches = dropShownDenials(new Map([[0, table]]));
+  const rows = patches?.[0]?.node.type === 'table' ? patches[0].node.rows : [];
+  assert.equal(rows.filter((row) => /battery/i.test(row[0] ?? '')).length, 1);
+  assert.ok(rows.some((row) => row[0] === 'Chip'));
+});
