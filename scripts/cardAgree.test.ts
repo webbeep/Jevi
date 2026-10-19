@@ -211,3 +211,16 @@ test('a peer-reviewed card is not an empty list when a source names a paper', ()
   assert.match(body, /10\.1000\/example\.paper/);
   assert.equal(out.some((node) => node?.type === 'stack' && node.children.length === 0), false);
 });
+
+test('a quote of a named guideline is its own line, not another page reporting it', async () => {
+  const { finishQuotedText } = await import('../server/cardAgree.ts');
+  const ask = 'How much exercise do adults need each week according to the US Physical Activity Guidelines? Quote the line.';
+  const sources = [
+    { text: 'Adult Activity: An Overview. According to the current Physical Activity Guidelines for Americans, adults need 150 minutes of moderate-intensity physical activity a week.' },
+    { text: 'Physical Activity Guidelines for Americans, 2nd edition. Adults should do at least 150 minutes to 300 minutes a week of moderate-intensity aerobic physical activity.' },
+  ];
+  const text = '"According to the current Physical Activity Guidelines for Americans, adults need 150 minutes of moderate-intensity physical activity a week."';
+  const fixed = finishQuotedText(ask, text, sources);
+  assert.match(fixed, /Adults should do at least 150 minutes to 300 minutes/);
+  assert.doesNotMatch(fixed, /According to/);
+});

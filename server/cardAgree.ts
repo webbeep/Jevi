@@ -71,6 +71,26 @@ function overlap(text: string, words: readonly string[]): number {
   return words.filter((word) => low.includes(word)).length;
 }
 
+/** "According to the current Physical Activity Guidelines, adults need…" reports a source; it is not the source's line. */
+const ATTRIBUTION = /^\s*(?:according to|per|as (?:stated|noted|outlined|set out) (?:in|by)|based on|under)\b[^,]{3,120},\s*/i;
+
+/** The sentence's own claim, without a lead clause that names who said it. */
+function ownWords(sentence: string): string {
+  return sentence.replace(ATTRIBUTION, '');
+}
+
+/**
+ * A secondhand sentence ranks below the source's own words, however many of the question's words it repeats. The
+ * splitter can cut "…Guidelines for Americans, adults need…" after its attribution, so the page's full sentence is read.
+ */
+function secondhand(sentence: string, page = ''): number {
+  if (ATTRIBUTION.test(sentence)) return 3;
+  const at = page.indexOf(sentence);
+  if (at <= 0) return 0;
+  const start = Math.max(page.lastIndexOf('.', at - 1), page.lastIndexOf('!', at - 1), page.lastIndexOf('?', at - 1), page.lastIndexOf('\n', at - 1)) + 1;
+  return ATTRIBUTION.test(page.slice(start, at + sentence.length)) ? 3 : 0;
+}
+
 /** A table cell, a word jammed onto a digit, or a run of figures is not a sentence to quote. */
 function quotableSentence(text: string): boolean {
   if (/[a-z]\d/i.test(text)) return false;
@@ -110,9 +130,9 @@ export function answeringSentence(query: string, text: string): string | undefin
   let best: { sentence: string; score: number } | undefined;
   for (const sentence of sentencesOf(text)) {
     if (!quotableSentence(sentence)) continue;
-    const hit = overlap(sentence, words);
+    const hit = overlap(ownWords(sentence), words);
     if (hit < Math.min(need, words.length)) continue;
-    const score = hit + (asksNumber && /\d/.test(sentence) ? 1 : 0);
+    const score = hit + (asksNumber && /\d/.test(sentence) ? 1 : 0) - secondhand(sentence, text);
     if (!best || score > best.score) best = { sentence, score };
   }
   return best?.sentence;
@@ -159,7 +179,7 @@ function proseEnough(text: string): boolean {
 function answerScore(query: string, text: string, words: readonly string[]): number {
   if (!quotableSentence(text)) return -1;
   const asksNumber = /\b(?:how many|how much|count|number|figure|total)\b/i.test(query);
-  return overlap(text, words) + (asksNumber && /\d/.test(text) ? 1 : 0);
+  return overlap(ownWords(text), words) + (asksNumber && /\d/.test(text) ? 1 : 0) - secondhand(text);
 }
 
 /** The line is a sentence this fetch already contains. */
@@ -199,7 +219,7 @@ export function finishQuotedText(query: string, text: string, sources: readonly 
     for (const source of (pool.length ? pool : sources)) {
       const answer = answeringSentence(query, sourceBlob(source));
       if (!answer) continue;
-      const score = answerScore(query, answer, words) + bonus(answer);
+      const score = answerScore(query, answer, words) + bonus(answer) - secondhand(answer, sourceBlob(source));
       if (score > best) {
         chosen = answer;
         best = score;
