@@ -171,10 +171,24 @@ function mentionsPlace(written: string, place: string): boolean {
 const POINTER = /\b(?:it|its|it's|they|them|their|this|that|these|those|he|she|his|her)\b/i;
 const SINGULAR_POINTER = /\b(?:it|its|it's|he|she|his|her)\b/i;
 
+/** The name a lead affirms when it rejects the person's claim: "No — One World Trade Center is still the tallest". */
+export function rejectionAffirms(lead: string): string | undefined {
+  const match = lead.match(/^\s*No\b[\s,.:;!—–-]+(?:the\s+)?([A-Z0-9][\w.'’&-]*(?:\s+(?:of\s+|the\s+|de\s+)?[A-Z0-9][\w.'’&-]*)*)/);
+  const name = match?.[1]?.trim();
+  return name && name.split(/\s+/).length >= 1 && !/^(?:It|That|This|They|He|She|The|You|We|I)$/.test(name) ? name : undefined;
+}
+
 export function followSearchPlan(input: { title?: string; question: string; queries: string[]; subject: string; lead?: string }): { query: string; fanout: string[]; added?: string; subject?: string } {
   const title = input.title?.replace(/\s+/g, ' ').trim() ?? '';
   const asked = input.question.replace(/^(?:and|so)\s+/i, '').trim();
   const sides = uniqueSides(compareSides(title).map((side) => cleanSideName(side)));
+  // "That's wrong, it's the Empire State Building, right?" answered "No — One World Trade Center is still the tallest":
+  // "When did it open?" is about the building the card affirmed, not the one the person proposed and the card rejected.
+  const affirmed = SINGULAR_POINTER.test(asked) ? rejectionAffirms(input.lead ?? '') : undefined;
+  if (affirmed && !sides.some((side) => sameObject(side, affirmed) || sideNamed(affirmed, side))) {
+    const query = asked.replace(/\bit's\b/i, `${affirmed} is`).replace(SINGULAR_POINTER, affirmed).replace(/[?.!]+$/, '');
+    return { query, fanout: [], subject: affirmed };
+  }
   // "When did it open?" on a card whose lead settles one side ("No — One WTC is still the tallest") is about that side.
   const pointed = sides.length >= 2 && SINGULAR_POINTER.test(asked) && !sides.some((side) => sideNamed(asked, side))
     ? sides.filter((side) => sideNamed(input.lead ?? '', side))

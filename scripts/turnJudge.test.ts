@@ -171,3 +171,18 @@ test('a follow-up that only changes the qualifier keeps the fact asked', () => {
   const judged = followSearchPlan({ title: 'NY State Met Admission', question: 'And for a visitor from Ohio?', queries: ['Met Museum admission price for out-of-state visitors'], subject: 'The Met' });
   assert.equal(judged.query, 'Met Museum admission price for out-of-state visitors');
 });
+
+test('a pronoun after a rejected claim points at the name the card affirmed', () => {
+  const plan = followSearchPlan({
+    title: 'Empire State Building vs NYC Record',
+    question: 'When did it open?',
+    queries: [],
+    subject: '',
+    lead: 'No — One World Trade Center is still the tallest Empire State Building is not the tallest No',
+  });
+  assert.equal(plan.query, 'When did One World Trade Center open');
+  assert.equal(plan.subject, 'One World Trade Center');
+  // A lead that is not a rejection leaves the old reading alone.
+  const kept = followSearchPlan({ title: 'Empire State Building vs. One WTC', question: 'When did it open?', queries: ['Empire State Building One WTC When did it open?'], subject: '', lead: 'No — One WTC is still the tallest' });
+  assert.equal(kept.subject, 'One WTC');
+});
