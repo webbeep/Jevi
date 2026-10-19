@@ -87,3 +87,19 @@ test('a thousands figure on one object is not foreign to another because both en
   }]]);
   assert.equal(unblendObjects(next, [], [{ title: 'IRA limits', snippet: 'Roth phase-out starts at $153,000.' }]), undefined);
 });
+
+test('a sentence that names only this object states its figure across a comma', () => {
+  const next = new Map<number, CardNode>([[0, {
+    type: 'table',
+    columns: ['Factor', 'Roth IRA', 'Traditional IRA'],
+    rows: [
+      ['Income limits', 'Full contribution under $153,000 single [1]', 'No income limit to contribute [2]'],
+      ['Note', 'Phase-out applies [1]', 'Deduction may phase out above $153,000 for some filers [2]'],
+    ],
+  }]]);
+  const sources = [
+    { title: 'Roth IRA limits', snippet: 'To contribute the full amount to a Roth IRA, single filers must have MAGI under $153,000.' },
+    { title: 'Traditional IRA', snippet: 'Anyone with earned income can contribute to a traditional IRA, and the deduction may phase out above $153,000 for some filers.' },
+  ];
+  assert.equal(unblendObjects(next, [], sources), undefined);
+});

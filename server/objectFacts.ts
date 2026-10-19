@@ -51,6 +51,10 @@ function statedFor(name: string, value: string, sources: readonly SourceRow[], o
     const blob = joinThousands(`${source.title ?? ''}. ${source.snippet ?? ''} ${source.content ?? ''}`);
     for (const sentence of blob.split(/(?<=[.!?])\s+/)) {
       if (namedTogether(name, others, sentence) && nums.every((num) => sentence.includes(num))) return true;
+      // "To contribute the full amount to a Roth IRA, single filers must have MAGI under $153,000": a sentence that
+      // names this object and no other states the figure for it, even across a comma.
+      const alone = sourceNames(name, sentence) && !others.some((other) => !sameObject(other, name) && sourceNames(other, sentence));
+      if (alone && nums.every((num) => sentence.includes(num))) return true;
       for (const clause of sentence.split(/\s*(?:;|\band\b|\bwith\b|,(?!\d))\s*/i)) {
         if (!sourceNames(name, clause)) continue;
         if (nums.every((num) => clause.includes(num))) return true;
