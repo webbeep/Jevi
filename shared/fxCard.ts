@@ -91,7 +91,7 @@ export function liveQuoteFacts(ticker: CardNode | undefined): LiveQuoteFacts | u
 }
 
 /** Words that mark a figure as another time or another quantity, not the price right now. */
-const HISTORY = /\b(?:low|high|range|close[ds]?|closing|open(?:ed)?|week|weeks|month|months|year|years|52|ago|since|target|forecast|record|all-time|ath|peak|earlier|previous|prior|ipo|q[1-4]|quarter|average|support|resistance|cap|volume|revenue|earnings|eps|guidance|dividend|yield)\b/i;
+const HISTORY = /\b(?:low|high|range|close[ds]?|closing|open(?:ed)?|week|weeks|month|months|year|years|52|ago|since|target|forecast|record|all-time|ath|peak|earlier|previous|prior|ipo|q[1-4]|quarter|average|support|resistance|cap|volume|revenue|earnings|eps|guidance|dividend|yield|yesterday|last (?:week|month|year))\b/i;
 const DAY_MOVE = /\b(?:today|24h|24-hour|24 hours|day|session|intraday|now|currently|this morning|this afternoon)\b/i;
 
 const moneyFigures = (text: string) => [...text.replace(/\[\d+\]/g, ' ').matchAll(/[$€£¥]\s?(\d[\d,]*(?:\.\d+)?)\s*(k|K|m|M|b|B)?\b/g)]
@@ -113,11 +113,15 @@ function contradictsQuote(text: string, quote: LiveQuoteFacts): boolean {
       if ((under && quote.price > value) || (!under && quote.price < value)) return true;
     }
   }
-  if (HISTORY.test(text)) return false;
-  if (moneyFigures(text).some((m) => m > quote.price * 0.4 && m < quote.price * 2.5 && Math.abs(m - quote.price) / quote.price > 0.01)) return true;
-  if (!DAY_MOVE.test(text)) return false;
-  const pcts = [...text.matchAll(/([+-−]?\d{1,2}(?:\.\d+)?)\s?%/g)].map((match) => Math.abs(Number(match[1]!.replace('−', '-'))));
-  return pcts.some((pct) => Math.abs(pct - Math.abs(quote.pct)) > 0.15);
+  // A history word marks only its own clause: in "BTC slipped to $81,017 as network difficulty rose 5.92% since
+  // Oct 16" the "since" dates the difficulty, and the price is still stated as where BTC is now.
+  return text.split(/\s*[,;:]\s+|\s+(?:as|while|after|but|and|amid|with)\s+/i).some((clause) => {
+    if (HISTORY.test(clause)) return false;
+    if (moneyFigures(clause).some((m) => m > quote.price * 0.4 && m < quote.price * 2.5 && Math.abs(m - quote.price) / quote.price > 0.01)) return true;
+    if (!DAY_MOVE.test(clause)) return false;
+    const pcts = [...clause.matchAll(/([+-−]?\d{1,2}(?:\.\d+)?)\s?%/g)].map((match) => Math.abs(Number(match[1]!.replace('−', '-'))));
+    return pcts.some((pct) => Math.abs(pct - Math.abs(quote.pct)) > 0.15);
+  });
 }
 
 /** A live-quote card agrees with its own widget: no second, different "now". */

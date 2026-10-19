@@ -55,3 +55,16 @@ test('a weather card keeps the official high for today and other days\' readings
   const later: CardNode = { type: 'tile', label: 'Wednesday', value: '62°', sub: 'High' };
   assert.equal(withinForecast(later, forecast!), later);
 });
+
+test('a history word dates only its own clause', async () => {
+  const { withinQuote } = await import('../shared/fxCard.ts');
+  const btc = { price: 82505, pct: 0.45 };
+  const slipped: CardNode = { type: 'list', items: [{ text: 'BTC slipped to $81,017 as network difficulty rose 5.92% since Oct 16 and hashprice fell 9.5% [12]' }, { text: 'Fear & Greed Index at neutral 53 [11]' }] };
+  const kept = withinQuote(slipped, btc);
+  assert.ok(kept && kept.type === 'list');
+  assert.deepEqual(kept.items.map((item) => item.text), ['Fear & Greed Index at neutral 53 [11]']);
+  const dated: CardNode = { type: 'text', text: 'BTC slipped to $81,017 last week [12].' };
+  assert.equal(withinQuote(dated, btc), dated);
+  const yesterday: CardNode = { type: 'text', text: 'It dipped to $80,900 yesterday before recovering [3].' };
+  assert.equal(withinQuote(yesterday, btc), yesterday);
+});
