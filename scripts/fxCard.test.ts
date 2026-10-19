@@ -20,3 +20,18 @@ test('a dollar-yen card drops the inverse rate, other currencies and a second ra
   const hero: CardNode = { type: 'hero', value: '158.02', unit: 'JPY', label: '1 US dollar' };
   assert.equal(withinFx(hero, fx), hero);
 });
+
+test('a live-quote card drops a different price right now and a different change today, and keeps history', async () => {
+  const { withinQuote } = await import('../shared/fxCard.ts');
+  const btc = { price: 82423, pct: 0.48 };
+  assert.equal(withinQuote({ type: 'text', text: 'BTC is trading around $81,184 [3].' }, btc), undefined);
+  assert.equal(withinQuote({ type: 'tile', label: 'Today', value: '+0.84%', sub: 'over the last day' }, btc), undefined);
+  const kept: CardNode = { type: 'tile', label: '52-week high', value: '$126,198' };
+  assert.equal(withinQuote(kept, btc), kept);
+  const rdw = { price: 8.39, pct: -5.84 };
+  assert.equal(withinQuote({ type: 'tile', label: 'Oct 18', value: 'Stock hit $14.19 Monday', sub: 'before falling to $13.58' }, rdw), undefined);
+  const closed: CardNode = { type: 'text', text: 'It closed at $8.91 on Friday [2].' };
+  assert.equal(withinQuote(closed, rdw), closed);
+  const why: CardNode = { type: 'list', items: [{ text: 'Shares fell 5.84% today after an analyst downgrade [4].' }] };
+  assert.equal(withinQuote(why, rdw), why);
+});

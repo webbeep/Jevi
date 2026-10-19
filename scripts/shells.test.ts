@@ -42,3 +42,16 @@ test('a tile value left as "Under" or "~" after its price went is removed, and t
   assert.deepEqual(withoutShells({ type: 'tile', label: '2. Soundcore Space One', value: 'Under', sub: 'Great ANC' }), { type: 'tile', label: '2. Soundcore Space One', value: undefined, sub: 'Great ANC' });
   assert.deepEqual(withoutShells({ type: 'tile', label: 'Soundcore Space Q45', value: '~ [1]' }), { type: 'tile', label: 'Soundcore Space Q45', value: undefined });
 });
+
+test('a fact another region shows right now is not shown again, and same-price products both stay', async () => {
+  const { withoutRepeatedFacts, factsElsewhere } = await import('../shared/shells.ts');
+  const shown = new Map<number, CardNode>([[0, { type: 'tile', label: 'Joined Microsoft', value: '1992' }]]);
+  assert.equal(withoutRepeatedFacts({ type: 'tile', label: 'Joined', value: '1992 [3]' }, factsElsewhere(shown, 2)), undefined);
+  assert.deepEqual(withoutRepeatedFacts({ type: 'keyvalue', items: [{ label: 'Joined Microsoft', value: '1992' }, { label: 'CEO since', value: '2014' }] }, factsElsewhere(shown, 3)),
+    { type: 'keyvalue', items: [{ label: 'CEO since', value: '2014' }] });
+  // The slot that shows it republishes it unchanged.
+  const own: CardNode = { type: 'tile', label: 'Joined Microsoft', value: '1992' };
+  assert.equal(withoutRepeatedFacts(own, factsElsewhere(shown, 0)), own);
+  const pair: CardNode = { type: 'grid', cols: 2, children: [{ type: 'tile', label: 'iPhone 17', value: '$799' }, { type: 'tile', label: 'Pixel 10', value: '$799' }] };
+  assert.equal(withoutRepeatedFacts(pair, factsElsewhere(new Map(), 0)), pair);
+});

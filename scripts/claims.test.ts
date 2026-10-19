@@ -901,3 +901,10 @@ test('a line that already gives the combined rate keeps its parts and ranges', (
   const range = bindClaims({ type: 'text', text: 'Rates in New York State range from 7% to 8.875% [1].' }, pages, ask);
   assert.match(range.type === 'text' ? range.text : '', /from 7% to 8\.875%/);
 });
+
+test('a draft keeps its own times and amounts: it is writing, not a sourced claim', () => {
+  const pages: ClaimSource[] = [{ n: 1, text: 'Name the miss in the first line. Skip excuses.' }];
+  const text = 'Hi Sam, I am sorry I missed our 3 pm meeting today. Could we find 30 minutes tomorrow? Thanks for your patience, Alex';
+  const next = bindClaims({ type: 'draft', text }, pages, 'make it shorter');
+  assert.equal(next.type === 'draft' ? next.text : '', text);
+});

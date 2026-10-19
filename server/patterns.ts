@@ -99,6 +99,14 @@ export function compareCount(query: string): 2 | 3 | 4 {
 
 /** Tiles for each side, then a table with one column per side plus the factor column. */
 function compareSkeleton(query: string): CardNode[] {
+  // "Compare Spotify Premium plan prices" names no options: two tiles made the card pick two of four plans.
+  // The options are whatever the sources list, so each gets a row.
+  if (query && compareSides(query).length < 2) {
+    return [
+      slot('every option the sources list, one row each (not just two): first column the option, then its price and what it includes', 'table', { cols: 3, rows: 5 }),
+      slot('verdict: which option fits whom', 'line'),
+    ];
+  }
   const n = compareCount(query);
   const tiles = Array.from({ length: n }, (_, i) => slot(`option ${i + 1}`, 'tile'));
   return [

@@ -76,3 +76,59 @@ export function withinSources(node: CardNode, count: number): CardNode {
   const fixed = json.replace(/\s*\[(\d+)\]/g, (cite, n: string) => (Number(n) >= 1 && Number(n) <= count ? cite : ''));
   return fixed === json ? node : (JSON.parse(fixed) as CardNode);
 }
+
+const factValue = (value: string) => value.replace(/\[\d+\]/g, '').toLowerCase().replace(/[^a-z0-9.$%€£]+/g, ' ').trim();
+const LABEL_STOP = new Set(['the', 'and', 'for', 'with', 'from', 'this', 'that', 'per', 'total', 'value']);
+const labelWords = (label: string) => label.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 3 && !LABEL_STOP.has(word));
+
+/** The keys one fact is known by: its value with each word of its label. "Joined Microsoft 1992" and "Joined 1992" share one. */
+function factKeys(label: string, value: string): string[] {
+  const v = factValue(value);
+  if (v.length < 2) return [];
+  const words = labelWords(label);
+  return (words.length ? words : ['']).map((word) => `${v}|${word}`);
+}
+
+/** Every fact key a component shows. */
+function keysOf(node: CardNode, out: Set<string>): Set<string> {
+  if (node.type === 'tile' || node.type === 'stat') factKeys(node.label, node.value ?? '').forEach((key) => out.add(key));
+  if (node.type === 'keyvalue') node.items.forEach((item) => factKeys(item.label, item.value).forEach((key) => out.add(key)));
+  if ('children' in node && Array.isArray(node.children)) node.children.forEach((child) => keysOf(child, out));
+  return out;
+}
+
+/**
+ * Regions are designed in parallel and restate the same fact ("Joined Microsoft 1992" in a tile and in a key-value row).
+ * A fact another slot shows right now is dropped from this one, so the component already on screen keeps it, and a
+ * slot republishing its own fact keeps it. Two products with the same price are different facts: their labels differ.
+ */
+export function withoutRepeatedFacts(node: CardNode, elsewhere: ReadonlySet<string>): CardNode | undefined {
+  const repeated = (label: string, value: string) => factKeys(label, value).some((key) => elsewhere.has(key));
+  switch (node.type) {
+    case 'stack':
+    case 'grid':
+    case 'section':
+    case 'scroller': {
+      const children = node.children.map((child) => withoutRepeatedFacts(child, elsewhere)).filter((child): child is CardNode => !!child);
+      if (children.length === node.children.length && children.every((child, i) => child === node.children[i])) return node;
+      return children.length ? { ...node, children } : undefined;
+    }
+    case 'tile':
+    case 'stat':
+      return repeated(node.label, node.value ?? '') ? undefined : node;
+    case 'keyvalue': {
+      const items = node.items.filter((item) => !repeated(item.label, item.value));
+      if (items.length === node.items.length) return node;
+      return items.length ? { ...node, items } : undefined;
+    }
+    default:
+      return node;
+  }
+}
+
+/** The fact keys the other slots show now. */
+export function factsElsewhere(shown: ReadonlyMap<number, CardNode>, slot: number): Set<string> {
+  const out = new Set<string>();
+  for (const [index, node] of shown) if (index !== slot) keysOf(node, out);
+  return out;
+}

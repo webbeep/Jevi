@@ -675,3 +675,11 @@ test('a carrier deal is not the phone\'s price', () => {
   const iphone = grid.children.find((tile) => tile.type === 'tile' && tile.label === 'Iphone 17');
   assert.equal(iphone && iphone.type === 'tile' ? iphone.value : '', '$799');
 });
+
+test('a comparison that names no options lists every option in a table', async () => {
+  const { skeletonCard } = await import('../server/patterns.ts');
+  const open = skeletonCard('Compare Spotify Premium plan prices in the US.', 'compare');
+  assert.equal(open.body[0]?.type === 'slot' ? open.body[0].shape : '', 'table');
+  const named = skeletonCard('iphone 17 vs pixel 10', 'compare');
+  assert.equal(named.body[0]?.type, 'grid');
+});

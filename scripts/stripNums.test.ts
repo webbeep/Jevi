@@ -23,3 +23,8 @@ test('a year goes in place with the words that pointed at it, so the fact beside
 test('an aside in parentheses goes on its own', () => {
   assert.equal(stripNums('Sales tax is 4% ($6).', ['6']), 'Sales tax is 4%.');
 });
+
+test('a figure is never taken out of a larger number', () => {
+  assert.equal(stripNums('The Pixel 10 has a 4,970 mAh battery.', ['4']), 'The Pixel 10 has a 4,970 mAh battery.');
+  assert.equal(stripNums('Built in 1970. Holds 70 people.', ['70']), 'Built in 1970.');
+});

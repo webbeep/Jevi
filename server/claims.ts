@@ -133,6 +133,11 @@ function shownNumber(num: string): RegExp {
   return new RegExp(`\\$?\\s*${groups.join(',?')}(?:\\.0+)?\\s?%?`, 'g');
 }
 
+/** A figure as written, never part of a larger number: "4" is not in "4,970", "70" is not in "1970". */
+function figureIn(num: string, prefix = '', suffix = ''): RegExp {
+  return new RegExp(`(?<![\\d.,])${prefix}${shownNumber(num).source}${suffix}(?!\\d|[.,]\\d)`, 'g');
+}
+
 const AGENCY_SKIP = new Set(['AM', 'PM', 'US', 'UK', 'EU', 'UN', 'TV', 'ID', 'OK', 'NBA', 'NFL', 'MLB', 'NHL', 'GDP', 'USD', 'EUR', 'CEO', 'CFO', 'PDF', 'FAQ', 'DIY', 'GPS', 'HDMI', 'USB']);
 
 function agencyTokens(label: string): string[] {
@@ -187,7 +192,7 @@ function stripInPlace(text: string, nums: readonly string[]): string {
   // "6.3″ · 256 GB · 8 GB RAM": a spec line loses the whole item whose number went, not just the digits.
   const items = text.split(/\s+[·•|]\s+/);
   if (items.length >= 2) {
-    const kept = items.filter((item) => !nums.some((num) => shownNumber(num).test(maskQuotes(item).text)));
+    const kept = items.filter((item) => !nums.some((num) => figureIn(num).test(maskQuotes(item).text)));
     if (kept.length < items.length) return kept.length ? stripNums(kept.join(' · '), nums) : '';
   }
   const masked = maskQuotes(text);
@@ -199,7 +204,7 @@ function stripInPlace(text: string, nums: readonly string[]): string {
     out = out.replace(new RegExp(`\\bAn\\s+${bare}\\s+(?=[bcdfghjklmnpqrstvwxyz])`, 'gi'), '');
     // The currency sign before it and the unit after it go with the number ("the £ Amazon price", "-nit display"),
     // and so does the word that only pointed at it ("in 1906 became" is "became", not "in became").
-    const figure = `(?:[€£¥]\\s?)?${shownNumber(num).source}${UNIT_AFTER}`;
+    const figure = figureIn(num, '(?:[€£¥]\\s?)?', UNIT_AFTER).source;
     out = out.replace(new RegExp(`\\b(?:in|on|since|by|during|until|from)\\s+${figure}(?=[\\s,.;:!?)]|$)`, 'gi'), ' ');
     out = out.replace(new RegExp(figure, 'g'), ' ');
   }
@@ -220,7 +225,7 @@ const YEAR = /^(?:19|20)\d\d$/;
  */
 export function stripNums(text: string, nums: readonly string[]): string {
   const figures = nums.filter((num) => !YEAR.test(num));
-  const holds = (part: string) => figures.some((num) => new RegExp(shownNumber(num).source).test(maskQuotes(part).text));
+  const holds = (part: string) => figures.some((num) => figureIn(num).test(maskQuotes(part).text));
   // "Sales tax is 4% ($6)": an aside in parentheses goes on its own and the sentence stays.
   text = text.replace(/\s*\([^()]*\)/g, (aside) => (holds(aside) ? '' : aside));
   const items = text.split(/\s+[·•|]\s+/);
@@ -535,7 +540,8 @@ function retargetNode(node: CardNode, sources: readonly ClaimSource[], query = '
     case 'callout':
     case 'quote':
     case 'draft': {
-      const cited = retargetCites(node.type === 'draft' ? node.text : wholeQuotes(node.text, sources, node.type === 'quote'), sources, query);
+      // A draft is writing the person asked for: its times and amounts are theirs, not facts to check against pages.
+      const cited = node.type === 'draft' ? node.text : retargetCites(wholeQuotes(node.text, sources, node.type === 'quote'), sources, query);
       const cleaned = cited.split(SENTENCE_BREAK).map((sentence) => {
         const n = [...sentence.matchAll(/\[(\d+)\]/g)].map((match) => Number(match[1])).at(-1);
         return withoutForeignAgency(sentence, byNumber(sources, n ?? 0));

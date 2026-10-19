@@ -74,8 +74,8 @@ import { anchoredFollowup, asksToCompare, comparisonFollow, cryptographyHint, fa
 import { calculationAnswer, isCalculationAsk, leadTaxedTotal, rateOnAmount, splitShare } from './calculate';
 import { acceptProductPhoto, appendAskedFact, comparisonRepair, comparisonTitle, dropShownDenials, keepComparedProducts, mentionsSide, missingSideNode, nameForms, placeSidePhotos, restoreSideTiles, stickerPrice } from './compareAnswer';
 import { cardGaps, citeForGap, gapSearchQuery, settleGap, type PieceGap } from './gapFill';
-import { withinSources, withoutShells } from '../shared/shells';
-import { fxQuote, withinFx } from '../shared/fxCard';
+import { factsElsewhere, withinSources, withoutRepeatedFacts, withoutShells } from '../shared/shells';
+import { fxQuote, liveQuoteFacts, withinFx, withinQuote } from '../shared/fxCard';
 import { unblendObjects } from './objectFacts';
 import { withFinishedSentences } from './polish';
 import { queryWithPlace, readerPlace, settleReadings } from './readings';
@@ -588,12 +588,16 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
    */
   // An exchange-rate card keeps to the pair and direction asked, at the live quote's rate.
   const fx = fxQuote(designReq.ticker);
+  // A stock, crypto or index card states one price right now: its widget's.
+  const live = liveQuoteFacts(designReq.ticker);
   /** Sources a later search appended after the ones the card was designed from; their cites run past the first list. */
   let addedSources = 0;
   const publish: Publish = (index, raw) => {
     // A component whose figures were all removed is collapsed, not shown as an empty shell.
     const fitted = withinSources(raw, designReq.search.results.length + addedSources);
-    const node = withoutShells(fx ? withinFx(fitted, fx) ?? { type: 'stack', children: [] } : fitted) ?? { type: 'stack', children: [] };
+    const agreed = fx ? withinFx(fitted, fx) : live ? withinQuote(fitted, live) : fitted;
+    const tidy = withoutShells(agreed ?? { type: 'stack', children: [] });
+    const node = (tidy && withoutRepeatedFacts(tidy, factsElsewhere(shown, index))) ?? { type: 'stack', children: [] };
     shown.set(index, node);
     if (!arrival.includes(index)) arrival.push(index);
     const key = JSON.stringify(node);
