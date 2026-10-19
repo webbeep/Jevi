@@ -89,6 +89,26 @@ export function mentionsSide(side: string, text: string): boolean {
   });
 }
 
+/**
+ * Every word of this product's name is on the page ("Fitbit Edge", not any Fitbit page; "Mi Band 10", not
+ * "the band"). A name typed as one word matches the spaced form the page uses ("miband" is "Mi Band").
+ */
+export function namesSide(side: string, text: string): boolean {
+  const words = side.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word && !SMALL.has(word));
+  if (!words.length) return false;
+  const page = text.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  const joined = (word: string) => page.some((_, i) => {
+    let acc = '';
+    for (let j = i; j < page.length && j < i + 3; j++) {
+      acc += page[j]!;
+      if (acc === word) return j > i;
+      if (acc.length >= word.length) return false;
+    }
+    return false;
+  });
+  return words.every((word) => page.includes(word) || (word.length >= 4 && joined(word)));
+}
+
 function sideTitle(side: string): string {
   return side
     .trim()
@@ -204,14 +224,19 @@ function measuredPhrase(sentence: string): string | undefined {
 }
 
 /** A spec cell with no measurement takes the number the source states for that row. */
-function specFromSources(label: string, side: string, search: SearchResponse): string | undefined {
+function specFromSources(label: string, side: string, search: SearchResponse, others?: readonly string[]): string | undefined {
   if (!labelKeys(label).length) return undefined;
   for (const result of search.results) {
     const blob = `${result.title ?? ''}. ${result.snippet ?? ''} ${result.content ?? ''}`;
-    if (!mentionsSide(side, `${result.title ?? ''} ${result.snippet ?? ''}`)) continue;
+    const head = `${result.title ?? ''} ${result.snippet ?? ''}`;
+    // With the other sides given, the page must name this product in full, and a page naming another one too
+    // only lends a sentence that names this product itself.
+    if (others ? !namesSide(side, head) : !mentionsSide(side, head)) continue;
+    const shared = !!others && others.some((other) => namesSide(other, blob));
     for (const sentence of blob.split(/(?<=[.!?])\s+/)) {
       const clean = sentence.replace(/\s+/g, ' ').trim();
       if (clean.length < 8 || clean.length > 400) continue;
+      if (shared && !namesSide(side, clean)) continue;
       for (const clause of clean.split(/\s*(?:,|;|\band\b|\bwith\b)\s*/i)) {
         if (!mentionsLabel(label, clause)) continue;
         const phrase = measuredPhrase(clause);
@@ -377,6 +402,8 @@ export function placeSidePhotos(question: string, nodes: Map<number, CardNode>, 
   return patches.length ? patches : undefined;
 }
 
+const FALLBACK_SPECS = ['Display', 'Battery life', 'Weight'];
+
 export function comparisonNodes(question: string, search: SearchResponse): CardNode[] {
   const sides = compareSides(question);
   if (sides.length < 2) return [];
@@ -385,12 +412,14 @@ export function comparisonNodes(question: string, search: SearchResponse): CardN
     ...search.results.map((result) => ({ text: `${result.title} ${result.snippet ?? ''} ${result.content ?? ''}`.replace(/\s+/g, ' ').trim() })),
   ];
   const used = new Set<string>();
-  const shared = rows.find((row) => sides.filter((side) => mentionsSide(side, row.text)).length >= 2);
+  const shared = rows.find((row) => sides.filter((side) => namesSide(side, row.text)).length >= 2);
   if (shared) used.add(shared.text);
-  const covered = shared ? sides.filter((side) => mentionsSide(side, shared.text)) : [];
+  const covered = shared ? sides.filter((side) => namesSide(side, shared.text)) : [];
+  // A row about this product alone: a page that also names another side does not lend this one its price.
+  const own = (side: string) => rows.filter((row) => namesSide(side, row.text) && !sides.some((other) => other !== side && namesSide(other, row.text)));
   const tiles: CardNode[] = sides.map((side) => {
     const title = sideTitle(side);
-    const price = priceForSide(side, rows);
+    const price = priceForSide(side, own(side));
     const image = imageForSide(side, search.images ?? []);
     return {
       type: 'tile',
@@ -401,16 +430,16 @@ export function comparisonNodes(question: string, search: SearchResponse): CardN
     };
   });
   const priced = tiles.filter((tile) => tile.type === 'tile' && tile.value);
-  const table: CardNode | undefined = priced.length
-    ? {
-        type: 'table',
-        columns: ['', ...sides.map(sideTitle)],
-        rows: [['Price', ...sides.map((side) => priceForSide(side, rows) ?? '')]],
-      }
+  // Each spec a source states for a side, measured, so the fallback still compares the products and not only their prices.
+  const specRows = FALLBACK_SPECS.map((label) => [label, ...sides.map((side) => specFromSources(label, side, search, sides.filter((other) => other !== side)) ?? '—')])
+    .filter((row) => row.slice(1).some((cell) => cell !== '—'));
+  const tableRows = [...(priced.length ? [['Price', ...sides.map((side) => priceForSide(side, own(side)) ?? '—')]] : []), ...specRows];
+  const table: CardNode | undefined = tableRows.length
+    ? { type: 'table', columns: ['', ...sides.map(sideTitle)], rows: tableRows }
     : undefined;
   const sections: CardNode[] = [];
   for (const side of sides) {
-    const hit = rows.find((row) => !used.has(row.text) && mentionsSide(side, row.text));
+    const hit = own(side).find((row) => !used.has(row.text));
     const title = sideTitle(side);
     if (hit) {
       used.add(hit.text);

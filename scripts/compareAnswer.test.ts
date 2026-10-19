@@ -620,3 +620,42 @@ test('a measured breakdown does not gain the previous card’s rows when the fac
   assert.equal(keepComparedProducts(prior, new Map([[0, table]]), 'Northwatch vs Glowband'), undefined);
   assert.deepEqual(table.rows.map((row) => row[0]), ['Points', 'Rebounds']);
 });
+
+test('a trailing aspect word is what to compare, not part of the last product name', () => {
+  assert.deepEqual(compareSides('fitbit edge vs mi band 10 specs'), ['fitbit edge', 'mi band 10']);
+  assert.deepEqual(compareSides('iphone 17 specs vs pixel 10 specs'), ['iphone 17', 'pixel 10']);
+  assert.deepEqual(compareSides('PS5 vs Xbox Series X full specs comparison'), ['PS5', 'Xbox Series X']);
+  assert.deepEqual(compareSides('Nike Pegasus vs Asics Novablast review'), ['Nike Pegasus', 'Asics Novablast']);
+  assert.deepEqual(compareSides('price vs value'), ['price', 'value']);
+});
+
+test('the fallback comparison takes each spec only from pages that name that product in full', () => {
+  const row = (title: string, snippet: string) => ({ title, url: `https://example.com/${encodeURIComponent(title)}`, snippet, domain: 'example.com', engines: ['web'] });
+  const search = {
+    query: 'fitbit edge vs mi band 10 specs',
+    freshness: 'any',
+    results: [
+      row('List of Fitbit products', 'The Fitbit Aria Air smart scale was released in 2019 and priced at $49.95.'),
+      row('Fitbit Edge launch: Price, specs', 'The AMOLED color display measures 1.34 inches and only weighs 17.7 grams without the band.'),
+      row('Redmi 10', 'Xiaomi Redmi 10 – Full Specs and Official Price in the Philippines.'),
+      row('Xiaomi Mi Smart Band 10 (2025) Global Version', 'The 1.72-inch AMOLED display with 21 days of battery.'),
+    ],
+    images: [],
+    discussions: [],
+    engines: [],
+  } as unknown as SearchResponse;
+  const nodes = comparisonNodes('fitbit edge vs mi band 10 specs', search);
+  const grid = nodes.find((node) => node.type === 'grid');
+  assert.ok(grid && grid.type === 'grid');
+  // The scale's price is not the Fitbit Edge's.
+  assert.deepEqual(grid.children.map((tile) => (tile.type === 'tile' ? [tile.label, tile.value] : [])), [['Fitbit Edge', undefined], ['Mi Band 10', undefined]]);
+  const table = nodes.find((node) => node.type === 'table');
+  assert.ok(table && table.type === 'table');
+  assert.deepEqual(table.rows, [
+    ['Display', '1.34 inches', '1.72-inch'],
+    ['Battery life', '—', '21 days'],
+    ['Weight', '17.7 grams', '—'],
+  ]);
+  const text = JSON.stringify(nodes);
+  assert.ok(!/Redmi/.test(text), 'the Redmi phone page is not the Mi Band');
+});

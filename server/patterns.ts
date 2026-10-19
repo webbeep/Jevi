@@ -66,8 +66,13 @@ function sidesIn(asked: string): string[] {
 
 /** "the iPhone 17" is the iPhone 17, and "a traditional IRA for 2026" is a traditional IRA: the year scopes the whole question. */
 function sideName(side: string): string {
-  return side.trim().replace(/^(?:the|a|an)\s+/i, '').replace(/\s+(?:for|in)\s+(?:(?:19|20)\d\d|the U\.?S\.?|the United States)$/i, '').trim();
+  const named = side.trim().replace(/^(?:the|a|an)\s+/i, '').replace(/\s+(?:for|in)\s+(?:(?:19|20)\d\d|the U\.?S\.?|the United States)$/i, '').trim();
+  // "Fitbit Edge vs Mi Band 10 specs" compares the Mi Band 10's specs: "specs" is what to compare, not part of its name.
+  const bare = named.replace(ASPECT_TAIL, '').trim();
+  return bare.length >= 2 ? bare : named;
 }
+
+const ASPECT_TAIL = /(?:\s+(?:full|tech(?:nical)?|spec(?:s|ification)?s?|sheet|prices?|pricing|costs?|reviews?|comparison|compared|differences?))+$/i;
 
 /**
  * Each named side, searched on its own in addition to the full question.
