@@ -40,7 +40,7 @@ function readCap(raw: string | undefined): number | undefined {
  * the per-person ask gates.
  */
 const DEFAULT_CAPS: Record<string, Record<CapBucket, number>> = {
-  serper: { prod: 10000, eval: 200, test: 8000 },
+  serper: { prod: 10000, eval: 200, test: 10000 },
   langsearch: { prod: 300, eval: 300, test: 100 },
   // You.com keyless MCP free profile (~100/day total). Stored under bucket 'shared'
   // so prod+eval share one counter (the free MCP is ~100/day per IP, not 200).
