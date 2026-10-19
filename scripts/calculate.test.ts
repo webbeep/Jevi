@@ -372,3 +372,12 @@ test('a price the card before called the old one is not the price a tax follow-u
   const other: CardNode[] = [{ type: 'hero', value: '$549.99', label: 'Bundle price' }, { type: 'tile', label: 'Tax rate', value: '8.875% combined' }];
   assert.match(JSON.stringify(leadTaxedTotal(ask, other, { priorNodes: prior })), /\$598\.80/);
 });
+
+test('a price change tile is not the price a tax follow-up uses', () => {
+  const prior: CardNode[] = [
+    { type: 'tile', label: 'Price change', value: '+$50', sub: 'Up from $449.99' },
+    { type: 'hero', value: '$499.99', label: 'Switch 2 MSRP' },
+  ];
+  const now: CardNode[] = [{ type: 'tile', label: 'Console price', value: '$449.99' }, { type: 'tile', label: 'Tax rate', value: '8.875% combined' }];
+  assert.match(JSON.stringify(leadTaxedTotal('What would I pay with sales tax in New York City?', now, { priorNodes: prior })), /\$544\.36/);
+});

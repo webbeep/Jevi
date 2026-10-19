@@ -878,8 +878,10 @@ const money = (value: number) => `$${value.toLocaleString('en-US', { minimumFrac
 export function cardPriceAndTax(nodes: readonly CardNode[]): { price?: number; rate?: number; total?: number } {
   const figures = labeledFigures(nodes);
   const total = figures.find((f) => /\btotal\b|\bwith tax\b|\bafter tax\b|\bout the door\b/i.test(f.label) && !/\bsplit|each|per\b/i.test(f.label));
-  const price = figures.find((f) => /\b(?:price|cost|msrp|retail|list)\b/i.test(f.label) && !/\btax|total|fee|split|each\b/i.test(f.label) && dollarsIn(f.value) !== undefined)
-    ?? figures.find((f) => !/\btax|total|fee|split|each|%/i.test(`${f.label} ${f.value}`) && dollarsIn(f.value) !== undefined);
+  // A change or a difference ("Price change +$50", "Saving $27.98") is not what the thing costs.
+  const notPrice = (f: { label: string; value: string }) => /\b(?:change|increase|decrease|difference|saving|savings|discount|gap)\b/i.test(f.label) || /^\s*[+−-]/.test(f.value);
+  const price = figures.find((f) => /\b(?:price|cost|msrp|retail|list)\b/i.test(f.label) && !/\btax|total|fee|split|each\b/i.test(f.label) && !notPrice(f) && dollarsIn(f.value) !== undefined)
+    ?? figures.find((f) => !/\btax|total|fee|split|each|%/i.test(`${f.label} ${f.value}`) && !notPrice(f) && dollarsIn(f.value) !== undefined);
   // "NYC combined sales tax 8.875%" and "Combined NYC rate 8.875%" are both the rate. Of several, the most precise
   // wins ("8.875%" over "almost 9%"), then the largest: the combined rate, not its 0.375% surcharge.
   // A fee, interest or discount percentage is not the sales tax.

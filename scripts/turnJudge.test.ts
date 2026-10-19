@@ -234,25 +234,6 @@ test('"it" after a rejected guess is the building the card affirmed, even when t
   assert.doesNotMatch(plan.query, /Empire State|NYC/);
 });
 
-test('"it" under an "X vs Y" title follows the one side the judge searched', () => {
-  const plan = followSearchPlan({
-    title: 'Empire State Building vs One WTC',
-    question: 'When did it open?',
-    queries: ['One WTC opening date'],
-    subject: 'Empire State Building vs One WTC',
-    lead: 'Heights, corrected side by side',
-  });
-  assert.equal(plan.query, 'One WTC opening date');
-  const both = followSearchPlan({
-    title: 'Empire State Building vs One WTC',
-    question: 'When did each open?',
-    queries: ['One WTC opening date'],
-    subject: 'Empire State Building vs One WTC',
-    lead: '',
-  });
-  assert.match(both.query, /Empire State Building vs One WTC/);
-});
-
 test('"it" searches the full name the verdict spells out, not the title\'s short side', () => {
   const plan = followSearchPlan({
     title: 'Empire State vs One WTC',

@@ -225,9 +225,6 @@ export function followSearchPlan(input: { title?: string; question: string; quer
     if (subject && !compareSides(subject).length) {
       return { query: withoutLeadVerb(judged), fanout: input.queries.slice(1).map(withoutLeadVerb), subject };
     }
-    // The judge's subject is the card's "X vs Y", but its search names one side: "it" is that side.
-    const one = sides.filter((side) => sideNamed(judged, side));
-    if (one.length === 1 && !compareSides(judged).length) return { query: withoutLeadVerb(judged), fanout: [], subject: one[0]! };
   }
   if (sides.length >= 2) {
     const intro = objectPhrase(asked, sides);
