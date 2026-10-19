@@ -1639,7 +1639,12 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   // still has the page that states the Switch 2's $499.99, after the new search found only tax pages.
   if (carried.length) {
     const have = new Set(results.results.map((row) => normalizeUrl(row.url)));
-    const add = carried.filter((row) => !have.has(normalizeUrl(row.url))).slice(0, CARRIED_ROWS);
+    // The pages that speak to what the follow-up asks ("battery" on "which has better battery life?") are carried
+    // first: the battery figures may sit on the card's tenth source, past the first few it cites.
+    const asked = threadWords(followQuestion || query);
+    const speaks = (row: SearchResult) => [...threadWords(`${row.title} ${row.snippet ?? ''}`)].filter((word) => asked.has(word)).length;
+    const ranked = carried.map((row, i) => ({ row, i, n: speaks(row) })).sort((a, b) => b.n - a.n || a.i - b.i).map(({ row }) => row);
+    const add = ranked.filter((row) => !have.has(normalizeUrl(row.url))).slice(0, CARRIED_ROWS);
     if (add.length) results = { ...results, results: [...results.results, ...add] };
   }
   send('search', results);

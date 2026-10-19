@@ -66,14 +66,22 @@ export class Grounding {
       const n = Number(match[1]!.replace(/,/g, '')) * SCALE[match[2]!.toLowerCase()]!;
       if (this.known.has(String(Math.round(n))) || this.known.has(String(n))) scaled.add(numberTokens(match[1]!)[0]!);
     }
-    // "About 2.7 times wider — 6.5 m against 2.4 m": a ratio worked out from two backed figures in the same line.
+    // A figure worked out from two backed figures in the same line: "$544.36" beside "$499.99 plus 8.875%" (a rate
+    // applied), "2.7 times wider" beside 6.5 m and 2.4 m (a ratio), a sum, a difference, a product, a share. It has to
+    // match to its own last digit, and a small whole number never counts, so a guess does not pass by coincidence.
     const tokens = numberTokens(withoutIdentifiers(text));
-    const backed = tokens.filter((n) => this.known.has(n)).map(Number).filter((n) => n > 0);
-    for (const match of text.matchAll(/(\d+(?:\.\d+)?)\s*(?:times|x|×)\b/gi)) {
-      const ratio = Number(match[1]);
-      const places = (match[1]!.split('.')[1] ?? '').length;
-      const tolerance = 0.5 * 10 ** -places + 1e-9;
-      if (backed.some((a) => backed.some((b) => a !== b && Math.abs(a / b - ratio) <= tolerance))) scaled.add(numberTokens(match[1]!)[0]!);
+    const backed = [...new Set(tokens.filter((n) => this.known.has(n)).map(Number).filter((n) => n > 0))];
+    for (const token of tokens) {
+      if (this.known.has(token) || scaled.has(token) || Number(token) <= FREE_NUMBER_MAX) continue;
+      const value = Number(token);
+      const places = (token.split('.')[1] ?? '').length;
+      const ratioWord = new RegExp(`${token.replace('.', '\\.')}\\s*(?:times|x|×)`, 'i').test(text.replace(/,/g, ''));
+      if (!places && value < 100 && !ratioWord) continue;
+      const near = (x: number) => Math.abs(x - value) <= 0.5 * 10 ** -places + 1e-9;
+      const derived = backed.some((a) => backed.some((b) => a !== b && (
+        near(a / b) || near(a * (1 + b / 100)) || near(a * b / 100) || near(a + b) || near(a - b) || near(a * b)
+      )));
+      if (derived) scaled.add(token);
     }
     return tokens.every((n) => this.known.has(n) || scaled.has(n) || Number(n) <= FREE_NUMBER_MAX);
   }
@@ -118,7 +126,8 @@ function groundNode(node: CardNode, g: Grounding): CardNode | undefined {
     case 'video':
       return node.type === 'badges' ? { ...node, items: node.items.filter((b) => g.ok(b)) } : node;
     case 'hero':
-      return g.ok(node.value) ? { ...node, caption: node.caption && g.sentences(node.caption) } : undefined;
+      // A total the caption works out ("$544.36" over "$499.99 list price plus 8.875%") is read with its caption.
+      return g.ok(node.value) || g.ok(`${node.value} ${node.label ?? ''} ${node.caption ?? ''}`) ? { ...node, caption: node.caption && g.sentences(node.caption) } : undefined;
     case 'heading':
       return g.ok(node.text) ? node : undefined;
     case 'text': {

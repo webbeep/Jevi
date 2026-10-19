@@ -63,3 +63,13 @@ test('a ratio worked out from two backed figures in the line is grounded', () =>
   assert.equal(g.ok("JWST's mirror is about 3.1 times wider than Hubble's — 6.5 m against 2.4 m."), false);
   assert.equal(g.ok("JWST's mirror is 3 times wider."), false);
 });
+
+test('a total worked out from backed figures in its own component is grounded, and a guess is not', async () => {
+  const { groundNodes } = await import('../server/ground.ts');
+  const g = new Grounding('Nintendo Switch 2 is $499.99. The NYC combined sales tax rate is 8.875%.');
+  const [hero] = groundNodes([{ type: 'hero', value: '$544.36', label: 'Switch 2 total in NYC', caption: '$499.99 list price plus 8.875% combined tax' }], g);
+  assert.equal(hero?.type === 'hero' ? hero.value : '', '$544.36');
+  const [wrong] = groundNodes([{ type: 'hero', value: '$543.36', label: 'Total', caption: '$499.99 plus 8.875%' }], g);
+  assert.equal(wrong, undefined);
+  assert.equal(g.ok('About 12 games, $499.99 each'), false);
+});
