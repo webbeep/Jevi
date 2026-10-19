@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { withinFx, type FxQuote } from '../shared/fxCard.ts';
+import { withinFx, withinQuote, type FxQuote } from '../shared/fxCard.ts';
 import type { CardNode } from '../shared/card.ts';
 
 const fx: FxQuote = { base: 'USD', quote: 'JPY', price: 158.02 };
@@ -108,4 +108,21 @@ test('a hero restating the widget\'s price is not shown twice', async () => {
   const card: CardNode = { type: 'stack', children: [{ type: 'hero', value: '$214.13', label: 'NVDA per share', caption: 'Down 1.43% on the day [2]' }, { type: 'text', text: 'Latest close $214.13 on Oct 16 [5].' }] };
   const kept = withinQuote(card, { price: 214.13, pct: -1.43 });
   assert.deepEqual(kept?.type === 'stack' ? kept.children.map((child) => child.type) : [], ['text']);
+});
+
+test('an earlier session\'s close, a day high under the live price and a stat day change that disagrees are dropped', () => {
+  const quote = { price: 219.35, pct: 2.44, previousClose: 214.13 };
+  const tiles: CardNode = { type: 'scroller', children: [
+    { type: 'tile', label: 'Open', value: '$216.56' },
+    { type: 'tile', label: 'Day high', value: '$218.68' },
+    { type: 'tile', label: 'Prev close', value: '$217.23' },
+    { type: 'tile', label: '52-week high', value: '$243.37' },
+    { type: 'tile', label: 'Day low', value: '$214.70' },
+    { type: 'tile', label: 'Previous close', value: '$214.13' },
+  ] };
+  const kept = withinQuote(tiles, quote);
+  assert.deepEqual(kept?.type === 'scroller' ? kept.children.map((tile) => (tile.type === 'tile' ? tile.label : '')) : [], ['Open', '52-week high', 'Day low', 'Previous close']);
+  const stat: CardNode = { type: 'stat', label: 'Day change', value: '-1.43', unit: '%' };
+  assert.equal(withinQuote(stat, quote), undefined);
+  assert.ok(withinQuote({ type: 'stat', label: 'Day change', value: '+2.44', unit: '%' }, quote));
 });

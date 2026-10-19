@@ -82,6 +82,8 @@ export interface LiveQuoteFacts {
   pct: number;
   /** Changes the live quote feed itself states ("+0.69%" over 24 hours, beside the widget's change since midnight). */
   feedPcts?: number[];
+  /** The close the widget's day change counts from. */
+  previousClose?: number;
 }
 
 /** The percentage changes a live quote row states. */
@@ -94,7 +96,7 @@ export function liveQuoteFacts(ticker: CardNode | undefined): LiveQuoteFacts | u
   if (!ticker || ticker.type !== 'ticker' || ticker.kind === 'fx') return undefined;
   const { price, base, range } = ticker.series;
   if (!Number.isFinite(price) || price <= 0 || range !== '1D') return undefined;
-  return { price, pct: base ? ((price - base) / base) * 100 : 0 };
+  return { price, pct: base ? ((price - base) / base) * 100 : 0, previousClose: base || undefined };
 }
 
 /** Words that mark a figure as another time or another quantity, not the price right now. */
@@ -110,6 +112,17 @@ const moneyFigures = (text: string) => [...text.replace(/\[\d+\]/g, ' ').matchAl
  * $82,423, "Stock hit $14.19 … $13.58" beside $8.39) or a different change today ("+0.84%" beside +0.48%).
  */
 function contradictsQuote(text: string, quote: LiveQuoteFacts): boolean {
+  const bare = text.replace(/\[\d+\]/g, ' ');
+  const figure = moneyFigures(bare)[0] ?? Number(bare.match(/\b(\d{1,3}(?:,\d{3})*\.\d{2})\b/)?.[1]?.replace(/,/g, '') ?? NaN);
+  if (Number.isFinite(figure) && figure > quote.price * 0.4 && figure < quote.price * 2.5) {
+    // "Prev close $217.23" beside a widget that counts from 214.13 is an earlier session's close.
+    if (quote.previousClose && /\b(?:prev(?:ious)?\.?|prior|last|yesterday['’]?s?)\s+close\b/i.test(bare) && Math.abs(figure - quote.previousClose) / quote.previousClose > 0.005) return true;
+    // A day or 52-week high under the live price, or a low above it, is from before the price got here.
+    const span = /\b(?:day|today['’]?s?|session|intraday|52[- ]?week)\b[^.]{0,12}\b(high|low)\b|^\s*(high|low)\b/i.exec(bare);
+    const side = (span?.[1] ?? span?.[2])?.toLowerCase();
+    if (side === 'high' && figure < quote.price * 0.997) return true;
+    if (side === 'low' && figure > quote.price * 1.003) return true;
+  }
   // "Below the 200-day average at 82,364" while the price is 82,581: a level the price is said to be under (or over)
   // that the live price is not. This holds even for history words, since it is a claim about the price now.
   const level = text.replace(/\[\d+\]/g, ' ').match(/\b(below|under|above|over)\b[^.]{0,60}?(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+\.\d+)/i);
@@ -146,7 +159,8 @@ export function withinQuote(node: CardNode, quote: LiveQuoteFacts): CardNode | u
     case 'tile':
       return contradictsQuote(`${node.label} ${node.value ?? ''} ${node.sub ?? ''}`, quote) ? undefined : node;
     case 'stat':
-      return contradictsQuote(`${node.label} ${node.value} ${node.delta ?? ''}`, quote) ? undefined : node;
+      // A stat keeps its percent sign in `unit` ("-1.43" + "%"): read together, it is the day change it claims.
+      return contradictsQuote(`${node.label} ${node.value}${node.unit === '%' ? '%' : ''} ${node.delta ?? ''}`, quote) ? undefined : node;
     case 'hero': {
       // The widget above already shows the price large: a hero restating it is the same number twice.
       const amount = Number(node.value.replace(/[^\d.]/g, ''));
