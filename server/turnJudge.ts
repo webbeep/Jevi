@@ -171,11 +171,19 @@ function mentionsPlace(written: string, place: string): boolean {
 const POINTER = /\b(?:it|its|it's|they|them|their|this|that|these|those|he|she|his|her)\b/i;
 const SINGULAR_POINTER = /\b(?:it|its|it's|he|she|his|her)\b/i;
 
-/** The name a lead affirms when it rejects the person's claim: "No — One World Trade Center is still the tallest". */
+/**
+ * The name a lead affirms when it rejects the person's claim: "No — One World Trade Center is still the tallest", or
+ * "One World Trade Center still holds the top spot · Empire State Building is not the tallest". Undefined when the
+ * lead rejects nothing.
+ */
 export function rejectionAffirms(lead: string): string | undefined {
-  const match = lead.match(/^\s*No\b[\s,.:;!—–-]+(?:the\s+)?([A-Z0-9][\w.'’&-]*(?:\s+(?:of\s+|the\s+|de\s+)?[A-Z0-9][\w.'’&-]*)*)/);
-  const name = match?.[1]?.trim();
-  return name && name.split(/\s+/).length >= 1 && !/^(?:It|That|This|They|He|She|The|You|We|I)$/.test(name) ? name : undefined;
+  const names = [...lead.matchAll(/\b[A-Z0-9][\w.'’&-]*(?:\s+(?:of\s+|the\s+|de\s+)?[A-Z0-9][\w.'’&-]*)*/g)]
+    .map((match) => ({ name: match[0].replace(/^(?:No|Yes|The)\s+/, '').trim(), after: lead.slice((match.index ?? 0) + match[0].length, (match.index ?? 0) + match[0].length + 24) }))
+    .filter(({ name }) => name && !/^(?:No|Yes|It|That|This|They|He|She|The|You|We|I|A|An)$/.test(name));
+  const rejected = names.filter(({ after }) => /^\s+(?:(?:is|was|are|were)\s+not|isn['’]t|wasn['’]t|aren['’]t)\b/i.test(after));
+  if (!rejected.length && !/^\s*No\b/.test(lead)) return undefined;
+  const affirmed = names.find(({ name, after }) => !rejected.some((item) => item.name === name) && /^\s+(?:is|was|still|remains|holds|stands|tops|has|ranks)\b/i.test(after));
+  return affirmed?.name;
 }
 
 export function followSearchPlan(input: { title?: string; question: string; queries: string[]; subject: string; lead?: string }): { query: string; fanout: string[]; added?: string; subject?: string } {

@@ -351,3 +351,12 @@ test('how long someone has held a role is the years since the current holder sta
   assert.equal(factAnswer('How long has she held the job as CEO?', 'She is a former CEO who left in 2019.', now), undefined);
   assert.equal(factAnswer('How long has it been raining?', 'Rain began in October 2026.', now), undefined);
 });
+
+test('each role in a joined "since" claim keeps the start date its sources give', async () => {
+  const { withRoleDates } = await import('../server/hops.ts');
+  const now = new Date(Date.UTC(2026, 9, 19));
+  const corpus = 'Su joined AMD in January 2012, became CEO in October 2014 and was elected chair in February 2022.';
+  assert.equal(withRoleDates('Chair and CEO since October 2014', corpus, now), 'CEO since October 2014');
+  assert.equal(withRoleDates('President and CEO since October 2014', corpus, now), 'President and CEO since October 2014');
+  assert.equal(withRoleDates('CEO since October 2014 · chair since February 2022', corpus, now), 'CEO since October 2014 · chair since February 2022');
+});

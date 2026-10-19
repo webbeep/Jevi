@@ -52,7 +52,7 @@ import { agreeOfficialRate, claimSources, groundMembers, oneNamedCharge, present
 import { answerTitle, fillPaperCard, keepAnswerBody, restoreKeptPapers, wantsNamedQuote } from './cardAgree';
 import { dropDisputedBio, type BioSource } from './bioFacts';
 import { withoutGluedPerson } from './peopleSplit';
-import { abstainComputed, alignFactProse, cardFacts, factAnswer, hasMemberWork, hopQueries, leadMemberRows, placeFactLead, unsupportedYear } from './hops';
+import { abstainComputed, alignFactProse, cardFacts, factAnswer, hasMemberWork, hopQueries, leadMemberRows, placeFactLead, unsupportedYear, withRoleDates } from './hops';
 import { gapQuery, onTopicCount, rescueQuery, sourcesMiss } from './rescue';
 import { keepShownComponent } from '../shared/keepShown';
 import { keepPictures, reviewCard, reviewComponents, type Review } from './review';
@@ -614,7 +614,10 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     const fitted = withinSources(raw, designReq.search.results.length + addedSources);
     const quoted0 = fx ? withinFx(fitted, fx) : live ? withinQuote(fitted, live) : fitted;
     const agreed = quoted0 && forecast ? withinForecast(quoted0, forecast) : quoted0;
-    const dated = agreed ? withSourcedMonths(agreed, { sources: monthSources(), asked: monthAsked, now: new Date() }) : undefined;
+    const monthsChecked = agreed ? withSourcedMonths(agreed, { sources: monthSources(), asked: monthAsked, now: new Date() }) : undefined;
+    const roleJson = monthsChecked ? JSON.stringify(monthsChecked) : '';
+    const roleFixed = roleJson ? withRoleDates(roleJson, factCorpus) : '';
+    const dated = monthsChecked && roleFixed !== roleJson ? (JSON.parse(roleFixed) as CardNode) : monthsChecked;
     const quoted = dated ? withVerbatimQuotes(dated, quotes()) : undefined;
     const tidy = withoutShells(quoted ?? { type: 'stack', children: [] });
     const node = (tidy && withoutRepeatedFacts(tidy, factsElsewhere(shown, index))) ?? { type: 'stack', children: [] };
@@ -665,7 +668,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     );
     const quality = agreed;
     if (head) {
-      if (settled.head) head = { ...head, title: settled.head.title, subtitle: settled.head.subtitle };
+      if (settled.head) head = { ...head, title: settled.head.title, subtitle: settled.head.subtitle && withRoleDates(settled.head.subtitle, factCorpus) };
       const title = answerTitle(questionOf(), head.title, quality.map((node) => (node ? JSON.stringify(node) : '')).join('\n'));
       if (title !== head.title) head = { ...head, title };
       const key = JSON.stringify(head);
@@ -689,6 +692,11 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       head = title === h.title ? h : { ...h, title };
       // The live chart shows the price. A subtitle saying none came back is false.
       if (designReq.ticker && deniesPrice(head.subtitle)) head = { ...head, subtitle: undefined };
+      // "Chair and CEO since October 2014": each role keeps the start date its sources give.
+      if (head.subtitle) {
+        const subtitle = withRoleDates(head.subtitle, factCorpus);
+        if (subtitle !== head.subtitle) head = { ...head, subtitle };
+      }
       publishReadings();
     },
     node: (node, index) => {
@@ -849,8 +857,16 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     // A computed figure uses the facts the card already shows. A figure from the raw pages,
     // or a hero the model wrote without those facts, changes from draw to draw.
     const grounded = cardFacts(req.query, nodes);
-    // Half of a two-part answer ("who is the CEO, and how long") does not replace the hero that answers the other half.
-    if (grounded?.hint) return;
+    // Half of a two-part answer ("who is the CEO, and how long") does not replace the hero that answers the other half:
+    // when the card never states it, it goes in a row under that hero.
+    if (grounded?.hint) {
+      const said = [grounded.lead, ...(grounded.accept ?? [])].map((value) => value.toLowerCase());
+      if (nodes.some((node) => said.some((value) => JSON.stringify(node).toLowerCase().includes(value)))) return;
+      const at = nodes.findIndex((node) => JSON.stringify(node).includes('"type":"hero"'));
+      if (at < 0) return;
+      publish(indexes[at]!, { type: 'stack', direction: 'col', gap: 'md', children: [nodes[at]!, { type: 'keyvalue', items: [{ label: grounded.label, value: grounded.lead }] }] });
+      return;
+    }
     if (!grounded) {
       const abstained = abstainComputed(req.query, nodes);
       abstained?.forEach((node, i) => {

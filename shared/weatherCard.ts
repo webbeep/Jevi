@@ -5,17 +5,20 @@ export interface ForecastHigh {
   high: number;
   /** That period's name as NWS gives it: "Today", "Monday", "This Afternoon". */
   day: string;
+  /** The forecast's citation number. */
+  ref?: number;
 }
 
 const DAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 
 /** The next daytime high from a National Weather Service forecast row ("Monday: Sunny, with a high near 65."). */
 export function forecastHigh(rows: readonly { engines?: string[]; content?: string; snippet?: string }[]): ForecastHigh | undefined {
-  const nws = rows.find((row) => row.engines?.includes('nws'));
+  const at = rows.findIndex((row) => row.engines?.includes('nws'));
+  const nws = rows[at];
   if (!nws) return undefined;
   for (const line of `${nws.content ?? ''}\n${nws.snippet ?? ''}`.split('\n')) {
     const match = line.match(/^([A-Za-z ]+?):\s.*?\bhigh near (-?\d{1,3})\b/i);
-    if (match) return { day: match[1]!.trim(), high: Number(match[2]) };
+    if (match) return { day: match[1]!.trim(), high: Number(match[2]), ref: at + 1 };
   }
   return undefined;
 }
@@ -46,8 +49,12 @@ export function withinForecast(node: CardNode, forecast: ForecastHigh): CardNode
       if (children.length === node.children.length && children.every((child, i) => child === node.children[i])) return node;
       return children.length ? { ...node, children } : undefined;
     }
-    case 'hero':
-      return contradictsForecast(`${node.label ?? ''} ${node.value}${node.unit ?? ''} ${node.caption ?? ''}`, forecast) ? undefined : node;
+    case 'hero': {
+      if (!contradictsForecast(`${node.label ?? ''} ${node.value}${node.unit ?? ''} ${node.caption ?? ''}`, forecast)) return node;
+      // The card still leads with the high, the official one.
+      const day = /^(?:today|this afternoon)$/i.test(forecast.day) ? 'today' : forecast.day;
+      return { type: 'hero', value: String(forecast.high), unit: '°F', label: `High ${day}`, caption: `National Weather Service forecast${forecast.ref ? ` [${forecast.ref}]` : ''}`, icon: node.icon, tone: node.tone };
+    }
     case 'tile':
       return contradictsForecast(`${node.label} ${node.value ?? ''} ${node.sub ?? ''}`, forecast) ? undefined : node;
     case 'stat':

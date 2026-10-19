@@ -186,3 +186,10 @@ test('a pronoun after a rejected claim points at the name the card affirmed', ()
   const kept = followSearchPlan({ title: 'Empire State Building vs. One WTC', question: 'When did it open?', queries: ['Empire State Building One WTC When did it open?'], subject: '', lead: 'No — One WTC is still the tallest' });
   assert.equal(kept.subject, 'One WTC');
 });
+
+test('a rejected claim is read from a lead that does not start with "No"', async () => {
+  const { rejectionAffirms } = await import('../server/turnJudge.ts');
+  assert.equal(rejectionAffirms('One World Trade Center still holds the top spot Empire State Building is not the tallest No'), 'One World Trade Center');
+  assert.equal(rejectionAffirms('No — One World Trade Center is still the tallest'), 'One World Trade Center');
+  assert.equal(rejectionAffirms('Lisa Su is the CEO of AMD since 2014'), undefined);
+});

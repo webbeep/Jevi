@@ -48,8 +48,9 @@ test('a 24-hour move and a level the price is not under are checked against the 
 test('a weather card keeps the official high for today and other days\' readings', async () => {
   const { forecastHigh, withinForecast } = await import('../shared/weatherCard.ts');
   const forecast = forecastHigh([{ engines: ['nws'], content: 'Official National Weather Service forecast.\nTonight: Mostly clear, with a low around 47.\nMonday: Sunny, with a high near 65.\nTuesday: Partly sunny, with a high near 65.' }]);
-  assert.deepEqual(forecast, { day: 'Monday', high: 65 });
-  assert.equal(withinForecast({ type: 'hero', value: '72', unit: '°F', label: 'High today', caption: 'Storms expected late Friday' }, forecast!), undefined);
+  assert.deepEqual(forecast, { day: 'Monday', high: 65, ref: 1 });
+  const official = withinForecast({ type: 'hero', value: '72', unit: '°F', label: 'High today', caption: 'Storms expected late Friday' }, forecast!);
+  assert.equal(official?.type === 'hero' ? `${official.value}${official.unit} ${official.label} · ${official.caption}` : '', '65°F High Monday · National Weather Service forecast [1]');
   const nws: CardNode = { type: 'hero', value: '65', unit: '°F', label: 'High today', caption: 'Sunny' };
   assert.equal(withinForecast(nws, forecast!), nws);
   const later: CardNode = { type: 'tile', label: 'Wednesday', value: '62°', sub: 'High' };

@@ -678,11 +678,11 @@ function roleIn(role: string, text: string): boolean {
  * "How long has she held the job?" with "became CEO in October 2014" in the sources: the years to today. Several
  * holders can be named ("Rory Read was named CEO in 2011"); the current one started last.
  */
-function tenureAnswer(query: string, corpus: string, now: Date): FactAnswer | undefined {
-  if (!TENURE_ASK.test(query)) return undefined;
-  const role = query.match(ROLE)?.[0];
-  if (!role) return undefined;
-  let best: { year: number; month?: number; raw: string } | undefined;
+interface RoleStart { year: number; month?: number; raw: string }
+
+/** When the role's current holder started, from the sources: the latest start any of them states. */
+function roleStart(role: string, corpus: string, now: Date): RoleStart | undefined {
+  let best: RoleStart | undefined;
   for (const sentence of corpus.split(/(?<=[.!?])\s+|\n+/)) {
     for (const clause of sentence.split(/\s*[,;]\s*|\s+and\s+(?=(?:was|has|is|had|became|served|later|then)\b)/i)) {
       if (!roleIn(role, clause) || ROLE_ENDED.test(clause)) continue;
@@ -699,6 +699,32 @@ function tenureAnswer(query: string, corpus: string, now: Date): FactAnswer | un
       }
     }
   }
+  return best;
+}
+
+const JOINED_ROLES = new RegExp(`\\b((?:${ROLE.source.slice(2, -2)})(?:\\s*(?:,|&|\\band\\b)\\s*(?:${ROLE.source.slice(2, -2)}))+)(\\s+since\\s+)((?:(?:${MONTH})\\.?\\s+(?:\\d{1,2},?\\s+)?)?((?:19|20)\\d{2}))`, 'gi');
+
+/**
+ * "Chair and CEO since October 2014" when the sources say CEO since October 2014 and chair since February 2022:
+ * a role whose own start the sources date to another year is taken out of that claim ("CEO since October 2014").
+ */
+export function withRoleDates(text: string, corpus: string, now = new Date()): string {
+  return text.replace(JOINED_ROLES, (whole, list: string, since: string, date: string, year: string) => {
+    const roles = list.split(/\s*(?:,|&|\band\b)\s*/i).filter(Boolean);
+    const kept = roles.filter((role) => {
+      const start = roleStart(role, corpus, now);
+      return !start || start.year === Number(year);
+    });
+    if (!kept.length || kept.length === roles.length) return whole;
+    return `${kept.join(' and ')}${since}${date}`;
+  });
+}
+
+function tenureAnswer(query: string, corpus: string, now: Date): FactAnswer | undefined {
+  if (!TENURE_ASK.test(query)) return undefined;
+  const role = query.match(ROLE)?.[0];
+  if (!role) return undefined;
+  const best = roleStart(role, corpus, now);
   if (!best) return undefined;
   const asOf = `${now.toLocaleString('en-US', { month: 'long', timeZone: 'UTC' })} ${now.getFullYear()}`;
   const tail = 'Give each role its own start date: a role taken later is never put under the earlier date.';
