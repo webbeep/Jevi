@@ -301,7 +301,7 @@ test('the test deployment counts searches in its own daily bucket', async () => 
   assert.equal(testHost('https://notjevi.pages.dev/'), false);
   assert.equal(capBucket({ test: true }), 'test');
   assert.equal(capBucket({}), 'prod');
-  assert.equal(capFor({} as never, 'serper', 'test'), 2600);
+  assert.equal(capFor({} as never, 'serper', 'test'), 3100);
   assert.equal(capFor({} as never, 'exa', 'test'), 0);
 });
 
