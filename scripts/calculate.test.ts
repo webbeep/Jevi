@@ -269,3 +269,14 @@ test('a with-tax ask leads with the taxed total', () => {
   assert.equal(next?.[1], NYC_CARD.body[1]);
   assert.equal(leadTaxedTotal('How much is a Switch 2?', NYC_CARD.body), undefined);
 });
+
+test('a combined rate labeled "rate" is the tax rate, and the split uses the taxed total', async () => {
+  const { splitShare, leadTaxedTotal } = await import('../server/calculate.ts');
+  const card = { title: 'Switch 2 in NYC With Tax', body: [
+    { type: 'keyvalue' as const, items: [{ label: 'Base price (MSRP)', value: '$499.99 [12]' }, { label: 'Combined NYC rate', value: '8.875% [7]' }, { label: 'NYC parts', value: '4% state + 4.5% city + 0.375% MCTD' }] },
+  ] };
+  const split = splitShare({ question: 'If my brother and I split it, how much does each of us pay?', card });
+  assert.equal(split?.nodes[0]?.type === 'hero' ? split.nodes[0].value : '', '$272.18 each');
+  const led = leadTaxedTotal('What would I pay with sales tax in New York City?', card.body);
+  assert.equal(led?.[0]?.type === 'stack' && led[0].children[0]?.type === 'hero' ? led[0].children[0].value : '', '$544.36');
+});

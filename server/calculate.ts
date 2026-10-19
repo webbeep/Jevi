@@ -869,11 +869,13 @@ export function cardPriceAndTax(nodes: readonly CardNode[]): { price?: number; r
   const total = figures.find((f) => /\btotal\b|\bwith tax\b|\bafter tax\b|\bout the door\b/i.test(f.label) && !/\bsplit|each|per\b/i.test(f.label));
   const price = figures.find((f) => /\b(?:price|cost|msrp|retail|list)\b/i.test(f.label) && !/\btax|total|fee|split|each\b/i.test(f.label) && dollarsIn(f.value) !== undefined)
     ?? figures.find((f) => !/\btax|total|fee|split|each|%/i.test(`${f.label} ${f.value}`) && dollarsIn(f.value) !== undefined);
+  // "NYC combined sales tax 8.875%" and "Combined NYC rate 8.875%" are both the rate. Of several, the most precise
+  // wins ("8.875%" over "almost 9%"), then the largest: the combined rate, not its 0.375% surcharge.
   const rates = figures
-    .filter((f) => /\btax\b/i.test(f.label) || /\btax\b/i.test(f.value))
+    .filter((f) => /\b(?:tax|rate)\b/i.test(f.label) || /\btax\b/i.test(f.value))
     .flatMap((f) => [...`${f.value} ${f.label}`.matchAll(/(\d{1,2}(?:\.\d+)?)\s*%/g)].map((m) => m[1]!))
     .filter((raw) => Number(raw) > 0 && Number(raw) < 15)
-    .sort((a, b) => (b.split('.')[1]?.length ?? 0) - (a.split('.')[1]?.length ?? 0));
+    .sort((a, b) => (b.split('.')[1]?.length ?? 0) - (a.split('.')[1]?.length ?? 0) || Number(b) - Number(a));
   return { price: price && dollarsIn(price.value), rate: rates[0] ? Number(rates[0]) : undefined, total: total && dollarsIn(total.value) };
 }
 

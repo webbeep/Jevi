@@ -145,3 +145,10 @@ test('a follow-up names the thing a card title is about, not the attribute it sh
   const plan = followSearchPlan({ title: 'Empire State Building Height', question: 'When did it open?', queries: [], subject: '' });
   assert.equal(plan.query, 'When did Empire State Building open');
 });
+
+test('a question-shaped title gives its subject with the model number, and the follow-up search names it', () => {
+  assert.equal(placeOnScreen('How Much Does a Nintendo Switch 2 Cost in the US Right Now'), 'Nintendo Switch 2');
+  assert.equal(placeOnScreen('Nintendo Switch 2 Price'), 'Nintendo Switch 2');
+  const plan = followSearchPlan({ title: 'Nintendo Switch 2 Price', question: 'What would I pay with sales tax in New York City?', queries: [], subject: '' });
+  assert.equal(plan.query, 'Nintendo Switch 2 What would I pay with sales tax in New York City');
+});

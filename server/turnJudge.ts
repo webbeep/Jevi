@@ -35,7 +35,9 @@ A variant (Pro, Plus, Max, Mini, Ultra) the question did not name is not the pro
 /** The place or business the card title names. "Art Institute of Chicago Illinois Resident…" → "Art Institute of Chicago". */
 export function placeOnScreen(title: string | undefined): string {
   if (!title) return '';
-  const words = title.replace(/[“”"'’?—–-]/g, ' ').split(/\s+/).filter(Boolean);
+  // "How Much Does a Nintendo Switch 2 Cost…" is about the Nintendo Switch 2: the question words before the name go.
+  const named = title.replace(/^\s*(?:how(?:\s+(?:much|many|long|far|big|old|often|tall))?|what|when|where|who|why|which)\b[^A-Z]*?\b(?:does|do|did|is|are|was|were|can|could|should|will|would)\s+(?:(?:a|an|the)\s+)?/i, '');
+  const words = named.replace(/[“”"'’?—–-]/g, ' ').split(/\s+/).filter(Boolean);
   const skip = /^(?:No|Yes|The|How|What|When|Where|Who|Why|Which|It|Its|That|This|These|Those|There|Here|Is|Are|Was|Did|Does|Do)$/i;
   const out: string[] = [];
   for (const word of words) {
@@ -51,7 +53,8 @@ export function placeOnScreen(title: string | undefined): string {
       out.push('of');
       continue;
     }
-    if (cap) {
+    // A model number stays with its name: "Switch 2", "iPhone 17".
+    if (cap || /^\d+[A-Za-z]{0,3}$/.test(bare)) {
       out.push(bare);
       continue;
     }
