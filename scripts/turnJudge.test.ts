@@ -111,8 +111,8 @@ test('a singular follow-up on a comparison card asks about the side its lead set
     subject: 'Empire State Building',
     lead: 'No — One World Trade Center is still the tallest One World Trade Center is the tallest No',
   });
-  assert.equal(plan.query, 'When did One WTC open');
-  assert.equal(plan.subject, 'One WTC');
+  assert.equal(plan.query, 'When did One World Trade Center open');
+  assert.equal(plan.subject, 'One World Trade Center');
   assert.deepEqual(plan.fanout, []);
   // Without a lead that picks one side, "each" still searches both.
   const both = followSearchPlan({ title: 'Harbor Slate vs Northwatch 2', question: 'When did it launch?', queries: [], subject: '', lead: 'Two smartwatches, side by side' });
@@ -251,4 +251,15 @@ test('"it" under an "X vs Y" title follows the one side the judge searched', () 
     lead: '',
   });
   assert.match(both.query, /Empire State Building vs One WTC/);
+});
+
+test('"it" searches the full name the verdict spells out, not the title\'s short side', () => {
+  const plan = followSearchPlan({
+    title: 'Empire State vs One WTC',
+    question: 'When did it open?',
+    queries: ['Empire State vs One WTC opening'],
+    subject: 'Empire State vs One WTC',
+    lead: 'No One World Trade Center is tallest Correcting the record',
+  });
+  assert.equal(plan.query, 'When did One World Trade Center open');
 });

@@ -209,7 +209,8 @@ export function followSearchPlan(input: { title?: string; question: string; quer
     ? sides.filter((side) => sideNamed(input.lead ?? '', side) && !rejectedIn(input.lead ?? '', side))
     : [];
   if (pointed.length === 1) {
-    const side = pointed[0]!;
+    // The card's own spelled-out name ("One World Trade Center") searches better than the title's short side ("One WTC").
+    const side = affirmed && sideNamed(affirmed, pointed[0]!) && affirmed.length > pointed[0]!.length ? affirmed : pointed[0]!;
     const query = asked.replace(/\bit's\b/i, `${side} is`).replace(SINGULAR_POINTER, side).replace(/[?.!]+$/, '');
     return { query, fanout: [], subject: side };
   }
