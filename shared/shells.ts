@@ -11,7 +11,10 @@ const blankCell = (cell: string) => cell !== GAP_MARK && hollow(cell);
 /** A value that says there is no value ("Unavailable", "None yet", "N/A"). */
 const NON_ANSWER = /^(?:unavailable|not available|none(?: yet| listed| found| reported)?|n\/?a|tbd|tba|unknown|not (?:yet )?(?:stated|reported|listed|announced|found)|not in (?:the |these )?sources|no data|pending)\.?$/i;
 const PRICE_LEFTOVER = /^(?:~|≈|under|over|from|around|about|approx\.?|up to|starting at|less than|more than|below|above)$/i;
-const saysNothing = (value: string | undefined) => hollow(value) || NON_ANSWER.test(value!.replace(/\[\d+\]/g, '').trim());
+/** A price cut off where its figure was: "starts at $...", "from $." A cashtag ("$RDW") is not one. */
+const CUT_MONEY = /[$€£¥]\s*(?:\.{2,}|…)|[$€£¥](?=\s*(?:[,;:)]|$))/;
+const cutMoney = (text: string | undefined) => !!text && CUT_MONEY.test(text.replace(/\[\d+\]/g, '').trim());
+const saysNothing = (value: string | undefined) => hollow(value) || cutMoney(value) || NON_ANSWER.test(value!.replace(/\[\d+\]/g, '').trim());
 
 /**
  * What a component still says after its unsupported figures were removed. A table row with no values left,
@@ -35,8 +38,12 @@ export function withoutShells(node: CardNode): CardNode | undefined {
       return children.length ? { ...node, children } : undefined;
     }
     case 'text':
-    case 'callout':
-      return hollow(node.text) ? undefined : node;
+    case 'callout': {
+      if (hollow(node.text)) return undefined;
+      if (!cutMoney(node.text)) return node;
+      const kept = node.text.split(/(?<=[.!?](?:\s*\[\d+\])*)\s+(?=[A-Z])/).filter((sentence) => !cutMoney(sentence)).join(' ').trim();
+      return kept && !hollow(kept) ? { ...node, text: kept } : undefined;
+    }
     case 'keyvalue': {
       const items = node.items.filter((item) => !saysNothing(item.value));
       if (items.length === node.items.length) return node;
@@ -55,8 +62,9 @@ export function withoutShells(node: CardNode): CardNode | undefined {
       // An empty detail ("meta": "") is dropped, and an item already listed is not listed again.
       const seen = new Set<string>();
       const items = node.items
-        .map((item) => (item.meta !== undefined && hollow(item.meta) ? { ...item, meta: undefined } : item))
+        .map((item) => (item.meta !== undefined && (hollow(item.meta) || cutMoney(item.meta)) ? { ...item, meta: undefined } : item))
         .filter((item) => {
+          if (cutMoney(item.text)) return false;
           const key = item.text.replace(/\[\d+\]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
           if (!key || seen.has(key)) return false;
           seen.add(key);
@@ -69,8 +77,8 @@ export function withoutShells(node: CardNode): CardNode | undefined {
       // A tile whose figure is "Unavailable" fills a row with nothing; a tile with no value at all is a name and stays.
       if (node.value !== undefined && node.value.trim() && NON_ANSWER.test(node.value.replace(/\[\d+\]/g, '').trim())) return undefined;
       // "Under", "From" or "~" is what is left of a price that was removed.
-      if (node.value !== undefined && (hollow(node.value) || PRICE_LEFTOVER.test(node.value.replace(/\[\d+\]/g, '').trim()))) return withoutShells({ ...node, value: undefined });
-      return node.sub !== undefined && hollow(node.sub) ? { ...node, sub: undefined } : node;
+      if (node.value !== undefined && (hollow(node.value) || cutMoney(node.value) || PRICE_LEFTOVER.test(node.value.replace(/\[\d+\]/g, '').trim()))) return withoutShells({ ...node, value: undefined });
+      return node.sub !== undefined && (hollow(node.sub) || cutMoney(node.sub)) ? { ...node, sub: undefined } : node;
     default:
       return node;
   }

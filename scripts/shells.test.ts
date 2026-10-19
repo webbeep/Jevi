@@ -82,3 +82,12 @@ test('a quotation stays only when its words are in the sources', async () => {
   const line: CardNode = { type: 'text', text: 'The guideline says “Adults should do at least 150 minutes to 300 minutes a week of moderate-intensity aerobic physical activity.” [4] It also says “adults must jog daily for an hour” [9].' };
   assert.deepEqual(withVerbatimQuotes(line, corpus), { type: 'text', text: 'The guideline says “Adults should do at least 150 minutes to 300 minutes a week of moderate-intensity aerobic physical activity.” [4]' });
 });
+
+test('a price cut off at its figure is not shown, and a cashtag stays', () => {
+  const tile = withoutShells({ type: 'tile', label: 'Members', value: 'Free', sub: 'Membership starts at $...' });
+  assert.deepEqual(tile, { type: 'tile', label: 'Members', value: 'Free', sub: undefined });
+  const text = withoutShells({ type: 'text', text: 'Members get in free [2]. Membership starts at $… per year.' });
+  assert.equal(text?.type === 'text' ? text.text : '', 'Members get in free [2].');
+  const cashtag: CardNode = { type: 'text', text: '$RDW fell 5% today.' };
+  assert.equal(withoutShells(cashtag), cashtag);
+});
