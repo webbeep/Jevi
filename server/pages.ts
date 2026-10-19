@@ -311,7 +311,15 @@ export async function collectPages(
     let pending = missing.length;
     if (!pending) resolve();
     for (const { r, n } of missing) {
-      Promise.any([fromLate(r.url), pageText(r.url, env, opts.budgetMs + 500, 6000, images, scope, focus)])
+      // A read started when the literal search returned is already on its way; it is used instead of a new one.
+      const early = scope?.prefetch?.get(normalizeUrl(r.url));
+      const read = early
+        ? early.then((text) => {
+          if (!text || text.length < MIN_TEXT || isBlockPage(text)) throw new Error('no early page');
+          return text;
+        })
+        : pageText(r.url, env, opts.budgetMs + 500, 6000, images, scope, focus);
+      Promise.any([fromLate(r.url), read])
         .then((text) => {
           pages.push({ n, url: r.url, text: focusPage(text, focus, 6000), image: images.get(r.url) });
           if (pages.length >= need) resolve();

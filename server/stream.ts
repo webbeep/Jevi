@@ -58,7 +58,7 @@ import { keepShownComponent } from '../shared/keepShown';
 import { keepPictures, reviewCard, reviewComponents, type Review } from './review';
 import { permitted } from './images';
 import { hasLlm } from './llm';
-import { BROWSER_UA, collectPages, ogImageOf } from './pages';
+import { BROWSER_UA, collectPages, ogImageOf, pageText } from './pages';
 import { applyFetched, fetchCitePages, fillFromSearch, pagesFromContent, renumberPages, shiftBrief, snippetSupports, thinPlan, type FetchedPage } from './thinSource';
 import { MADE_PATTERNS, compareSideQueries, compareSides, heuristicPattern, skeletonCard } from './patterns';
 import { planLayout } from './plan';
@@ -1170,6 +1170,19 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     // A first look at what the search found, shown while the rest of the search and the layout finish.
     const kept = preferSources(query, gateResults(query, hits.map(webRow)).kept);
     send('peek', kept.slice(0, PEEK_ROWS).map(({ title, url, domain, date }) => ({ title, url, domain, date })));
+    // The pages most likely to be read start loading now, while the rewrites search, so the writer has page text
+    // without waiting for it after the search.
+    if (!paper) {
+      scope.prefetch ??= new Map();
+      const domains = new Set<string>();
+      for (const row of kept) {
+        if (scope.prefetch.size >= 4) break;
+        const key = normalizeUrl(row.url);
+        if (scope.prefetch.has(key) || domains.has(row.domain) || isVideoHost(row.domain) || isSocialHost(row.domain)) continue;
+        domains.add(row.domain);
+        scope.prefetch.set(key, pageText(row.url, env, 5000, 6000, undefined, scope, query).catch(() => ''));
+      }
+    }
     if (!paper && !sourceJudge) {
       const snippets = kept.slice(0, 6).map((row) => `${row.title} ${row.snippet ?? ''}`).join('\n');
       sourceJudge = judgeSources(env, query, snippets);

@@ -70,6 +70,8 @@ export interface AskScope {
    * Unset on a first search, so a comparison can still expand "Pixel" to the company that makes it.
    */
   bound?: string;
+  /** Page reads started as soon as the literal search returned, by normalized URL. */
+  prefetch?: Map<string, Promise<string>>;
 }
 
 export function newLedger(): CallLedger {
