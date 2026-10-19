@@ -231,7 +231,10 @@ function yearOf(row: RankedHit): number {
 function probeWords(text: string): string {
   return text
     .replace(/\b[A-Z]{2,8}\b/g, ' ')
+    // Who is asking and how ("I'm 65 … should I start") only dilutes a site search.
+    .replace(/\b(?:i|i'm|im|me|my|we|our|you|your|it|should|could|would|can|will|start|before|step by step)\b/gi, ' ')
     .replace(/\b(?:what|does|do|did|the|is|are|say|says|said|about|how|many|much|live|lives|living|in|of|a|an|by|for|to|on|from|likely|according|quote|quotes|quoting|exact|line|lines|page|pages)\b/gi, ' ')
+    .replace(/(?:^|\s)'?m\b/gi, ' ')
     .replace(/[^a-z0-9\s-]/gi, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -472,8 +475,9 @@ export function preferSources<T extends RankedHit>(query: string, rows: readonly
   // free-host pages that had to stay sunk to the back.
   const promote = /\b(who|whom|whose|biography|nobel|scores?|scoreboard|standings)\b/i.test(query);
   const orgs = agencyTokens(query);
-  const places = placeHosts(query);
   const journals = journalHosts(query);
+  // A topic's authority (the USPSTF for aspirin) leads like a named place's own site.
+  const places = [...placeHosts(query), ...(orgs.length || journals.length ? [] : topicHosts(query).map((host) => `.${host}`))];
   const paper = isPaperAsk(query);
   const official = OFFICIAL_ASK.test(query) || journals.length > 0;
   const leadOf = (item: (typeof pool)[number]) => officialLead(item.row.domain || hostOf(item.row.url), orgs, places, journals);

@@ -4,7 +4,7 @@ import { GAP_MARK } from '../shared/gap';
 const BLANK = /^[\s—–\-−~]*$/;
 const NOT_STATED = /\bnot stated\b/i;
 const CITE = /\[\d+\]/;
-const MEASURE = /\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*[x×]\s*\d{1,3}(?:,\d{3})*(?:\.\d+)?)*(?:\s*[-–]?\s*(?:inch(?:es)?|in\b|["″]|mm|cm|kg|oz|mah|nits?|atm|px|hours?|days?|shots?|frames?|grams?|g\b))/i;
+const MEASURE = /\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*[x×]\s*\d{1,3}(?:,\d{3})*(?:\.\d+)?)*(?:\s*[-–]?\s*(?:inch(?:es)?|in\b|["″]|mm|cm|kg|oz|mah|nits?|atm|px|hours?|days?|shots?|frames?|grams?|g\b)(?![a-z]))/i;
 const MONEY = /[$€£¥]\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?/;
 
 type Step = { kind: 'child'; at: number } | { kind: 'cell'; row: number; column: number };

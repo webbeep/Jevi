@@ -395,8 +395,11 @@ test('a topic with a known US authority probes that authority when the ask names
   assert.equal(officialProbe('Who is Ira Glass married to?'), '');
   assert.equal(officialProbe('Dune screening times tonight'), '');
   assert.doesNotMatch(officialProbe('What does the WHO say about aspirin?'), /uspreventiveservicestaskforce/);
-  // The topic word leads a long question so the cut keeps it.
-  assert.match(officialProbe("I'm 65 with no heart disease. Should I start taking a daily low-dose aspirin to prevent a heart attack?"), /^aspirin /);
+  // Who is asking drops out, and the topic word survives the cut.
+  const long = officialProbe("I'm 65 with no heart disease. Should I start taking a daily low-dose aspirin to prevent a heart attack?");
+  assert.match(long, /aspirin/);
+  assert.doesNotMatch(long, /\b(?:I|m|Should|start)\b/);
+  assert.match(officialProbe('Step by step, how do I renew my US passport by mail?'), /^renew passport mail /);
   // A job title or a currency is not an agency.
   assert.equal(officialProbe('Bitcoin price in USD'), '');
   assert.doesNotMatch(officialProbe('Who is the CEO of the IRS?'), /site:ceo\./);

@@ -63,3 +63,18 @@ test('a number a source states for the new object stays', () => {
   ]);
   assert.equal(patches, undefined);
 });
+
+test('a figure a source states for both objects together stays on each', () => {
+  const next = new Map<number, CardNode>([[0, {
+    type: 'table',
+    columns: ['Factor', 'Roth IRA', 'Traditional IRA'],
+    rows: [['2026 contribution limit', '$7,500 under 50; $8,600 age 50+ [1]', '$7,500 under 50; $8,600 age 50+ [1]']],
+  }]]);
+  const shared = [{ title: 'IRA contribution limits', snippet: "For 2026, the total contributions you make to all of your traditional IRAs and Roth IRAs can't be more than $7,500 ($8,600 if you're age 50 or older)." }];
+  assert.equal(unblendObjects(next, [], shared), undefined);
+  // A sentence that gives each object its own figure does not lend one to the other.
+  const own = [{ title: 'IRA limits', snippet: 'A Roth IRA allows $7,500 under 50 and $8,600 at age 50+, while a SEP IRA allows far more.' }];
+  const patches = unblendObjects(next, [], own);
+  const table = patches?.[0]?.node;
+  assert.equal(table?.type === 'table' ? table.rows[0]?.[2] : 'kept', '');
+});

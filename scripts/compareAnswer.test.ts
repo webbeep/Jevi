@@ -735,3 +735,25 @@ test('rows with the same figures under different battery labels are one row', ()
   assert.equal(rows.filter((row) => /battery/i.test(row[0] ?? '')).length, 1);
   assert.ok(rows.some((row) => row[0] === 'Chip'));
 });
+
+test('a word that starts with a unit is not a measurement', () => {
+  const ask = 'Northwatch 2 versus Glowband 4';
+  const table: CardNode = {
+    type: 'table',
+    columns: ['Factor', 'Northwatch 2', 'Glowband 4'],
+    rows: [['Income limits', 'Applies above a set income', 'None']],
+  };
+  const found: SearchResponse = {
+    query: ask,
+    freshness: 'any',
+    results: [
+      { title: 'Northwatch 2', url: 'https://example.com/north', snippet: 'The Northwatch 2 has no limits for buyers 18 when they register.', domain: 'example.com', engines: ['web'] },
+      { title: 'Glowband 4', url: 'https://example.com/glow', snippet: 'The Glowband 4 has income limits for buyers 18 when they apply.', domain: 'example.com', engines: ['web'] },
+    ],
+    images: [],
+    discussions: [],
+    engines: ['web'],
+  };
+  const patches = comparisonRepair(ask, found, new Map([[0, table]]));
+  assert.doesNotMatch(JSON.stringify(patches ?? []), /18 wh/);
+});

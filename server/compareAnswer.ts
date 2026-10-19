@@ -223,7 +223,7 @@ function mentionsLabel(label: string, sentence: string): boolean {
 }
 
 // The number starts at a digit run's start, so "4970 mAh" is never read as "970 mAh".
-const MEASURE = /(?<![\d.,])\d+(?:,\d{3})*(?:\.\d+)?(?:\s*[x×]\s*\d+(?:,\d{3})*(?:\.\d+)?)*(?:\s*[-–]?\s*(?:inch(?:es)?|["″]|mm|cm|kg|oz|lbs?|mah|wh|nits?|ppi|hz|atm|px|hours?|hrs?|days?|shots?|frames?|grams?|g\b))/i;
+const MEASURE = /(?<![\d.,])\d+(?:,\d{3})*(?:\.\d+)?(?:\s*[x×]\s*\d+(?:,\d{3})*(?:\.\d+)?)*(?:\s*[-–]?\s*(?:inch(?:es)?|["″]|mm|cm|kg|oz|lbs?|mah|wh|nits?|ppi|hz|atm|px|hours?|hrs?|days?|shots?|frames?|grams?|g\b)(?![a-z]))/i;
 
 /** The units a row can be measured in: a display is not "7.2 oz", and battery life is hours or days, not mAh. */
 const ROW_UNITS: [RegExp, RegExp][] = [

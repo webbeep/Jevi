@@ -24,13 +24,28 @@ function sourceNames(name: string, text: string): boolean {
   return words.length > 0 || marks.length > 0;
 }
 
+function nameWords(name: string): string[] {
+  return name.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 4 && !/\d/.test(word));
+}
+
+/** "your traditional IRAs and Roth IRAs": both objects as one subject, so a figure in that sentence is each one's. */
+function namedTogether(name: string, others: readonly string[], sentence: string): boolean {
+  const mine = nameWords(name);
+  const theirs = others.filter((other) => !sameObject(other, name)).flatMap(nameWords);
+  if (!mine.length || !theirs.length) return false;
+  const either = (words: string[]) => words.map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  const join = '(?:\\s+\\S+)?\\s*(?:,|\\band\\b|\\bor\\b|&|\\/)\\s*(?:\\S+\\s+)?';
+  return new RegExp(`\\b(?:${either(mine)})\\b${join}\\b(?:${either(theirs)})\\b|\\b(?:${either(theirs)})\\b${join}\\b(?:${either(mine)})\\b`, 'i').test(sentence);
+}
+
 /** A source that names this object also states this number. */
-function statedFor(name: string, value: string, sources: readonly SourceRow[]): boolean {
+function statedFor(name: string, value: string, sources: readonly SourceRow[], others: readonly string[] = []): boolean {
   const nums = numbersOf(value);
   if (!nums.length) return true;
   return sources.some((source) => {
     const blob = `${source.title ?? ''}. ${source.snippet ?? ''} ${source.content ?? ''}`;
     for (const sentence of blob.split(/(?<=[.!?])\s+/)) {
+      if (namedTogether(name, others, sentence) && nums.every((num) => sentence.includes(num))) return true;
       for (const clause of sentence.split(/\s*(?:;|\band\b|\bwith\b|,(?!\d))\s*/i)) {
         if (!sourceNames(name, clause)) continue;
         if (nums.every((num) => clause.includes(num))) return true;
@@ -53,7 +68,7 @@ function clearMoney(value: string): string {
 function edit(node: CardNode, objects: ReturnType<typeof threadObjects>, sources: readonly SourceRow[]): CardNode {
   if (node.type === 'tile') {
     let next = node;
-    if (next.value && foreignNumber(next.label, next.value, objects) && !statedFor(next.label, next.value, sources)) {
+    if (next.value && foreignNumber(next.label, next.value, objects) && !statedFor(next.label, next.value, sources, objects.map((object) => object.name))) {
       const value = clearMoney(next.value);
       // "Under $100" without its price is "Under": a value that was a price says nothing once the price goes.
       next = value && /\d/.test(value) ? { ...next, value } : { ...next, value: undefined };
@@ -70,7 +85,7 @@ function edit(node: CardNode, objects: ReturnType<typeof threadObjects>, sources
     const rows = node.rows.map((row) => row.map((cell, column) => {
       if (column === 0) return cell;
       const name = String(columns[column] ?? '').trim();
-      if (!name || !foreignNumber(name, cell, objects) || statedFor(name, cell, sources)) return cell;
+      if (!name || !foreignNumber(name, cell, objects) || statedFor(name, cell, sources, objects.map((object) => object.name))) return cell;
       return '';
     }));
     const same = rows.every((row, index) => row.every((cell, column) => cell === node.rows[index]?.[column]));
