@@ -75,6 +75,7 @@ import { calculationAnswer, isCalculationAsk, leadTaxedTotal, rateOnAmount, spli
 import { acceptProductPhoto, appendAskedFact, comparisonRepair, comparisonTitle, dropShownDenials, keepComparedProducts, mentionsSide, missingSideNode, nameForms, placeSidePhotos, restoreSideTiles, stickerPrice } from './compareAnswer';
 import { cardGaps, citeForGap, gapSearchQuery, settleGap, type PieceGap } from './gapFill';
 import { withinSources, withoutShells } from '../shared/shells';
+import { fxQuote, withinFx } from '../shared/fxCard';
 import { unblendObjects } from './objectFacts';
 import { withFinishedSentences } from './polish';
 import { queryWithPlace, readerPlace, settleReadings } from './readings';
@@ -585,11 +586,14 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
    * Every component reaches the client through here. A fix replaces only its own slot;
    * a repeat of what is already on screen is not sent again.
    */
+  // An exchange-rate card keeps to the pair and direction asked, at the live quote's rate.
+  const fx = fxQuote(designReq.ticker);
   /** Sources a later search appended after the ones the card was designed from; their cites run past the first list. */
   let addedSources = 0;
   const publish: Publish = (index, raw) => {
     // A component whose figures were all removed is collapsed, not shown as an empty shell.
-    const node = withoutShells(withinSources(raw, designReq.search.results.length + addedSources)) ?? { type: 'stack', children: [] };
+    const fitted = withinSources(raw, designReq.search.results.length + addedSources);
+    const node = withoutShells(fx ? withinFx(fitted, fx) ?? { type: 'stack', children: [] } : fitted) ?? { type: 'stack', children: [] };
     shown.set(index, node);
     if (!arrival.includes(index)) arrival.push(index);
     const key = JSON.stringify(node);
