@@ -58,7 +58,7 @@ import { keepShownComponent } from '../shared/keepShown';
 import { keepPictures, reviewCard, reviewComponents, type Review } from './review';
 import { permitted } from './images';
 import { hasLlm } from './llm';
-import { BROWSER_UA, collectPages, ogImageOf, pageText, type PageText } from './pages';
+import { BROWSER_UA, collectPages, ogImageOf, pageText } from './pages';
 import { applyFetched, fetchCitePages, fillFromSearch, pagesFromContent, renumberPages, shiftBrief, snippetSupports, thinPlan, type FetchedPage } from './thinSource';
 import { MADE_PATTERNS, compareSideQueries, compareSides, heuristicPattern, skeletonCard } from './patterns';
 import { planLayout } from './plan';
@@ -799,18 +799,13 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
           addedSources = addedRows.length;
           send('search', { ...designReq.search, results: [...designReq.search.results, ...addedRows] });
         }
-        // Pages still loading when the card was written reach the review, which adds the fee or limit they state.
-        const reviewPages = designReq.pages.length || filled?.shifted
-          ? designReq.pages
-          : await Promise.race([pagesReady.catch(() => [] as PageText[]), new Promise<PageText[]>((resolve) => setTimeout(() => resolve([]), 300))]);
-        if (reviewPages !== designReq.pages && reviewPages.length) console.log(JSON.stringify({ zo: 'review-pages', n: reviewPages.length }));
         return reviewCard({
           query: designReq.followup?.question ?? designReq.query,
           context: designReq.context,
           brief: designReq.brief,
           results: designReq.search.results,
           extra: addedRows,
-          pages: reviewPages,
+          pages: designReq.pages,
           isLive: isQuoteRow,
           head,
           nodes: shown,
