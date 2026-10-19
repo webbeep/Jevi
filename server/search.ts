@@ -195,10 +195,24 @@ async function wikiSummary(title: string): Promise<Knowledge | undefined> {
   };
 }
 
+const IMAGE_STOP = new Set(['how', 'what', 'why', 'who', 'when', 'where', 'which', 'the', 'and', 'for', 'with', 'make', 'best', 'top', 'good', 'today', 'tonight', 'now', 'latest', 'new', 'news', 'does', 'work', 'vs', 'versus', 'about', 'from', 'your', 'you', 'can', 'are', 'is', 'near', 'me', 'price', 'cost']);
+
+const imageWords = (text: string) => new Set(text.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 3 && !IMAGE_STOP.has(w)).map((w) => w.replace(/(?<=[a-z]{3})s$/, '')));
+
+/**
+ * A library picture whose title shares a word with the question. Library search matches loosely
+ * ("sourdough starter" returned a Transformer-model diagram), and a card must not show that.
+ */
+export function topicalImage(q: string, title: string | undefined): boolean {
+  const asked = imageWords(q);
+  if (!asked.size) return true;
+  return [...imageWords(title ?? '')].some((word) => asked.has(word));
+}
+
 /** Topic imagery from open-licensed libraries only (commercial use allowed). */
 function images(q: string): Promise<ImageResult[]> {
   const nonEmpty = (task: () => Promise<ImageResult[]>) => async () => {
-    const out = await task();
+    const out = (await task()).filter((image) => topicalImage(q, image.title));
     if (!out.length) throw new Error('no images');
     return out;
   };

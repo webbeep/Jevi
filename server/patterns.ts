@@ -166,7 +166,7 @@ export const PATTERNS: PatternDef[] = [
     id: 'ranked',
     label: 'Top picks',
     description: 'A ranked set of recommendations or best options, each with a short reason and rating',
-    skeleton: [slot('the verdict: top pick and why', 'hero'), { type: 'stack', gap: 'sm', children: [slot('ranked picks with pictures', 'row'), slot('ranked picks with pictures', 'row'), slot('ranked picks with pictures', 'row')] }, slot('what to look for', 'block')],
+    skeleton: [slot('the verdict: top pick and why', 'hero'), { type: 'stack', gap: 'sm', children: [slot('ranked picks with pictures', 'row'), slot('ranked picks with pictures', 'row'), slot('ranked picks with pictures', 'row'), slot('ranked picks with pictures', 'row'), slot('ranked picks with pictures', 'row')] }, slot('what to look for', 'block')],
   },
   {
     id: 'steps',

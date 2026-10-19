@@ -8,6 +8,10 @@ function hollow(text: string | undefined): boolean {
 
 const blankCell = (cell: string) => cell !== GAP_MARK && hollow(cell);
 
+/** A value that says there is no value ("Unavailable", "None yet", "N/A"). */
+const NON_ANSWER = /^(?:unavailable|not available|none(?: yet)?|n\/?a|tbd|tba|unknown|not (?:yet )?(?:stated|reported|listed|announced|found)|no data|pending)\.?$/i;
+const saysNothing = (value: string | undefined) => hollow(value) || NON_ANSWER.test(value!.replace(/\[\d+\]/g, '').trim());
+
 /**
  * What a component still says after its unsupported figures were removed. A table row with no values left,
  * a key with no value, a sentence that is only "[8]" and a subtitle that is only " · " are dropped, and a
@@ -27,7 +31,7 @@ export function withoutShells(node: CardNode): CardNode | undefined {
     case 'callout':
       return hollow(node.text) ? undefined : node;
     case 'keyvalue': {
-      const items = node.items.filter((item) => !hollow(item.value));
+      const items = node.items.filter((item) => !saysNothing(item.value));
       if (items.length === node.items.length) return node;
       return items.length ? { ...node, items } : undefined;
     }
@@ -39,6 +43,8 @@ export function withoutShells(node: CardNode): CardNode | undefined {
       return rows.length ? { ...node, rows } : undefined;
     }
     case 'tile':
+      // A tile whose figure is "Unavailable" fills a row with nothing; a tile with no value at all is a name and stays.
+      if (node.value !== undefined && node.value.trim() && NON_ANSWER.test(node.value.replace(/\[\d+\]/g, '').trim())) return undefined;
       return node.sub !== undefined && hollow(node.sub) ? { ...node, sub: undefined } : node;
     default:
       return node;

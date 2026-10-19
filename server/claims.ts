@@ -197,11 +197,16 @@ export function stripNums(text: string, nums: readonly string[]): string {
     // "A 2024 imaging" loses the year and must not stay "A imaging". Only the article that sat on that number goes.
     out = out.replace(new RegExp(`\\bA\\s+${bare}\\s+(?=[aeiou])`, 'gi'), '');
     out = out.replace(new RegExp(`\\bAn\\s+${bare}\\s+(?=[bcdfghjklmnpqrstvwxyz])`, 'gi'), '');
-    // The currency sign before it and the unit after it go with the number ("the £ Amazon price", "-nit display").
-    out = out.replace(new RegExp(`(?:[€£¥]\\s?)?${shownNumber(num).source}${UNIT_AFTER}`, 'g'), ' ');
+    // The currency sign before it and the unit after it go with the number ("the £ Amazon price", "-nit display"),
+    // and so does the word that only pointed at it ("in 1906 became" is "became", not "in became").
+    const figure = `(?:[€£¥]\\s?)?${shownNumber(num).source}${UNIT_AFTER}`;
+    out = out.replace(new RegExp(`\\b(?:in|on|since|by|during|until|from)\\s+${figure}(?=[\\s,.;:!?)]|$)`, 'gi'), ' ');
+    out = out.replace(new RegExp(figure, 'g'), ' ');
   }
   out = unmaskQuotes(out, masked.quotes);
   out = out.replace(/\s{2,}/g, ' ').replace(/\s+([,.;:)])/g, '$1').replace(/\(\s*\)/g, '').trim();
+  // "no scores for October,." and "University of Paris," lose the comma that led to the removed figure.
+  out = out.replace(/,+\s*([.;:!?])/g, '$1').replace(/^[,;:\s]+/, '').replace(/[,;:]+$/, '').trim();
   return withoutEmptySlots(out);
 }
 

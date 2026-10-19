@@ -18,3 +18,11 @@ test('a citation-only sentence, an empty verdict and an empty key are not shown'
   assert.equal(withoutShells(kept), kept);
   assert.deepEqual(withoutShells({ type: 'stack', children: [{ type: 'text', text: 'Feed it daily.' }, { type: 'callout', text: '[8]' }] }), { type: 'stack', children: [{ type: 'text', text: 'Feed it daily.' }] });
 });
+
+test('a tile or key that only says there is no value is not shown', () => {
+  assert.equal(withoutShells({ type: 'tile', label: 'Lakers vs Warriors', value: 'None yet' }), undefined);
+  assert.deepEqual(withoutShells({ type: 'grid', cols: 2, children: [{ type: 'tile', label: 'Final', value: 'Unavailable' }, { type: 'tile', label: 'Next game', value: 'Oct 21' }] }), { type: 'grid', cols: 2, children: [{ type: 'tile', label: 'Next game', value: 'Oct 21' }] });
+  assert.deepEqual(withoutShells({ type: 'keyvalue', items: [{ label: 'Weight', value: 'N/A' }, { label: 'Display', value: '1.34 in' }] }), { type: 'keyvalue', items: [{ label: 'Display', value: '1.34 in' }] });
+  const named = { type: 'tile' as const, label: 'Mi Band 10' };
+  assert.equal(withoutShells(named), named);
+});
