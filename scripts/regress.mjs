@@ -247,11 +247,11 @@ if (!only) {
   const title = /<title>([^<]*)<\/title>/.exec(html)?.[1];
   results.push({ name: 'title zo', ok: title === 'zo', detail: `"${title}"` });
   console.log(`${title === 'zo' ? '✓' : '✗'} title: "${title}"`);
-  const png = Buffer.from(await (await fetch(`${base}/og-card.png`)).arrayBuffer());
+  const png = Buffer.from(await (await fetch(`${base}/og-home.png`)).arrayBuffer());
   const sha = createHash('sha256').update(png).digest('hex');
   const same = sha === '16e85d0d74a3aeaeb273dee86c0c9e7c9c02dc9ce275982f0ac1b24240dedec0';
-  results.push({ name: '/og-card.png unchanged', ok: same, detail: `${png.length} bytes ${sha.slice(0, 12)}` });
-  console.log(`${same ? '✓' : '✗'} /og-card.png ${png.length} bytes ${sha.slice(0, 12)}`);
+  results.push({ name: '/og-home.png product card', ok: same, detail: `${png.length} bytes ${sha.slice(0, 12)}` });
+  console.log(`${same ? '✓' : '✗'} /og-home.png ${png.length} bytes ${sha.slice(0, 12)}`);
 }
 const times = results.map((x) => x.ms).filter((x) => typeof x === 'number').sort((a, b) => a - b);
 const pct = (p) => times[Math.min(times.length - 1, Math.floor(p * times.length))];
