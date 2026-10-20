@@ -1,4 +1,3 @@
-import { cacheTier } from '../shared/cacheTtl';
 import { DEEP_PAGES, routeOf } from './router';
 import { serperImages } from './cascade';
 import { playerStatRow } from './playerLine';
@@ -224,18 +223,6 @@ function imageBoost(pattern: string, search: SearchResponse, env: Env, scope: As
   if (!search.engines.some((e) => e.name === 'serper' && e.ok)) return undefined;
   // T443: card-level pictures must mention the subject; a wrong picture is worse than none.
   return serperImages(query, env, capBucket(scope), () => { scope.ledger.imageCalls = 1; }).then((imgs) => imgs.filter((i) => mentionsAny(query, i)));
-}
-
-/**
- * A rule, fee, limit, step or health answer turns on a line in the page, not the snippet ("$130", "issued within 15
- * years"): it waits briefly for the pages already being read. Live, news and quick asks never wait.
- */
-const RULE_ASK = /\b(?:how (?:do|to|can|long|much|many|often)|should (?:i|you|we)|can (?:i|you)|is it safe|steps?|rules?|guidelines?|requirements?|eligib\w*|fees?|limits?|laws?|bill|veto|recommend\w*|according to)\b/i;
-const PAGE_WAIT_MS = 900;
-
-export function pageWaitMs(asked: string): number {
-  const tier = cacheTier(asked);
-  return RULE_ASK.test(asked) && tier !== 'live' && tier !== 'short' ? PAGE_WAIT_MS : 0;
 }
 
 /** How many pages to read and how long to wait for them before designing. At most five pages per ask. */
@@ -558,7 +545,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   const pageBudgetNow = { ...budget, skip };
   const pagesReady = reread ? collectPages(req.search.results, env, pageBudgetNow, undefined, scope, req.query) : reading;
   const [pagesRaw, fetched, filled] = await Promise.all([
-    wantsNamedQuote(req.query) ? pagesReady : Promise.race([pagesReady, new Promise<Awaited<typeof pagesReady>>((resolve) => setTimeout(() => resolve([]), pageWaitMs(asked)))]),
+    wantsNamedQuote(req.query) ? pagesReady : Promise.race([pagesReady, new Promise<Awaited<typeof pagesReady>>((resolve) => setTimeout(() => resolve([]), 0))]),
     citeWait,
     gapFill ?? Promise.resolve(undefined),
   ]);
