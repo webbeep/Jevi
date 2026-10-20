@@ -495,9 +495,13 @@ export function preferSources<T extends RankedHit>(query: string, rows: readonly
     const at = topics.findIndex((topic) => endsWithHost(host, topic));
     return at < 0 ? topics.length : at;
   };
+  const social = (item: (typeof pool)[number]) => Number(!shoppingAsk(query) && isSocialHost(item.row.domain || hostOf(item.row.url)));
   const byLead = (a: (typeof pool)[number], b: (typeof pool)[number]) => {
     const lead = leadOf(a) - leadOf(b);
     if (lead) return lead;
+    // A forum or social post kept for want of other pages still ranks behind every page that is not one.
+    const post = social(a) - social(b);
+    if (post) return post;
     if (topics.length) {
       const rank = topicRank(a) - topicRank(b);
       if (rank) return rank;
