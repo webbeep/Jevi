@@ -3,6 +3,7 @@ import type { ImageResult } from '../shared/types';
 import { stripHtml } from '../shared/text';
 import { type Env, UA, domainOf, fetchJson, hedge } from './util';
 import { isBlockedHost } from './spamHosts';
+import { serperImages } from './cascade';
 
 export { matchScore, matches };
 
@@ -244,6 +245,9 @@ function sources(env: Env): { name: string; run: Source; specificOnly?: boolean 
     ...(env.PEXELS_API_KEY ? [{ name: 'pexels', run: (q: string, n: number) => pexels(q, env, Math.max(6, n)) }] : []),
     { name: 'openverse', run: (q, n) => openverse(q, Math.max(8, n)) },
     ...(pub && env.BRAVE_API_KEY ? [{ name: 'brave', run: (q: string) => brave(q, env), specificOnly: true }] : []),
+    // Product and place photos live on the web, not in the open libraries: one Serper image search per named item,
+    // inside Serper's daily image share and the 7-day lookup cache.
+    ...(pub && env.SERPER_API_KEY ? [{ name: 'serper', run: (q: string) => serperImages(q, env, 'prod', undefined, 2500), specificOnly: true }] : []),
   ];
 }
 

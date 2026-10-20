@@ -126,6 +126,10 @@ function contradictsQuote(text: string, quote: LiveQuoteFacts): boolean {
   if (Number.isFinite(figure) && figure > quote.price * 0.4 && figure < quote.price * 2.5) {
     // "Prev close $217.23" beside a widget that counts from 214.13 is an earlier session's close.
     if (quote.previousClose && /\b(?:prev(?:ious)?\.?|prior|last|yesterday['’]?s?)\s+close\b/i.test(bare) && Math.abs(figure - quote.previousClose) / quote.previousClose > 0.005) return true;
+    // "$214.13 · NVDA close · Oct 19" beside a widget at 217.09 that counts from 214.13: the earlier session's close
+    // presented as this one's. A plain "close" is this session's only when it is the widget's price.
+    if (quote.previousClose && /\bclos(?:e|ed|ing)\b/i.test(bare) && !/\b(?:prev(?:ious)?\.?|prior|last|yesterday['’]?s?|friday['’]?s?|earlier)\b/i.test(bare)
+      && Math.abs(figure - quote.previousClose) / quote.previousClose <= 0.005 && Math.abs(figure - quote.price) / quote.price > 0.005) return true;
     // A day or 52-week high under the live price, or a low above it, is from before the price got here.
     const span = /\b(?:day|today['’]?s?|session|intraday|52[- ]?(?:week|wk))\b[^.]{0,12}\b(high|low)\b|^\s*(high|low)\b/i.exec(bare);
     const side = (span?.[1] ?? span?.[2])?.toLowerCase();
