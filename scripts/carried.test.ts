@@ -39,6 +39,9 @@ test('a follow-up on a new topic the card never mentions searches, one that poin
   const card = 'How mRNA Vaccines Work\nmRNA teaches cells to make a spike protein. Moderna, Pfizer vaccine sources.';
   assert.equal(newTopic('What is photosynthesis?', card), true);
   assert.equal(newTopic('explain it like I am 10', card), false);
+  // The cost of the thing on screen with a tax or a fee added is about that thing, even when no word of it is repeated.
+  assert.equal(newTopic('What would I pay with sales tax in New York City?', card), false);
+  assert.equal(newTopic('How much is it after shipping?', card), false);
   assert.equal(newTopic('Can I use rye flour instead?', 'Sourdough starter: mix flour and water, feed daily.'), false);
   assert.equal(newTopic('which one has better battery life?', 'iPhone 17 vs Pixel 10'), false);
 });

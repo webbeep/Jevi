@@ -1924,8 +1924,11 @@ const ELLIPTICAL = /^(?:and|but|also|so|plus|or|what about|how about|same|for|in
 const POINTS_BACK = /\b(?:it|its|it's|they|them|their|this|that|these|those|he|she|his|her|one|ones)\b/i;
 
 /** A follow-up about something the card and its sources never mention, with nothing pointing back at them. */
+/** "What would I pay with sales tax in NYC?", "How much is that with shipping?": a cost of the thing on screen, not a new thing. */
+const COST_QUALIFIER = /\b(?:with|after|including|incl\.?|plus|before|without)\s+(?:the\s+)?(?:sales\s+|state\s+|local\s+)?(?:tax|taxes|fees?|shipping|delivery|tip|vat|gst|discount)\b|\bwhat\s+(?:would|will|do|does)\s+(?:i|we|you)\s+pay\b/i;
+
 export function newTopic(question: string, onScreen: string): boolean {
-  if (POINTS_BACK.test(question) || ELLIPTICAL.test(question.trim())) return false;
+  if (POINTS_BACK.test(question) || ELLIPTICAL.test(question.trim()) || COST_QUALIFIER.test(question)) return false;
   const words = question.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 4 && !TOPIC_STOP.has(word));
   if (!words.length) return false;
   const seen = onScreen.toLowerCase();
