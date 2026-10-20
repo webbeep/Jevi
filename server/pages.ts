@@ -233,14 +233,26 @@ async function readReadable(url: string, env: Env, signal: AbortSignal, images: 
   const key = env.JINA_API_KEY;
   const skips = await loadSkips(env);
   const skipped = (name: string) => engineDead(name) || (skips[name] ?? 0) > Date.now();
-  // DeepSeek's fetch tool reads first: it reaches pages that turn datacenter fetches away and needs no Jina credit.
-  // A miss (empty, short, a bot wall, a slow call) falls through to the readers below.
+  // DeepSeek's fetch tool is the reader: it reaches pages that turn datacenter fetches away and needs no Jina credit.
+  // It often takes seconds, so a direct fetch runs beside it and the first real page wins. When both miss, the Jina
+  // readers below still get their turn.
   if (env.DEEPSEEK_API_KEY && !signal.aborted) {
     bump(scope, 'deepseek');
-    const doc = await deepseekFetch(env, url, scope?.ledger ?? env, scope?.ledger, DEEPSEEK_READ_MS).catch(() => undefined);
-    const text = doc ? cleanMarkdown(doc.content, 20000) : '';
-    if (text.length >= MIN_TEXT && !isBlockPage(text)) return text;
-    scope?.ledger.fellThrough.push(`deepseek-fetch:${doc ? 'short' : 'miss'}`);
+    const viaDeepseek = deepseekFetch(env, url, scope?.ledger ?? env, scope?.ledger, DEEPSEEK_READ_MS).then((doc) => {
+      const text = doc ? cleanMarkdown(doc.content, 20000) : '';
+      if (text.length < MIN_TEXT || isBlockPage(text)) throw new Error(doc ? 'short' : 'miss');
+      return text;
+    });
+    bump(scope, 'direct');
+    const viaDirect = direct(url, signal, images).then((text) => {
+      if (text.length < MIN_TEXT || isBlockPage(text)) throw new Error('short');
+      return text;
+    });
+    try {
+      return await Promise.any([viaDeepseek, viaDirect]);
+    } catch {
+      scope?.ledger.fellThrough.push('deepseek+direct:miss');
+    }
   }
   let straightToDirect = false;
   if (key && !skipped('jina')) {
