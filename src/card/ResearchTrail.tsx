@@ -53,7 +53,7 @@ export function ResearchTrail({ question, intent, peek, search }: {
             <li key={r.url} style={{ animationDelay: `${Math.min(i, 7) * 48}ms` }} className="zo-row">
               <div>
                 <div className="zo-read-once flex min-w-0 items-center gap-2.5 rounded-lg px-1.5 py-1.5" style={{ animationDelay: `${420 + i * 220}ms` }}>
-                  <img src={favicon(r.domain)} alt="" loading="lazy" className="size-4 shrink-0 rounded-[4px]" />
+                  <img src={favicon(r.domain)} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.visibility = 'hidden'; }} className="size-4 shrink-0 rounded-[4px]" />
                   <span className="min-w-0 flex-1 truncate text-[13.5px]">{r.title}</span>
                   <span className="zo-meta shrink-0">{shortDomain(r.domain)}</span>
                 </div>
