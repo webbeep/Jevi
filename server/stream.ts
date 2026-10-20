@@ -1108,6 +1108,10 @@ function applyReview(send: Send, publish: Publish, req: DesignRequest, shown: Ma
     if (!gated) continue;
     const accepted = keepShownComponent(before, gated);
     if (before && accepted === before) continue;
+    // A correction never takes a figure away: a replacement with fewer amounts than the node it replaces ("Student
+    // $6.99" turned into "Not stated") lost a supported fact, so the node on screen stays.
+    const amounts = (node: unknown) => (JSON.stringify(node).match(/[$€£]\s?\d|\d+(?:\.\d+)?\s?%/g) ?? []).length;
+    if (before && amounts(accepted) < amounts(before)) continue;
     publish(fix.index, keepPictures(before, accepted) as CardNode);
     fixed++;
   }
