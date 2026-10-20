@@ -25,7 +25,7 @@ export function FaviconStack({ domains, size = 'sm' }: { domains: string[]; size
   return (
     <span className="flex shrink-0 -space-x-1.5">
       {[...new Set(domains)].slice(0, 4).map((d) => (
-        <img key={d} src={favicon(d)} alt="" loading="lazy" className={cn('rounded-full bg-background ring-2 ring-card', size === 'sm' ? 'size-4' : 'size-[18px]')} />
+        <img key={d} src={favicon(d)} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.visibility = 'hidden'; }} className={cn('rounded-full bg-background ring-2 ring-card', size === 'sm' ? 'size-4' : 'size-[18px]')} />
       ))}
     </span>
   );
@@ -49,7 +49,7 @@ function SourceRow({ entry, detail = false }: { entry: LibraryEntry; detail?: bo
   return (
     <a href={r.url} target="_blank" rel="noopener noreferrer" className={cn('flex min-h-11 w-full flex-col gap-1 text-left transition-colors hover:bg-foreground/[0.04]', detail ? 'px-4 py-3' : 'rounded-lg px-2 py-2.5')}>
       <span className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
-        <img src={favicon(r.domain)} alt="" className="size-3.5 rounded-[3px]" loading="lazy" />
+        <img src={favicon(r.domain)} alt="" className="size-3.5 rounded-[3px]" loading="lazy" onError={(e) => { e.currentTarget.style.visibility = 'hidden'; }} />
         <span className="truncate">{shortDomain(r.domain)}</span>
         {r.content && <FileText className="size-3 shrink-0 opacity-60" aria-label="Full text read" />}
         {entry.citedBy.length > 0 && <span className="zo-meta ml-auto shrink-0 text-foreground/60">cited{entry.citedBy.length > 1 ? ` ×${entry.citedBy.length}` : ''}</span>}

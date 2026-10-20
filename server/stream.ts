@@ -95,7 +95,7 @@ import { nwsForecastRow } from './weatherService';
 import { brandPriceProbe, probeHost } from './brandPrice';
 import { cleanSideName } from '../shared/objects';
 import { cardCitesName, citedNames, nameSeekingQuery, namedListNode, wantsNamedList } from './namedList';
-import { addedComparison, fallbackQuery, followSearchPlan, judgeSources, judgeTurn } from './turnJudge';
+import { addedComparison, challengedWith, fallbackQuery, followSearchPlan, judgeSources, judgeTurn, sideNamed } from './turnJudge';
 import { deniesPrice, findTicker } from '../shared/tickerNotes';
 import { splitPeople } from './peopleSplit';
 import { personSteer, pronounFollow, roleFollow, threadPerson, topicOnly, withoutChosen } from './personSteer';
@@ -1108,6 +1108,10 @@ function applyReview(send: Send, publish: Publish, req: DesignRequest, shown: Ma
     if (!gated) continue;
     const accepted = keepShownComponent(before, gated);
     if (before && accepted === before) continue;
+    // A correction never takes a figure away: a replacement with fewer amounts than the node it replaces ("Student
+    // $6.99" turned into "Not stated") lost a supported fact, so the node on screen stays.
+    const amounts = (node: unknown) => (JSON.stringify(node).match(/[$€£]\s?\d|\d+(?:\.\d+)?\s?%/g) ?? []).length;
+    if (before && amounts(accepted) < amounts(before)) continue;
     publish(fix.index, keepPictures(before, accepted) as CardNode);
     fixed++;
   }
@@ -1924,8 +1928,11 @@ const ELLIPTICAL = /^(?:and|but|also|so|plus|or|what about|how about|same|for|in
 const POINTS_BACK = /\b(?:it|its|it's|they|them|their|this|that|these|those|he|she|his|her|one|ones)\b/i;
 
 /** A follow-up about something the card and its sources never mention, with nothing pointing back at them. */
+/** "What would I pay with sales tax in NYC?", "How much is that with shipping?": a cost of the thing on screen, not a new thing. */
+const COST_QUALIFIER = /\b(?:with|after|including|incl\.?|plus|before|without)\s+(?:the\s+)?(?:sales\s+|state\s+|local\s+)?(?:tax|taxes|fees?|shipping|delivery|tip|vat|gst|discount)\b|\bwhat\s+(?:would|will|do|does)\s+(?:i|we|you)\s+pay\b/i;
+
 export function newTopic(question: string, onScreen: string): boolean {
-  if (POINTS_BACK.test(question) || ELLIPTICAL.test(question.trim())) return false;
+  if (POINTS_BACK.test(question) || ELLIPTICAL.test(question.trim()) || COST_QUALIFIER.test(question)) return false;
   const words = question.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 4 && !TOPIC_STOP.has(word));
   if (!words.length) return false;
   const seen = onScreen.toLowerCase();
@@ -2188,13 +2195,24 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
       ? { action: 'search' as const, queries: [req.question.replace(/[?!.]+$/, '')], subject: '' }
       : judgedOrFallback;
     console.log(JSON.stringify({ zo: 'judge-turn', action: decision.action, subject: decision.subject, queries: decision.queries, model: !!judged }));
-    const planned = decision.action !== 'search'
+    let planned = decision.action !== 'search'
       ? undefined
       : unrelated
         ? { query: decision.queries[0] ?? req.question, fanout: decision.queries.slice(1) }
         : followSearchPlan({ title: onScreen?.title, question: req.question, queries: decision.queries, subject: decision.subject, lead: onScreen ? cardLead(onScreen) : '' });
     const subject = planned?.subject ?? decision.subject;
-    const lock = planned?.added
+    // "That's wrong, it's the Empire State Building, right?" disputes the card: the answer checks that claim and says
+    // which is right, rather than profiling the name they proposed.
+    const claimed = onScreen ? challengedWith(req.question) : undefined;
+    const disputed = !!(claimed && onScreen && !sideNamed(cardLead(onScreen), claimed));
+    // The claim is searched against the card's own question, never as "X vs Y": a side-by-side table has no verdict,
+    // and the next "When did it open?" needs the one the verdict named.
+    if (disputed && planned && onScreen) {
+      planned = { query: `${onScreen.title} ${claimed}`, fanout: decision.queries.filter((item) => compareSides(item).length < 2).slice(0, 2) };
+    }
+    const lock = disputed && claimed && onScreen
+      ? `The person disputes the card on screen ("${onScreen.title}": ${cardLead(onScreen).slice(0, 200)}) and proposes ${claimed}. Check their claim against the sources. Lead with a yes or no that names which one is right, then the figure that settles it.`
+      : planned?.added
       ? `${planned.added} is its own object. Use only a price, photo, spec, or citation from a source that names it. Do not copy those from another object.`
       : subject
         ? `This turn is about ${cleanSideName(subject)}. Answer the new question about that subject. A label is the object name, not the question.`

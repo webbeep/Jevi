@@ -1004,11 +1004,30 @@ export function leadTaxedTotal(
     }
     return node;
   };
-  // A line saying the rate or the total can't be found is wrong once the card works the total out.
-  const kept = nodes.map((node) => withoutTotalDenial(node) ?? { type: 'stack', children: [] } as CardNode);
+  // A line saying the rate or the total can't be found is wrong once the card works the total out. A tile for another
+  // version ("Bundle $499.99") that only repeats the priced thing's figure was copied from it, unless the question named it.
+  const kept = nodes.map((node) => withoutTotalDenial(withoutCopiedVariant(node, price, question)) ?? { type: 'stack', children: [] } as CardNode);
   const next = kept.map(swap);
   if (placed) return next;
   return kept.length ? [{ type: 'stack', direction: 'col', gap: 'md', children: [hero, kept[0]!] }, ...kept.slice(1)] : [hero];
+}
+
+const VARIANT_LABEL = /\b(?:bundle|pro|plus|max|mini|ultra|edition|lite|oled|deluxe|premium)\b/i;
+
+/** A tile or stat for a variant the question did not name, showing exactly the priced thing's figure, is a copy. */
+function withoutCopiedVariant(node: CardNode, price: number, question: string): CardNode {
+  const figure = money(price);
+  const copied = (item: { label?: string; value?: string }) =>
+    !!item.label && VARIANT_LABEL.test(item.label) && !new RegExp(`\\b${item.label.match(VARIANT_LABEL)![0]}\\b`, 'i').test(question) && (item.value ?? '').trim() === figure;
+  if (node.type === 'stack' || node.type === 'grid' || node.type === 'section' || node.type === 'scroller') {
+    const children = node.children.filter((child) => !((child.type === 'tile' || child.type === 'stat') && copied(child))).map((child) => withoutCopiedVariant(child, price, question));
+    return children.length === node.children.length && children.every((child, i) => child === node.children[i]) ? node : { ...node, children };
+  }
+  if (node.type === 'keyvalue') {
+    const items = node.items.filter((item) => !copied(item));
+    return items.length === node.items.length ? node : { ...node, items };
+  }
+  return node;
 }
 
 /** The card names this amount as a past price: "Up from $449.99", "was $449.99", "Previous MSRP $449.99". */

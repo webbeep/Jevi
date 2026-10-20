@@ -1019,3 +1019,22 @@ test('a combined rate from a commercial page still answers a pay question when a
   ];
   assert.equal(salesTax('What would I pay with sales tax in New York City?', sources as never)?.rate, 8.875);
 });
+
+test('a breakdown part that shows the combined rate is dropped, in a grid and in a table', async () => {
+  const { agreeOfficialRate } = await import('../server/claims.ts');
+  const ask = 'What would I pay with sales tax in New York City?';
+  const sources = [{ n: 3, text: 'NYC sales tax. The combined sales tax rate in New York City is 8.875%: 4% New York State, 4.5% city, and 0.375% MCTD.' }];
+  const grid: CardNode = { type: 'grid', cols: 2, children: [
+    { type: 'stat', label: 'City sales tax', value: '8.875', unit: '%' },
+    { type: 'stat', label: 'NY State tax', value: '4', unit: '%' },
+    { type: 'stat', label: 'MTA surcharge', value: '0.375', unit: '%' },
+    { type: 'stat', label: 'Combined rate', value: '8.875', unit: '%' },
+  ] };
+  const next = agreeOfficialRate(grid, ask, sources as never) as Extract<CardNode, { type: 'grid' }>;
+  assert.deepEqual(next.children.map((child) => (child as { label: string }).label), ['NY State tax', 'MTA surcharge', 'Combined rate']);
+  const table: CardNode = { type: 'section', title: 'How the 8.875% adds up', children: [
+    { type: 'table', columns: ['Component', 'Rate'], rows: [['NY State sales and use tax', '8.875%'], ['MCTD surcharge', '8.875%'], ['Combined', '8.875%']], highlight: 3 },
+  ] };
+  const gone = agreeOfficialRate(table, ask, sources as never);
+  assert.ok(!JSON.stringify(gone).includes('MCTD surcharge'), 'a table whose parts all show the whole says nothing');
+});

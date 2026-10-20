@@ -391,3 +391,21 @@ test('the price a card states is its lead figure, not a previous or resale price
   ];
   assert.equal(cardPriceAndTax(card).price, 499.99);
 });
+
+test('a bundle tile that only repeats the console price is a copy and goes', () => {
+  const body: CardNode[] = [
+    { type: 'hero', value: '$499.99', label: 'Switch 2 console' },
+    { type: 'scroller', children: [
+      { type: 'tile', label: 'Console', value: '$499.99', sub: 'List price' },
+      { type: 'tile', label: 'Bundle', value: '$499.99', sub: 'With Mario Kart World' },
+    ] },
+    { type: 'stat', label: 'Combined rate', value: '8.875', unit: '%' },
+  ];
+  const next = leadTaxedTotal('What would I pay with sales tax in New York City?', body);
+  const text = JSON.stringify(next);
+  assert.match(text, /\$544\.36/);
+  assert.ok(!/"Bundle"/.test(text), 'the copied bundle tile is gone');
+  assert.match(text, /"Console"/);
+  // When the question names the bundle, its tile stays.
+  assert.match(JSON.stringify(leadTaxedTotal('What would I pay for the bundle with sales tax in New York City?', body)), /"Bundle"/);
+});

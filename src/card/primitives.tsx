@@ -460,7 +460,7 @@ export function VideoView({ node }: { node: Of<'video'> }) {
         )}
       </div>
       <figcaption className="flex items-start gap-2 text-sm">
-        <img src={`https://icons.duckduckgo.com/ip3/${r.domain}.ico`} alt="" className="mt-0.5 size-4 shrink-0 rounded-sm" />
+        <img src={`https://icons.duckduckgo.com/ip3/${r.domain}.ico`} alt="" className="mt-0.5 size-4 shrink-0 rounded-sm" onError={(e) => { e.currentTarget.style.visibility = 'hidden'; }} />
         <span className="min-w-0 flex-1">
           <a href={r.url} target="_blank" rel="noopener noreferrer" className="font-medium leading-snug hover:underline">{node.caption ?? r.title}</a>
           <span className="block text-xs text-muted-foreground">{domainLabel(r.domain)}{r.date ? ` · ${r.date.slice(0, 10)}` : ''}</span>

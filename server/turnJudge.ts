@@ -188,6 +188,22 @@ export function rejectionAffirms(lead: string): string | undefined {
   return affirmed?.name;
 }
 
+const PUSHBACK = /^(?:no\b|nope\b|wrong\b|that(?:'s| is| was)\s+(?:wrong|not right|incorrect)|actually\b|are you sure\b|i thought\b|isn['’]t it\b|wasn['’]t it\b|shouldn['’]t it be\b)|,\s*(?:right|correct|no)\s*\?\s*$/i;
+
+/**
+ * The name the person proposes when they dispute the card: "That's wrong, it's the Empire State Building, right?" →
+ * "Empire State Building". Their turn is a claim to check against the card, not a new subject to profile.
+ */
+export function challengedWith(question: string): string | undefined {
+  const asked = question.replace(/\s+/g, ' ').trim();
+  if (!PUSHBACK.test(asked)) return undefined;
+  const body = asked.replace(/^[A-Za-z]+['’]?[a-z]*/, (word) => ' '.repeat(word.length));
+  const names = [...body.matchAll(/\b[A-Z0-9][\w.'’&-]*(?:\s+(?:of\s+|the\s+|de\s+)?[A-Z0-9][\w.'’&-]*)*/g)]
+    .map((match) => match[0].trim())
+    .filter((name) => !/^(?:I|It|It['’]s|That|This|Isn['’]t|Is|Are|No|Yes|Right|Correct)$/.test(name));
+  return names[0];
+}
+
 /** The lead names this side only to reject it ("Empire State Building is not the tallest"). */
 function rejectedIn(lead: string, side: string): boolean {
   const name = side.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -206,8 +222,10 @@ export function followSearchPlan(input: { title?: string; question: string; quer
     return { query, fanout: [], subject: affirmed };
   }
   // "When did it open?" on a card whose lead settles one side ("No — One WTC is still the tallest") is about that side.
+  // A verdict that affirms one side ("No — One World Trade Center is taller") settles it even when the lead also names the other.
+  const settled = affirmed ? sides.filter((side) => sideNamed(affirmed, side)) : [];
   const pointed = sides.length >= 2 && SINGULAR_POINTER.test(asked) && !sides.some((side) => sideNamed(asked, side))
-    ? sides.filter((side) => sideNamed(input.lead ?? '', side) && !rejectedIn(input.lead ?? '', side))
+    ? settled.length === 1 ? settled : sides.filter((side) => sideNamed(input.lead ?? '', side) && !rejectedIn(input.lead ?? '', side))
     : [];
   if (pointed.length === 1) {
     // The card's own spelled-out name ("One World Trade Center") searches better than the title's short side ("One WTC").

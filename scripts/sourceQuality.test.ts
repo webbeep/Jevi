@@ -388,6 +388,8 @@ test('a topic with a known US authority probes that authority when the ask names
   assert.match(probe, /aspirin/);
   assert.equal(hasOfficialHit(aspirin, [{ domain: 'www.healthline.com', url: 'https://www.healthline.com/aspirin' }]), false);
   assert.equal(hasOfficialHit(aspirin, [{ domain: 'www.uspreventiveservicestaskforce.org', url: 'https://www.uspreventiveservicestaskforce.org/uspstf/recommendation/aspirin' }]), true);
+  // An NIH news page reports the task force's rule; the task force's own page is still worth the short wait.
+  assert.equal(hasOfficialHit(aspirin, [{ domain: 'newsinhealth.nih.gov', url: 'https://newsinhealth.nih.gov/2018/11/daily-aspirin' }]), false);
   assert.match(officialProbe('Should I rinse raw chicken before cooking?'), /site:fsis\.usda\.gov/);
   assert.match(officialProbe('What is the Roth IRA contribution limit?'), /site:irs\.gov/);
   assert.match(officialProbe('What happens if the president does a pocket veto?'), /site:congress\.gov/);

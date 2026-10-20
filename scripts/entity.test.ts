@@ -385,6 +385,11 @@ test('two identical choices are one person, and two careers stay a picker', () =
     { name: 'Mara Chen', descriptor: 'Scientist at Future Institute', query: 'Mara Chen scientist', id: 'a', seeds: [0] },
     { name: 'Mara Chen', descriptor: 'Professor at University of Lakes', query: 'Mara Chen professor', id: 'b', seeds: [1] },
   ], rows), false);
+  // Two roles at one workplace are one career, not two people.
+  assert.equal(samePersonChoices([
+    { name: 'Simon Willison', descriptor: 'Founder of Django Web', query: 'Simon Willison Django Web Founder', id: 'a', seeds: [0] },
+    { name: 'Simon Willison', descriptor: 'Engineer at Django', query: 'Simon Willison Django Engineer', id: 'b', seeds: [1] },
+  ], rows), true);
   const article = [
     row('Mara Chen', 'Mara Chen is a scientist at the Future Institute.', 'https://en.wikipedia.org/wiki/Mara_Chen'),
     row('Mara Chen, professor', 'Mara Chen is a professor at the University of Lakes.', 'https://example.edu/chen'),

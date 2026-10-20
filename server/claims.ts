@@ -2610,6 +2610,47 @@ export function presentNamedCharges(query: string, nodes: readonly (CardNode | u
   return next;
 }
 
+/** The percent a breakdown row shows: "4.5" with unit "%", "8.875%", "4.5 percent". */
+function rowRate(row: { value?: string; unit?: string }): number | undefined {
+  const text = `${row.value ?? ''}${row.unit ? ` ${row.unit}` : ''}`;
+  const match = text.match(/(\d+(?:\.\d+)?)\s*(?:%|percent)/i);
+  return match ? Number(match[1]) : undefined;
+}
+
+/**
+ * A part of the combined rate that shows the whole ("City sales tax 8.875%" beside "Combined 8.875%", a breakdown
+ * table with 8.875% on every line) was filled from the lead figure: a part can never equal the whole, so it goes.
+ */
+function withoutPartsEqualToWhole(node: CardNode, rate: number): CardNode | undefined {
+  const isPart = (label: string) => PART_LABEL.test(label) && !WHOLE_LABEL.test(label) && !NOT_TAX_RATE.test(label);
+  const wrong = (row: { label?: string; value?: string; unit?: string }) => !!row.label && isPart(row.label) && rowRate(row) === rate;
+  switch (node.type) {
+    case 'stat':
+    case 'tile':
+      return wrong(node) ? undefined : node;
+    case 'keyvalue': {
+      const items = node.items.filter((item) => !wrong(item));
+      return items.length === node.items.length ? node : items.length ? { ...node, items } : undefined;
+    }
+    case 'table': {
+      const rows = node.rows.filter((cells) => !(cells[0] && isPart(cells[0]) && cells.slice(1).some((cell) => rowRate({ value: cell }) === rate)));
+      if (rows.length === node.rows.length) return node;
+      // A breakdown with its parts gone says nothing: the lead already shows the whole.
+      return rows.some((cells) => cells[0] && isPart(cells[0])) ? { ...node, rows, highlight: undefined } : undefined;
+    }
+    case 'stack':
+    case 'grid':
+    case 'section':
+    case 'scroller': {
+      const children = node.children.map((child) => withoutPartsEqualToWhole(child, rate)).filter((child): child is CardNode => !!child);
+      if (children.length === node.children.length && children.every((child, i) => child === node.children[i])) return node;
+      return children.length ? { ...node, children } : undefined;
+    }
+    default:
+      return node;
+  }
+}
+
 /** The last pass: every percent on a tax card is the official rate, including nodes added after the first bind. */
 export function agreeOfficialRate(node: CardNode, query: string, sources: readonly ClaimSource[]): CardNode {
   const tax = salesTax(query, sources);
@@ -2618,7 +2659,8 @@ export function agreeOfficialRate(node: CardNode, query: string, sources: readon
   // card, after the marks from designing it were made on other objects.
   breakdown = new WeakSet<object>();
   markBreakdown(node);
-  return alignTax(applyTax(node, query, tax, ratesIn(sources.find((source) => source.n === tax.n))), tax.rate);
+  const aligned = alignTax(applyTax(node, query, tax, ratesIn(sources.find((source) => source.n === tax.n))), tax.rate);
+  return withoutPartsEqualToWhole(aligned, tax.rate) ?? { type: 'stack', children: [] };
 }
 
 /** Move each number's citation onto a page that states it, then fill a missing product price from that page. */

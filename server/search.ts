@@ -12,7 +12,7 @@ import { newLedger } from './budget';
 import { searchTtlS } from '../shared/cacheTtl';
 import { cacheDb, packSearch, readSearchCache, searchCacheKey, writeSearchCache } from './cache';
 import { type WebHit, cascadeWeb } from './cascade';
-import { searchDegraded } from './degraded';
+import { searchDegraded, thinSearch } from './degraded';
 import { diversify } from './diversify';
 import { withinOneEdit } from './entity';
 import { gateResults } from './relevanceGate';
@@ -106,7 +106,11 @@ export function coverage(query: string, hit: Pick<Hit, 'title' | 'snippet' | 'ur
   const text = `${hit.title} ${hit.snippet} ${hit.url} ${(hit.content ?? '').slice(0, 800)}`.toLowerCase();
   const long = text.split(/[^a-z0-9]+/).filter((w) => w.length >= 6);
   // "bleuflame" covers a page that says "blueflame".
-  const found = words.filter((w) => text.includes(w) || (w.length >= 6 && long.some((t) => withinOneEdit(w, t)))).length;
+  // "NYC" on a page covers "New York City" in the ask.
+  const named = new Set((query.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+){2,}/g) ?? [])
+    .filter((phrase) => new RegExp(`\\b${phrase.split(/\s+/).map((word) => word[0]).join('').toLowerCase()}\\b`).test(text))
+    .flatMap((phrase) => phrase.toLowerCase().split(/\s+/).map(stem)));
+  const found = words.filter((w) => named.has(w) || text.includes(w) || (w.length >= 6 && long.some((t) => withinOneEdit(w, t)))).length;
   const share = found / words.length;
   return typed && found >= Math.max(2, Math.ceil(words.length / 3)) ? Math.max(0.5, share) : share;
 }
@@ -274,6 +278,7 @@ const emptyLate = (): LateExtras => ({ content: new Map(), images: [] });
 export async function searchWithLate(q: Query, env: Env, scope?: AskScope): Promise<SearchWithLate> {
   const ask: AskScope = scope ?? { ledger: newLedger(), bypass: false };
   const key = searchCacheKey(q.q, q.freshness, q.count);
+  const rewrites = !!(q.later || q.more?.length);
   const db = cacheDb(env);
 
   if (q.ungated) {
@@ -285,7 +290,9 @@ export async function searchWithLate(q: Query, env: Env, scope?: AskScope): Prom
   } else {
     const cached = await readSearchCache(db, key, Date.now(), searchTtlS(q.q, q.freshness) * 1000);
     // T424: a degraded cached search (0 sources / Wikipedia-only / provider errors) is a miss.
-    if (cached.kind === 'hit' && !searchDegraded(cached.response)) {
+    // A thin cached search is a miss for an ask with rewrites: it was saved by a call whose rewrites never ran or
+    // came late ("How much is a subway ride in NYC?" → the MTA page and five Wikipedia articles, for a day).
+    if (cached.kind === 'hit' && !searchDegraded(cached.response) && !(rewrites && thinSearch(cached.response))) {
       ask.ledger.cache = 'hit';
       const hit = gateResults(q.q, cached.response.results);
       ask.ledger.relevanceDropped = (ask.ledger.relevanceDropped ?? 0) + hit.dropped;
@@ -360,7 +367,7 @@ export async function searchWithLate(q: Query, env: Env, scope?: AskScope): Prom
   const degraded = searchDegraded(response);
   if (degraded) Object.assign(response, { degraded: true, degradedReason: degraded });
   // T424: never cache a degraded search.
-  if (!q.ungated && !ask.bypass && ask.ledger.cache === 'miss' && db && response.results.length && !degraded) {
+  if (!q.ungated && !ask.bypass && ask.ledger.cache === 'miss' && db && response.results.length && !degraded && !(rewrites && thinSearch(response))) {
     const payload = packSearch(response);
     const pending = writeSearchCache(db, key, payload).catch(() => undefined);
     if (ask.waitUntil) ask.waitUntil(pending);
