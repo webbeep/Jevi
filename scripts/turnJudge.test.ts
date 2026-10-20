@@ -276,3 +276,12 @@ test('"it" after a verdict that affirms one of two compared sides is that side',
   assert.equal(plan.subject, 'One World Trade Center');
   assert.match(plan.query, /^When did One World Trade Center open$/);
 });
+
+test('rule, fee and health asks wait briefly for pages; live and quick asks do not', async () => {
+  const { pageWaitMs } = await import('../server/stream.ts');
+  assert.ok(pageWaitMs('Step by step, how do I renew my US passport by mail?') > 0);
+  assert.ok(pageWaitMs('Should I rinse raw chicken before I cook it?') > 0);
+  assert.equal(pageWaitMs("What's Nvidia's stock price right now?"), 0);
+  assert.equal(pageWaitMs("What's the weather in NYC today?"), 0);
+  assert.equal(pageWaitMs('Who is Ed Chu?'), 0);
+});
