@@ -1,6 +1,5 @@
-import { cacheTier } from '../shared/cacheTtl';
 import { DEEP_PAGES, routeOf } from './router';
-import { exaSearch, serperImages } from './cascade';
+import { serperImages } from './cascade';
 import { playerStatRow } from './playerLine';
 import { publicEvent } from './publicPayload';
 import {
@@ -69,7 +68,7 @@ import { gateResults } from './relevanceGate';
 import { entityQuery, plainQuotes, relaxQuery, tickerQueries } from './queryClean';
 import { type LateExtras, normalizeUrl, searchWithLate } from './search';
 import type { WebHit } from './cascade';
-import { clip, domainOf } from './util';
+import { domainOf } from './util';
 import { choicesIn, distinctActions, subjectWords } from './chips';
 import { anchoredFollowup, asksToCompare, comparisonFollow, cryptographyHint, faithfulQuery, followSearchQuery, foreignName, isWritingAsk, lockChainQuery, needsOwnSearch, ownQuestion, personQuestion, quickPlan, quoteFollowQuery, sameSubjectQuery, screenSubject, scrubLeak, sourcesCover, standsAlone, withoutLeakActions, withoutRepeatedCallouts } from './askGuard';
 import { calculationAnswer, isCalculationAsk, leadTaxedTotal, rateOnAmount, splitShare } from './calculate';
@@ -307,45 +306,6 @@ interface EarlyOfficial {
   promise: Promise<OfficialSearch | undefined>;
   /** The probe, when it has already finished. Reading this never waits. */
   ready: () => OfficialSearch | undefined;
-}
-
-/**
- * A rule, fee, step or health answer turns on a line in the page, and the pages rarely finish loading before the
- * card is written. Exa returns each result with its page text, so for those asks it runs beside the main search and
- * its text becomes the page text of the matching rows: no page read, no wait.
- */
-const CONTENT_ASK = /\b(?:how (?:do|to|can|long|much|many|often)|should (?:i|you|we)|can (?:i|you)|is it safe|steps?|rules?|guidelines?|requirements?|eligib\w*|fees?|limits?|laws?|bill|veto|recommend\w*|according to|quote)\b/i;
-const EXA_CONTENT_GRACE_MS = 600;
-
-function startContentSearch(query: string, env: Env, scope: AskScope): Promise<WebHit[]> | undefined {
-  if (!env.EXA_API_KEY || !CONTENT_ASK.test(query) || cacheTier(query) === 'live') return undefined;
-  scope.ledger.bonus = (scope.ledger.bonus ?? 0) + 1;
-  scope.ledger.search.exa += 1;
-  return exaSearch({ q: query, freshness: 'any', count: 8 }, env).then(
-    (found) => found.hits.filter((hit) => hit.content && hit.content.length >= 300),
-    () => [],
-  );
-}
-
-/** Exa's page text joins the rows the card is written from; up to two rows it alone found are added. */
-async function foldContentWithin(results: SearchResponse, early: Promise<WebHit[]> | undefined, ms: number): Promise<SearchResponse> {
-  if (!early) return results;
-  const hits = await Promise.race([early, new Promise<WebHit[]>((resolve) => setTimeout(() => resolve([]), ms))]);
-  if (!hits.length) return results;
-  const byUrl = new Map(hits.map((hit) => [normalizeUrl(hit.url), hit]));
-  let filled = 0;
-  const rows = results.results.map((row) => {
-    const hit = byUrl.get(normalizeUrl(row.url));
-    if (!hit?.content || row.content) return row;
-    filled += 1;
-    return { ...row, content: hit.content };
-  });
-  const have = new Set(rows.map((row) => normalizeUrl(row.url)));
-  const added = hits.filter((hit) => !have.has(normalizeUrl(hit.url)) && !isVideoHost(domainOf(hit.url)) && !isSocialHost(domainOf(hit.url))).slice(0, 2)
-    .map((hit): SearchResult => ({ title: hit.title, url: hit.url, snippet: clip(hit.snippet, 320), domain: domainOf(hit.url), engines: ['exa'], date: hit.date, image: hit.image, content: hit.content }));
-  console.log(JSON.stringify({ zo: 'content-search', hits: hits.length, filled, added: added.length }));
-  if (!filled && !added.length) return results;
-  return { ...results, results: [...rows, ...added] };
 }
 
 /** The agency or place search, started with the literal one so the card does not wait for it after the main search. */
@@ -1194,7 +1154,6 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   // Keyless, in parallel with the web search: a price ask is answered from the live quote, not old articles.
   const quoting = liveQuote(query).finally(() => mark(scope.ledger, 'quote'));
   const officialEarly = paper ? undefined : startOfficial(query, env, scope);
-  const contentEarly = paper || rewritten ? undefined : startContentSearch(query, env, scope);
   // A product price ask also reads the maker's own store page ("Nintendo Switch 2 price site:nintendo.com").
   const brandProbe = paper ? undefined : brandPriceProbe(query);
   const brandEarly = brandProbe ? Object.assign(startProbe(brandProbe, env, scope)!, { host: probeHost(brandProbe) }) : undefined;
@@ -1740,7 +1699,6 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
       ? await foldOfficialWithin(query, results, officialEarly, 700)
       : foldReadyOfficial(query, results, officialEarly);
   if (official !== results) results = official;
-  results = await foldContentWithin(results, contentEarly, EXA_CONTENT_GRACE_MS);
   // The pages the card on screen cited stay sources for the follow-up on the same subject: "with NYC sales tax"
   // still has the page that states the Switch 2's $499.99, after the new search found only tax pages.
   if (carried.length) {

@@ -110,7 +110,7 @@ function exaSearchType(env: Env): string {
   return raw || 'fast';
 }
 
-export async function exaSearch(q: Query, env: Env): Promise<{ hits: WebHit[]; images: ImageResult[] }> {
+async function exaSearch(q: Query, env: Env): Promise<{ hits: WebHit[]; images: ImageResult[] }> {
   const since = q.freshness === 'any' ? undefined : new Date(Date.now() - DAYS[q.freshness] * 86_400_000).toISOString();
   const data = await fetchJson<{
     results?: { title?: string; url: string; publishedDate?: string; image?: string; text?: string; highlights?: string[] }[];
