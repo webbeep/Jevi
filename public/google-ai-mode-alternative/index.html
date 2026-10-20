@@ -28,6 +28,16 @@
     a { color: inherit; }
     .note { font: 15px/1.4 system-ui, sans-serif; }
   </style>
+    <!-- Cloudflare Web Analytics (cookieless). Loaded on zo.fyi only, so test and preview deploys never count as visits. -->
+    <script>
+      if (/(^|\.)zo\.fyi$/.test(location.hostname)) {
+        var cfwa = document.createElement('script');
+        cfwa.defer = true;
+        cfwa.src = 'https://static.cloudflareinsights.com/beacon.min.js';
+        cfwa.setAttribute('data-cf-beacon', '{"token": "556b6b57c285463bbdeb435a4948204f"}');
+        document.head.appendChild(cfwa);
+      }
+    </script>
 </head>
 <body>
   <main>
