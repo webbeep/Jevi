@@ -1957,6 +1957,8 @@ function dedupeChoices(choices: EntityChoice[]): EntityChoice[] {
 }
 
 const PLACE_ONLY = /^(?:based in|located in|lives in|from|in|at)\b/i;
+/** Words of a descriptor that say what someone does, not where: left over, a descriptor names the workplace. */
+const ROLE_WORD = new Set(['founder', 'co', 'cofounder', 'ceo', 'cto', 'coo', 'cfo', 'chief', 'officer', 'engineer', 'developer', 'author', 'writer', 'creator', 'maintainer', 'director', 'manager', 'head', 'lead', 'senior', 'staff', 'principal', 'partner', 'president', 'vice', 'chair', 'professor', 'researcher', 'scientist', 'analyst', 'consultant', 'advisor', 'investor', 'the', 'and', 'for', 'web', 'inc', 'llc', 'ltd', 'company', 'former', 'ex']);
 
 /**
  * Two choices with the same full name are one person, including a role plus a place.
@@ -1970,6 +1972,9 @@ function onePerson(choices: EntityChoice[], _rows: EntityRow[]): boolean {
   if (name.split(' ').length >= 2) {
     const careers = choices.map((choice) => key(choice.descriptor)).filter((descriptor) => descriptor && !PLACE_ONLY.test(descriptor));
     if (new Set(careers).size <= 1) return true;
+    // "Founder of Django Web" and "Engineer at Django" name one workplace: two roles there are one person's career.
+    const workplaces = careers.map((career) => new Set(career.split(' ').filter((word) => word.length >= 3 && !ROLE_WORD.has(word))));
+    if (workplaces.every((words) => words.size) && workplaces.every((words, i) => i === 0 || [...words].some((word) => workplaces[0]!.has(word)))) return true;
   }
   return new Set(choices.map((choice) => key(choice.descriptor))).size < 2;
 }
