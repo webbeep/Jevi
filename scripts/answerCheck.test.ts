@@ -67,6 +67,17 @@ describe('answer review', () => {
     assert.deepEqual(review?.fixes, [{ index: 0, node: { type: 'hero', value: '82,290.94' } }]);
   });
 
+  test('a fix listed under an "ok" verdict still applies', () => {
+    const review = readReview({
+      verdict: 'ok',
+      problems: ['Node 1 omits the passport photo step the results state [9]'],
+      fixes: [{ node: 1, replace: { type: 'text', text: 'Include one 2x2 inch photo [9]' } }],
+      note: '',
+    }, shown);
+    assert.equal(review?.ok, false);
+    assert.equal(review?.fixes.length, 1);
+  });
+
   test('a fix verdict with nothing to apply counts as ok', () => {
     assert.equal(readReview({ verdict: 'fix', problems: ['minor'], fixes: [], note: '' }, shown)?.ok, true);
   });

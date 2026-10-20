@@ -77,7 +77,10 @@ export function readReview(raw: Raw | undefined, indices: Set<number>): Review |
   const followups = Array.isArray(raw.followups)
     ? raw.followups.filter((f): f is string => typeof f === 'string' && !!f.trim()).map((f) => boundAsk(f)).filter(Boolean).slice(0, 4)
     : [];
-  const ok = raw.verdict === 'ok' || (!fixes.length && !note && !followups.length);
+  // A fix names a node and applies whatever the verdict says: a reviewer that lists one under "ok" still fixed
+  // something. A note or replacement follow-ups count only when the reviewer also raised a problem.
+  const claimed = raw.verdict === 'fix' || problems.length > 0;
+  const ok = !fixes.length && !(claimed && (note || followups.length));
   return { ok, problems, fixes: ok ? [] : fixes, note: ok ? undefined : note, ...(!ok && followups.length ? { followups } : {}) };
 }
 
