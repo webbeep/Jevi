@@ -1960,11 +1960,37 @@ const PLACE_ONLY = /^(?:based in|located in|lives in|from|in|at)\b/i;
 /** Words of a descriptor that say what someone does, not where: left over, a descriptor names the workplace. */
 const ROLE_WORD = new Set(['founder', 'co', 'cofounder', 'ceo', 'cto', 'coo', 'cfo', 'chief', 'officer', 'engineer', 'developer', 'author', 'writer', 'creator', 'maintainer', 'director', 'manager', 'head', 'lead', 'senior', 'staff', 'principal', 'partner', 'president', 'vice', 'chair', 'professor', 'researcher', 'scientist', 'analyst', 'consultant', 'advisor', 'investor', 'the', 'and', 'for', 'web', 'inc', 'llc', 'ltd', 'company', 'former', 'ex']);
 
+const SHARED_STOP = new Set(['the', 'and', 'for', 'with', 'from', 'that', 'this', 'his', 'her', 'has', 'have', 'was', 'are', 'who', 'after', 'about', 'their', 'news', 'stats', 'latest', 'more', 'info', 'page', 'profile', 'wikipedia', 'born', 'also', 'into', 'over', 'when', 'what', 'year', 'years', 'time', 'first', 'former', 'named', 'team', 'member']);
+const shareWords = (text: string, name: string) => {
+  const own = new Set(low(name).split(/\s+/));
+  return new Set(low(text).split(/[^a-z0-9]+/).filter((word) => word.length >= 3 && !own.has(word) && !SHARED_STOP.has(word) && !/^\d+$/.test(word)));
+};
+
+/**
+ * "Joel Embiid" alone, with Wikipedia's article for that exact name among the sources and no namesake or
+ * disambiguation page: the choices are one notable person seen through different pages ("Player in Friday's",
+ * "Linked to All-NBA Team"), as long as every other choice's pages share at least two of the article's own
+ * words ("center", "NBA"). A namesake who shares none of them still gets the picker.
+ */
+function oneNotablePerson(choices: EntityChoice[], rows: EntityRow[]): boolean {
+  const name = choices[0]!.name;
+  if (rows.some((row) => isDisambiguationPage(row) || wikiNamesake(row, name))) return false;
+  const holder = choices.find((choice) => (choice.seeds ?? []).some((i) => rows[i] && exactWikiArticle(rows[i]!, name)));
+  if (!holder) return false;
+  const article = (holder.seeds ?? []).map((i) => rows[i]).find((row) => row && exactWikiArticle(row, name))!;
+  const known = shareWords(`${article.title ?? ''} ${article.snippet ?? ''}`, name);
+  return choices.every((choice) => {
+    if (choice === holder) return true;
+    const seen = new Set((choice.seeds ?? []).flatMap((i) => [...shareWords(`${rows[i]?.title ?? ''} ${rows[i]?.snippet ?? ''}`, name)]));
+    return [...seen].filter((word) => known.has(word)).length >= 2;
+  });
+}
+
 /**
  * Two choices with the same full name are one person, including a role plus a place.
  * Different full names, or two careers under one shared name, stay a picker.
  */
-function onePerson(choices: EntityChoice[], _rows: EntityRow[]): boolean {
+function onePerson(choices: EntityChoice[], rows: EntityRow[]): boolean {
   if (choices.length < 2) return true;
   const key = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
   const name = key(choices[0]!.name);
@@ -1975,6 +2001,7 @@ function onePerson(choices: EntityChoice[], _rows: EntityRow[]): boolean {
     // "Founder of Django Web" and "Engineer at Django" name one workplace: two roles there are one person's career.
     const workplaces = careers.map((career) => new Set(career.split(' ').filter((word) => word.length >= 3 && !ROLE_WORD.has(word))));
     if (workplaces.every((words) => words.size) && workplaces.every((words, i) => i === 0 || [...words].some((word) => workplaces[0]!.has(word)))) return true;
+    if (oneNotablePerson(choices, rows)) return true;
   }
   return new Set(choices.map((choice) => key(choice.descriptor))).size < 2;
 }

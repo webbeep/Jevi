@@ -1519,3 +1519,15 @@ test('a Title Case page title does not make an everyday word a name', () => {
   ];
   assert.equal(spellingQuery('Should I start taking a daily low-dose aspirin', pages), '');
 });
+
+test('one notable person seen through different pages is one card; a namesake with nothing in common stays a picker', () => {
+  const article = row('Joel Embiid', 'The 7-foot center is a seven-time NBA All-Star and a former NBA MVP.', 'https://en.wikipedia.org/wiki/Joel_Embiid');
+  const espn = row('Joel Embiid - Philadelphia 76ers Center', 'Embiid, the NBA MVP center, returned on Friday.', 'https://www.espn.com/nba/player/_/id/3059318/joel-embiid');
+  const choices = [
+    { name: 'Joel Embiid', descriptor: "Player in Friday's", query: 'Joel Embiid player', id: 'a', seeds: [1] },
+    { name: 'Joel Embiid', descriptor: 'Linked to All-NBA Team', query: 'Joel Embiid All-NBA', id: 'b', seeds: [0] },
+  ];
+  assert.equal(samePersonChoices(choices, [article, espn]), true);
+  const founder = row('Joel Embiid - Founder, Brightloop', 'Joel Embiid is the founder of Brightloop, a payments startup in Austin.', 'https://www.linkedin.com/in/joelembiid');
+  assert.equal(samePersonChoices([{ ...choices[0]!, descriptor: 'Founder at Brightloop', seeds: [1] }, choices[1]!], [article, founder]), false);
+});
