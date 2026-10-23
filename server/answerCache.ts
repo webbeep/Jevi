@@ -1,4 +1,5 @@
 import { answerCacheUrl } from '../shared/answerKey';
+import { followupSlug } from '../shared/publicPage';
 import { cacheTier, TIER_TTL_S } from '../shared/cacheTtl';
 import { savePublicAnswer } from './publicAnswer';
 import { type Send, sseResponse } from './sse';
@@ -24,6 +25,51 @@ const HIT_HEADERS = {
 };
 
 /**
+ * A follow-up's card gets its own share page: its `done` carries the path, and the finished card is published
+ * there, so sharing the second card opens that card instead of the conversation's first question. Only a card
+ * this stream wrote is published; a picker, an error or a degraded answer is not.
+ */
+function followupStream(o: { request: Request; env: Env; req: StreamRequest; run: (send: Send) => Promise<void>; waitUntil?: (p: Promise<unknown>) => void }): Response {
+  const question = o.req.kind === 'followup' ? o.req.question.trim() : '';
+  const slug = followupSlug(question, crypto.randomUUID().replace(/-/g, ''));
+  const frames: string[] = [];
+  let sawNode = false;
+  let sawError = false;
+  let skip = false;
+  let published = false;
+  return sseResponse(
+    async (send) => {
+      const wrapped: Send = (event, data) => {
+        if (event === 'notice') skip = true;
+        if (event === 'done' && data !== null && typeof data === 'object') {
+          const done = data as { degraded?: unknown; choices?: unknown };
+          if (done.degraded === true || Array.isArray(done.choices)) skip = true;
+          if (question && sawNode && !sawError && !skip) {
+            published = true;
+            send(event, { ...data, share: `/a/${slug}` });
+            return;
+          }
+        }
+        send(event, data);
+      };
+      await o.run(wrapped);
+      if (!published || testForce(o.request, o.env)) return;
+      const saved = savePublicAnswer(o.env, question, frames, slug).catch(() => undefined);
+      if (o.waitUntil) o.waitUntil(saved);
+      await saved;
+    },
+    {
+      headers: { 'X-ZO-Cache': 'SKIP' },
+      onFrame: (event, frame) => {
+        frames.push(frame);
+        if (event === 'node') sawNode = true;
+        if (event === 'error') sawError = true;
+      },
+    },
+  );
+}
+
+/**
  * Serves a search stream from the answer cache when the same query already finished.
  * Only `kind: 'search'` is cacheable. Hits replay the stored SSE bytes unchanged.
  */
@@ -36,6 +82,7 @@ export async function serveStream(o: {
   cache?: CacheLike | null;
 }): Promise<Response> {
   const cache = o.cache === undefined ? defaultCache() : o.cache;
+  if (o.req.kind === 'followup') return followupStream(o);
   if (o.req.kind !== 'search') return sseResponse(o.run, { headers: { 'X-ZO-Cache': 'SKIP' } });
   const query = o.req.query;
 

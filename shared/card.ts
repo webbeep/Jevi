@@ -158,6 +158,8 @@ export interface CardResponse {
   degradedReason?: string;
   /** "Which one?" options the answer came with, when a name was ambiguous. */
   choices?: Disambiguation;
+  /** This card's own share page ("/a/…"), for a follow-up whose card was published on its own. */
+  share?: string;
 }
 
 /** Drops a clause written twice at the start ("Which Is Better Value: Which Is Better Value: …"). */

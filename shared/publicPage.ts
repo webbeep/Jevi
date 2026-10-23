@@ -11,6 +11,17 @@ export function answerSlug(query: string): string {
   return `${words || 'answer'}-${fnv1a(norm)}`;
 }
 
+/**
+ * A follow-up's own page: "When did it open?" means something only after the card before it, so two people's
+ * follow-ups never share a path. The "-f" + 10 characters tail marks it (kept out of the sitemap, not indexed).
+ */
+export function followupSlug(question: string, nonce: string): string {
+  const words = normalizeAnswerQuery(question).replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48);
+  return `${words || 'answer'}-f${nonce.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 10).padEnd(10, '0')}`;
+}
+
+export const isFollowupSlug = (slug: string) => /-f[a-z0-9]{10}$/.test(slug);
+
 export function answerPath(query: string): string {
   return `/a/${answerSlug(query)}`;
 }
@@ -157,14 +168,14 @@ function readAnswer(query: string, frames: readonly string[]): ReadAnswer {
 }
 
 /** Read a finished SSE stream into the fields a crawler should see. Undefined when there is no card. */
-export function publicAnswerFromFrames(query: string, frames: readonly string[]): PublicAnswer | undefined {
+export function publicAnswerFromFrames(query: string, frames: readonly string[], slug = answerSlug(query)): PublicAnswer | undefined {
   const read = readAnswer(query, frames);
   if (read.skip) return undefined;
   const heading = read.title || query.trim();
   const body = [read.subtitle, ...read.parts].map((s) => s.replace(/\s+/g, ' ').trim()).filter(Boolean).join('\n');
   if (!heading || !body) return undefined;
   return {
-    slug: answerSlug(query),
+    slug,
     query: query.trim(),
     title: clip(heading, 70),
     description: clip(read.subtitle || body, 160),

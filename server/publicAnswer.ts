@@ -1,7 +1,7 @@
 import { d1 } from './auth/env';
 import type { Env } from './util';
 import { packHistorySources, type HistorySource } from '../shared/historyCard';
-import { publicAnswerFromFrames, shareCardFromFrames, type PublicAnswer, type ShareCard } from '../shared/publicPage';
+import { isFollowupSlug, publicAnswerFromFrames, shareCardFromFrames, type PublicAnswer, type ShareCard } from '../shared/publicPage';
 import type { AnswerCard } from '../shared/card';
 
 export interface StoredAnswer extends PublicAnswer {
@@ -36,9 +36,9 @@ function parseShare(raw: string | null | undefined): ShareCard | undefined {
   return { card: row.card, results, followups };
 }
 
-export async function savePublicAnswer(env: Env, query: string, frames: readonly string[]): Promise<void> {
+export async function savePublicAnswer(env: Env, query: string, frames: readonly string[], slug?: string): Promise<void> {
   const db = d1(env);
-  const page = publicAnswerFromFrames(query, frames);
+  const page = publicAnswerFromFrames(query, frames, slug);
   if (!db || !page) return;
   const share = shareCardFromFrames(query, frames);
   const cardJson = share ? encodeShare(share) : null;
@@ -90,6 +90,7 @@ export async function loadPublicAnswer(env: Env, slug: string): Promise<StoredAn
 export async function listPublicAnswers(env: Env, limit = 50): Promise<{ slug: string; title: string }[]> {
   const db = d1(env);
   if (!db) return [];
-  const out = await db.prepare('SELECT slug, title FROM public_answers ORDER BY updated_at DESC LIMIT ?1').bind(limit).all<{ slug: string; title: string }>();
-  return out.results ?? [];
+  // Shared follow-ups are pages for one conversation, not answers to list.
+  const out = await db.prepare('SELECT slug, title FROM public_answers ORDER BY updated_at DESC LIMIT ?1').bind(limit * 3).all<{ slug: string; title: string }>();
+  return (out.results ?? []).filter((row) => !isFollowupSlug(row.slug)).slice(0, limit);
 }

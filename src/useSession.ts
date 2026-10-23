@@ -400,6 +400,7 @@ export function useSession() {
               via: e.data.via,
               ...(choices ? { choices } : {}),
               ...(e.data.degraded ? { degraded: true as const, degradedReason: e.data.degradedReason } : {}),
+              ...(typeof e.data.share === 'string' && e.data.share.startsWith('/a/') ? { share: e.data.share } : {}),
             };
             return { result, slots: settled.slots, variants: { ...t.variants, [variantKey(t.pattern, t.simple)]: result }, live: undefined, filling: false, status: undefined, thinking: false, error: undefined, retryable: undefined, offline: undefined, reconnects: undefined };
           });

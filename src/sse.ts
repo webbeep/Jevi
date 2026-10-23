@@ -35,7 +35,7 @@ export type StreamEvent =
   | { event: 'head'; data: Omit<AnswerCard, 'body'> }
   | { event: 'node'; data: { index: number; node: CardNode } }
   | { event: 'followups'; data: string[] }
-  | { event: 'done'; data: { engine: 'composed' | 'reasoning' | 'extractive'; removed: number; pagesRead: number; ms: number; via?: string; degraded?: boolean; degradedReason?: string; choices?: unknown } }
+  | { event: 'done'; data: { engine: 'composed' | 'reasoning' | 'extractive'; removed: number; pagesRead: number; ms: number; via?: string; degraded?: boolean; degradedReason?: string; choices?: unknown; share?: string } }
   | { event: 'notice'; data: NoSourcesNotice }
   | { event: 'error'; data: { message: string; retryable?: boolean } };
 
