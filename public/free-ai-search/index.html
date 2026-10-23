@@ -25,27 +25,17 @@
     .row { display: flex; gap: .5rem; }
     input { flex: 1; min-width: 0; font: inherit; padding: .7rem .8rem; border: 1px solid #141414; background: #fff; }
     button { font: inherit; padding: .7rem 1rem; background: #141414; color: #fff; border: 0; }
+    h2 { font-size: 1.3rem; margin-top: 2rem; }
     a { color: inherit; }
     .note { font: 15px/1.4 system-ui, sans-serif; }
   </style>
-    <!-- Cloudflare Web Analytics (cookieless). Loaded on zo.fyi only, so test and preview deploys never count as visits. -->
-    <script>
-      if (/(^|\.)zo\.fyi$/.test(location.hostname)) {
-        var cfwa = document.createElement('script');
-        cfwa.defer = true;
-        cfwa.src = 'https://static.cloudflareinsights.com/beacon.min.js';
-        cfwa.setAttribute('data-cf-beacon', '{"token": "556b6b57c285463bbdeb435a4948204f"}');
-        document.head.appendChild(cfwa);
-      }
-    </script>
 </head>
 <body>
   <main>
-    <p class="note"><a href="/">ZO</a></p>
+    <p class="note"><a href="/">ZO</a> · <a href="/about">About</a></p>
     <h1>Free AI search</h1>
     <p>Good search should be free.</p>
     <p>You ask, and the page is the answer. A chart, a comparison, or the steps. Then you tap the part you actually meant. Answers you can see, adjust, and act on.</p>
-    <p>ZO is free to try. Signed-out use is a small daily allowance. A signed-in account gets a larger one. The search box is the same one as the homepage.</p>
     <form action="/" method="get">
       <label class="note" for="q">Ask ZO</label>
       <div class="row">
@@ -53,7 +43,22 @@
         <button type="submit">Search</button>
       </div>
     </form>
-    <p class="note"><a href="/google-ai-mode-alternative/">Google AI Mode alternative</a></p>
+
+    <h2>What you get for free</h2>
+    <p>ZO is free to try. Signed-out use is a small daily allowance. A signed-in account gets a larger one. The search box is the same one as the homepage, and so are the answers: there is no cut-down free version.</p>
+    <p>Each answer is written from a fresh web search. ZO reads the results, writes one page that answers the question, and lists the sources it used, numbered, so a figure on the page points back to the page it came from.</p>
+
+    <h2>Answers in the shape you need</h2>
+    <p>Not every answer should be a paragraph. Ask for a comparison and you get a table. Ask how to do something and you get numbered steps. Ask about a price or a score and the figure comes first, with its source and, for live figures, the time it is from.</p>
+    <p>From there, keep going on the same page. Tap a row to ask about it, or type a follow-up. ZO keeps the conversation, so a short question like "and with tax?" is about the thing you were just looking at.</p>
+
+    <h2>Check what you read</h2>
+    <p>AI answers can be wrong. The sources are there so you can check. For health, money, or legal questions, open the source before you act on the answer.</p>
+
+    <h2>Your questions stay yours</h2>
+    <p>ZO sets only essential cookies. Unless you save an answer or turn on history sync, your questions are not stored in our database. The <a href="/privacy">privacy policy</a> has the details.</p>
+
+    <p class="note"><a href="/about">About ZO</a> · <a href="/google-ai-mode-alternative/">Google AI Mode alternative</a> · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></p>
   </main>
 </body>
 </html>

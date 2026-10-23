@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "include": ["/", "/about", "/privacy", "/terms", "/free-ai-search/*", "/google-ai-mode-alternative/*", "/api/*", "/a/*", "/og/*", "/sitemap"],
+  "exclude": []
+}
