@@ -112,6 +112,8 @@ export async function serveStream(o: {
         if (event === 'done' && data !== null && typeof data === 'object' && (data as { engine?: unknown }).engine === 'extractive') extractive = true;
         // T424: never cache a degraded answer (no-sources notice, or a degraded search/done payload).
         if (event === 'notice' || ((event === 'search' || event === 'done') && data !== null && typeof data === 'object' && (data as { degraded?: unknown }).degraded === true)) extractive = true;
+        // A card written from a live scoreboard is stale in minutes: never cache it or publish it as a page.
+        if (event === 'done' && data !== null && typeof data === 'object' && (data as { live?: unknown }).live === true) extractive = true;
         // T444: a disambiguation turn has no card; never cache it.
         if (event === 'done' && data !== null && typeof data === 'object' && Array.isArray((data as { choices?: unknown }).choices)) extractive = true;
         send(event, data);
