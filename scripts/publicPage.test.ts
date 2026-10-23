@@ -19,7 +19,8 @@ test('a finished card becomes indexable HTML with its title, description, and bo
   ]);
   assert.ok(page);
   const html = renderAnswerHtml(page, 'https://zo2.pages.dev');
-  assert.match(html, /<title>zo<\/title>/);
+  assert.match(html, /<title>Kindle and Kobo · ZO<\/title>/);
+  assert.match(html, /name="robots" content="index, follow"/);
   assert.match(html, /property="og:title" content="Kindle and Kobo"/);
   assert.doesNotMatch(html, /Good search should be free/);
   assert.match(html, /name="description" content="A side by side look"/);

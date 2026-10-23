@@ -238,10 +238,10 @@ export function renderAnswerHtml(page: PublicAnswer, origin: string): string {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>zo</title>
+  <title>${esc(page.title)} · ZO</title>
   <meta name="description" content="${esc(page.description)}" />
   <link rel="canonical" href="${esc(url)}" />
-  <meta name="robots" content="index, follow" />
+  <meta name="robots" content="${isFollowupSlug(page.slug) ? 'noindex, follow' : 'index, follow'}" />
   <meta property="og:type" content="article" />
   <meta property="og:title" content="${esc(page.title)}" />
   <meta property="og:description" content="${esc(page.description)}" />
