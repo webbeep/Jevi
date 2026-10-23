@@ -3,7 +3,7 @@
  * (a flickr badge on "New episodes", a diagram on "Network"), so the tile stays text.
  */
 const FACT_TILE =
-  /^(hosts?|co[- ]?hosts?|network|episodes?|new episodes?|schedule|airtime|airs|rating|distributor|frequency|genre|runtime|seasons?|status)$/i;
+  /^(hosts?|co[- ]?hosts?|network|episodes?|new episodes?|schedule|airtime|airs|rating|distributor|frequency|genre|runtime|seasons?|status|cuisine|style|price range|price|dress code|reservations?|hours|address|neighborhood|neighbourhood|seats|capacity|menu|tasting menu|courses)$/i;
 
 /** True when this tile label is a fact and must not show a picture. */
 export function factTileLabel(label: string | undefined): boolean {
