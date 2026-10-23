@@ -98,7 +98,7 @@ import { cleanSideName } from '../shared/objects';
 import { cardCitesName, citedNames, nameSeekingQuery, namedListNode, wantsNamedList } from './namedList';
 import { addedComparison, challengedWith, fallbackQuery, followSearchPlan, judgeSources, judgeTurn, sideNamed } from './turnJudge';
 import { deniesPrice, findTicker } from '../shared/tickerNotes';
-import { splitPeople } from './peopleSplit';
+import { bareTerm, splitPeople, splitSenses } from './peopleSplit';
 import { personSteer, pronounFollow, roleFollow, threadPerson, topicOnly, withoutChosen } from './personSteer';
 import type { Send } from './sse';
 import { extraQueries, understand } from './understand';
@@ -1600,6 +1600,9 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     send('done', { engine: 'extractive', removed: 0, pagesRead: 0, ms: Date.now() - started, choices: publicChoices(decision.choices) });
     return;
   }
+  // Started before the layout plan is awaited, so a one-word ask waits for the slower of the two, not both.
+  const term = !steer && !prior && !context && decision.kind === 'skip' && !results.results.some(isLiveScoreRow) ? bareTerm(query) : undefined;
+  const sensesCall = term ? splitSenses(term, results.results, env) : Promise.resolve(undefined);
   const plan = await planned;
   // A bare "who is" for someone without an encyclopedia page, whose namesakes the heuristic dropped:
   // the model may still see several people worth offering ("who is Ed Chu" → oncologist, EPA official, CEO).
@@ -1614,6 +1617,16 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     send('search', results);
     // Choices ride on the done event (FE readChoices() in shared/choices.ts); never cached.
     send('done', { engine: 'extractive', removed: 0, pagesRead: 0, ms: Date.now() - started, choices: publicChoices(distinct) });
+    return;
+  }
+  // A bare word with several meanings ("Cesar": a restaurant, a dog food, a labor leader) is a pick, not one card
+  // that guesses or a card that lists the meanings. People's names took the path above.
+  const senses = await sensesCall;
+  if (senses) {
+    console.log(JSON.stringify({ zo: 'entity', kind: 'choices', choices: senses.length, by: 'senses' }));
+    scope.ledger.entity = { kind: 'choices', choices: senses.length };
+    send('search', results);
+    send('done', { engine: 'extractive', removed: 0, pagesRead: 0, ms: Date.now() - started, choices: publicChoices(senses) });
     return;
   }
   noteSpelling(send, query, results.results);

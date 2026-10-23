@@ -155,3 +155,69 @@ export function notRejected(people: EntityChoice[] | undefined, rejected: string
   const kept = people.filter((p) => nameKey(p.name) !== who);
   return kept.length >= min ? kept : undefined;
 }
+
+const SENSES = `A searcher typed one bare word or name. You sort the web search results into the distinct things that word means, so they can pick the one they meant.
+Reply as JSON: {"dominant": boolean, "senses":[{"name": string, "who": string, "rows": number[], "query": string}]}
+- dominant: true when one meaning is what nearly everyone typing this word wants (Apple → Apple Inc., Bitcoin, Python → the language). Then list only that one.
+- name: what this thing is called, as the results write it ("César", "CESAR dog food", "César Chávez"). Each sense gets a different name ("Jaguar (animal)", "Jaguar Cars").
+- who: 3-8 words that tell it apart at a glance: kind plus place, field or best-known fact ("Two-Michelin-star restaurant, New York", "Dog food brand by Mars", "American labor leader"). No filler.
+- rows: the result numbers about this thing. A result belongs to one thing at most; leave out results about nothing in particular (pronunciation, dictionaries, the word as a given name or surname, disambiguation lists).
+- query: a web search for this thing only: the word plus 1-3 words that are about it, at most 5 words, no word twice.
+- Different kinds (a restaurant, a brand, a person, a place, a film) are different things. Most covered first. At most 5.`;
+
+/** A bare one-word ask ("Cesar", "Mercury"): the word as typed, or undefined for anything longer or worded as a question. */
+export function bareTerm(query: string): string | undefined {
+  const q = query.trim();
+  return /^[\p{L}][\p{L}'’.-]{2,29}$/u.test(q) ? q : undefined;
+}
+
+const fold = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+/** "César restaurant New York César Ramirez" → each word once. */
+const onceEach = (query: string) => {
+  const seen = new Set<string>();
+  return query.split(/\s+/).filter((word) => {
+    const key = fold(word).replace(/[^a-z0-9]/g, '');
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).join(' ');
+};
+
+/** Parses the model's meanings into choices. Undefined when one meaning dominates or fewer than two have their own rows. */
+export function readSenses(raw: { dominant?: unknown; senses?: { name?: unknown; who?: unknown; rows?: unknown; query?: unknown }[] } | undefined, term: string, count: number): EntityChoice[] | undefined {
+  if (!raw || raw.dominant === true) return undefined;
+  const taken = new Set<number>();
+  const out: EntityChoice[] = [];
+  for (const s of raw.senses ?? []) {
+    if (typeof s.name !== 'string' || typeof s.who !== 'string' || typeof s.query !== 'string' || !Array.isArray(s.rows)) continue;
+    const seeds = s.rows.filter((n): n is number => Number.isInteger(n) && n >= 1 && n <= count && !taken.has(n - 1)).map((n) => n - 1);
+    const name = s.name.trim().replace(/\s+/g, ' ').slice(0, 60);
+    const descriptor = s.who.trim().replace(/\s+/g, ' ').slice(0, 60);
+    const query = boundAsk(fold(s.query).includes(fold(term)) ? s.query : `${term} ${s.query}`);
+    if (!seeds.length || !name || !descriptor || !query) continue;
+    // The word itself as a name ("Cesar (name)", "given name", a disambiguation page) is not a thing to pick.
+    if (/\b(?:given name|surname|first name|last name|name meaning|meaning of the name|disambiguation|pronunciation)\b|\(name\)/i.test(`${name} ${descriptor}`)) continue;
+    seeds.forEach((i) => taken.add(i));
+    const shown = out.some((choice) => fold(choice.name) === fold(name)) ? `${name} (${descriptor.split(/[,;]/)[0]!.trim()})` : name;
+    out.push({ name: shown, descriptor, query: onceEach(query), id: slug(`${shown} ${descriptor}`), seeds });
+    if (out.length === 5) break;
+  }
+  return out.length >= 2 ? out : undefined;
+}
+
+/** The meanings of a bare word whose results are about several different things. Undefined when one meaning dominates. */
+export async function splitSenses(term: string, rows: SearchResult[], env: Env, timeoutMs = 2200): Promise<EntityChoice[] | undefined> {
+  if (!hasLlm(env) || rows.length < 3) return undefined;
+  const list = rows
+    .slice(0, 20)
+    .map((r, i) => `${i + 1}. ${r.title} — ${r.domain}\n   ${(r.snippet ?? '').replace(/\s+/g, ' ').slice(0, 200)}`)
+    .join('\n');
+  const call = llmJson<{ dominant?: unknown; senses?: { name?: unknown; who?: unknown; rows?: unknown; query?: unknown }[] }>(env, SENSES, `Word: ${term}\nResults:\n${list}`, 500).catch(() => undefined);
+  const timeout = new Promise<undefined>((r) => setTimeout(() => r(undefined), timeoutMs));
+  const started = Date.now();
+  const raw = await Promise.race([call, timeout]);
+  const senses = readSenses(raw, term, Math.min(rows.length, 20));
+  console.log(JSON.stringify({ zo: 'senses', term, ms: Date.now() - started, answered: !!raw, dominant: raw?.dominant === true, choices: senses?.length ?? 0 }));
+  return senses;
+}
