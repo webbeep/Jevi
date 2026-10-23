@@ -16,33 +16,26 @@
   <meta name="twitter:title" content="Google AI Mode alternative — ZO" />
   <meta name="twitter:description" content="ZO is a search where the page is the answer: a chart, a comparison, or the steps. Good search should be free." />
   <meta name="twitter:image" content="https://zo.fyi/og-card.png" />
-  <style>
-    body { margin: 0; font: 18px/1.5 Georgia, serif; background: #f7f7f5; color: #141414; }
-    main { max-width: 40rem; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
-    h1 { font-size: 2.2rem; line-height: 1.15; }
-    form { margin: 1.5rem 0; font-family: system-ui, sans-serif; }
-    label { display: block; margin-bottom: .4rem; }
-    .row { display: flex; gap: .5rem; }
-    input { flex: 1; min-width: 0; font: inherit; padding: .7rem .8rem; border: 1px solid #141414; background: #fff; }
-    button { font: inherit; padding: .7rem 1rem; background: #141414; color: #fff; border: 0; }
-    h2 { font-size: 1.3rem; margin-top: 2rem; }
-    a { color: inherit; }
-    .note { font: 15px/1.4 system-ui, sans-serif; }
-  </style>
+  <meta name="theme-color" content="#f7f7f5" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#0e0e10" media="(prefers-color-scheme: dark)" />
+  <link rel="preload" href="/fonts/geist.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="/site.css" />
 </head>
 <body>
+  <header class="top">
+    <a class="wordmark" href="/" aria-label="ZO home"><svg viewBox="0 -622 2052 710" fill="currentColor" role="img" aria-label="zo"><g transform="translate(-79.2 -693.2) scale(26.39)"><path d="M3 11A8 8 0 0 1 11 3H14.6V14.6H3ZM17.4 3H21A8 8 0 0 1 29 11V14.6H17.4ZM3 17.4H14.6V29H11A8 8 0 0 1 3 21Z" /><circle cx="23.05" cy="23.05" r="4.55" fill="none" stroke="currentColor" stroke-width="3.4" /></g><text x="942.8" font-size="1000" font-weight="600" font-family="'Geist Variable', ui-sans-serif, sans-serif" aria-hidden="true">z</text><text x="1485.2" font-size="1000" font-weight="600" font-family="'Geist Variable', ui-sans-serif, sans-serif" aria-hidden="true">o</text></svg></a>
+    <nav aria-label="ZO pages"><a href="/about">About</a> <a href="/free-ai-search/">Free AI search</a> <a href="/google-ai-mode-alternative/" aria-current="page">vs Google AI Mode</a></nav>
+  </header>
   <main>
-    <p class="note"><a href="/">ZO</a> · <a href="/about">About</a></p>
     <h1>A Google AI Mode alternative</h1>
-    <p>Good search should be free.</p>
+    <p class="lede">Good search should be free.</p>
     <p>This is the search ZO is built for: you ask, and the page is the answer. A chart, a comparison, or the steps. Then you tap the part you actually meant.</p>
     <p>ZO does not claim to outscore Google. It is a different page: the answer is something you can see, adjust, and act on, with the sources beside it.</p>
-    <form action="/" method="get">
-      <label class="note" for="q">Ask ZO</label>
-      <div class="row">
-        <input id="q" name="q" required placeholder="Ask anything" />
-        <button type="submit">Search</button>
-      </div>
+    <form class="ask" action="/" method="get" role="search">
+      <label for="q">Ask ZO</label>
+      <svg class="lens" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+      <input id="q" name="q" required placeholder="Ask anything" autocomplete="off" />
+      <button type="submit" aria-label="Search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5" /><path d="m5 12 7-7 7 7" /></svg></button>
     </form>
 
     <h2>How ZO is different</h2>
@@ -55,8 +48,9 @@
 
     <h2>Free, without the trade-off</h2>
     <p>ZO is free to use, with a small daily allowance signed out and a larger one signed in. It sets only essential cookies, and unless you save an answer or turn on history sync, your questions are not stored in our database.</p>
-
-    <p class="note"><a href="/about">About ZO</a> · <a href="/free-ai-search/">Free AI search</a> · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></p>
   </main>
+  <footer class="foot">
+    <a href="/">Search</a><a href="/about">About</a><a href="/free-ai-search/">Free AI search</a><a href="/google-ai-mode-alternative/">Google AI Mode alternative</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a>
+  </footer>
 </body>
 </html>

@@ -1,0 +1,95 @@
+/* Static pages (about, landing pages) in the app's design: Geist, warm neutrals, the app's search box. Tokens mirror src/index.css. */
+@font-face {
+  font-family: 'Geist Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url('/fonts/geist.woff2') format('woff2-variations');
+}
+:root {
+  color-scheme: light;
+  --background: oklch(0.975 0.002 90);
+  --foreground: oklch(0.2 0.004 90);
+  --card: oklch(0.995 0.001 90);
+  --muted-foreground: oklch(0.52 0.006 90);
+  --border: oklch(0.2 0.01 90 / 0.085);
+  --input: oklch(0.2 0.01 90 / 0.12);
+  --primary: oklch(0.2 0.004 90);
+  --primary-foreground: oklch(0.985 0.002 90);
+  --ring: oklch(0.55 0.15 255 / 0.5);
+  --shadow-float: 0 1px 2px oklch(0.2 0.01 90 / 0.06), 0 12px 32px -12px oklch(0.2 0.01 90 / 0.2);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --background: oklch(0.155 0.003 270);
+    --foreground: oklch(0.95 0.002 90);
+    --card: oklch(0.19 0.003 270);
+    --muted-foreground: oklch(0.68 0.005 270);
+    --border: oklch(1 0 0 / 0.075);
+    --input: oklch(1 0 0 / 0.12);
+    --primary: oklch(0.95 0.002 90);
+    --primary-foreground: oklch(0.18 0.003 270);
+    --ring: oklch(0.7 0.14 255 / 0.5);
+    --shadow-float: 0 1px 0 oklch(1 0 0 / 0.04) inset, 0 16px 40px -12px oklch(0 0 0 / 0.6);
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: 'Geist Variable', ui-sans-serif, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+  letter-spacing: -0.006em;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; text-underline-offset: 3px; text-decoration-color: color-mix(in oklch, currentColor 35%, transparent); }
+a:hover { text-decoration-color: currentColor; }
+
+.top { display: flex; align-items: center; justify-content: space-between; max-width: 640px; margin: 0 auto; padding: 20px 16px 0; }
+.wordmark { display: inline-flex; color: var(--foreground); text-decoration: none; }
+.wordmark svg { height: 24px; width: auto; overflow: visible; }
+.top nav { display: flex; gap: 18px; font-size: 13px; color: var(--muted-foreground); }
+.top nav a { text-decoration: none; }
+.top nav a:hover, .top nav a[aria-current] { color: var(--foreground); }
+
+main { max-width: 640px; margin: 0 auto; padding: 40px 16px 56px; }
+h1 { font-size: 30px; line-height: 1.15; font-weight: 600; letter-spacing: -0.025em; margin: 0 0 12px; text-wrap: balance; }
+.lede { font-size: 17px; line-height: 1.55; color: var(--muted-foreground); margin: 0 0 28px; text-wrap: pretty; }
+h2 { font-size: 17px; line-height: 1.3; font-weight: 600; letter-spacing: -0.012em; margin: 40px 0 8px; text-wrap: balance; }
+p { margin: 0 0 12px; text-wrap: pretty; }
+ul { margin: 0 0 12px; padding-left: 1.2rem; }
+li { margin: 6px 0; }
+
+.ask { position: relative; margin: 0 0 8px; }
+.ask label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.ask .lens { position: absolute; left: 18px; top: 50%; width: 18px; height: 18px; transform: translateY(-50%); color: var(--muted-foreground); pointer-events: none; }
+.ask input {
+  width: 100%; height: 56px; padding: 4px 60px 4px 48px;
+  font: inherit; font-size: 16px; color: var(--foreground);
+  background: var(--card); border: 1px solid var(--input); border-radius: 18px;
+  box-shadow: var(--shadow-float); outline: none;
+  -webkit-appearance: none; appearance: none;
+}
+.ask input::placeholder { color: var(--muted-foreground); }
+.ask input:focus { border-color: var(--ring); box-shadow: var(--shadow-float), 0 0 0 3px oklch(from var(--ring) l c h / 0.25); }
+.ask button {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  width: 40px; height: 40px; border: 0; border-radius: 14px;
+  display: grid; place-items: center; cursor: pointer;
+  background: var(--primary); color: var(--primary-foreground);
+}
+.ask button svg { width: 16px; height: 16px; }
+
+.foot { max-width: 640px; margin: 0 auto; padding: 24px 16px 40px; border-top: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 13px; color: var(--muted-foreground); }
+.foot a { text-decoration: none; }
+.foot a:hover { color: var(--foreground); }
+
+@media (max-width: 480px) {
+  .top nav a:not([href="/about"]) { display: none; }
+  main { padding-top: 28px; }
+  h1 { font-size: 26px; }
+  .lede { font-size: 16px; }
+}
