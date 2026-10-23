@@ -20,6 +20,9 @@ const hostOf = (url: string | undefined) => {
 
 const COMMON = new Set(['with', 'from', 'that', 'this', 'their', 'there', 'about', 'year', 'years', 'since', 'also', 'more', 'most', 'best', 'only', 'other', 'which', 'where', 'what', 'when', 'have', 'into', 'over', 'https', 'html', 'official', 'site', 'home', 'page']);
 
+/** What kind of thing it is, which any namesake of the same kind shares. */
+const KIND_WORDS = new Set(['restaurant', 'restaurants', 'hotel', 'cafe', 'shop', 'store', 'company', 'brand', 'museum', 'park', 'building', 'tower', 'place', 'food', 'dining', 'band', 'album', 'film', 'movie', 'book', 'show', 'series', 'team', 'club']);
+
 /** Words that say what a card is about: lower case, accents off, four letters or more, minus filler. */
 const cardWords = (text: string) => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !COMMON.has(w));
 type Pic = { src: string; link: string; title: string };
@@ -222,7 +225,12 @@ export class PictureResolver {
     // A picture from elsewhere is held to the card's words only when the name is shared: a result row names it and
     // is about something else (the dog food beside the restaurant), so "La Cesar Restaurant" in Shenzhen is not it.
     const shared = this.rows?.results.some((r) => cardWords(`${r.title} ${r.snippet ?? ''}`).some((w) => name.has(w)) && !about(`${r.title} ${r.snippet ?? ''} ${r.url}`));
-    return !!shared && !about(`${title} ${page ?? ''}`);
+    if (shared) return !about(`${title} ${page ?? ''}`);
+    // A thing (not a person) pictured from outside the results must share a telling word with the card: "La Cesar
+    // Restaurant, Shenzhen" shares only "restaurant" with a New York tasting counter.
+    if (this.ctx.person) return false;
+    const telling = [...want].filter((w) => !KIND_WORDS.has(w));
+    return telling.length >= 2 && !cardWords(`${title} ${page ?? ''}`).some((w) => telling.includes(w));
   }
 
   /** The last word on a profile's picture, whichever step placed it (pool, lookup or row fill). */
