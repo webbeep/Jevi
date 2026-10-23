@@ -9,6 +9,19 @@ import { corpusOf, fillRowImages, hasBlankPictures, rowEntity, type RowImageDeps
 import type { Env } from './util';
 
 type Emit = (node: CardNode, index: number) => void;
+
+const hostOf = (url: string | undefined) => {
+  try {
+    return url ? new URL(url).hostname.replace(/^www\./, '') : '';
+  } catch {
+    return '';
+  }
+};
+
+const COMMON = new Set(['with', 'from', 'that', 'this', 'their', 'there', 'about', 'year', 'years', 'since', 'also', 'more', 'most', 'best', 'only', 'other', 'which', 'where', 'what', 'when', 'have', 'into', 'over', 'https', 'html', 'official', 'site', 'home', 'page']);
+
+/** Words that say what a card is about: lower case, accents off, four letters or more, minus filler. */
+const cardWords = (text: string) => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !COMMON.has(w));
 type Pic = { src: string; link: string; title: string };
 type FindImages = (query: string, env: Env, n?: number, allowGeneric?: boolean) => Promise<ImageResult[]>;
 
@@ -59,6 +72,7 @@ export class PictureResolver {
   private readonly pool: ImageResult[];
   private readonly onCredit: (credit: ImageCredit) => void;
   private readonly find: FindImages;
+  private readonly seenPics = new Map<string, ImageResult>();
 
   /** T442: latest version of every emitted node, so blank tiles/rows can be filled once the card is complete. */
   private readonly latest = new Map<number, { node: CardNode; emit: Emit }>();
@@ -71,8 +85,21 @@ export class PictureResolver {
     this.env = env;
     this.pool = pool;
     this.onCredit = onCredit;
-    this.find = find;
-    this.rows = rows;
+    // Every picture seen, by thumbnail: the last check on a profile needs the page and title behind its picture.
+    this.find = (query, env, n, allowGeneric) => find(query, env, n, allowGeneric).then((imgs) => {
+      for (const img of imgs) this.seenPics.set(img.thumb, img);
+      return imgs;
+    });
+    for (const img of pool) this.seenPics.set(img.thumb, img);
+    const cardImages = rows?.cardImages;
+    if (rows && cardImages) {
+      this.rows = { ...rows, cardImages: () => cardImages().then((imgs) => {
+        for (const img of imgs) this.seenPics.set(img.thumb, img);
+        return imgs;
+      }) };
+    } else {
+      this.rows = rows;
+    }
     this.subject = query ?? '';
     this.ctx = { corpus: corpusOf(rows?.results ?? []), hintFor: rows?.hintFor, person: rows?.person };
     for (const name of splitEntities(query ?? '')) this.note(name);
@@ -176,11 +203,54 @@ export class PictureResolver {
     return this.pool.find((img) => img.thumb && !this.used.has(img.thumb) && portraitSrcOk(img.thumb) && personPage(name, img) && portraitMatches(marks, img));
   }
 
+  /**
+   * A thing's profile picture must come from a page about that thing: "César" the restaurant does not take the
+   * dog-food brand's photo. When the picture's site is among the results and that page shares no word with what the
+   * card says (subtitle, facts), it is a namesake. A picture from a site not among the results is judged as before.
+   */
+  private namesakePicture(node: Extract<CardNode, { type: 'profile' }>, page: string | undefined, title = ''): boolean {
+    const name = new Set(cardWords(node.name));
+    const want = new Set(cardWords([node.subtitle ?? '', ...(node.facts ?? []).map((f) => `${f.label} ${f.value}`)].join(' ')).filter((w) => !name.has(w)));
+    if (want.size < 2) return false;
+    const about = (text: string) => cardWords(text).some((w) => want.has(w));
+    // A picture that names the whole name ("Cesar Chavez crop") is that one, not a namesake of a shared first name.
+    if (name.size >= 2 && [...name].every((w) => cardWords(`${title} ${page ?? ''}`).includes(w))) return false;
+    const host = hostOf(page);
+    const rows = this.rows?.results ?? [];
+    const row = rows.find((r) => r.url === page) ?? (host ? rows.find((r) => hostOf(r.url) === host) : undefined);
+    if (row) return !about(`${row.title} ${row.snippet ?? ''} ${row.url}`);
+    // A picture from elsewhere is held to the card's words only when the name is shared: a result row names it and
+    // is about something else (the dog food beside the restaurant), so "La Cesar Restaurant" in Shenzhen is not it.
+    const shared = this.rows?.results.some((r) => cardWords(`${r.title} ${r.snippet ?? ''}`).some((w) => name.has(w)) && !about(`${r.title} ${r.snippet ?? ''} ${r.url}`));
+    return !!shared && !about(`${title} ${page ?? ''}`);
+  }
+
+  /** The last word on a profile's picture, whichever step placed it (pool, lookup or row fill). */
+  private dropNamesakes(node: CardNode): CardNode {
+    if (node.type === 'profile') {
+      const img = node.imageSrc ? this.seenPics.get(node.imageSrc) : undefined;
+      if (img && this.namesakePicture(node, img.url, `${img.title ?? ''} ${img.source ?? ''}`)) {
+        console.log(JSON.stringify({ zo: 'namesake-picture', name: node.name, title: img.title?.slice(0, 80), page: img.url?.slice(0, 120) }));
+        return { ...node, imageSrc: undefined };
+      }
+      return node;
+    }
+    if (node.type === 'stack' || node.type === 'grid' || node.type === 'section' || node.type === 'scroller') {
+      const children = node.children.map((child) => this.dropNamesakes(child));
+      return children.some((child, i) => child !== node.children[i]) ? ({ ...node, children } as CardNode) : node;
+    }
+    return node;
+  }
+
   private vetProfile(node: Extract<CardNode, { type: 'profile' }>): CardNode {
     const target = this.profileTarget(node.name);
     const placed = this.place(node.name, node.imageRef, node.imageQuery, target);
     const marks = [...new Set([...profilePortraitMarks(node), ...contextMarks(target.hint?.context)])];
-    if (!marks.length) return { ...node, ...placed };
+    if (!marks.length) {
+      const pooled = placed.imageSrc ? this.pool.find((p) => p.thumb === placed.imageSrc) : placed.imageRef !== undefined ? this.pool[placed.imageRef] : undefined;
+      if (pooled && this.namesakePicture(node, pooled.url, `${pooled.title ?? ''} ${pooled.source ?? ''}`)) return { ...node, imageRef: undefined, imageSrc: undefined, imageQuery: [node.name, node.subtitle].filter(Boolean).join(' ').slice(0, 80) };
+      return { ...node, ...placed };
+    }
     const img = placed.imageSrc
       ? this.pool.find((p) => p.thumb === placed.imageSrc)
       : placed.imageRef !== undefined ? this.pool[placed.imageRef] : undefined;
@@ -310,6 +380,7 @@ export class PictureResolver {
         if (!node.imageQuery || node.imageRef !== undefined) return node;
         const target: PicTarget = node.type === 'tile' ? this.tileTarget(node) : this.profileTarget(node.name);
         const pic = await this.one(node.imageQuery, false, target);
+        if (pic && node.type === 'profile' && this.namesakePicture(node, pic.link, pic.title)) return { ...node, imageQuery: undefined, imageSrc: undefined };
         return { ...node, imageQuery: undefined, imageSrc: pic?.src };
       }
       case 'list': {
@@ -396,7 +467,8 @@ export class PictureResolver {
     }
     this.collect(node);
     const vetted = this.vet(node);
-    const track = (n: CardNode) => {
+    const track = (picked: CardNode) => {
+      const n = this.dropNamesakes(picked);
       if (this.closed) return;
       if (this.rows) this.latest.set(index, { node: n, emit });
       emit(n, index);

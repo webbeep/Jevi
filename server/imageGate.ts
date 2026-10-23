@@ -215,9 +215,12 @@ export function targetFor(label: string, value?: string, imageQuery?: string, ct
   return forPerson(slotTarget(label, value, imageQuery, ctx), ctx);
 }
 
+/** A rating or award tile ("Michelin: 2 stars", "IMDb: 8.1") is a fact about the card's subject, not a picture of the rater. */
+const RATER = /^(?:michelin(?: guide| stars?)?|zagat|yelp|tripadvisor|google (?:rating|reviews?)|imdb|rotten tomatoes|metacritic|letterboxd|goodreads|james beard(?: awards?)?|forbes travel guide|aaa diamonds?)$/i;
+
 function slotTarget(label: string, value?: string, imageQuery?: string, ctx?: GateContext): PicTarget {
   const l = label.trim().replace(/[:：]$/, '');
-  if (ATTR.test(l) || factTileLabel(l) || isEventOrCategory(l)) return NONE;
+  if (ATTR.test(l) || factTileLabel(l) || isEventOrCategory(l) || RATER.test(l)) return NONE;
   if (ORG.test(l)) return value && value.trim() ? withHint({ kind: 'org', entity: value.trim() }, ctx) : NONE;
   if (properName(l, ctx?.corpus)) return withHint({ kind: 'named', entity: l }, ctx);
   if (imageQuery && properName(imageQuery, ctx?.corpus)) return withHint({ kind: 'named', entity: imageQuery }, ctx);
