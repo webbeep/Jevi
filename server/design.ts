@@ -29,6 +29,7 @@ import { CHART_TALK, withoutCharts } from '../shared/tickerNotes';
 import { brandPriceProbe } from './brandPrice';
 import { diagramIntent, diagramRegionIndex, diagramSlotAt, diagramsEnabled, dropModelDiagram, layoutWithDiagram } from '../shared/diagram';
 import { requestDiagram } from './diagramAsk';
+import { teamLogos } from './liveScore';
 
 const GRAMMAR = `Each node is a JSON object with a "type" field.
 LAYOUT
@@ -493,6 +494,7 @@ export async function designStream(req: DesignRequest, env: Env, on: DesignEvent
   const g = new Grounding(chat ? `${corpus} ${req.context ?? ''}` : corpus, chat, linksOf(req), !req.search.results.length);
   const polish = new Polisher(textCap(req));
   const pictures = new PictureResolver(env, req.search.images, on.credit, req.query, undefined, req.rowImages && { ...req.rowImages, results: req.search.results });
+  pictures.useLogos(teamLogos(req.search.results));
   const emitNode = bindVerdict(req, on.node);
   const base = req.followup?.mode === 'refine' && req.followup.baseCard ? `CURRENT CARD\n${JSON.stringify(req.followup.baseCard).slice(0, 12000)}\n\n` : '';
   const asked = req.followup?.question ?? req.query;
@@ -616,6 +618,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
   const claims = claimSources(req.search.results, req.pages);
   const g = new Grounding(corpus, false, linksOf(req));
   const pictures = new PictureResolver(env, req.search.images, on.credit, req.query, undefined, req.rowImages && { ...req.rowImages, results: req.search.results });
+  pictures.useLogos(teamLogos(req.search.results));
   const emitNode = bindVerdict(req, on.node);
   const polish = new Polisher(textCap(req));
   const shared = `${sourcesBlock(req.search, req.pages, 2800)}${keyLinesBlock(req)}\n\nTASK\n${taskBlock(req)}\n- Card regions, top to bottom:\n${skeleton.map((r, i) => `  R${i + 1}: ${regionPurpose(r)}`).join('\n')}${lead?.type === 'video' ? `\n  (Above R1 the card already plays VIDEO source [${lead.source}]; don't add another video node for it.)` : ''}\n  FINISH: header, interactive control, actions, citations, follow-ups`;

@@ -92,7 +92,7 @@ import { recallClips, wantsVideo, withProductClips, withVideos } from './videoSe
 import { guessFreshness, preferFresh, staleComplaint, stricter } from './freshness';
 import { isQuoteRow, liveQuote, quoteRow, tickerNode } from './liveQuote';
 import { nwsForecastRow } from './weatherService';
-import { isGameScoreRow, isLiveScoreRow, liveScoreRow } from './liveScore';
+import { isGameScoreRow, isLiveScoreRow, liveScoreRow, staleGameRow } from './liveScore';
 import { brandPriceProbe, probeHost } from './brandPrice';
 import { cleanSideName } from '../shared/objects';
 import { cardCitesName, citedNames, nameSeekingQuery, namedListNode, wantsNamedList } from './namedList';
@@ -889,8 +889,10 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     publishAll(keepComparedProducts(designReq.priorBody, shown, question, designReq.priorImages));
   };
   const settleComparison = () => {
+    // A scoreboard card's teams are not products: no side tiles, side photos or spec rows for them.
+    const scoreCard = designReq.search.results.some(isLiveScoreRow);
     const question = compareSides(designReq.query).length >= 2 ? designReq.query : (designReq.followup?.question ?? designReq.query);
-    if (designReq.pattern === 'compare') {
+    if (designReq.pattern === 'compare' && !scoreCard) {
       const title = comparisonTitle(question, head?.title ?? question);
       if (head && title !== head.title) {
         head = { ...head, title };
@@ -906,12 +908,12 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       publishAll(comparisonRepair(question, withPages, shown));
     }
     restoreKeptProducts();
-    if (designReq.priorBody?.length && compareSides(question).length >= 2) publishAll(restoreSideTiles(designReq.priorBody, shown, question));
+    if (!scoreCard && designReq.priorBody?.length && compareSides(question).length >= 2) publishAll(restoreSideTiles(designReq.priorBody, shown, question));
     if (designReq.followup?.question && compareSides(designReq.query).length >= 2) {
       publishAll(appendAskedFact(designReq.followup.question, designReq.query, shown, designReq.search));
     }
     publishAll(dropShownDenials(shown));
-    const extra = missingSideNode(question, [...shown.values()], designReq.search);
+    const extra = scoreCard ? undefined : missingSideNode(question, [...shown.values()], designReq.search);
     if (extra) publish(Math.max(-1, ...shown.keys()) + 1, extra);
   };
   const memberSources = () => req.search.results.map((row, i) => {
@@ -1072,7 +1074,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     restoreKeptProducts();
     separateObjects();
     const question = compareSides(designReq.query).length >= 2 ? designReq.query : (designReq.followup?.question ?? designReq.query);
-    publishAll(placeSidePhotos(question, shown, designReq.search.images));
+    if (!designReq.search.results.some(isLiveScoreRow)) publishAll(placeSidePhotos(question, shown, designReq.search.images));
     republishFees();
     mark(scope.ledger, 'reviewed');
   } else if (pendingReview) {
@@ -1730,8 +1732,12 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     if (add.length) results = { ...results, results: [...results.results, ...add] };
   }
   // The live scoreboard leads whatever the reranking above did: the score is the answer to a game ask.
+  // A page's mid-game score ("Cavaliers 84, 3:08 left in the 3rd") is from earlier: only the scoreboard says the score now.
   const scoreRows = results.results.filter(isLiveScoreRow);
-  if (scoreRows.length && !isLiveScoreRow(results.results[0])) results = { ...results, results: [...scoreRows, ...results.results.filter((row) => !isLiveScoreRow(row))] };
+  if (scoreRows.length) {
+    results = { ...results, results: [...scoreRows, ...results.results.filter((row) => !isLiveScoreRow(row) && !staleGameRow(row))] };
+    designContext = [designContext, 'Scores: the LIVE ESPN scoreboard source is the only current score, clock and game status. Never show a score, quarter or clock from any other source; those are from earlier or from other games.'].filter(Boolean).join('\n');
+  }
   send('search', results);
   const boost = imageBoost(pattern, results, env, scope, boostQuery, portraitAgain);
   const crypto = cryptographyHint(query, results.results);

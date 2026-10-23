@@ -3,6 +3,7 @@ import { claimsFigure, showsFigure } from '../shared/figure';
 import { fileWords, fitsEntity, isComposite, namesSibling, rankForEntity, splitEntities } from '../shared/imagematch';
 import type { ImageResult } from '../shared/types';
 import { findImages } from './images';
+import type { TeamLogo } from './liveScore';
 import { type GateContext, type PicTarget, accepts, contextMarks, mentions, mentionsAny, nameLike, namedTarget, namesPerson, personPage, portraitMatches, portraitSrcOk, profilePortraitMarks, profilePortraitQuery, targetFor, withHint } from './imageGate';
 import { corpusOf, fillRowImages, hasBlankPictures, rowEntity, type RowImageDeps } from './rowImages';
 import type { Env } from './util';
@@ -346,8 +347,53 @@ export class PictureResolver {
     }
   }
 
+  private logos: TeamLogo[] = [];
+
+  /** A scoreboard card: teams show their own logos and nothing is looked up ("Nuggets" is not a food photo). */
+  useLogos(teams: TeamLogo[]): void {
+    this.logos = teams;
+  }
+
+  private logoFor(label: string): string | undefined {
+    const text = ` ${label.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()} `;
+    let best: { logo: string; len: number } | undefined;
+    for (const team of this.logos) {
+      for (const name of team.names) {
+        const n = name.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+        if (text.includes(` ${n} `) && (!best || n.length > best.len)) best = { logo: team.logo, len: n.length };
+      }
+    }
+    if (best) this.onCredit({ src: best.logo, link: 'https://www.espn.com/', credit: 'espn.com', license: 'source' });
+    return best?.logo;
+  }
+
+  private withLogos(node: CardNode): CardNode {
+    switch (node.type) {
+      case 'tile':
+      case 'profile': {
+        const logo = this.logoFor(node.type === 'tile' ? `${node.imageQuery ?? ''} ${node.label}` : node.name);
+        return { ...node, imageRef: undefined, imageQuery: undefined, imageSrc: logo };
+      }
+      case 'list':
+        return { ...node, items: node.items.map((item) => ({ ...item, imageRef: undefined, imageQuery: undefined, imageSrc: item.imageQuery || item.imageRef !== undefined ? this.logoFor(`${item.imageQuery ?? ''} ${itemEntity(item.text)}`) : undefined })) };
+      case 'stack':
+      case 'grid':
+      case 'section':
+      case 'scroller':
+        return { ...node, children: node.children.map((child) => this.withLogos(child)) } as CardNode;
+      case 'tabs':
+        return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: tab.children.map((child) => this.withLogos(child)) })) };
+      default:
+        return this.vet(node);
+    }
+  }
+
   /** Emits `node` now and, if it asked for pictures, again once they are found. */
   emit(node: CardNode, index: number, emit: Emit): void {
+    if (this.logos.length) {
+      if (!this.closed) emit(this.withLogos(node), index);
+      return;
+    }
     this.collect(node);
     const vetted = this.vet(node);
     const track = (n: CardNode) => {
