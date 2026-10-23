@@ -1,7 +1,7 @@
 import { listPublicAnswers } from '../server/publicAnswer';
 import type { Env } from '../server/util';
 
-const PAGES = ['/', '/free-ai-search/', '/google-ai-mode-alternative/', '/privacy.html', '/terms.html'];
+const PAGES = ['/', '/about', '/free-ai-search/', '/google-ai-mode-alternative/', '/privacy', '/terms'];
 
 export const onRequestGet: PagesFunction<Env> = async ({ env, request }) => {
   const origin = new URL(request.url).origin;
