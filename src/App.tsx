@@ -1157,6 +1157,7 @@ const TurnView = memo(function TurnView({ turn, first, search, actions, onSource
               card={card}
               keys={keys}
               ask={turn.question}
+              sharePath={turn.result?.share}
               version={`${turn.id}-${turn.version}`}
               filling={offlinePartial ? false : turn.filling}
               streaming={offlinePartial ? false : streaming}

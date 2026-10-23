@@ -481,3 +481,23 @@ test('a finished search is saved as a public answer and a picker is not', async 
   );
   assert.equal(saved.length, 1);
 });
+
+test('a finished follow-up card gets its own share page; a picker does not', async () => {
+  const followup = (question: string) => ({ kind: 'followup', question, original: 'Joel Embiid', cards: [], context: '' }) as unknown as StreamRequest;
+  const read = async (run: (send: Send) => Promise<void>) => {
+    const res = await serveStream({ request: new Request('https://zo.page/api/stream', { method: 'POST' }), env: {}, req: followup('Joel Embiid Player'), run, cache: null });
+    const text = await res.text();
+    const done = text.split('\n\n').find((frame) => frame.startsWith('event: done'));
+    return JSON.parse(done!.split('\ndata: ')[1]!) as { share?: string };
+  };
+  const card = await read(async (send) => {
+    send('head', { title: 'Joel Embiid' });
+    send('node', { index: 0, node: { type: 'text', text: 'Joel Embiid is a center for the Philadelphia 76ers.' } });
+    send('done', { engine: 'composed', removed: 0, pagesRead: 1, ms: 4 });
+  });
+  assert.match(card.share ?? '', /^\/a\/joel-embiid-player-f[a-z0-9]{10}$/);
+  const picker = await read(async (send) => {
+    send('done', { engine: 'extractive', removed: 0, pagesRead: 0, ms: 4, choices: [{ name: 'Joel Embiid', descriptor: 'x', query: 'x', id: 'a' }] });
+  });
+  assert.equal(picker.share, undefined);
+});

@@ -1,5 +1,5 @@
 import { shareDocument } from '../../shared/crawler';
-import { renderAnswerHtml } from '../../shared/publicPage';
+import { isFollowupSlug, renderAnswerHtml } from '../../shared/publicPage';
 import { loadPublicAnswer } from '../../server/publicAnswer';
 import type { Env } from '../../server/util';
 
@@ -40,7 +40,8 @@ export const onRequestGet: PagesFunction<AssetEnv> = async ({ params, env, reque
     headers: {
       'content-type': 'text/html; charset=utf-8',
       'cache-control': 'public, max-age=300',
-      'x-robots-tag': 'index, follow',
+      // A shared follow-up only makes sense after the conversation before it: open to anyone, not indexed.
+      'x-robots-tag': isFollowupSlug(slug) ? 'noindex, follow' : 'index, follow',
     },
   });
 };

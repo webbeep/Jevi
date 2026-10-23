@@ -27,7 +27,7 @@ import { Icon } from './Icon';
 import { hasVideo, Nodes } from './render';
 import { CardTitle } from './primitives';
 
-export function AnswerCardView({ card, keys, ask = '', version, filling, streaming, status, pattern, alternatives, onPattern, simple, onSimple, onRegenerate, onRetry, toolbar, provisional = false, trail, gapTrail }: {
+export function AnswerCardView({ card, keys, ask = '', version, filling, streaming, status, pattern, alternatives, onPattern, simple, onSimple, onRegenerate, onRetry, toolbar, provisional = false, trail, gapTrail, sharePath }: {
   card: AnswerCard;
   /** Each body node's identity on screen (its slot on the streamed card), aligned with `card.body`. */
   keys?: readonly string[];
@@ -54,6 +54,8 @@ export function AnswerCardView({ card, keys, ask = '', version, filling, streami
   trail?: ReactNode;
   /** A search for one missing piece, shown under the components that already have data. */
   gapTrail?: ReactNode;
+  /** This card's own share page ("/a/…"); without it the share link is the page's address. */
+  sharePath?: string;
 }) {
   const { results, onSources } = useCard();
   const [toast, setToast] = useState<string | null>(null);
@@ -79,7 +81,8 @@ export function AnswerCardView({ card, keys, ask = '', version, filling, streami
   };
   // Native share sheet where there is one; otherwise (or if it fails) the link is copied. Cancelling the sheet is silent.
   const share = async () => {
-    const url = publicShareUrl(window.location.href);
+    // A follow-up's card has its own page; the address bar still shows the conversation's first question.
+    const url = publicShareUrl(sharePath ? new URL(sharePath, window.location.origin).href : window.location.href);
     if (typeof navigator.share === 'function') {
       try {
         await navigator.share({ title: card.title, text: card.subtitle ?? card.title, url });
