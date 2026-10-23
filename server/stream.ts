@@ -92,6 +92,7 @@ import { recallClips, wantsVideo, withProductClips, withVideos } from './videoSe
 import { guessFreshness, preferFresh, staleComplaint, stricter } from './freshness';
 import { isQuoteRow, liveQuote, quoteRow, tickerNode } from './liveQuote';
 import { nwsForecastRow } from './weatherService';
+import { isGameScoreRow, isLiveScoreRow, liveScoreRow } from './liveScore';
 import { brandPriceProbe, probeHost } from './brandPrice';
 import { cleanSideName } from '../shared/objects';
 import { cardCitesName, citedNames, nameSeekingQuery, namedListNode, wantsNamedList } from './namedList';
@@ -224,6 +225,9 @@ function imageBoost(pattern: string, search: SearchResponse, env: Env, scope: As
   // T443: card-level pictures must mention the subject; a wrong picture is worse than none.
   return serperImages(query, env, capBucket(scope), () => { scope.ledger.imageCalls = 1; }).then((imgs) => imgs.filter((i) => mentionsAny(query, i)));
 }
+
+/** Real-time rows: a live quote or a live scoreboard. They beat every other result on the current value. */
+const isLiveRow = (row: SearchResult | undefined) => isQuoteRow(row) || isLiveScoreRow(row);
 
 /** How many pages to read and how long to wait for them before designing. At most five pages per ask. */
 const pageBudget = (readPages: boolean) => (readPages ? { count: 5, need: 3, budgetMs: 2200 } : { count: 3, need: 2, budgetMs: 1500 });
@@ -401,7 +405,7 @@ async function rescueSources(send: Send, env: Env, req: DesignArgs, brief: Sourc
   if (!(after > before) || !gated.results.length) return undefined;
   send('peek', gated.results.slice(0, PEEK_ROWS).map(({ title, url, domain, date }) => ({ title, url, domain, date })));
   send('search', gated);
-  const next = await briefSources({ query: req.query, intent: req.intent, context: req.context, results: gated.results, isLive: isQuoteRow, shown: req.ticker ? TICKER_SHOWN : undefined }, env, 1200);
+  const next = await briefSources({ query: req.query, intent: req.intent, context: req.context, results: gated.results, isLive: isLiveRow, shown: req.ticker ? TICKER_SHOWN : undefined }, env, 1200);
   return { search: gated, brief: next ?? { goal: brief.goal, use: [], stale: [], offTopic: [], conflicts: [] } };
 }
 
@@ -452,7 +456,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   // Usually it already ran on the literal search's rows while the rewrites were searching.
   const briefing = !newSearch || chat || isPaperAsk(req.query) ? undefined
     : req.earlyBrief ? req.earlyBrief.then((early) => early ? remapBrief(early.brief, early.judged, req.search.results) : undefined)
-    : briefSources({ query: req.query, intent: req.intent, context: req.context, results: req.search.results, isLive: isQuoteRow, shown: req.ticker ? TICKER_SHOWN : undefined }, env);
+    : briefSources({ query: req.query, intent: req.intent, context: req.context, results: req.search.results, isLive: isLiveRow, shown: req.ticker ? TICKER_SHOWN : undefined }, env);
   // A key fact the brief finds no result stating (a fee, a cap, a safe temperature) is searched while the card is
   // written; the review adds it from those rows. Nothing waits on it.
   const gapRows: Promise<SearchResult[]> = briefing
@@ -806,7 +810,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
           results: designReq.search.results,
           extra: addedRows,
           pages: designReq.pages,
-          isLive: isQuoteRow,
+          isLive: isLiveRow,
           head,
           nodes: shown,
           followups,
@@ -1054,7 +1058,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   if (!chat) await searchGaps();
   separateObjects();
   republishFees();
-  send('done', { ...summary, pagesRead: pages.length, ms: Date.now() - started });
+  send('done', { ...summary, pagesRead: pages.length, ms: Date.now() - started, ...(designReq.search.results.some(isLiveScoreRow) ? { live: true } : {}) });
   if (pendingReview && !arrived.ready) {
     const review = await pendingReview;
     if (review) applyReview(send, publish, withAdded(), shown, review, started);
@@ -1194,7 +1198,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     if (paper) return;
     earlyBrief = quoting.then(async (quote) => {
       const rows = [...(quote ? [quoteRow(quote)] : []), ...kept].slice(0, BRIEF_ROWS);
-      const brief = await briefSources({ query, intent: intentNow, context, results: rows, isLive: isQuoteRow, shown: quote ? TICKER_SHOWN : undefined }, env);
+      const brief = await briefSources({ query, intent: intentNow, context, results: rows, isLive: isLiveRow, shown: quote ? TICKER_SHOWN : undefined }, env);
       mark(scope.ledger, 'brief');
       return brief && { brief, judged: rows };
     });
@@ -1222,6 +1226,8 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   const statLine = playerStatRow(query);
   // A US weather ask reads the National Weather Service forecast while the web search runs.
   const forecast = nwsForecastRow(query);
+  // A game ask reads the live scoreboard the same way: a running score is never in the web results.
+  const scoreRow = liveScoreRow(query);
   // Searches that need no model ("$rdw" → "RDW stock news today") lead the rewrites.
   const instant = [...tickerQueries(query), ...formalNameQueries(query), ...workplaceQueries(query)];
   const sides = sideList;
@@ -1299,6 +1305,8 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   let late: Promise<LateExtras> | undefined = found.late;
   const nws = await forecast;
   if (nws) results = { ...results, results: [nws, ...results.results.filter((row) => row.domain !== nws.domain)] };
+  const score = await scoreRow;
+  if (score) results = { ...results, results: [score, ...results.results.filter((row) => normalizeUrl(row.url) !== normalizeUrl(score.url))] };
   const line = await statLine;
   if (line) {
     const key = normalizeUrl(line.url);
@@ -1688,13 +1696,19 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
       return;
     }
   }
-  if (compareSides(query).length >= 2 && pattern !== 'compare') {
+  // "Cavs vs 76ers" with that game on the scoreboard asks for the score: lead with it, no side-by-side or ticket prices.
+  const gameAsk = results.results.some(isGameScoreRow);
+  if (gameAsk && pattern !== 'spotlight') {
+    pattern = 'spotlight';
+    send('plan', { ...plan, pattern, skeleton: skeletonCard(query, pattern) });
+  }
+  if (!gameAsk && compareSides(query).length >= 2 && pattern !== 'compare') {
     pattern = 'compare';
     send('plan', { ...plan, pattern, skeleton: skeletonCard(query, pattern) });
   }
   // Each side's "price" and "specs" searches are for products. "Roth IRA vs traditional IRA: contribution limit, tax
   // treatment, income limits" asks about rules, and those searches added six seconds and found nothing to use.
-  if (compareSides(query).length >= 2 && !rulesCompare(query)) results = await searchNamedSides(query, results, env, scope, send);
+  if (!gameAsk && compareSides(query).length >= 2 && !rulesCompare(query)) results = await searchNamedSides(query, results, env, scope, send);
   results = { ...results, results: leadMemberRows(query, leadPreprints(query, results.results), hopUrls) };
   const chargeAsk = /\b(?:tax|taxes|fee|fees|fine|fines|toll|tolls|duty|duties|surcharge|levy|levies)\b/i.test(query);
   const official = chargeAsk
@@ -1715,6 +1729,9 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     const add = ranked.filter((row) => !have.has(normalizeUrl(row.url))).slice(0, CARRIED_ROWS);
     if (add.length) results = { ...results, results: [...results.results, ...add] };
   }
+  // The live scoreboard leads whatever the reranking above did: the score is the answer to a game ask.
+  const scoreRows = results.results.filter(isLiveScoreRow);
+  if (scoreRows.length && !isLiveScoreRow(results.results[0])) results = { ...results, results: [...scoreRows, ...results.results.filter((row) => !isLiveScoreRow(row))] };
   send('search', results);
   const boost = imageBoost(pattern, results, env, scope, boostQuery, portraitAgain);
   const crypto = cryptographyHint(query, results.results);
