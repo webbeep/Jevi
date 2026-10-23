@@ -1979,11 +1979,21 @@ function oneNotablePerson(choices: EntityChoice[], rows: EntityRow[]): boolean {
   if (!holder) return false;
   const article = (holder.seeds ?? []).map((i) => rows[i]).find((row) => row && exactWikiArticle(row, name))!;
   const known = shareWords(`${article.title ?? ''} ${article.snippet ?? ''}`, name);
-  return choices.every((choice) => {
-    if (choice === holder) return true;
-    const seen = new Set((choice.seeds ?? []).flatMap((i) => [...shareWords(`${rows[i]?.title ?? ''} ${rows[i]?.snippet ?? ''}`, name)]));
-    return [...seen].filter((word) => known.has(word)).length >= 2;
-  });
+  const wordsOf = (choice: EntityChoice) => new Set((choice.seeds ?? []).flatMap((i) => [...shareWords(`${rows[i]?.title ?? ''} ${rows[i]?.snippet ?? ''}`, name)]));
+  // A choice joins once its pages share two words with the article or with pages already joined to it
+  // (Basketball Reference's "stats" and "points" reach the article through ESPN and NBA.com).
+  let left = choices.filter((choice) => choice !== holder);
+  for (let joined = true; joined && left.length;) {
+    joined = false;
+    for (const choice of left) {
+      const seen = wordsOf(choice);
+      if ([...seen].filter((word) => known.has(word)).length < 2) continue;
+      for (const word of seen) known.add(word);
+      left = left.filter((other) => other !== choice);
+      joined = true;
+    }
+  }
+  return !left.length;
 }
 
 /**
