@@ -48,7 +48,7 @@ const GAME_ASK = /(?:\bvs\.?|\bversus\b|\bv\.)\s|\b(?:score|scores|scoreboard|wh
 /** The boards read when the ask names no league: the most-followed ones, today only. */
 const POPULAR = new Set(['basketball/nba', 'football/nfl', 'baseball/mlb', 'hockey/nhl', 'football/college-football', 'soccer/eng.1', 'soccer/usa.1', 'soccer/uefa.champions']);
 
-interface Competitor { homeAway?: string; score?: string; winner?: boolean; team: { displayName: string; shortDisplayName?: string; name?: string; abbreviation?: string; location?: string } }
+interface Competitor { homeAway?: string; score?: string; winner?: boolean; linescores?: { value?: number }[]; team: { displayName: string; shortDisplayName?: string; name?: string; abbreviation?: string; location?: string; logo?: string } }
 interface Event {
   id: string;
   date: string;
@@ -60,6 +60,32 @@ interface Event {
 }
 
 const TIMEOUT_MS = 2500;
+
+/** A team on a scoreboard row, by every name a card may call it, with its logo. */
+export interface TeamLogo { names: string[]; logo: string }
+
+/**
+ * The teams behind each scoreboard row, by row URL. A tile labelled "Nuggets" shows the Denver Nuggets' logo, not a
+ * photo search's chicken nuggets. Rows are read in the same request that built them; the map stays small.
+ */
+const LOGOS = new Map<string, TeamLogo[]>();
+
+function keepLogos(url: string, events: Event[]): void {
+  const teams = events.flatMap((event) => event.competitions[0]?.competitors ?? []).flatMap(({ team }) => (team.logo ? [{ names: [team.displayName, team.shortDisplayName, team.name, team.location].filter((n): n is string => !!n && n.length >= 3), logo: team.logo }] : []));
+  if (LOGOS.size > 200) LOGOS.delete(LOGOS.keys().next().value!);
+  LOGOS.set(url, teams);
+}
+
+/** The team logos for whatever scoreboard rows are among these results. */
+export function teamLogos(rows: readonly SearchResult[]): TeamLogo[] {
+  return rows.filter(isLiveScoreRow).flatMap((row) => LOGOS.get(row.url) ?? []);
+}
+
+/** A game clock ("3:08 left", "Q3", "end of the 3rd"): a page saying it was written during some game, not now. */
+const GAME_CLOCK = /\b\d{1,2}:\d{2}\s+(?:left|remaining)\b|\bQ[1-4]\b|\b(?:1st|2nd|3rd|4th|first|second|third|fourth)\s+(?:quarter|period|qtr)\b|\b(?:halftime|half-time)\b/i;
+
+/** A web page's mid-game score: older than the scoreboard beside it, so it never reaches the card. */
+export const staleGameRow = (row: SearchResult) => !isLiveScoreRow(row) && GAME_CLOCK.test(`${row.title} ${row.snippet ?? ''}`);
 
 async function scoreboard(league: League, date?: string): Promise<Event[]> {
   const url = `https://site.api.espn.com/apis/site/v2/sports/${league.path}/scoreboard${date ? `?dates=${date}` : ''}`;
@@ -106,10 +132,12 @@ function line(event: Event, league: League): string {
   const start = new Date(event.date).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
   if (state === 'pre') return `${away.team.displayName} at ${home.team.displayName}: not started, starts ${start} ET${venue ? ` at ${venue}` : ''}.`;
   const score = `${away.team.displayName} ${away.score ?? '0'}, ${home.team.displayName} ${home.score ?? '0'}`;
-  if (state === 'post') return `Final: ${score}${event.status.type.detail && event.status.type.detail !== 'Final' ? ` (${event.status.type.detail})` : ''}. Played ${start} ET${venue ? ` at ${venue}` : ''}.`;
+  const periods = (side: Competitor) => (side.linescores ?? []).map((part) => part.value ?? 0).join(', ');
+  const split = away.linescores?.length && home.linescores?.length ? ` By ${league.period}: ${away.team.shortDisplayName ?? away.team.displayName} ${periods(away)}; ${home.team.shortDisplayName ?? home.team.displayName} ${periods(home)}.` : '';
+  if (state === 'post') return `Final: ${score}${event.status.type.detail && event.status.type.detail !== 'Final' ? ` (${event.status.type.detail})` : ''}. Played ${start} ET${venue ? ` at ${venue}` : ''}.${split}`;
   const period = event.status.period ? `${ordinal(event.status.period)} ${league.period}` : '';
   const clock = event.status.displayClock && event.status.displayClock !== '0:00' ? `${event.status.displayClock} left in the ` : '';
-  return `In progress: ${score}, ${clock}${period || event.status.type.shortDetail || 'live'}${venue ? ` at ${venue}` : ''}.`;
+  return `In progress: ${score}, ${clock}${period || event.status.type.shortDetail || 'live'}${venue ? ` at ${venue}` : ''}.${split}`;
 }
 
 const ordinal = (n: number) => `${n}${n % 10 === 1 && n % 100 !== 11 ? 'st' : n % 10 === 2 && n % 100 !== 12 ? 'nd' : n % 10 === 3 && n % 100 !== 13 ? 'rd' : 'th'}`;
@@ -145,10 +173,12 @@ export async function liveScoreRow(query: string, now = new Date()): Promise<Sea
     const twoSided = /(?:\bvs\.?|\bversus\b|\bv\.)\s/i.test(query);
     if (best && (best.both || (!twoSided && best.strength >= 2))) {
       const text = line(best.event, best.league);
+      const url = best.event.links?.[0]?.href || `https://www.espn.com/${best.league.path.split('/')[1]}/scoreboard`;
+      keepLogos(url, [best.event]);
       console.log(JSON.stringify({ zo: 'live-score', game: best.event.shortName, state: best.event.status.type.state, ms: Date.now() - started }));
       return {
         title: `${best.event.status.type.state === 'in' ? 'Live score' : best.event.status.type.state === 'post' ? 'Final score' : 'Game time'}: ${best.event.shortName ?? best.event.name} (${best.league.label})`,
-        url: best.event.links?.[0]?.href || `https://www.espn.com/${best.league.path.split('/')[1]}/scoreboard`,
+        url,
         domain: 'espn.com',
         snippet: `ESPN scoreboard at ${at} UTC. ${text}`,
         content: `ESPN scoreboard, read at ${now.toISOString()}.\n${text}`,
@@ -163,6 +193,7 @@ export async function liveScoreRow(query: string, now = new Date()): Promise<Sea
       if (!today.length) return undefined;
       const lines = today.sort((x, y) => RANK[x.event.status.type.state] - RANK[y.event.status.type.state] || Date.parse(x.event.date) - Date.parse(y.event.date)).slice(0, 12).map((game) => line(game.event, league));
       console.log(JSON.stringify({ zo: 'live-score', league: league.label, games: lines.length, ms: Date.now() - started }));
+      keepLogos(`https://www.espn.com/${league.path.split('/')[1]}/scoreboard`, today.map((game) => game.event));
       return {
         title: `${league.label} scoreboard: ${today.filter((game) => game.event.status.type.state === 'in').length} live now`,
         url: `https://www.espn.com/${league.path.split('/')[1]}/scoreboard`,
