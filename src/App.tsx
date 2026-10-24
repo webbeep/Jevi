@@ -649,6 +649,8 @@ export default function App() {
         ) : (
           <>
             <header className="sticky top-0 z-30 border-b bg-background/75 backdrop-blur-xl backdrop-saturate-150">
+              {/* Same above the header: behind the status bar, the page does not show through. */}
+              <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-full h-[50vh] bg-background" />
               <div className={cn(SHELL, 'flex min-h-14 items-center gap-2 py-2 sm:gap-3')}>
                 <button onClick={newChat} className="shrink-0 rounded-full" aria-label="Home">
                   <LogoMark className="size-7" />
@@ -889,6 +891,8 @@ function Composer({ actions, topic, mainRef }: { actions: SessionActions; topic:
 
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 bg-gradient-to-t from-background via-background/85 to-transparent pb-[calc(env(safe-area-inset-bottom)+12px)] pt-10">
+      {/* iOS Safari's floating toolbar sits below the fixed bottom edge; the page must not scroll by under it. */}
+      <div aria-hidden className="absolute inset-x-0 top-full h-[50vh] bg-background" />
       <div className={cn(SHELL, GRID)}>
         <UsageLine />
         <form onSubmit={send} className="pointer-events-auto overflow-hidden rounded-2xl border border-input bg-popover shadow-float">
