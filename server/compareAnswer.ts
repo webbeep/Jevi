@@ -431,8 +431,13 @@ export function acceptProductPhoto(side: string, title: string, extra = ''): boo
   return pageNamesProduct(side, page);
 }
 
+/** A thumbnail from a video: its title text is drawn over the picture. */
+function videoFrame(src: string, page = ''): boolean {
+  return /(?:^|\/\/)(?:i\d?\.ytimg\.com|img\.youtube\.com)\//i.test(src) || /\/\/(?:www\.|m\.)?(?:youtube\.com|youtu\.be)\//i.test(page);
+}
+
 function imageForSide(side: string, images: SearchResponse['images']): string | undefined {
-  const hit = images.find((image) => acceptProductPhoto(side, `${image.title} ${image.source}`));
+  const hit = images.find((image) => !videoFrame(image.thumb, image.url) && acceptProductPhoto(side, `${image.title} ${image.source}`));
   return hit?.thumb || undefined;
 }
 
@@ -445,7 +450,7 @@ export function placeSidePhotos(question: string, nodes: Map<number, CardNode>, 
   if (sides.length < 2 || !images?.length) return undefined;
   const owner = new Map<string, string>();
   for (const image of images) {
-    if (!image.thumb || owner.has(image.thumb)) continue;
+    if (!image.thumb || owner.has(image.thumb) || videoFrame(image.thumb, image.url)) continue;
     const side = sides.find((item) => acceptProductPhoto(item, `${image.title} ${image.source}`));
     if (side) owner.set(image.thumb, side);
   }
@@ -457,7 +462,8 @@ export function placeSidePhotos(question: string, nodes: Map<number, CardNode>, 
       const side = sides.find((item) => mentionsSide(item, node.label) || pageNamesProduct(item, node.label));
       if (!side) return node;
       const own = photoFor(side);
-      const borrowed = !!node.imageSrc && owner.has(node.imageSrc) && owner.get(node.imageSrc) !== side;
+      // A video's frame ("How to use Pixel 10 — Beginners" over the phone) is not the product's photo.
+      const borrowed = !!node.imageSrc && ((owner.has(node.imageSrc) && owner.get(node.imageSrc) !== side) || videoFrame(node.imageSrc));
       if (borrowed && !own) return { ...node, imageSrc: undefined, imageRef: undefined, imageQuery: undefined };
       const imageSrc = borrowed ? own : node.imageSrc || own;
       if (!imageSrc || imageSrc === node.imageSrc) return node;

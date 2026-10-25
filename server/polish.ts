@@ -67,7 +67,8 @@ function repairHole(sentence: string): string {
   s = s.replace(/\b(et al\.?)\s*\[(\d+)\]\s+((?:1[5-9]|20)\d{2})\b/gi, '$1 $3 [$2]');
   s = s.replace(/\s+/g, ' ').replace(/\s+([,.;:!?])/g, '$1').replace(/^[,;:\s]+/, '').trim();
   if (!s) return '';
-  s = s.replace(/^[a-z]/, (ch) => ch.toUpperCase());
+  // "iPhone 17 gives…" and "eBay lists…" keep their own capitals.
+  s = s.replace(/^[a-z](?=[a-z0-9'’-]*(?:[\s,.;:!?]|$))/, (ch) => ch.toUpperCase());
   const bare = s.replace(/\[\d+\]/g, '');
   if (/\[(?!\d+\])[^\]]+\]/.test(s)) return '';
   if (/\b(?:in|on|at|of|by|from|since|during)\s+(?:he|she|they|it|we)\b/i.test(bare)) return '';
