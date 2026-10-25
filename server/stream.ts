@@ -1256,7 +1256,7 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     const more = withHops([...extra, ...sides, ...instant]);
     // A follow-up that needs a rate ("with sales tax in New York City") is not answered without the rate's search.
     const needRate = more.some((item) => /\btax rate\b/i.test(item));
-    found = await searchWithLate({ q, more, freshness: freshness === 'any' ? guessFreshness(query) : freshness, count: 20, extrasCutMs: extraWait, waitExtras: needRate, onLiteral }, env, scope);
+    found = await searchWithLate({ q, more, freshness: freshness === 'any' ? guessFreshness(query) : freshness, count: 20, extrasCutMs: extraWait, waitExtras: needRate, keyExtras: true, onLiteral }, env, scope);
   }
   let results = applyPickGate(query, applyRelevance(query, { ...found.response, query }, scope.ledger));
   // "AI news today" must not lead with last week's launch: past-window rows drop once enough current ones remain.
@@ -2231,9 +2231,15 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
     // The same holds for a search: a question that shares nothing with the card is searched as asked, never with the
     // card's subject glued on ("How mRNA Vaccines Work What is photosynthesis" when the judge was late).
     const unrelated = newTopic(req.question, `${cardText}\n${sourceText}`);
-    const decision = unrelated && (judgedOrFallback.action !== 'search' || !judged)
+    let decision = unrelated && (judgedOrFallback.action !== 'search' || !judged)
       ? { action: 'search' as const, queries: [req.question.replace(/[?!.]+$/, '')], subject: '' }
       : judgedOrFallback;
+    // "What would I pay with sales tax in New York City?" under a price card needs the place's rate. When neither the card
+    // nor its sources state a sales tax rate, it is a search, whatever the judge said ("answer" gave "rate not in sources").
+    const askedTaxPlace = req.question.match(/\bsales tax\b[^?.]*?\bin ([A-Z][\w.'-]*(?:\s+[A-Z][\w.'-]*)*)/)?.[1];
+    if (askedTaxPlace && decision.action !== 'search' && !/sales tax[^.]{0,80}?\d+(?:\.\d+)?\s*%|\d+(?:\.\d+)?\s*%[^.]{0,40}sales tax/i.test(`${cardText}\n${sourceText}`)) {
+      decision = { action: 'search', queries: [`${askedTaxPlace} sales tax rate`], subject: decision.subject };
+    }
     console.log(JSON.stringify({ zo: 'judge-turn', action: decision.action, subject: decision.subject, queries: decision.queries, model: !!judged }));
     let planned = decision.action !== 'search'
       ? undefined
