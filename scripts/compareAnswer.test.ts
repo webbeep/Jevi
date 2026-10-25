@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import type { CardNode } from '../shared/card.ts';
 import type { SearchResponse } from '../shared/types.ts';
 import { asksToCompare } from '../server/askGuard.ts';
-import { acceptProductPhoto, answersComparison, appendAskedFact, breakdownStays, comparisonNodes, comparisonRepair, comparisonTitle, dropShownDenials, keepComparedProducts, mentionsSide, missingSideNode, nameForms, placeSidePhotos, restoreSideTiles, sameProduct, showsComparison } from '../server/compareAnswer.ts';
+import { acceptProductPhoto, answersComparison, appendAskedFact, breakdownStays, comparisonNodes, comparisonRepair, comparisonTitle, dropShownDenials, keepComparedProducts, mentionsSide, missingSideNode, nameForms, placeSidePhotos, restoreSideTiles, sameProduct, showsComparison, statedForSide } from '../server/compareAnswer.ts';
 import { candidates } from '../server/extract.ts';
 import { compareSideQueries, compareSides, withoutLeadVerb } from '../server/patterns.ts';
 import { Polisher, completeSentences, emptyFigure, withoutEmptySlots } from '../server/polish.ts';
@@ -782,4 +782,28 @@ test('a measured tile value is not replaced by a price a source states', () => {
   const blob = JSON.stringify(comparisonRepair(ask, found, new Map([[0, tiles]])) ?? []);
   assert.doesNotMatch(blob, /\$35\.93/);
   assert.match(blob, /\$79\.00/);
+});
+
+test('a side keeps only a price a page states for it, not a lineup page price', () => {
+  const ask = 'Compare the Northwatch 2 and Glowband 4 side by side: starting price';
+  const rows = (items: { title: string; snippet: string }[]): SearchResponse => ({
+    query: ask,
+    results: items.map((item, i) => ({ ...item, url: `https://example.com/${i}`, domain: 'example.com', engines: ['web'] })),
+    images: [],
+    engines: [],
+  });
+  const lineup = rows([
+    { title: 'Northwatch - Shop all models', snippet: 'Northwatch 3, Northwatch 2, and Northwatch 2e. From $1099 or $45.79/mo. From $899 or $37.45/mo.' },
+    { title: 'Northwatch 2 vs Glowband 4 review', snippet: 'Both the Northwatch 2 and Glowband 4 start at $799. The Northwatch 2 has 256GB.' },
+  ]);
+  const sides = ['Northwatch 2', 'Glowband 4'];
+  assert.equal(statedForSide('Northwatch 2', '$899', lineup, sides), false);
+  assert.equal(statedForSide('Northwatch 2', '$799', lineup, sides), true);
+  assert.equal(statedForSide('Glowband 4', '$799', lineup, sides), true);
+  // The product's own page states its price without naming it again.
+  assert.equal(statedForSide('Glowband 4', '$349', rows([{ title: 'Glowband 4 - Glow Store', snippet: 'From $349 or $14/mo.' }]), sides), true);
+  const table: CardNode = { type: 'table', columns: ['Factor', 'Northwatch 2', 'Glowband 4'], rows: [['Starting price', 'From $899', '—']] };
+  const fixed = comparisonRepair(ask, lineup, new Map([[0, table]]))?.find((patch) => patch.index === 0)?.node;
+  assert.equal(fixed?.type === 'table' ? fixed.rows[0]?.[1] : '', '$799');
+  assert.equal(fixed?.type === 'table' ? fixed.rows[0]?.[2] : '', '$799');
 });

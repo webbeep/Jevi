@@ -83,7 +83,7 @@ import { unblendObjects } from './objectFacts';
 import { withFinishedSentences } from './polish';
 import { queryWithPlace, readerPlace, settleReadings } from './readings';
 import { isKeepOnly, keptBody } from './refine';
-import { finishQuality, hasOfficialHit, hostTier, isSocialHost, isVideoHost, officialProbe, preferSources, sinkFormatWords, topicAuthorityAsk } from './sourceQuality';
+import { finishQuality, hasOfficialHit, hostTier, isSocialHost, isVideoHost, officialFits, officialProbe, preferSources, sinkFormatWords, topicAuthorityAsk } from './sourceQuality';
 import { isOwnSite, orcidSite, pickOwnSite, probeOwnSite, RESEARCH_ASK, withOwnSite } from './ownSite';
 import { quoteAsk } from '../shared/quoteAsk';
 import { dropClinicPages, dropStrayDois, isPaperAsk, leadPreprints, scholarlyResults, withScholarly } from './scholarly';
@@ -353,7 +353,7 @@ async function attachOfficial(query: string, results: SearchResponse, env: Env, 
     if (room < 1) scope.ledger.bonus = (scope.ledger.bonus ?? 0) + 1;
     extra = await searchWithLate({ q: probe, freshness: 'any', count: 6, lite: true }, env, scope);
   }
-  const add = extra.response.results.filter((row) => !results.results.some((have) => have.url === row.url));
+  const add = extra.response.results.filter((row) => !results.results.some((have) => have.url === row.url) && officialFits(query, row));
   if (!add.length) return results;
   console.log(JSON.stringify({ zo: 'official', added: add.length, lead: add[0]?.domain }));
   return { ...results, results: preferSources(query, [...add, ...results.results]) };
@@ -385,7 +385,7 @@ async function foldOfficialWithin(query: string, results: SearchResponse, early:
 function foldReadyOfficial(query: string, results: SearchResponse, early?: EarlyOfficial): SearchResponse {
   const extra = early?.ready();
   if (!extra?.response.results.length || hasOfficialHit(query, results.results)) return results;
-  const add = extra.response.results.filter((row) => !results.results.some((have) => have.url === row.url));
+  const add = extra.response.results.filter((row) => !results.results.some((have) => have.url === row.url) && officialFits(query, row));
   if (!add.length) return results;
   console.log(JSON.stringify({ zo: 'official', added: add.length, lead: add[0]?.domain }));
   return { ...results, results: preferSources(query, [...add, ...results.results]) };
@@ -1212,7 +1212,9 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   // Both forms of a workplace ask ("Tim at X", "Timothy at X") have to run, or a second person
   // who only shows up under one of them never reaches the picker.
   const places = workplaceQueries(query);
-  const extraWait = hopList.length || places.length ? 1800 : undefined;
+  // A follow-up's extra searches are what the card lacks ("New York City sales tax rate" under a price card): cut at the
+  // usual 0.8 s, the rate came in after the card was written. They wait as long as fact hops do.
+  const extraWait = hopList.length || places.length || (rewritten && extra.length) ? 1800 : undefined;
   const withHops = (extras: string[]) => {
     const room = extraSearchRoom(route, hopList.length, places.length, compareSides(query).length);
     return moreQueries(query, [...hopList, ...places, ...extras], room);
