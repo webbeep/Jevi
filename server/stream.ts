@@ -2275,7 +2275,9 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
         : '';
     // The thread's own figures stand unless a newer dated source states otherwise: "visitor from Ohio" is not $25 from a
     // 2022 article when the card on screen just said $30.
-    const thread = onScreen ? `The card on screen ("${onScreen.title}") says: ${cardLead(onScreen).slice(0, 300)}. Keep those figures for this subject unless a newer, dated source states a different one, and say which date it is from.` : '';
+    // A tax on "it" is a tax on the price the card on screen leads with, not a bundle's or an old listing's.
+    const leadPrice = askedTaxPlace && onScreen ? cardLead(onScreen).match(/\$\s?\d[\d,]*(?:\.\d{2})?/)?.[0] : undefined;
+    const thread = onScreen ? `The card on screen ("${onScreen.title}") says: ${cardLead(onScreen).slice(0, 300)}. Keep those figures for this subject unless a newer, dated source states a different one, and say which date it is from.${leadPrice ? ` Apply the tax to ${leadPrice}, the price that card leads with.` : ''}` : '';
     // "What would I pay with sales tax in New York City?" needs the rate as much as the price: a search for the
     // product with "sales tax" in it returns price pages, so the place's rate is always one of the searches.
     const taxPlace = req.question.match(/\bsales tax\b[^?.]*?\bin ([A-Z][\w.'-]*(?:\s+[A-Z][\w.'-]*)*)/)?.[1];
