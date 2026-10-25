@@ -539,7 +539,7 @@ test('a new side takes its own price, and a follow-up without tiles keeps the ea
   const next = repaired?.find((patch) => patch.index === 0)?.node;
   assert.equal(next?.type, 'table');
   if (next?.type !== 'table') return;
-  assert.equal(next.rows[0]?.[3], '$1,099.99');
+  assert.equal(next.rows[0]?.[3], '$1,099.99 [1]');
   assert.equal(next.rows[0]?.[1], '$849.95');
   assert.equal(next.rows[2]?.[1], '');
   const photos = restoreSideTiles(prior, new Map([[0, table]]), 'Pentax KF vs Fujifilm X-T30 II');
@@ -806,8 +806,9 @@ test('a side keeps only a price a page states for it, not a lineup page price', 
   assert.equal(statedForSide('Glowband 4', '$349', rows([{ title: 'Glowband 4 - Glow Store', snippet: 'From $349 or $14/mo.' }]), sides), true);
   const table: CardNode = { type: 'table', columns: ['Factor', 'Northwatch 2', 'Glowband 4'], rows: [['Starting price', 'From $899', '—']] };
   const fixed = comparisonRepair(ask, lineup, new Map([[0, table]]))?.find((patch) => patch.index === 0)?.node;
-  assert.equal(fixed?.type === 'table' ? fixed.rows[0]?.[1] : '', '$799');
-  assert.equal(fixed?.type === 'table' ? fixed.rows[0]?.[2] : '', '$799');
+  // The repaired price cites the page that states it.
+  assert.equal(fixed?.type === 'table' ? fixed.rows[0]?.[1] : '', '$799 [2]');
+  assert.equal(fixed?.type === 'table' ? fixed.rows[0]?.[2] : '', '$799 [2]');
 });
 
 test('a comparison asked for price gets the price row a source states', () => {
@@ -820,5 +821,5 @@ test('a comparison asked for price gets the price row a source states', () => {
   };
   const table: CardNode = { type: 'table', columns: ['Factor', 'Northwatch 2', 'Glowband 4'], rows: [['Base storage', '256GB', '128GB']] };
   const fixed = comparisonRepair(ask, search, new Map([[0, table]]))?.find((patch) => patch.index === 0)?.node;
-  assert.deepEqual(fixed?.type === 'table' ? fixed.rows[0] : [], ['Starting price', '$799', '$799']);
+  assert.deepEqual(fixed?.type === 'table' ? fixed.rows[0] : [], ['Starting price', '$799 [1]', '$799 [1]']);
 });
