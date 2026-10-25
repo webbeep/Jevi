@@ -1254,7 +1254,9 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     // Literal question first. Planner rewrites are the later calls, still inside the cap.
     const q = queriesForAsk(query, instant);
     const more = withHops([...extra, ...sides, ...instant]);
-    found = await searchWithLate({ q, more, freshness: freshness === 'any' ? guessFreshness(query) : freshness, count: 20, extrasCutMs: extraWait, onLiteral }, env, scope);
+    // A follow-up that needs a rate ("with sales tax in New York City") is not answered without the rate's search.
+    const needRate = more.some((item) => /\btax rate\b/i.test(item));
+    found = await searchWithLate({ q, more, freshness: freshness === 'any' ? guessFreshness(query) : freshness, count: 20, extrasCutMs: extraWait, waitExtras: needRate, onLiteral }, env, scope);
   }
   let results = applyPickGate(query, applyRelevance(query, { ...found.response, query }, scope.ledger));
   // "AI news today" must not lead with last week's launch: past-window rows drop once enough current ones remain.
