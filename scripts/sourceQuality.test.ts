@@ -444,3 +444,8 @@ test('an official-site row is on the question, not any page of that site', () =>
   assert.equal(officialFits('Should I start taking a daily low-dose aspirin?', { title: 'Aspirin Use to Prevent Cardiovascular Disease', snippet: 'USPSTF' }), true);
   assert.equal(officialFits('Should I start taking a daily low-dose aspirin?', { title: 'Annual report 2024', snippet: 'budget' }), false);
 });
+
+test('an IRS page on Roth income ranges fits an IRA limits ask without the word "limit"', () => {
+  const ask = 'Make a table comparing a Roth IRA and a traditional IRA for 2026: contribution limit, tax treatment, income limits';
+  assert.equal(officialFits(ask, { title: 'Amount of Roth IRA contributions that you can make for 2026', snippet: 'modified AGI phase-out range' }), true);
+});

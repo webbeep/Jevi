@@ -2261,7 +2261,11 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
     // "What would I pay with sales tax in New York City?" needs the rate as much as the price: a search for the
     // product with "sales tax" in it returns price pages, so the place's rate is always one of the searches.
     const taxPlace = req.question.match(/\bsales tax\b[^?.]*?\bin ([A-Z][\w.'-]*(?:\s+[A-Z][\w.'-]*)*)/)?.[1];
-    if (planned && taxPlace && !planned.fanout.some((query) => /\btax rate\b/i.test(query))) planned.fanout = [...planned.fanout, `${taxPlace} sales tax rate`];
+    // That search is the place and the rate only: "New York City sales tax rate 2026 Nintendo Switch 2" returns Switch
+    // pages. It goes first, since a follow-up may run only one extra search.
+    const topicWords = (subject || onScreen?.title || '').toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 3 && !/^(?:price|prices|cost|the|and|with)$/.test(word));
+    const rateOnly = (query: string) => /\btax rate\b/i.test(query) && !topicWords.some((word) => new RegExp(`\\b${word}\\b`, 'i').test(query));
+    if (planned && taxPlace && !planned.fanout.some(rateOnly)) planned.fanout = [`${taxPlace} sales tax rate`, ...planned.fanout];
     if (decision.action === 'search' && planned) {
       scope.bound = `${subject}\n${req.question}`;
       send('rewrite', { query: planned.query });
