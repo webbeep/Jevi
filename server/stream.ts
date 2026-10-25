@@ -419,6 +419,26 @@ function pagesCanWait(req: DesignArgs): boolean {
   return req.search.results.slice(0, 5).some((row) => hostTier(row.domain) === 0 && /\d/.test(`${row.title} ${row.snippet}`));
 }
 
+/**
+ * Pages read since the card was written: the early reads (DeepSeek's fetch reaches the .gov pages that turn a plain
+ * fetch away, but takes longer than the writer can wait) finish while the card is written. The review reads them, so
+ * the passport fee or the income limit on that page can still reach the card. Never waits more than a beat.
+ */
+async function latePages(results: SearchResult[], have: readonly { n: number }[], scope: AskScope): Promise<{ n: number; url: string; text: string }[]> {
+  if (!scope.prefetch?.size) return [];
+  const read = new Set(have.map((page) => page.n));
+  const pending = results.slice(0, 12).map((row, index) => ({ row, n: index + 1 }))
+    .filter(({ n }) => !read.has(n))
+    .map(({ row, n }) => ({ n, url: row.url, text: scope.prefetch!.get(normalizeUrl(row.url)) }))
+    .filter((item): item is { n: number; url: string; text: Promise<string> } => !!item.text);
+  if (!pending.length) return [];
+  const beat = () => new Promise<string>((resolve) => setTimeout(() => resolve(''), 400));
+  const settled = await Promise.all(pending.map(async (item) => ({ n: item.n, url: item.url, text: await Promise.race([item.text.catch(() => ''), beat()]) })));
+  const got = settled.filter((page) => page.text.length >= 200);
+  if (got.length) console.log(JSON.stringify({ zo: 'late-pages', n: got.map((page) => page.n) }));
+  return got.slice(0, 2);
+}
+
 /** Puts one component in its slot on the card. */
 type Publish = (index: number, node: CardNode) => void;
 /** A slot whose component was dropped. The client draws nothing for it. */
@@ -827,7 +847,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
           brief: designReq.brief,
           results: designReq.search.results,
           extra: addedRows,
-          pages: designReq.pages,
+          pages: [...designReq.pages, ...await latePages(designReq.search.results, designReq.pages, scope)],
           isLive: isLiveRow,
           head,
           nodes: shown,
