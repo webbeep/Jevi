@@ -419,6 +419,26 @@ function pagesCanWait(req: DesignArgs): boolean {
   return req.search.results.slice(0, 5).some((row) => hostTier(row.domain) === 0 && /\d/.test(`${row.title} ${row.snippet}`));
 }
 
+/**
+ * Pages read since the card was written: the early reads (DeepSeek's fetch reaches the .gov pages that turn a plain
+ * fetch away, but takes longer than the writer can wait) finish while the card is written. The review reads them, so
+ * the passport fee or the income limit on that page can still reach the card. Never waits more than a beat.
+ */
+async function latePages(results: SearchResult[], have: readonly { n: number }[], scope: AskScope): Promise<{ n: number; url: string; text: string }[]> {
+  if (!scope.prefetch?.size) return [];
+  const read = new Set(have.map((page) => page.n));
+  const pending = results.slice(0, 12).map((row, index) => ({ row, n: index + 1 }))
+    .filter(({ n }) => !read.has(n))
+    .map(({ row, n }) => ({ n, url: row.url, text: scope.prefetch!.get(normalizeUrl(row.url)) }))
+    .filter((item): item is { n: number; url: string; text: Promise<string> } => !!item.text);
+  if (!pending.length) return [];
+  const beat = () => new Promise<string>((resolve) => setTimeout(() => resolve(''), 400));
+  const settled = await Promise.all(pending.map(async (item) => ({ n: item.n, url: item.url, text: await Promise.race([item.text.catch(() => ''), beat()]) })));
+  const got = settled.filter((page) => page.text.length >= 200);
+  if (got.length) console.log(JSON.stringify({ zo: 'late-pages', n: got.map((page) => page.n) }));
+  return got.slice(0, 2);
+}
+
 /** Puts one component in its slot on the card. */
 type Publish = (index: number, node: CardNode) => void;
 /** A slot whose component was dropped. The client draws nothing for it. */
@@ -470,7 +490,13 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       for (const hit of found) {
         for (const row of (hit?.response.results ?? []).slice(0, 3)) {
           const key = normalizeUrl(row.url);
-          if (have.has(key) || isVideoHost(row.domain) || isSocialHost(row.domain)) continue;
+          if (isVideoHost(row.domain) || isSocialHost(row.domain)) continue;
+          // A page already among the sources comes back with the snippet for this fact ("Passport book: $130"):
+          // that text joins the source it belongs to, under the same number, instead of being dropped as a repeat.
+          if (have.has(key)) {
+            if (row.snippet && !rows.some((item) => normalizeUrl(item.url) === key)) rows.push(row);
+            continue;
+          }
           have.add(key);
           rows.push(row);
         }
@@ -796,9 +822,21 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       pendingReview = (async () => {
         // The gap search had the whole design to finish; a late one is skipped, never waited for.
         const found = await Promise.race([gapRows, new Promise<SearchResult[]>((resolve) => setTimeout(() => resolve([]), 150))]);
+        const at = new Map(designReq.search.results.map((row, index) => [normalizeUrl(row.url), index]));
+        const merged = found.filter((row) => at.has(normalizeUrl(row.url)));
+        if (merged.length) {
+          const results = [...designReq.search.results];
+          for (const row of merged) {
+            const index = at.get(normalizeUrl(row.url))!;
+            const prior = results[index]!;
+            // First, since the review reads the start of each snippet.
+            if (row.snippet && !(prior.snippet ?? '').includes(row.snippet)) results[index] = { ...prior, snippet: `${row.snippet} … ${prior.snippet ?? ''}`.trim() };
+          }
+          designReq.search = { ...designReq.search, results };
+        }
         const have = new Set([...designReq.search.results, ...addedRows].map((row) => normalizeUrl(row.url)));
         const extra = found.filter((row) => !have.has(normalizeUrl(row.url)));
-        if (extra.length) {
+        if (extra.length || merged.length) {
           addedRows = [...addedRows, ...extra];
           addedSources = addedRows.length;
           send('search', { ...designReq.search, results: [...designReq.search.results, ...addedRows] });
@@ -809,7 +847,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
           brief: designReq.brief,
           results: designReq.search.results,
           extra: addedRows,
-          pages: designReq.pages,
+          pages: [...designReq.pages, ...await latePages(designReq.search.results, designReq.pages, scope)],
           isLive: isLiveRow,
           head,
           nodes: shown,

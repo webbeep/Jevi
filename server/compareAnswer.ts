@@ -137,7 +137,9 @@ export function comparisonTitle(question: string, proposed: string): string {
   const bounded = title.length > 80 ? `${shortSide(sides[0]!)} vs ${sides.length - 1} others` : title;
   if (!sides.some((side) => QUESTION_WORD.test(side)) && QUESTION_WORD.test(proposed)) return bounded;
   const named = sides.filter((side) => mentionsSide(side, proposed)).length;
-  const same = proposed.trim().toLowerCase() === question.trim().toLowerCase();
+  // The question title-cased ("Make a Table Comparing a Roth IRA and a Traditional IRA for 2026: …") is still the question.
+  const flat = (text: string) => text.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const same = flat(proposed) === flat(question) || proposed.length > 70;
   if (!same && (named >= 2 || (named === 1 && /\bvs\.?\b/i.test(proposed)))) return proposed;
   return bounded;
 }
@@ -235,6 +237,11 @@ const ROW_UNITS: [RegExp, RegExp][] = [
 ];
 
 function fitsRow(label: string, phrase: string): boolean {
+  // A money or rules row ("Income limits", "Tax treatment") is never a length or weight: "96\"" there was a number
+  // before a closing quote mark on some page.
+  if (/\b(?:income|limits?|tax|contributions?|phase-?outs?|deduct\w*|eligib\w*|fees?|rates?|price|cost|penalt\w*|withdrawals?)\b/i.test(label)) return false;
+  // An inch mark is a screen or body size, never a reading for any other row.
+  if (/["″]/.test(phrase) && !/\b(?:display|screen|size|diagonal|monitor|tv|panel)\b/i.test(label)) return false;
   const units = ROW_UNITS.find(([row]) => row.test(label))?.[1];
   return !units || units.test(phrase);
 }

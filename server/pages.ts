@@ -213,8 +213,12 @@ function bump(scope: AskScope | undefined, kind: 'deepseek' | 'jina' | 'keyless'
   if (scope) scope.ledger.pages[kind] = (scope.ledger.pages[kind] ?? 0) + 1;
 }
 
-/** How long DeepSeek's fetch gets before the Jina and direct readers take over. */
-const DEEPSEEK_READ_MS = 2500;
+/**
+ * How long DeepSeek's fetch gets before the Jina reader takes over. Most reads take 0.3-0.7 s; the .gov pages that turn
+ * a plain fetch away take 5-9 s, and a 2.5 s limit paid for those and threw them away. The writer never waits this
+ * long (its page budget is shorter); a read that lands later goes to the review.
+ */
+const DEEPSEEK_READ_MS = 9000;
 
 /**
  * One reader, not a race. Keyed Jina when the key is set and not recently dead.
