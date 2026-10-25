@@ -313,7 +313,11 @@ export function officialFits(query: string, row: { title?: string; snippet?: str
   const text = ` ${`${row.title ?? ''} ${row.snippet ?? ''}`.toLowerCase().replace(/[^a-z0-9\s-]/g, ' ')} `;
   const stem = (word: string) => CHARGE_STEM[word.toLowerCase()] ?? word.toLowerCase();
   // "Sales tax in New York City" is a charge to find; "tax treatment" of an IRA is not.
-  const charges = new Set((query.match(CHARGE_PHRASE) ?? []).flatMap((phrase) => phrase.match(CHARGE) ?? []).map(stem));
+  const phrases = query.match(CHARGE_PHRASE) ?? [];
+  // A named tax is that tax: a court filing about "delinquent taxes" is not a sales tax page.
+  const named = [...new Set(phrases.map((phrase) => phrase.toLowerCase().match(/\b(sales|use|hotel|occupancy|property|excise|transfer|transit|toll|import|vehicle|registration)\s+tax/)?.[1]).filter(Boolean))];
+  if (named.length) return named.some((kind) => new RegExp(`\\b${kind}\\s+tax`).test(text));
+  const charges = new Set(phrases.flatMap((phrase) => phrase.match(CHARGE) ?? []).map(stem));
   if (charges.size) return (text.match(CHARGE) ?? []).some((word) => charges.has(stem(word)));
   const states = new Set(STATES.split(',').flatMap((pair) => pair.split(':')[0]!.split(' ')));
   const words = probeWords(query).toLowerCase().split(/\s+/).filter((word) => word.length >= 4 && !PROBE_GENERIC.has(word) && !states.has(word));

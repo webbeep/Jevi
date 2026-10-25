@@ -440,6 +440,7 @@ test('an official-site row is on the question, not any page of that site', () =>
   const ask = 'Nintendo Switch 2 price with New York City sales tax';
   assert.equal(officialFits(ask, { title: 'New York State Common Retirement Fund Asset Listing', snippet: '$ 22,541,138 $ 1-800-FLOWERS.COM' }), false);
   assert.equal(officialFits(ask, { title: 'Sales Tax Rates, Additional Sales Taxes, and Fees', snippet: 'New York City are subject to the 4% state tax' }), true);
+  assert.equal(officialFits(ask, { title: 'FILED: NEW YORK COUNTY CLERK', snippet: 'delinquent in the payment of taxes for two years. Nintendo Switch for sale' }), false);
   assert.equal(officialFits('Met Museum admission fees for New York residents', { title: 'Admission fee policy', snippet: 'pay what you wish' }), true);
   assert.equal(officialFits('Should I start taking a daily low-dose aspirin?', { title: 'Aspirin Use to Prevent Cardiovascular Disease', snippet: 'USPSTF' }), true);
   assert.equal(officialFits('Should I start taking a daily low-dose aspirin?', { title: 'Annual report 2024', snippet: 'budget' }), false);

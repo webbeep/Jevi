@@ -304,6 +304,7 @@ function statedPrice(side: string, search: SearchResponse, blocked: readonly str
   return undefined;
 }
 
+const OTHER_MODEL = /\b\d+\s?(?:GB|TB)\s+(?:model|version|variant|option|configuration|tier)\b|\b(?:Pro|Max|Plus|Ultra|XL|Fold|Mini)\b|\bupgrade\b|\bstep(?:-| )up\b/i;
 const SHARED_PRICE = /\bboth\b|\beach\b|\bsame (?:price|starting price)\b|\balike\b/i;
 
 /**
@@ -330,7 +331,13 @@ export function statedForSide(side: string, amount: string, search: SearchRespon
       const first = side.toLowerCase().split(/[^a-z0-9]+/).find((word) => word.length >= 2) ?? '';
       const at = Math.max(0, low.indexOf(first));
       const after = stickerAmounts(sentence.slice(at));
-      if (after.length && Number(after[0]!.replace(/[^0-9.]/g, '')) === want) return true;
+      if (!after.length || Number(after[0]!.replace(/[^0-9.]/g, '')) !== want) continue;
+      // "… starts with 128GB, with a 256GB model costing $899": that is a bigger model's price, not this one's.
+      const money = new RegExp(STICKER.source, 'g');
+      money.lastIndex = at;
+      const between = sentence.slice(at + side.length, money.exec(sentence)?.index ?? at);
+      if (OTHER_MODEL.test(between.replace(/\s+/g, ' ')) && !OTHER_MODEL.test(side)) continue;
+      return true;
     }
   }
   return false;
@@ -342,8 +349,7 @@ function attributedPrice(side: string, value: string, search: SearchResponse, si
   // An amount no source has at all is the card-wide check's to drop; this one moves a price that a page gives for
   // something else (another model on a lineup page) back to the product's own.
   if (!amount || offerName(value) || !sourcesState(amount, search) || statedForSide(side, amount, search, sides)) return value;
-  const stated = statedPrice(side, search, blocked) ?? sharedPrice(side, search, sides);
-  return stated && statedForSide(side, stated, search, sides) ? stated : undefined;
+  return [statedPrice(side, search, blocked), sharedPrice(side, search, sides)].find((stated) => stated && statedForSide(side, stated, search, sides));
 }
 
 /** "Both the iPhone 17 and Pixel 10 start at $799": the one price a sentence gives every compared product. */
@@ -739,11 +745,31 @@ function agreeSidePrices(nodes: CardNode[], sides: string[]): CardNode[] {
   return JSON.stringify(copy) === JSON.stringify(nodes) ? nodes : copy;
 }
 
+/**
+ * "Compare … starting price and base storage" with no price row, while a source states each product's price ("Both
+ * the iPhone 17 and Pixel 10 start at $799"): the table gets that row, so the asked figure is not left out.
+ */
+function withAskedPrice(question: string, nodes: CardNode[], sides: string[], search: SearchResponse): CardNode[] {
+  if (!/\b(?:price|prices|cost|costs|msrp)\b/i.test(question)) return nodes;
+  const at = nodes.findIndex((node) => node.type === 'table');
+  const table = nodes[at];
+  if (!table || table.type !== 'table' || table.rows.some((row) => priceRow(row[0] ?? ''))) return nodes;
+  const prices = table.columns.slice(1).map((column) => {
+    const side = sides.find((item) => mentionsSide(item, column));
+    if (!side) return undefined;
+    return [statedPrice(side, search, []), sharedPrice(side, search, sides)].find((found) => found && statedForSide(side, found, search, sides));
+  });
+  if (!prices.length || prices.some((price) => !price)) return nodes;
+  const label = /\bstarting\b/i.test(question) ? 'Starting price' : 'Price';
+  const next: CardNode = { ...table, rows: [[label, ...(prices as string[])], ...table.rows] };
+  return nodes.map((node, index) => (index === at ? next : node));
+}
+
 function groundCompared(question: string, search: SearchResponse, body: [number, CardNode][]): { index: number; node: CardNode }[] | undefined {
   const sides = compareSides(question);
   const shown = shownPrices(body.map(([, node]) => node), sides);
   const grounded = body.map(([, node]) => groundCompareNode(node, sides, search, shown));
-  const agreed = agreeSidePrices(grounded, sides);
+  const agreed = agreeSidePrices(withAskedPrice(question, grounded, sides, search), sides);
   const patches: { index: number; node: CardNode }[] = [];
   agreed.forEach((node, at) => {
     if (node !== body[at]![1]) patches.push({ index: body[at]![0], node });
@@ -1018,7 +1044,7 @@ function askedLabel(question: string): string | undefined {
   return word[0]!.toUpperCase() + word.slice(1);
 }
 
-const FACT_DENIAL = /\b(?:not stated|not in (?:the |these )?sources|unavailable|none of the sources|no sources?|neither|don'?t state|do not state|does not state|doesn'?t state)\b|\bno\b[^.]{0,48}\b(?:rating|figure|spec|capacity|number|value|data|measurement)s?\b/i;
+const FACT_DENIAL = /\b(?:not stated|not in (?:the |these )?sources|unavailable|none of the sources|no sources?|neither|don'?t state|do not state|does not state|doesn'?t state)\b|\bcan(?:'|’|no)?t be (?:shown|given|stated)\b|\bno\b[^.]{0,48}\b(?:rating|figure|spec|capacity|number|value|data|measurement|price)s?\b/i;
 const BLANKET_DENIAL = /\b(?:neither|either|both|all of them|every one|none of the)\b/i;
 
 interface ShownFact {

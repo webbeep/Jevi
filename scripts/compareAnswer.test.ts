@@ -800,10 +800,25 @@ test('a side keeps only a price a page states for it, not a lineup page price', 
   assert.equal(statedForSide('Northwatch 2', '$899', lineup, sides), false);
   assert.equal(statedForSide('Northwatch 2', '$799', lineup, sides), true);
   assert.equal(statedForSide('Glowband 4', '$799', lineup, sides), true);
+  const bigger = rows([{ title: 'Northwatch 2 vs Glowband 4', snippet: 'The Glowband 4 still starts with 128GB of storage, with a 256GB model costing $899.' }]);
+  assert.equal(statedForSide('Glowband 4', '$899', bigger, sides), false);
   // The product's own page states its price without naming it again.
   assert.equal(statedForSide('Glowband 4', '$349', rows([{ title: 'Glowband 4 - Glow Store', snippet: 'From $349 or $14/mo.' }]), sides), true);
   const table: CardNode = { type: 'table', columns: ['Factor', 'Northwatch 2', 'Glowband 4'], rows: [['Starting price', 'From $899', '—']] };
   const fixed = comparisonRepair(ask, lineup, new Map([[0, table]]))?.find((patch) => patch.index === 0)?.node;
   assert.equal(fixed?.type === 'table' ? fixed.rows[0]?.[1] : '', '$799');
   assert.equal(fixed?.type === 'table' ? fixed.rows[0]?.[2] : '', '$799');
+});
+
+test('a comparison asked for price gets the price row a source states', () => {
+  const ask = 'Compare the Northwatch 2 and Glowband 4 side by side: starting price and base storage.';
+  const search: SearchResponse = {
+    query: ask,
+    results: [{ title: 'Northwatch 2 vs Glowband 4', url: 'https://example.com/a', snippet: 'Both the Northwatch 2 and Glowband 4 start at $799. Storage differs.', domain: 'example.com', engines: ['web'] }],
+    images: [],
+    engines: [],
+  };
+  const table: CardNode = { type: 'table', columns: ['Factor', 'Northwatch 2', 'Glowband 4'], rows: [['Base storage', '256GB', '128GB']] };
+  const fixed = comparisonRepair(ask, search, new Map([[0, table]]))?.find((patch) => patch.index === 0)?.node;
+  assert.deepEqual(fixed?.type === 'table' ? fixed.rows[0] : [], ['Starting price', '$799', '$799']);
 });
