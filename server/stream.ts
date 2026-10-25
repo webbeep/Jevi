@@ -1256,16 +1256,18 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     const more = withHops([...extra, ...sides, ...instant]);
     // A follow-up that needs a rate ("with sales tax in New York City") is not answered without the rate's search.
     const needRate = more.some((item) => /\btax rate\b/i.test(item));
-    found = await searchWithLate({ q, more, freshness: freshness === 'any' ? guessFreshness(query) : freshness, count: 20, extrasCutMs: extraWait, waitExtras: needRate, keyExtras: true, onLiteral }, env, scope);
-    // An engine that answers without running extras (the fallback once the main engine's share is spent) leaves the
-    // rate out: the rate search then runs on its own and its pages lead.
+    // The rate search also runs on its own, beside the main one: an engine that answers without running extras (the
+    // fallback once the main engine's share is spent) left it out, and a clothing page's "4.5% NYC sales tax" is not
+    // the combined rate. Its pages lead.
     const rateQuery = needRate ? more.find((item) => /\btax rate\b/i.test(item)) : undefined;
-    const hasRate = (rows: SearchResult[]) => rows.some((row) => /sales tax[^.]{0,80}?\d+(?:\.\d+)?\s*%|\d+(?:\.\d+)?\s*%[^.]{0,40}sales tax/i.test(`${row.title} ${row.snippet ?? ''}`));
-    if (rateQuery && !hasRate(found.response.results)) {
-      const rate = await searchWithLate({ q: rateQuery, freshness: 'any', count: 8, lite: true }, env, scope).catch(() => undefined);
-      const add = (rate?.response.results ?? []).filter((row) => !found.response.results.some((have) => normalizeUrl(have.url) === normalizeUrl(row.url))).slice(0, 4);
-      console.log(JSON.stringify({ zo: 'rate-search', added: add.length }));
-      if (add.length) found = { ...found, response: { ...found.response, results: [...add, ...found.response.results] } };
+    const rateSearch = rateQuery ? searchWithLate({ q: rateQuery, freshness: 'any', count: 8, lite: true }, env, scope).catch(() => undefined) : undefined;
+    found = await searchWithLate({ q, more, freshness: freshness === 'any' ? guessFreshness(query) : freshness, count: 20, extrasCutMs: extraWait, waitExtras: needRate, keyExtras: true, onLiteral }, env, scope);
+    const rate = await rateSearch;
+    const lead = rate?.response.results.slice(0, 4) ?? [];
+    if (lead.length) {
+      const urls = new Set(lead.map((row) => normalizeUrl(row.url)));
+      console.log(JSON.stringify({ zo: 'rate-search', lead: lead.length }));
+      found = { ...found, response: { ...found.response, results: [...lead, ...found.response.results.filter((row) => !urls.has(normalizeUrl(row.url)))] } };
     }
   }
   let results = applyPickGate(query, applyRelevance(query, { ...found.response, query }, scope.ledger));
