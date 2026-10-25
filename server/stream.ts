@@ -1257,6 +1257,16 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
     // A follow-up that needs a rate ("with sales tax in New York City") is not answered without the rate's search.
     const needRate = more.some((item) => /\btax rate\b/i.test(item));
     found = await searchWithLate({ q, more, freshness: freshness === 'any' ? guessFreshness(query) : freshness, count: 20, extrasCutMs: extraWait, waitExtras: needRate, keyExtras: true, onLiteral }, env, scope);
+    // An engine that answers without running extras (the fallback once the main engine's share is spent) leaves the
+    // rate out: the rate search then runs on its own and its pages lead.
+    const rateQuery = needRate ? more.find((item) => /\btax rate\b/i.test(item)) : undefined;
+    const hasRate = (rows: SearchResult[]) => rows.some((row) => /sales tax[^.]{0,80}?\d+(?:\.\d+)?\s*%|\d+(?:\.\d+)?\s*%[^.]{0,40}sales tax/i.test(`${row.title} ${row.snippet ?? ''}`));
+    if (rateQuery && !hasRate(found.response.results)) {
+      const rate = await searchWithLate({ q: rateQuery, freshness: 'any', count: 8, lite: true }, env, scope).catch(() => undefined);
+      const add = (rate?.response.results ?? []).filter((row) => !found.response.results.some((have) => normalizeUrl(have.url) === normalizeUrl(row.url))).slice(0, 4);
+      console.log(JSON.stringify({ zo: 'rate-search', added: add.length }));
+      if (add.length) found = { ...found, response: { ...found.response, results: [...add, ...found.response.results] } };
+    }
   }
   let results = applyPickGate(query, applyRelevance(query, { ...found.response, query }, scope.ledger));
   // "AI news today" must not lead with last week's launch: past-window rows drop once enough current ones remain.
