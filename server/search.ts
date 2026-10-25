@@ -37,6 +37,11 @@ interface Query {
   lite?: boolean;
   /** Always wait for `later` rewrites (deep asks), even when the literal search already answered. */
   waitExtras?: boolean;
+  /**
+   * The cache key also names these extra searches. A follow-up's merged results are only the same search when its
+   * extras are: "Switch 2 price with NYC sales tax" cached without the NYC rate search is not that follow-up's answer.
+   */
+  keyExtras?: boolean;
   /** With a good literal search, how long its rewrites' results may still join. */
   extrasCutMs?: number;
   /** The literal search's rows, as soon as they land (not called on a cache hit). */
@@ -277,7 +282,8 @@ const emptyLate = (): LateExtras => ({ content: new Map(), images: [] });
 
 export async function searchWithLate(q: Query, env: Env, scope?: AskScope): Promise<SearchWithLate> {
   const ask: AskScope = scope ?? { ledger: newLedger(), bypass: false };
-  const key = searchCacheKey(q.q, q.freshness, q.count);
+  const extrasKey = q.keyExtras && q.more?.length ? ` || ${[...q.more].map((item) => item.toLowerCase().trim()).sort().join(' | ')}` : '';
+  const key = searchCacheKey(`${q.q}${extrasKey}`, q.freshness, q.count);
   const rewrites = !!(q.later || q.more?.length);
   const db = cacheDb(env);
 
