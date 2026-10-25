@@ -299,6 +299,27 @@ export function officialProbe(query: string): string {
   return `${head.slice(0, 70).trim()} (${sites.slice(0, 4).join(' OR ')})`.trim();
 }
 
+const CHARGE = /\b(?:tax|taxes|fee|fees|fine|fines|toll|tolls|fare|fares|duty|duties|surcharge|levy|levies)\b/gi;
+const CHARGE_PHRASE = /\b(?:sales|use|hotel|occupancy|property|excise|transfer|transit|toll|import|vehicle|registration)\s+tax(?:es)?\b|\btax(?:es)?\s+(?:rate|rates|on|in)\b|\bwith\s+(?:sales\s+)?tax\b|\b(?:fee|fees|fine|fines|toll|tolls|fare|fares|duty|duties|surcharge|levy|levies)\b/gi;
+const CHARGE_STEM: Record<string, string> = { taxes: 'tax', fees: 'fee', fines: 'fine', tolls: 'toll', fares: 'fare', duties: 'duty', levies: 'levy' };
+const PROBE_GENERIC = new Set(['price', 'prices', 'total', 'cost', 'costs', 'pay', 'paid', 'much', 'with', 'and', 'new', 'york', 'city', 'state', 'county', 'today', 'now', 'current', 'right', 'year', 'get', 'need', 'take', 'like', 'that', 'this', 'there']);
+
+/**
+ * A row the official-site probe brought in is on the question's subject. A site search on ny.gov for "Nintendo Switch
+ * 2 price with New York City sales tax" returns a pension fund's asset list and a building survey: they are the
+ * state's pages, not the answer. A charge ask needs its charge word on the row ("tax"); any other ask a topic word.
+ */
+export function officialFits(query: string, row: { title?: string; snippet?: string }): boolean {
+  const text = ` ${`${row.title ?? ''} ${row.snippet ?? ''}`.toLowerCase().replace(/[^a-z0-9\s-]/g, ' ')} `;
+  const stem = (word: string) => CHARGE_STEM[word.toLowerCase()] ?? word.toLowerCase();
+  // "Sales tax in New York City" is a charge to find; "tax treatment" of an IRA is not.
+  const charges = new Set((query.match(CHARGE_PHRASE) ?? []).flatMap((phrase) => phrase.match(CHARGE) ?? []).map(stem));
+  if (charges.size) return (text.match(CHARGE) ?? []).some((word) => charges.has(stem(word)));
+  const states = new Set(STATES.split(',').flatMap((pair) => pair.split(':')[0]!.split(' ')));
+  const words = probeWords(query).toLowerCase().split(/\s+/).filter((word) => word.length >= 4 && !PROBE_GENERIC.has(word) && !states.has(word));
+  return !words.length || words.some((word) => text.includes(` ${word}`));
+}
+
 /** True when a result is the agency or the place named in the question, or the question names neither. A training or course page on that site does not count: the public page is the one still missing. */
 export function hasOfficialHit(query: string, rows: readonly { domain?: string; url?: string; title?: string }[]): boolean {
   const orgs = agencyTokens(query);

@@ -304,6 +304,60 @@ function statedPrice(side: string, search: SearchResponse, blocked: readonly str
   return undefined;
 }
 
+const SHARED_PRICE = /\bboth\b|\beach\b|\bsame (?:price|starting price)\b|\balike\b/i;
+
+/**
+ * A source states this amount as this product's price: a sentence names the product (every word of its name, so
+ * "iPhone 17e" is not the iPhone 17) and the amount is the first one after that name. An Apple lineup page ("iPhone 17,
+ * and iPhone 17e. From $1099 … From $899") states no price for the iPhone 17. A sentence that names another compared
+ * product counts only when it gives both one price ("Both the iPhone 17 and Pixel 10 start at $799").
+ */
+export function statedForSide(side: string, amount: string, search: SearchResponse, sides: readonly string[]): boolean {
+  const want = Number(amount.replace(/[^0-9.]/g, ''));
+  if (!want) return true;
+  const others = sides.filter((other) => other !== side);
+  for (const result of search.results) {
+    const blob = `${result.title}. ${result.snippet ?? ''} ${result.content ?? ''}`;
+    if (!namesSide(side, blob)) continue;
+    // The product's own page ("Google Pixel 10 - Google Store": "From $799") states its price without naming it again.
+    const ownPage = namesSide(side, result.title ?? '') && !others.some((other) => namesSide(other, result.title ?? ''));
+    const lead = stickerAmounts(`${result.snippet ?? ''} ${result.content ?? ''}`)[0];
+    if (ownPage && lead && Number(lead.replace(/[^0-9.]/g, '')) === want) return true;
+    for (const sentence of blob.split(/(?<=[.!?])\s+(?=[A-Z])/)) {
+      if (!namesSide(side, sentence)) continue;
+      if (others.some((other) => namesSide(other, sentence)) && !SHARED_PRICE.test(sentence)) continue;
+      const low = sentence.toLowerCase();
+      const first = side.toLowerCase().split(/[^a-z0-9]+/).find((word) => word.length >= 2) ?? '';
+      const at = Math.max(0, low.indexOf(first));
+      const after = stickerAmounts(sentence.slice(at));
+      if (after.length && Number(after[0]!.replace(/[^0-9.]/g, '')) === want) return true;
+    }
+  }
+  return false;
+}
+
+/** The price shown for a side is one a source states for it; otherwise the stated one, or none. */
+function attributedPrice(side: string, value: string, search: SearchResponse, sides: readonly string[], blocked: readonly string[]): string | undefined {
+  const amount = moneyAmounts(value)[0];
+  // An amount no source has at all is the card-wide check's to drop; this one moves a price that a page gives for
+  // something else (another model on a lineup page) back to the product's own.
+  if (!amount || offerName(value) || !sourcesState(amount, search) || statedForSide(side, amount, search, sides)) return value;
+  const stated = statedPrice(side, search, blocked) ?? sharedPrice(side, search, sides);
+  return stated && statedForSide(side, stated, search, sides) ? stated : undefined;
+}
+
+/** "Both the iPhone 17 and Pixel 10 start at $799": the one price a sentence gives every compared product. */
+function sharedPrice(side: string, search: SearchResponse, sides: readonly string[]): string | undefined {
+  for (const result of search.results) {
+    for (const sentence of `${result.title}. ${result.snippet ?? ''} ${result.content ?? ''}`.split(/(?<=[.!?])\s+(?=[A-Z])/)) {
+      if (!SHARED_PRICE.test(sentence) || !sides.every((item) => namesSide(item, sentence)) || RELATIVE_PRICE.test(sentence)) continue;
+      const amounts = stickerAmounts(sentence);
+      if (amounts.length === 1 && namesSide(side, sentence)) return amounts[0];
+    }
+  }
+  return undefined;
+}
+
 /** One amount the source states for this product. A range or a "cheaper" line is not that price. */
 export function stickerPrice(side: string, search: SearchResponse): string | undefined {
   for (const result of search.results) {
@@ -377,8 +431,13 @@ export function acceptProductPhoto(side: string, title: string, extra = ''): boo
   return pageNamesProduct(side, page);
 }
 
+/** A thumbnail from a video: its title text is drawn over the picture. */
+function videoFrame(src: string, page = ''): boolean {
+  return /(?:^|\/\/)(?:i\d?\.ytimg\.com|img\.youtube\.com)\//i.test(src) || /\/\/(?:www\.|m\.)?(?:youtube\.com|youtu\.be)\//i.test(page);
+}
+
 function imageForSide(side: string, images: SearchResponse['images']): string | undefined {
-  const hit = images.find((image) => acceptProductPhoto(side, `${image.title} ${image.source}`));
+  const hit = images.find((image) => !videoFrame(image.thumb, image.url) && acceptProductPhoto(side, `${image.title} ${image.source}`));
   return hit?.thumb || undefined;
 }
 
@@ -391,7 +450,7 @@ export function placeSidePhotos(question: string, nodes: Map<number, CardNode>, 
   if (sides.length < 2 || !images?.length) return undefined;
   const owner = new Map<string, string>();
   for (const image of images) {
-    if (!image.thumb || owner.has(image.thumb)) continue;
+    if (!image.thumb || owner.has(image.thumb) || videoFrame(image.thumb, image.url)) continue;
     const side = sides.find((item) => acceptProductPhoto(item, `${image.title} ${image.source}`));
     if (side) owner.set(image.thumb, side);
   }
@@ -403,7 +462,8 @@ export function placeSidePhotos(question: string, nodes: Map<number, CardNode>, 
       const side = sides.find((item) => mentionsSide(item, node.label) || pageNamesProduct(item, node.label));
       if (!side) return node;
       const own = photoFor(side);
-      const borrowed = !!node.imageSrc && owner.has(node.imageSrc) && owner.get(node.imageSrc) !== side;
+      // A video's frame ("How to use Pixel 10 — Beginners" over the phone) is not the product's photo.
+      const borrowed = !!node.imageSrc && ((owner.has(node.imageSrc) && owner.get(node.imageSrc) !== side) || videoFrame(node.imageSrc));
       if (borrowed && !own) return { ...node, imageSrc: undefined, imageRef: undefined, imageQuery: undefined };
       const imageSrc = borrowed ? own : node.imageSrc || own;
       if (!imageSrc || imageSrc === node.imageSrc) return node;
@@ -529,7 +589,8 @@ function groundCompareNode(node: CardNode, sides: string[], search: SearchRespon
     // A word in place of a price ("Costs more", "Premium") takes the stated price; a measurement ("1,776 ft") is
     // that side's answer, not a missing price.
     const relative = !!node.value && (RELATIVE_PRICE.test(node.value) || (!moneyIn(node.value) && !/\d/.test(node.value)));
-    const value = price && (missing || relative) ? price : node.value;
+    const kept = !missing && !relative && node.value && moneyIn(node.value) ? attributedPrice(side, node.value, search, sides, blocked) : node.value;
+    const value = price && (missing || relative) ? price : kept === undefined ? 'Not stated' : kept;
     const imageSrc = node.imageSrc || image;
     if (value === node.value && imageSrc === node.imageSrc) return node;
     return { ...node, value, imageSrc, imageQuery: node.imageQuery ?? sideTitle(side) };
@@ -537,11 +598,16 @@ function groundCompareNode(node: CardNode, sides: string[], search: SearchRespon
   if (node.type === 'table') {
     const rows = node.rows.map((row) => row.map((cell, index) => {
       const side = sides.find((item) => mentionsSide(item, node.columns[index] ?? ''));
-      if (!side || moneyIn(cell)) return cell;
+      if (!side) return cell;
+      if (moneyIn(cell)) {
+        if (!priceRow(row[0] ?? '')) return cell;
+        const blocked = [...shown.entries()].filter(([name]) => name !== side).map(([, price]) => price);
+        return attributedPrice(side, cell, search, sides, blocked) ?? '—';
+      }
       // Only a price row's cell is a price to repair: "tax-free growth" or "MAGI under $153,000" is not a deal.
       if (priceRow(row[0] ?? '')) {
         const blocked = [...shown.entries()].filter(([name]) => name !== side).map(([, price]) => price);
-        const found = statedPrice(side, search, blocked);
+        const found = statedPrice(side, search, blocked) ?? sharedPrice(side, search, sides);
         if (found) return found;
         return BLANK_CELL.test(cell) || NOT_STATED.test(cell) ? cell : '';
       }

@@ -5,6 +5,7 @@ import { numberTokens } from './ground';
 import { completeCutDecimal, withoutEmptySlots } from './polish';
 import { dropInventedTitles, finishQuotedText, honestHero, honestStudyText, peerPaperItems, peerPaperSource } from './cardAgree';
 import { figureClause, leadFigure, moneyClauses } from './thinSource';
+import { keepStorePrices } from './retailerPrice';
 
 /** One search result, numbered the way the card cites it, with the text the card was allowed to use. */
 export interface ClaimSource {
@@ -2677,5 +2678,6 @@ export function bindClaims(node: CardNode, sources: readonly ClaimSource[], quer
   const charged = fee ? alignFee(applyCharge(lined, fee, allowed), fee, allowed, query, namedCharges(sources)) : lined;
   if (!shoppingAsk(query)) return charged;
   const ceilings = budgetAmounts(query);
-  return dropPriceless(keepBudgetPrices(fillPrices(charged, sources, ceilings), ceilings), ceilings, query);
+  const filled = dropPriceless(keepBudgetPrices(fillPrices(charged, sources, ceilings), ceilings), ceilings, query);
+  return keepStorePrices(filled, sources) ?? { type: 'stack', children: [] };
 }

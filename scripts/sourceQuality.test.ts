@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { CardNode } from '../shared/card.ts';
-import { finishQuality, hasOfficialHit, hostTier, latinQuery, officialProbe, preferSources, sinkFormatWords, topicAuthorityAsk } from '../server/sourceQuality.ts';
+import { finishQuality, hasOfficialHit, officialFits, hostTier, latinQuery, officialProbe, preferSources, sinkFormatWords, topicAuthorityAsk } from '../server/sourceQuality.ts';
 
 const hit = (domain: string, title: string, snippet = title) => ({ url: `https://${domain}/x`, domain, title, snippet });
 
@@ -434,4 +434,18 @@ test('of a topic\'s authorities, the one that sets the rule leads', () => {
     hit('www.mayoclinic.org', 'Daily aspirin therapy', 'Overview'),
   ]);
   assert.equal(ranked[0]?.domain, 'www.uspreventiveservicestaskforce.org');
+});
+
+test('an official-site row is on the question, not any page of that site', () => {
+  const ask = 'Nintendo Switch 2 price with New York City sales tax';
+  assert.equal(officialFits(ask, { title: 'New York State Common Retirement Fund Asset Listing', snippet: '$ 22,541,138 $ 1-800-FLOWERS.COM' }), false);
+  assert.equal(officialFits(ask, { title: 'Sales Tax Rates, Additional Sales Taxes, and Fees', snippet: 'New York City are subject to the 4% state tax' }), true);
+  assert.equal(officialFits('Met Museum admission fees for New York residents', { title: 'Admission fee policy', snippet: 'pay what you wish' }), true);
+  assert.equal(officialFits('Should I start taking a daily low-dose aspirin?', { title: 'Aspirin Use to Prevent Cardiovascular Disease', snippet: 'USPSTF' }), true);
+  assert.equal(officialFits('Should I start taking a daily low-dose aspirin?', { title: 'Annual report 2024', snippet: 'budget' }), false);
+});
+
+test('an IRS page on Roth income ranges fits an IRA limits ask without the word "limit"', () => {
+  const ask = 'Make a table comparing a Roth IRA and a traditional IRA for 2026: contribution limit, tax treatment, income limits';
+  assert.equal(officialFits(ask, { title: 'Amount of Roth IRA contributions that you can make for 2026', snippet: 'modified AGI phase-out range' }), true);
 });

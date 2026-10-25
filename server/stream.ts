@@ -83,7 +83,7 @@ import { unblendObjects } from './objectFacts';
 import { withFinishedSentences } from './polish';
 import { queryWithPlace, readerPlace, settleReadings } from './readings';
 import { isKeepOnly, keptBody } from './refine';
-import { finishQuality, hasOfficialHit, hostTier, isSocialHost, isVideoHost, officialProbe, preferSources, sinkFormatWords, topicAuthorityAsk } from './sourceQuality';
+import { finishQuality, hasOfficialHit, hostTier, isSocialHost, isVideoHost, officialFits, officialProbe, preferSources, sinkFormatWords, topicAuthorityAsk } from './sourceQuality';
 import { isOwnSite, orcidSite, pickOwnSite, probeOwnSite, RESEARCH_ASK, withOwnSite } from './ownSite';
 import { quoteAsk } from '../shared/quoteAsk';
 import { dropClinicPages, dropStrayDois, isPaperAsk, leadPreprints, scholarlyResults, withScholarly } from './scholarly';
@@ -353,7 +353,7 @@ async function attachOfficial(query: string, results: SearchResponse, env: Env, 
     if (room < 1) scope.ledger.bonus = (scope.ledger.bonus ?? 0) + 1;
     extra = await searchWithLate({ q: probe, freshness: 'any', count: 6, lite: true }, env, scope);
   }
-  const add = extra.response.results.filter((row) => !results.results.some((have) => have.url === row.url));
+  const add = extra.response.results.filter((row) => !results.results.some((have) => have.url === row.url) && officialFits(query, row));
   if (!add.length) return results;
   console.log(JSON.stringify({ zo: 'official', added: add.length, lead: add[0]?.domain }));
   return { ...results, results: preferSources(query, [...add, ...results.results]) };
@@ -385,7 +385,7 @@ async function foldOfficialWithin(query: string, results: SearchResponse, early:
 function foldReadyOfficial(query: string, results: SearchResponse, early?: EarlyOfficial): SearchResponse {
   const extra = early?.ready();
   if (!extra?.response.results.length || hasOfficialHit(query, results.results)) return results;
-  const add = extra.response.results.filter((row) => !results.results.some((have) => have.url === row.url));
+  const add = extra.response.results.filter((row) => !results.results.some((have) => have.url === row.url) && officialFits(query, row));
   if (!add.length) return results;
   console.log(JSON.stringify({ zo: 'official', added: add.length, lead: add[0]?.domain }));
   return { ...results, results: preferSources(query, [...add, ...results.results]) };
@@ -1212,7 +1212,9 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
   // Both forms of a workplace ask ("Tim at X", "Timothy at X") have to run, or a second person
   // who only shows up under one of them never reaches the picker.
   const places = workplaceQueries(query);
-  const extraWait = hopList.length || places.length ? 1800 : undefined;
+  // A follow-up's extra searches are what the card lacks ("New York City sales tax rate" under a price card): cut at the
+  // usual 0.8 s, the rate came in after the card was written. They wait as long as fact hops do.
+  const extraWait = hopList.length || places.length || (rewritten && extra.length) ? 1800 : undefined;
   const withHops = (extras: string[]) => {
     const room = extraSearchRoom(route, hopList.length, places.length, compareSides(query).length);
     return moreQueries(query, [...hopList, ...places, ...extras], room);
@@ -2259,7 +2261,11 @@ async function followup(send: Send, env: Env, req: Extract<StreamRequest, { kind
     // "What would I pay with sales tax in New York City?" needs the rate as much as the price: a search for the
     // product with "sales tax" in it returns price pages, so the place's rate is always one of the searches.
     const taxPlace = req.question.match(/\bsales tax\b[^?.]*?\bin ([A-Z][\w.'-]*(?:\s+[A-Z][\w.'-]*)*)/)?.[1];
-    if (planned && taxPlace && !planned.fanout.some((query) => /\btax rate\b/i.test(query))) planned.fanout = [...planned.fanout, `${taxPlace} sales tax rate`];
+    // That search is the place and the rate only: "New York City sales tax rate 2026 Nintendo Switch 2" returns Switch
+    // pages. It goes first, since a follow-up may run only one extra search.
+    const topicWords = (subject || onScreen?.title || '').toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 3 && !/^(?:price|prices|cost|the|and|with)$/.test(word));
+    const rateOnly = (query: string) => /\btax rate\b/i.test(query) && !topicWords.some((word) => new RegExp(`\\b${word}\\b`, 'i').test(query));
+    if (planned && taxPlace && !planned.fanout.some(rateOnly)) planned.fanout = [`${taxPlace} sales tax rate`, ...planned.fanout];
     if (decision.action === 'search' && planned) {
       scope.bound = `${subject}\n${req.question}`;
       send('rewrite', { query: planned.query });
