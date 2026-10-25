@@ -113,7 +113,9 @@ export function rowLine(r: SearchResult, i: number, live: boolean): string {
 export async function briefSources(
   args: { query: string; intent?: string; context?: string; results: SearchResult[]; isLive: (r: SearchResult) => boolean; shown?: string },
   env: Env,
-  timeoutMs = 1400,
+  // The check takes 1.3-1.6 s. At 1.4 s most were dropped, and with them the gap searches for the fee or limit the
+  // snippets lack ("2026 Roth IRA income limits"). Nothing waits on it: the card is written beside it.
+  timeoutMs = 2200,
 ): Promise<SourceBrief | undefined> {
   const rows = args.results.slice(0, BRIEF_ROWS);
   if (!hasLlm(env) || rows.length < 2) return undefined;

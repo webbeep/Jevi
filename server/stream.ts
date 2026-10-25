@@ -470,7 +470,13 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       for (const hit of found) {
         for (const row of (hit?.response.results ?? []).slice(0, 3)) {
           const key = normalizeUrl(row.url);
-          if (have.has(key) || isVideoHost(row.domain) || isSocialHost(row.domain)) continue;
+          if (isVideoHost(row.domain) || isSocialHost(row.domain)) continue;
+          // A page already among the sources comes back with the snippet for this fact ("Passport book: $130"):
+          // that text joins the source it belongs to, under the same number, instead of being dropped as a repeat.
+          if (have.has(key)) {
+            if (row.snippet && !rows.some((item) => normalizeUrl(item.url) === key)) rows.push(row);
+            continue;
+          }
           have.add(key);
           rows.push(row);
         }
@@ -796,9 +802,21 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       pendingReview = (async () => {
         // The gap search had the whole design to finish; a late one is skipped, never waited for.
         const found = await Promise.race([gapRows, new Promise<SearchResult[]>((resolve) => setTimeout(() => resolve([]), 150))]);
+        const at = new Map(designReq.search.results.map((row, index) => [normalizeUrl(row.url), index]));
+        const merged = found.filter((row) => at.has(normalizeUrl(row.url)));
+        if (merged.length) {
+          const results = [...designReq.search.results];
+          for (const row of merged) {
+            const index = at.get(normalizeUrl(row.url))!;
+            const prior = results[index]!;
+            // First, since the review reads the start of each snippet.
+            if (row.snippet && !(prior.snippet ?? '').includes(row.snippet)) results[index] = { ...prior, snippet: `${row.snippet} … ${prior.snippet ?? ''}`.trim() };
+          }
+          designReq.search = { ...designReq.search, results };
+        }
         const have = new Set([...designReq.search.results, ...addedRows].map((row) => normalizeUrl(row.url)));
         const extra = found.filter((row) => !have.has(normalizeUrl(row.url)));
-        if (extra.length) {
+        if (extra.length || merged.length) {
           addedRows = [...addedRows, ...extra];
           addedSources = addedRows.length;
           send('search', { ...designReq.search, results: [...designReq.search.results, ...addedRows] });

@@ -138,7 +138,9 @@ export async function reviewCard(
     extra?: SearchResult[];
   },
   env: Env,
-  timeoutMs = 2200,
+  // The review takes 0.9-2.5 s, longest when a gap search added rows (the fee it should put on the card). At 2.2 s
+  // those were the ones dropped.
+  timeoutMs = 3200,
 ): Promise<Review | undefined> {
   if (!hasLlm(env) || !args.nodes.size) return undefined;
   const user = [
