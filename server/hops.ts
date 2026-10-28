@@ -472,6 +472,31 @@ export function askedFigureLines(query: string, results: readonly { title: strin
   const year = query.match(/\b(?:19|20)\d{2}\b/)?.[0];
   const lines: { n: number; line: string; amounts: string[]; named: number }[] = [];
   results.slice(0, 30).forEach((row, index) => {
+    const before = lines.length;
+    readRow(row, index);
+    if (lines.length > before) return;
+    // "Pay your fees ; Passport Book · DS-82(opens in a new tab). $130 ; Passport Card · DS-82. $30": a table the snippet
+    // breaks into sentences reads as the span from the item's name through the amounts after it.
+    const snippet = (row.snippet ?? '').replace(/\s*\((?:opens|open) in a new (?:tab|window)\)/gi, '');
+    // Each mention is tried in turn; a span stops at the snippet's "…", where the page's text was cut.
+    for (const mention of snippet.toLowerCase().matchAll(new RegExp(`\\b${stem[0] === 'incom' ? '(?:incom|magi\\b)' : stem[0]}`, 'g'))) {
+      const at = mention.index ?? 0;
+      const start = Math.max(snippet.lastIndexOf('…', at) + 1, snippet.lastIndexOf('. ', at) + 1, 0);
+      const cut = snippet.indexOf('…', at);
+      const window = snippet.slice(start, Math.min(at + 160, cut < 0 ? Infinity : cut));
+      const found = [...window.matchAll(money)];
+      if (found.length < 2 || /\b(?:should not|shouldn't|do not|don't|never|no longer|not charge)\b/i.test(window)) continue;
+      const last = found[found.length - 1]!;
+      const line = window.slice(0, (last.index ?? 0) + last[0].length).replace(/^[\s…·•|.;]+/, '').replace(/\s*;\s*/g, ' · ').replace(/\s+/g, ' ').trim();
+      if (/^[a-z]/.test(line)) continue;
+      const words = line.toLowerCase().split(/[^a-z0-9]+/);
+      const named = subject.filter((word) => words.some((token) => token.startsWith(word))).length;
+      // A span is a rougher read than a sentence: it goes after the sentences that name as much.
+      if (named) lines.push({ n: index + 1, line, amounts: [...new Set(found.map((m) => m[0].replace(/\s/g, '')))], named: named - 1 });
+      return;
+    }
+  });
+  function readRow(row: { title: string; snippet?: string }, index: number) {
     const parts = [row.title, ...(row.snippet ?? '').split(/(?<=[.!?])\s+|\s+[·•|…]\s+|\s+\.\.\.\s*/)];
     parts.forEach((raw, at) => {
       // "…a $35 facility fee." starts mid-sentence: the "will not charge you" before it is cut off.
@@ -500,7 +525,7 @@ export function askedFigureLines(query: string, results: readonly { title: strin
       const line = /[.!?]\s*$/.test(part) ? part.trim() : part.trim().replace(/,?\s+(?:and|or|but)\s+[a-z][a-z\s]{0,30}$/i, '');
       lines.push({ n: index + 1, line, amounts, named: named - stale });
     });
-  });
+  }
   // A later line quoting only amounts an earlier one already gives adds nothing.
   const best = lines
     .sort((a, b) => b.named - a.named || b.amounts.length - a.amounts.length || a.n - b.n)

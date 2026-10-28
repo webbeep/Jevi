@@ -33,3 +33,10 @@ test('income limits stated as MAGI, or under an income heading, are found', () =
     'In 2026, married couples filing jointly can contribute to a Roth IRA if their MAGI is less than $242,000.',
   ]);
 });
+
+test('a fee table the snippet broke into sentences is read as one span', () => {
+  const found = askedFigureLines(PASSPORT, [
+    { title: 'Renew Your Passport by Mail - Travel - State Department', snippet: 'You can expect to receive these documents up to 4 weeks after your passport book ... … Pay your fees ; Passport Book · DS-82(opens in a new tab). $130 ; Passport Card · DS-82(opens in a new tab). $30 ; Passport Book and Card. DS-82( ...' },
+  ]);
+  assert.equal(found?.lines[0]?.line, 'Pay your fees · Passport Book · DS-82. $130 · Passport Card · DS-82. $30');
+});
