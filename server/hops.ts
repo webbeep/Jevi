@@ -504,6 +504,8 @@ export function askedFigureLines(query: string, results: readonly { title: strin
       const before = at > 1 ? parts[at - 1]! : '';
       // "Your fee depends on what you are renewing. $130 Passport Card ・ $30 …": the table lost its first label.
       const shifted = !names(raw.toLowerCase()) && names(before.toLowerCase()) && before.length <= 140 ? shiftedLabels(raw) : undefined;
+      // "$35 execution fee, in addition to…" is a list item cut from what it applies to.
+      if (!shifted && /^[\s…·•|.]*[$€£]\s?\d/.test(raw)) return;
       const part = shifted ? (money.test(before) ? shifted : `${before.replace(/^[\s…·•|.]+/, "").trim()} ${shifted}`) : raw.replace(/^[\s…·•|.]+/, '');
       money.lastIndex = 0;
       const low = part.toLowerCase();
