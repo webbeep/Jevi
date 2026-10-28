@@ -437,6 +437,202 @@ export function hopQueries(query: string): string[] {
   return [];
 }
 
+const VERB = 'renew|apply for|get|obtain|replace|register|file for|sign up for|request|order|transfer|cancel';
+const GERUND: Record<string, string> = { renewing: 'renew', 'applying for': 'apply for', getting: 'get', obtaining: 'obtain', replacing: 'replace', registering: 'register', 'filing for': 'file for', requesting: 'request', transferring: 'transfer', cancelling: 'cancel', canceling: 'cancel' };
+const NOUN: Record<string, string> = { renewal: 'renew', application: 'apply for', replacement: 'replace', registration: 'register', transfer: 'transfer', cancellation: 'cancel' };
+const MODE = /\s+(by mail|online|in person|by phone)$/i;
+/** "Step by step", ", what are the steps?" and "through the mail" say how the answer is laid out, not what it is about. */
+const STEPS_TAIL = /(?:,?\s*(?:what are the steps|step[- ]by[- ]step(?: please)?|in steps|the steps|please))+\s*[?.!]*$/i;
+
+/**
+ * A how-to ask for a paperwork process: "how do I renew my US passport by mail", "steps to renew…", "renewing my US
+ * passport by mail, what are the steps?", "US passport renewal by mail step by step". The verb and what it acts on.
+ */
+function processAsk(query: string): [string, string] | undefined {
+  const found = readProcess(query);
+  // "Get" is a process only for a document: "get a Real ID", not "get better at chess".
+  return found && (found[0] !== 'get' || PAPER.test(found[1])) ? found : undefined;
+}
+
+const PAPER = /\b(?:licen[cs]e|card|passport|permit|visa|id|certificate|plates?|title|registration|green card|citizenship|transcript|records?|copy|tag|sticker|ssn|itin|ein)\b/i;
+
+function readProcess(query: string): [string, string] | undefined {
+  const text = query.replace(/\bthrough the mail\b/i, 'by mail').replace(STEPS_TAIL, '').replace(/[?.!]+$/, '').trim();
+  const object = (raw: string) => raw.replace(/^(?:a|an|my|the|for|our|your)\s+/i, '').trim();
+  const asked = text.match(new RegExp(`\\b(?:how (?:do|can|should) i|how to|steps? (?:to|for))\\s+(${VERB})\\s+(.+)$`, 'i'));
+  if (asked) return [asked[1]!.toLowerCase(), object(asked[2]!)];
+  const gerund = text.match(new RegExp(`^(?:\\w+[:,]?\\s+)?(${Object.keys(GERUND).join('|')})\\s+(.+)$`, 'i'));
+  if (gerund) return [GERUND[gerund[1]!.toLowerCase()]!, object(gerund[2]!)];
+  // A noun ask has to say it wants steps: "passport renewal requirements" is not a how-to.
+  const noun = /\bsteps?\b/i.test(query) && text.match(new RegExp(`^(?:how (?:does|do)\\s+)?(?:a |an |my |the )?(.+?)\\s+(${Object.keys(NOUN).join('|')})(\\s+(?:by mail|online|in person|by phone))?(?:\\s+work)?$`, 'i'));
+  if (noun) return [NOUN[noun[2]!.toLowerCase()]!, `${noun[1]}${noun[3] ?? ''}`];
+  return undefined;
+}
+// A price is the comparison's own check (a lineup page's "$899" is not the iPhone 17's), so it is not a figure hop.
+const FIGURE_ITEM = /\b(?:limits?|fees?|rates?|caps?|thresholds?|phase-?outs?|minimums?|maximums?)\b/i;
+
+/**
+ * The figure a complete answer needs and the first search rarely brings: the fee of a process ("How do I renew my
+ * US passport by mail?" → "renew US passport by mail fee": travel.state.gov's "$130" is on that search's snippet, not on
+ * the how-to's), or the last figure item a question lists after a colon ("…: contribution limit, tax treatment, and
+ * income limits" → "Roth IRA and traditional IRA 2026 income limits", where the married-filing-jointly range is).
+ */
+/** The figure item the question needs ("fee", "income limits"), when `figureHop` would search for one. */
+export function figureItem(query: string): string | undefined {
+  if (processAsk(query) && !/\b(?:fee|fees|cost|price)\b/i.test(query)) return 'fee';
+  const colon = query.indexOf(':');
+  if (colon < 0) return undefined;
+  const items = query.slice(colon + 1).replace(/[?.!]+$/, '').split(/,\s*(?:and\s+)?|\s+and\s+/).map((item) => item.trim()).filter(Boolean);
+  return items.length >= 2 ? [...items].reverse().find((entry) => FIGURE_ITEM.test(entry) && entry.split(/\s+/).length <= 4) : undefined;
+}
+
+/**
+ * Snippet lines in the first 20 results that state the asked figure (a "fee", "income limits"): the line has to name
+ * the question's subject too ("passport", "Roth"), so "a $60 expedite fee" or "should not charge you a $35 facility
+ * fee" is not the renewal fee. Lines naming more of the subject, then more amounts, come first.
+ */
+export function askedFigureLines(query: string, results: readonly { title: string; snippet?: string }[]): { item: string; lines: { n: number; line: string; amounts: string[] }[] } | undefined {
+  const item = figureItem(query);
+  if (!item) return undefined;
+  const stem = item.toLowerCase().split(/\s+/).map((word) => word.replace(/(?:es|s)$/, '').slice(0, 5)).filter((word) => word.length >= 3);
+  const subject = [...new Set(query.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 4 && !FIGURE_STOP.has(word) && !stem.some((part) => word.startsWith(part))).map((word) => word.slice(0, 5)))];
+  const money = /[$€£]\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?(?!\d)/g;
+  const names = (text: string) => text.includes(stem[0]!) || (stem[0] === 'incom' && /\b(?:magi|agi)\b/.test(text));
+  const year = query.match(/\b(?:19|20)\d{2}\b/)?.[0];
+  const lines: { n: number; line: string; amounts: string[]; named: number }[] = [];
+  results.slice(0, 30).forEach((row, index) => {
+    const before = lines.length;
+    readRow(row, index);
+    if (lines.length > before) return;
+    // "Pay your fees ; Passport Book · DS-82(opens in a new tab). $130 ; Passport Card · DS-82. $30": a table the snippet
+    // breaks into sentences reads as the span from the item's name through the amounts after it.
+    const snippet = (row.snippet ?? '').replace(/\s*\((?:opens|open) in a new (?:tab|window)\)/gi, '');
+    // Each mention is tried in turn; a span stops at the snippet's "…", where the page's text was cut.
+    for (const mention of snippet.toLowerCase().matchAll(new RegExp(`\\b${stem[0] === 'incom' ? '(?:incom|magi\\b)' : stem[0]}`, 'g'))) {
+      const at = mention.index ?? 0;
+      const start = Math.max(snippet.lastIndexOf('…', at) + 1, snippet.lastIndexOf('. ', at) + 1, 0);
+      const cut = snippet.indexOf('…', at);
+      const window = snippet.slice(start, Math.min(at + 160, cut < 0 ? Infinity : cut));
+      const found = [...window.matchAll(money)];
+      if (found.length < 2 || /\b(?:should not|shouldn't|do not|don't|never|no longer|not charge)\b/i.test(window)) continue;
+      const last = found[found.length - 1]!;
+      const line = window.slice(0, (last.index ?? 0) + last[0].length).replace(/^[\s…·•|.;]+/, '').replace(/\s*;\s*/g, ' · ').replace(/\s+/g, ' ').trim();
+      if (/^[a-z]/.test(line)) continue;
+      const words = line.toLowerCase().split(/[^a-z0-9]+/);
+      const named = subject.filter((word) => words.some((token) => token.startsWith(word))).length;
+      // A span is a rougher read than a sentence: it goes after the sentences that name as much.
+      if (named) lines.push({ n: index + 1, line, amounts: [...new Set(found.map((m) => m[0].replace(/\s/g, '')))], named: named - 1 });
+      return;
+    }
+  });
+  function readRow(row: { title: string; snippet?: string }, index: number) {
+    const parts = [row.title, ...(row.snippet ?? '').split(/(?<=[.!?])\s+|\s+[·•|…]\s+|\s+\.\.\.\s*/)];
+    parts.forEach((raw, at) => {
+      // "…a $35 facility fee." starts mid-sentence: the "will not charge you" before it is cut off.
+      if (/^[a-z]/.test(raw)) return;
+      const before = at > 1 ? parts[at - 1]! : '';
+      // "Your fee depends on what you are renewing. $130 Passport Card ・ $30 …": the table lost its first label.
+      const shifted = !names(raw.toLowerCase()) && names(before.toLowerCase()) && before.length <= 140 ? shiftedLabels(raw) : undefined;
+      // "$35 execution fee, in addition to…" is a list item cut from what it applies to.
+      if (!shifted && /^[\s…·•|.]*[$€£]\s?\d/.test(raw)) return;
+      const part = shifted ? (money.test(before) ? shifted : `${before.replace(/^[\s…·•|.]+/, "").trim()} ${shifted}`) : raw.replace(/^[\s…·•|.]+/, '');
+      money.lastIndex = 0;
+      const low = part.toLowerCase();
+      const amounts = [...new Set((part.match(money) ?? []).map((amount) => amount.replace(/\s/g, '')))];
+      if (part.length < 12 || part.length > 320 || !amounts.length) return;
+      if (/\b(?:should not|shouldn't|do not|don't|never|no longer|not charge)\b/i.test(part)) return;
+      // "Income limits" is about income: a "contribution limit" line is the other row. MAGI is the income those limits
+      // are set on, and "What are the income limits…?" heads the sentence that answers it.
+      const own = names(low) || (/\?\s*$/.test(before) && names(before.toLowerCase()));
+      // "Passport book: $130 Passport card: $30": a labeled price list for the asked thing names its own figures.
+      const listed = (part.match(/[a-z)]\s*:\s*[$€£]\s?\d/gi) ?? []).length >= 2;
+      if (!own && !listed) return;
+      const words = low.split(/[^a-z0-9]+/);
+      const named = subject.filter((word) => words.some((token) => token.startsWith(word))).length + (own || listed ? 1 : 0);
+      if (!named) return;
+      // Asked for 2026: a line that also quotes 2025's range goes after one that does not.
+      const stale = year && (part.match(/\b(?:19|20)\d{2}\b/g) ?? []).some((other) => other !== year) ? 1 : 0;
+      // "…should only charge you a $35 fee if you are": cut off inside the condition, so who pays it is lost.
+      const finished = /[.!?]\s*$/.test(part);
+      if (!finished && /\b(?:if|unless|when|only)\b[^$€£]*$/i.test(part.slice(part.search(/[$€£]\s?\d[^$€£]*$/)))) return;
+      // "…less than $153,000 to contribute fully and married couples ...": the snippet's cut-off tail goes.
+      const line = /[.!?]\s*$/.test(part) ? part.trim() : part.trim().replace(/,?\s+(?:and|or|but)\s+[a-z][a-z\s]{0,30}$/i, '');
+      lines.push({ n: index + 1, line, amounts, named: named - stale });
+    });
+  }
+  // A later line quoting only amounts an earlier one already gives adds nothing.
+  const best = lines
+    .sort((a, b) => b.named - a.named || b.amounts.length - a.amounts.length || a.n - b.n)
+    .filter((line, i, all) => !all.slice(0, i).some((before) => line.amounts.every((amount) => before.amounts.includes(amount))))
+    .slice(0, 4);
+  return best.length ? { item, lines: best.map(({ n, line, amounts }) => ({ n, line, amounts })) } : undefined;
+}
+
+/**
+ * Rows with the text of their read pages after the snippet, so a fee or a limit stated only on the page (the State
+ * Department's fee table) is read too. A markdown table reads as "Passport Book · DS-82 · $130 ; Passport Card · …".
+ */
+export function withPageText<T extends { snippet?: string }>(results: readonly T[], pages: readonly { n: number; text: string }[], maxChars = 4000): T[] {
+  return results.map((row, index) => {
+    const page = pages.find((item) => item.n === index + 1);
+    if (!page?.text) return row;
+    const text = page.text.slice(0, maxChars)
+      .replace(/\\([\\`*_{}[\]()#+\-.!$,;:|<>~])/g, '$1')
+      .replace(/^\s*\|?[\s:|-]*-{3,}[\s:|-]*$/gm, '')
+      .replace(/[#*_`>]+/g, ' ')
+      .replace(/\s*\|\s*/g, ' · ')
+      .replace(/\s*\n+\s*/g, ' ; ')
+      .replace(/(?:\s*[;·]\s*){2,}/g, ' ; ');
+    return { ...row, snippet: `${row.snippet ?? ''} … ${text}` };
+  });
+}
+
+/**
+ * "$130 Passport Card ・ $30 Passport Book and Card ・ $160": a table read row by row, where each label names the amount
+ * after it, as "$130 · Passport Card $30 · Passport Book and Card $160". Undefined when it is not that shape.
+ */
+function shiftedLabels(part: string): string | undefined {
+  const pieces = part.split(/([$€£]\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?)(?!\d)/);
+  if (pieces.length < 3 || !/^\W*(?:[A-Z]{2}-\d+)?\W*$/.test(pieces[0]!)) return undefined;
+  // "$130 Passport Card": cut after the first amount, whose label was lost; the label left labels the next one.
+  if (pieces.length === 3) return /^\s+[A-Z][\w&' -]{2,40}$/.test(pieces[2]!) ? pieces[1] : undefined;
+  const out = [pieces[1]!];
+  for (let i = 2; i + 1 < pieces.length; i += 2) {
+    const name = pieces[i]!.replace(/[・·•|…]/g, ' ').replace(/\b[A-Z]{2}-\d+\b/g, '').replace(/\s+/g, ' ').trim();
+    if (!/^[A-Z][\w&' -]{2,40}$/.test(name)) return undefined;
+    out.push(`${name} ${pieces[i + 1]}`);
+  }
+  return out.join(' · ');
+}
+
+const FIGURE_STOP = new Set(['what', 'when', 'where', 'which', 'with', 'from', 'that', 'this', 'step', 'make', 'table', 'comparing', 'compare', 'show', 'give', 'list', 'chart', 'does', 'have', 'about', 'your', 'into', 'their', 'there']);
+
+export function figureHop(query: string): string | undefined {
+  const process = processAsk(query);
+  if (process && !/\b(?:fee|fees|cost|price)\b/i.test(query)) {
+    const object = process[1];
+    const mode = object.match(MODE)?.[1] ?? '';
+    const thing = object.replace(MODE, '').replace(/^(?:a|an|my|the)\s+/i, '');
+    return `${process[0]} ${thing}${mode ? ` ${mode}` : ''} fee`;
+  }
+  const colon = query.indexOf(':');
+  if (colon < 0) return undefined;
+  const items = query.slice(colon + 1).replace(/[?.!]+$/, '').split(/,\s*(?:and\s+)?|\s+and\s+/).map((item) => item.trim()).filter(Boolean);
+  const item = [...items].reverse().find((entry) => FIGURE_ITEM.test(entry) && entry.split(/\s+/).length <= 4);
+  if (!item || items.length < 2) return undefined;
+  const subject = query.slice(0, colon)
+    .replace(/^\s*(?:please\s+)?(?:make|build|create|give me|show)\s+(?:me\s+)?(?:a\s+)?(?:table|chart|list)\s+(?:comparing|of|for|on)\s+/i, '')
+    .replace(/^\s*compare\s+/i, '')
+    .replace(/\b(?:a|an|the)\s+/gi, '')
+    .replace(/\bfor\s+((?:19|20)\d{2})\b/i, '$1')
+    .replace(/\bside[- ]by[- ]side\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  // Income limits are set per filing status; the search asks for them that way, so the joint range comes back too.
+  const tail = /\bincome\b/i.test(item) ? ' by filing status' : '';
+  return subject.split(/\s+/).length >= 2 && subject.length <= 70 ? `${subject} ${item}${tail}` : undefined;
+}
+
 const MEMBER_ASK = /\bwhich\b[\s\S]{0,180}\b(?:have|has|had|did|does|appeared|appear)\b/i;
 
 function memberWork(query: string): string | undefined {

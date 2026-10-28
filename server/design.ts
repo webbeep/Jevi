@@ -27,9 +27,10 @@ import { isQuoteRow } from './liveQuote';
 import { BRIEF_ROWS, rejectedSources, type SourceBrief } from './brief';
 import { CHART_TALK, withoutCharts } from '../shared/tickerNotes';
 import { brandPriceProbe } from './brandPrice';
-import { diagramIntent, diagramRegionIndex, diagramSlotAt, diagramsEnabled, dropModelDiagram, layoutWithDiagram } from '../shared/diagram';
+import { diagramRegionIndex, diagramSlotAt, diagramsOn, dropModelDiagram, explicitDiagram, layoutWithDiagram } from '../shared/diagram';
 import { requestDiagram } from './diagramAsk';
 import { teamLogos } from './liveScore';
+import { askedFigureLines } from './hops';
 
 const GRAMMAR = `Each node is a JSON object with a "type" field.
 LAYOUT
@@ -99,6 +100,17 @@ function keyLinesBlock(req: DesignRequest): string {
   console.log(JSON.stringify({ zo: 'key-lines', pages: req.pages.map((p) => [p.n, p.text.length]), lines: lines.map((l) => `[${l.n}] ${l.line.slice(0, 90)}`) }));
   if (!lines.length) return '';
   return `\n\nKEY LINES (sentences from the page text that state a figure or a rule this question turns on; include each one the answer needs, with its citation)\n${lines.map(({ n, line }) => `[${n}] ${clip(line, 240)}`).join('\n')}`;
+}
+
+/**
+ * The figure the question turns on ("the fee" of a renewal, "income limits" in an IRA table), as the search snippets
+ * state it. A how-to card without the $130 fee, or a Roth table without the married-filing-jointly range, misses what
+ * was asked even when a source states it.
+ */
+function askedFigureBlock(req: DesignRequest): string {
+  const found = askedFigureLines(req.followup?.question ?? req.query, req.search.results);
+  if (!found) return '';
+  return `\n\nASKED FIGURE (the question needs the ${found.item}. These source lines state it: put the ${found.item} on the card, in the lead or the table, with its citation)\n${found.lines.map(({ n, line }) => `[${n}] ${clip(line, 260)}`).join('\n')}`;
 }
 
 function sourcesBlock(search: SearchResponse, pages: PageText[], pageChars = 2800): string {
@@ -498,8 +510,8 @@ export async function designStream(req: DesignRequest, env: Env, on: DesignEvent
   const emitNode = bindVerdict(req, on.node);
   const base = req.followup?.mode === 'refine' && req.followup.baseCard ? `CURRENT CARD\n${JSON.stringify(req.followup.baseCard).slice(0, 12000)}\n\n` : '';
   const asked = req.followup?.question ?? req.query;
-  const diagramTask = diagramsEnabled(env.ZO_DIAGRAMS) && diagramIntent(asked) ? requestDiagram(env, asked, corpusOf(req)) : Promise.resolve(undefined);
-  const user = `${sourcesBlock(req.search, req.pages)}${keyLinesBlock(req)}\n\n${base}SKELETON\n${JSON.stringify(patternSkeleton(req.pattern, asked))}\n\nTASK\n${taskBlock(req)}\n\nQUERY: ${asked}`;
+  const diagramTask = diagramsOn(env.ZO_DIAGRAMS, asked) ? requestDiagram(env, asked, corpusOf(req)) : Promise.resolve(undefined);
+  const user = `${sourcesBlock(req.search, req.pages)}${keyLinesBlock(req)}${askedFigureBlock(req)}\n\n${base}SKELETON\n${JSON.stringify(patternSkeleton(req.pattern, asked))}\n\nTASK\n${taskBlock(req)}\n\nQUERY: ${asked}`;
 
   let headSent = false;
   let index = 0;
@@ -609,9 +621,11 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
   const lead = videoLead(req);
   const query = req.followup?.question ?? req.query;
   const skeleton = patternSkeleton(req.pattern, query);
-  const diagramOn = diagramsEnabled(env.ZO_DIAGRAMS) && diagramIntent(query) !== null;
+  const diagramOn = diagramsOn(env.ZO_DIAGRAMS, query);
+  // "Visualize how a bill becomes a law": the card opens on the picture that was asked for.
+  const diagramFirst = diagramOn && explicitDiagram(query);
   const baseLayout = lead ? [lead, ...skeleton] : skeleton;
-  const regions = diagramOn ? layoutWithDiagram(baseLayout, !!lead) : baseLayout;
+  const regions = diagramOn ? layoutWithDiagram(baseLayout, !!lead, diagramFirst) : baseLayout;
   on.layout(regions);
   const sources = priceSources(req);
   const corpus = corpusOf(req);
@@ -621,7 +635,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
   pictures.useLogos(teamLogos(req.search.results));
   const emitNode = bindVerdict(req, on.node);
   const polish = new Polisher(textCap(req));
-  const shared = `${sourcesBlock(req.search, req.pages, 2800)}${keyLinesBlock(req)}\n\nTASK\n${taskBlock(req)}\n- Card regions, top to bottom:\n${skeleton.map((r, i) => `  R${i + 1}: ${regionPurpose(r)}`).join('\n')}${lead?.type === 'video' ? `\n  (Above R1 the card already plays VIDEO source [${lead.source}]; don't add another video node for it.)` : ''}\n  FINISH: header, interactive control, actions, citations, follow-ups`;
+  const shared = `${sourcesBlock(req.search, req.pages, 2800)}${keyLinesBlock(req)}${askedFigureBlock(req)}\n\nTASK\n${taskBlock(req)}\n- Card regions, top to bottom:\n${skeleton.map((r, i) => `  R${i + 1}: ${regionPurpose(r)}`).join('\n')}${lead?.type === 'video' ? `\n  (Above R1 the card already plays VIDEO source [${lead.source}]; don't add another video node for it.)` : ''}\n  FINISH: header, interactive control, actions, citations, follow-ups`;
   let contentNodes = 0;
   let removed = 0;
 
@@ -637,7 +651,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
         const node = emitReady(polish.apply(parsed.node), req.search.results.length === 0);
         if (!node || (node.type === 'video' && lead?.type === 'video' && node.source === lead.source)) return;
         contentNodes++;
-        pictures.emit(node, diagramRegionIndex(i, !!lead, diagramOn), emitNode);
+        pictures.emit(node, diagramRegionIndex(i, !!lead, diagramOn, diagramFirst), emitNode);
       } else if (parsed?.kind === 'dropped') removed++;
     }, req.followup || req.fromFollowup ? { deadlineMs: 12_000 } : {});
   };
@@ -680,13 +694,13 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
 
   if (lead) {
     contentNodes++;
-    emitNode(lead, 0);
+    emitNode(lead, diagramFirst ? 1 : 0);
   }
   const diagramTask = diagramOn
     ? requestDiagram(env, query, corpusOf(req)).then((node) => {
         if (!node) return;
         contentNodes++;
-        return pictures.emit(node, diagramSlotAt(!!lead, skeleton.length), emitNode);
+        return pictures.emit(node, diagramSlotAt(!!lead, skeleton.length, diagramFirst), emitNode);
       })
     : Promise.resolve();
   const results = await Promise.allSettled([...skeleton.map((region, i) => regionCall(region, i)), finishCall(), diagramTask]);

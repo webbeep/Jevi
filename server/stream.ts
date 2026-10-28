@@ -52,7 +52,7 @@ import { agreeOfficialRate, claimSources, groundMembers, oneNamedCharge, present
 import { answerTitle, fillPaperCard, keepAnswerBody, restoreKeptPapers, wantsNamedQuote } from './cardAgree';
 import { dropDisputedBio, type BioSource } from './bioFacts';
 import { withoutGluedPerson } from './peopleSplit';
-import { abstainComputed, alignFactProse, cardFacts, factAnswer, hasMemberWork, hopQueries, leadMemberRows, placeFactLead, unsupportedYear, withRoleDates } from './hops';
+import { abstainComputed, alignFactProse, askedFigureLines, cardFacts, factAnswer, figureHop, figureItem, hasMemberWork, hopQueries, leadMemberRows, placeFactLead, unsupportedYear, withPageText, withRoleDates } from './hops';
 import { gapQuery, onTopicCount, rescueQuery, sourcesMiss } from './rescue';
 import { keepShownComponent } from '../shared/keepShown';
 import { keepPictures, reviewCard, reviewComponents, type Review } from './review';
@@ -424,7 +424,7 @@ function pagesCanWait(req: DesignArgs): boolean {
  * fetch away, but takes longer than the writer can wait) finish while the card is written. The review reads them, so
  * the passport fee or the income limit on that page can still reach the card. Never waits more than a beat.
  */
-async function latePages(results: SearchResult[], have: readonly { n: number }[], scope: AskScope): Promise<{ n: number; url: string; text: string }[]> {
+async function latePages(results: SearchResult[], have: readonly { n: number }[], scope: AskScope, waitMs = 400): Promise<{ n: number; url: string; text: string }[]> {
   if (!scope.prefetch?.size) return [];
   const read = new Set(have.map((page) => page.n));
   const pending = results.slice(0, 12).map((row, index) => ({ row, n: index + 1 }))
@@ -432,7 +432,7 @@ async function latePages(results: SearchResult[], have: readonly { n: number }[]
     .map(({ row, n }) => ({ n, url: row.url, text: scope.prefetch!.get(normalizeUrl(row.url)) }))
     .filter((item): item is { n: number; url: string; text: Promise<string> } => !!item.text);
   if (!pending.length) return [];
-  const beat = () => new Promise<string>((resolve) => setTimeout(() => resolve(''), 400));
+  const beat = () => new Promise<string>((resolve) => setTimeout(() => resolve(''), waitMs));
   const settled = await Promise.all(pending.map(async (item) => ({ n: item.n, url: item.url, text: await Promise.race([item.text.catch(() => ''), beat()]) })));
   const got = settled.filter((page) => page.text.length >= 200);
   if (got.length) console.log(JSON.stringify({ zo: 'late-pages', n: got.map((page) => page.n) }));
@@ -872,6 +872,34 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   const separateObjects = () => {
     publishAll(unblendObjects(shown, designReq.priorBody ?? [], designReq.search.results));
   };
+  // The figure the question turns on ("the fee" of a renewal, "income limits" in an IRA table) is on the card. When a
+  // source line states it and the card shows none of its amounts, that line goes under the lead, cited.
+  const showAskedFigure = async () => {
+    const question = designReq.followup?.question ?? designReq.query;
+    if (chat || !figureItem(question)) return;
+    // Gap-search rows count too: the line naming the joint range can be one the review's search brought back. So do
+    // pages read by now, without waiting on the ones still loading.
+    const read = [...designReq.pages, ...await latePages(designReq.search.results, designReq.pages, scope, 0)];
+    const rows = withAdded().search.results;
+    // A page's own lines come after the snippets': a long page names more of the question's words in passing.
+    const snippets = askedFigureLines(question, rows);
+    const paged = read.length ? askedFigureLines(question, withPageText(rows, read)) : undefined;
+    const found = snippets || paged
+      ? { item: (snippets ?? paged)!.item, lines: [...(snippets?.lines ?? []), ...(paged?.lines ?? []).filter((line) => !snippets?.lines.some((before) => line.amounts.every((amount) => before.amounts.includes(amount))))] }
+      : undefined;
+    if (!found) return;
+    const text = JSON.stringify([...shown.values()]).replace(/(\d),(?=\d{3})/g, '$1');
+    const shows = (amount: string) => text.includes(amount.replace(/,/g, ''));
+    // Up to two lines with an amount the card does not show: the single filer's range may be there and the joint one not.
+    const missing = found.lines.filter((line) => !line.amounts.every(shows)).slice(0, 2);
+    if (!missing.length) return;
+    const leadIndex = [...shown.keys()].sort((a, b) => a - b).find((i) => !['citations', 'actions', 'ticker', 'choices', 'diagram'].includes(shown.get(i)!.type));
+    if (leadIndex === undefined) return;
+    const label = found.item.charAt(0).toUpperCase() + found.item.slice(1);
+    const note: CardNode = { type: 'callout', tone: 'default', icon: 'receipt', title: label, text: missing.map((line) => `${line.line.replace(/\s*\[\d+\]\s*$/, '').replace(/[.;,]?\s*$/, '.')} [${line.n}]`).join(' ') };
+    console.log(JSON.stringify({ zo: 'asked-figure', item: found.item, n: missing.map((line) => line.n) }));
+    publish(leadIndex, { type: 'stack', direction: 'col', gap: 'sm', children: [shown.get(leadIndex)!, note] });
+  };
   const searchGaps = async () => {
     const question = designReq.followup?.question ?? designReq.query;
     // Finished cells stay on screen. A placeholder is the wait, before those cells exist.
@@ -1098,6 +1126,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   if (!chat) await searchGaps();
   separateObjects();
   republishFees();
+  await showAskedFigure();
   send('done', { ...summary, pagesRead: pages.length, ms: Date.now() - started, ...(designReq.search.results.some(isLiveScoreRow) ? { live: true } : {}) });
   if (pendingReview && !arrived.ready) {
     const review = await pendingReview;
@@ -1111,6 +1140,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     leadTotal();
     restoreKeptProducts();
     separateObjects();
+    await showAskedFigure();
     const question = compareSides(designReq.query).length >= 2 ? designReq.query : (designReq.followup?.question ?? designReq.query);
     if (!designReq.search.results.some(isLiveScoreRow)) publishAll(placeSidePhotos(question, shown, designReq.search.images));
     republishFees();
@@ -1283,8 +1313,20 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
       const extras = extraQueries(query, x).filter((item) => !scope.bound || !foreignName(item, `${query}\n${scope.bound}`));
       return { more: withHops([...extra, ...sides, ...instant, ...extras]), freshness: freshness === 'any' ? x?.freshness ?? literalFresh : freshness };
     });
+    // The asked figure's search ("renew US passport by mail fee") runs on its own beside the main one: as a rewrite it
+    // was skipped whenever the fallback engine answered, and the card went out without the fee.
+    const figure = paper ? undefined : figureHop(query);
+    const figureSearch = figure ? searchWithLate({ q: figure, freshness: 'any', count: 8, lite: true }, env, scope).catch(() => undefined) : undefined;
     // A price ask is answered by the live quote; the rewrites only add the news around it.
     found = await searchWithLate({ q: queriesForAsk(query, []), more: withHops([...extra, ...sides, ...instant]), later, freshness: literalFresh, count: 20, waitExtras: deep && !paper, extrasCutMs: quoteAsk(query) ? QUOTE_EXTRAS_MS : extraWait, onLiteral }, env, scope);
+    const figureRows = (await figureSearch)?.response.results.slice(0, 3) ?? [];
+    if (figureRows.length) {
+      // Third to fifth: the writer sees them, and the literal search's own pages still lead.
+      const urls = new Set(figureRows.map((row) => normalizeUrl(row.url)));
+      const rest = found.response.results.filter((row) => !urls.has(normalizeUrl(row.url)));
+      console.log(JSON.stringify({ zo: 'figure-search', rows: figureRows.length }));
+      found = { ...found, response: { ...found.response, results: [...rest.slice(0, 2), ...figureRows, ...rest.slice(2)] } };
+    }
     mark(scope.ledger, 'found');
     u = await understood;
   } else {

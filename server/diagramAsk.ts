@@ -1,4 +1,4 @@
-import { acceptDiagram, diagramIntent, diagramIsLine, diagramNeedsRetry, diagramsEnabled, type DiagramCard } from '../shared/diagram';
+import { acceptDiagram, diagramIntent, diagramIsLine, diagramNeedsRetry, diagramsOn, type DiagramCard } from '../shared/diagram';
 import { llmJson } from './llm';
 import type { Env } from './util';
 
@@ -14,7 +14,7 @@ const BRANCH_NUDGE = 'That graph is one straight line of names, which does not s
  * is unavailable, or the stages are not in the sources. The rest of the card still stands.
  */
 export async function requestDiagram(env: Env, question: string, corpus: string): Promise<DiagramCard | undefined> {
-  if (!diagramsEnabled(env.ZO_DIAGRAMS)) return undefined;
+  if (!diagramsOn(env.ZO_DIAGRAMS, question)) return undefined;
   const kind = diagramIntent(question);
   if (!kind || !corpus.trim()) return undefined;
   const user = [
