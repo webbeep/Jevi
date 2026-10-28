@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { askedFigureLines } from '../server/hops.ts';
+import { askedFigureLines, figureHop, withPageText } from '../server/hops.ts';
 
 const PASSPORT = 'Step by step, how do I renew my US passport by mail?';
 const ROTH = 'Make a table comparing a Roth IRA and a traditional IRA for 2026: contribution limit, tax treatment, and income limits.';
@@ -39,4 +39,23 @@ test('a fee table the snippet broke into sentences is read as one span', () => {
     { title: 'Renew Your Passport by Mail - Travel - State Department', snippet: 'You can expect to receive these documents up to 4 weeks after your passport book ... … Pay your fees ; Passport Book · DS-82(opens in a new tab). $130 ; Passport Card · DS-82(opens in a new tab). $30 ; Passport Book and Card. DS-82( ...' },
   ]);
   assert.equal(found?.lines[0]?.line, 'Pay your fees · Passport Book · DS-82. $130 · Passport Card · DS-82. $30');
+});
+
+test('a fee stated only in the read page\'s table is found', () => {
+  const rows = withPageText([{ title: 'Renew Your Passport by Mail', snippet: 'Confirm you meet the requirements. Fill out your form online.' }], [
+    { n: 1, text: '## Pay your fees\n\n| Product | Form | Fee |\n| --- | --- | --- |\n| Passport Book | DS-82 | $130 |\n| Passport Card | DS-82 | $30 |\n| Passport Book and Card | DS-82 | $160 |' },
+  ]);
+  const found = askedFigureLines(PASSPORT, rows);
+  assert.ok(found?.lines[0]?.amounts.includes('$130'), JSON.stringify(found));
+  assert.match(found!.lines[0]!.line, /Passport Book · DS-82 · \$130/);
+});
+
+test('a how-to for paperwork asks for its fee however it is worded, and "get better" is not paperwork', () => {
+  assert.equal(figureHop('Step by step, how do I renew my US passport by mail?'), 'renew US passport by mail fee');
+  assert.equal(figureHop('Renewing my US passport by mail, what are the steps?'), 'renew US passport by mail fee');
+  assert.equal(figureHop('US passport renewal by mail step by step'), 'renew US passport by mail fee');
+  assert.equal(figureHop('Steps to renew my American passport through the mail'), 'renew American passport by mail fee');
+  assert.equal(figureHop('How do I get better at chess?'), undefined);
+  assert.equal(figureHop('Getting started with Python'), undefined);
+  assert.equal(figureHop('passport renewal requirements'), undefined);
 });

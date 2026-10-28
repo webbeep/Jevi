@@ -437,8 +437,37 @@ export function hopQueries(query: string): string[] {
   return [];
 }
 
-const PROCESS = /\bhow (?:do|can|should) i\s+(renew|apply for|get|obtain|replace|register|file for|sign up for|request|order|transfer|cancel)\s+(?:a |an |my |the |for )?(.+?)\s*[?.!]*$/i;
+const VERB = 'renew|apply for|get|obtain|replace|register|file for|sign up for|request|order|transfer|cancel';
+const GERUND: Record<string, string> = { renewing: 'renew', 'applying for': 'apply for', getting: 'get', obtaining: 'obtain', replacing: 'replace', registering: 'register', 'filing for': 'file for', requesting: 'request', transferring: 'transfer', cancelling: 'cancel', canceling: 'cancel' };
+const NOUN: Record<string, string> = { renewal: 'renew', application: 'apply for', replacement: 'replace', registration: 'register', transfer: 'transfer', cancellation: 'cancel' };
 const MODE = /\s+(by mail|online|in person|by phone)$/i;
+/** "Step by step", ", what are the steps?" and "through the mail" say how the answer is laid out, not what it is about. */
+const STEPS_TAIL = /(?:,?\s*(?:what are the steps|step[- ]by[- ]step(?: please)?|in steps|the steps|please))+\s*[?.!]*$/i;
+
+/**
+ * A how-to ask for a paperwork process: "how do I renew my US passport by mail", "steps to renew…", "renewing my US
+ * passport by mail, what are the steps?", "US passport renewal by mail step by step". The verb and what it acts on.
+ */
+function processAsk(query: string): [string, string] | undefined {
+  const found = readProcess(query);
+  // "Get" is a process only for a document: "get a Real ID", not "get better at chess".
+  return found && (found[0] !== 'get' || PAPER.test(found[1])) ? found : undefined;
+}
+
+const PAPER = /\b(?:licen[cs]e|card|passport|permit|visa|id|certificate|plates?|title|registration|green card|citizenship|transcript|records?|copy|tag|sticker|ssn|itin|ein)\b/i;
+
+function readProcess(query: string): [string, string] | undefined {
+  const text = query.replace(/\bthrough the mail\b/i, 'by mail').replace(STEPS_TAIL, '').replace(/[?.!]+$/, '').trim();
+  const object = (raw: string) => raw.replace(/^(?:a|an|my|the|for|our|your)\s+/i, '').trim();
+  const asked = text.match(new RegExp(`\\b(?:how (?:do|can|should) i|how to|steps? (?:to|for))\\s+(${VERB})\\s+(.+)$`, 'i'));
+  if (asked) return [asked[1]!.toLowerCase(), object(asked[2]!)];
+  const gerund = text.match(new RegExp(`^(?:\\w+[:,]?\\s+)?(${Object.keys(GERUND).join('|')})\\s+(.+)$`, 'i'));
+  if (gerund) return [GERUND[gerund[1]!.toLowerCase()]!, object(gerund[2]!)];
+  // A noun ask has to say it wants steps: "passport renewal requirements" is not a how-to.
+  const noun = /\bsteps?\b/i.test(query) && text.match(new RegExp(`^(?:how (?:does|do)\\s+)?(?:a |an |my |the )?(.+?)\\s+(${Object.keys(NOUN).join('|')})(\\s+(?:by mail|online|in person|by phone))?(?:\\s+work)?$`, 'i'));
+  if (noun) return [NOUN[noun[2]!.toLowerCase()]!, `${noun[1]}${noun[3] ?? ''}`];
+  return undefined;
+}
 // A price is the comparison's own check (a lineup page's "$899" is not the iPhone 17's), so it is not a figure hop.
 const FIGURE_ITEM = /\b(?:limits?|fees?|rates?|caps?|thresholds?|phase-?outs?|minimums?|maximums?)\b/i;
 
@@ -450,7 +479,7 @@ const FIGURE_ITEM = /\b(?:limits?|fees?|rates?|caps?|thresholds?|phase-?outs?|mi
  */
 /** The figure item the question needs ("fee", "income limits"), when `figureHop` would search for one. */
 export function figureItem(query: string): string | undefined {
-  if (PROCESS.test(query) && !/\b(?:fee|fees|cost|price)\b/i.test(query)) return 'fee';
+  if (processAsk(query) && !/\b(?:fee|fees|cost|price)\b/i.test(query)) return 'fee';
   const colon = query.indexOf(':');
   if (colon < 0) return undefined;
   const items = query.slice(colon + 1).replace(/[?.!]+$/, '').split(/,\s*(?:and\s+)?|\s+and\s+/).map((item) => item.trim()).filter(Boolean);
@@ -537,6 +566,25 @@ export function askedFigureLines(query: string, results: readonly { title: strin
 }
 
 /**
+ * Rows with the text of their read pages after the snippet, so a fee or a limit stated only on the page (the State
+ * Department's fee table) is read too. A markdown table reads as "Passport Book · DS-82 · $130 ; Passport Card · …".
+ */
+export function withPageText<T extends { snippet?: string }>(results: readonly T[], pages: readonly { n: number; text: string }[], maxChars = 4000): T[] {
+  return results.map((row, index) => {
+    const page = pages.find((item) => item.n === index + 1);
+    if (!page?.text) return row;
+    const text = page.text.slice(0, maxChars)
+      .replace(/\\([\\`*_{}[\]()#+\-.!$,;:|<>~])/g, '$1')
+      .replace(/^\s*\|?[\s:|-]*-{3,}[\s:|-]*$/gm, '')
+      .replace(/[#*_`>]+/g, ' ')
+      .replace(/\s*\|\s*/g, ' · ')
+      .replace(/\s*\n+\s*/g, ' ; ')
+      .replace(/(?:\s*[;·]\s*){2,}/g, ' ; ');
+    return { ...row, snippet: `${row.snippet ?? ''} … ${text}` };
+  });
+}
+
+/**
  * "$130 Passport Card ・ $30 Passport Book and Card ・ $160": a table read row by row, where each label names the amount
  * after it, as "$130 · Passport Card $30 · Passport Book and Card $160". Undefined when it is not that shape.
  */
@@ -555,12 +603,12 @@ function shiftedLabels(part: string): string | undefined {
 const FIGURE_STOP = new Set(['what', 'when', 'where', 'which', 'with', 'from', 'that', 'this', 'step', 'make', 'table', 'comparing', 'compare', 'show', 'give', 'list', 'chart', 'does', 'have', 'about', 'your', 'into', 'their', 'there']);
 
 export function figureHop(query: string): string | undefined {
-  const process = query.match(PROCESS);
+  const process = processAsk(query);
   if (process && !/\b(?:fee|fees|cost|price)\b/i.test(query)) {
-    const object = process[2]!.trim();
+    const object = process[1];
     const mode = object.match(MODE)?.[1] ?? '';
     const thing = object.replace(MODE, '').replace(/^(?:a|an|my|the)\s+/i, '');
-    return `${process[1]!.toLowerCase()} ${thing}${mode ? ` ${mode}` : ''} fee`;
+    return `${process[0]} ${thing}${mode ? ` ${mode}` : ''} fee`;
   }
   const colon = query.indexOf(':');
   if (colon < 0) return undefined;
