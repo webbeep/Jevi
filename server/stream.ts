@@ -52,7 +52,7 @@ import { agreeOfficialRate, claimSources, groundMembers, oneNamedCharge, present
 import { answerTitle, fillPaperCard, keepAnswerBody, restoreKeptPapers, wantsNamedQuote } from './cardAgree';
 import { dropDisputedBio, type BioSource } from './bioFacts';
 import { withoutGluedPerson } from './peopleSplit';
-import { abstainComputed, alignFactProse, askedFigureLines, cardFacts, factAnswer, hasMemberWork, hopQueries, leadMemberRows, placeFactLead, unsupportedYear, withRoleDates } from './hops';
+import { abstainComputed, alignFactProse, askedFigureLines, cardFacts, factAnswer, figureHop, hasMemberWork, hopQueries, leadMemberRows, placeFactLead, unsupportedYear, withRoleDates } from './hops';
 import { gapQuery, onTopicCount, rescueQuery, sourcesMiss } from './rescue';
 import { keepShownComponent } from '../shared/keepShown';
 import { keepPictures, reviewCard, reviewComponents, type Review } from './review';
@@ -876,7 +876,8 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   // source line states it and the card shows none of its amounts, that line goes under the lead, cited.
   const showAskedFigure = () => {
     if (chat) return;
-    const found = askedFigureLines(designReq.followup?.question ?? designReq.query, designReq.search.results);
+    // Gap-search rows count too: the line naming the joint range can be one the review's search brought back.
+    const found = askedFigureLines(designReq.followup?.question ?? designReq.query, withAdded().search.results);
     if (!found) return;
     const text = JSON.stringify([...shown.values()]).replace(/(\d),(?=\d{3})/g, '$1');
     const shows = (amount: string) => text.includes(amount.replace(/,/g, ''));
@@ -1303,8 +1304,20 @@ async function searchAndDesign(send: Send, env: Env, query: string, freshness: F
       const extras = extraQueries(query, x).filter((item) => !scope.bound || !foreignName(item, `${query}\n${scope.bound}`));
       return { more: withHops([...extra, ...sides, ...instant, ...extras]), freshness: freshness === 'any' ? x?.freshness ?? literalFresh : freshness };
     });
+    // The asked figure's search ("renew US passport by mail fee") runs on its own beside the main one: as a rewrite it
+    // was skipped whenever the fallback engine answered, and the card went out without the fee.
+    const figure = paper ? undefined : figureHop(query);
+    const figureSearch = figure ? searchWithLate({ q: figure, freshness: 'any', count: 8, lite: true }, env, scope).catch(() => undefined) : undefined;
     // A price ask is answered by the live quote; the rewrites only add the news around it.
     found = await searchWithLate({ q: queriesForAsk(query, []), more: withHops([...extra, ...sides, ...instant]), later, freshness: literalFresh, count: 20, waitExtras: deep && !paper, extrasCutMs: quoteAsk(query) ? QUOTE_EXTRAS_MS : extraWait, onLiteral }, env, scope);
+    const figureRows = (await figureSearch)?.response.results.slice(0, 3) ?? [];
+    if (figureRows.length) {
+      // Third to fifth: the writer sees them, and the literal search's own pages still lead.
+      const urls = new Set(figureRows.map((row) => normalizeUrl(row.url)));
+      const rest = found.response.results.filter((row) => !urls.has(normalizeUrl(row.url)));
+      console.log(JSON.stringify({ zo: 'figure-search', rows: figureRows.length }));
+      found = { ...found, response: { ...found.response, results: [...rest.slice(0, 2), ...figureRows, ...rest.slice(2)] } };
+    }
     mark(scope.ledger, 'found');
     u = await understood;
   } else {

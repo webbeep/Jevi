@@ -434,8 +434,7 @@ export function hopQueries(query: string): string[] {
   const act = memberAct(query);
   const work = memberWork(query);
   if (act && work && MEMBER_ASK.test(query)) return [`${work} ${act} appearances`];
-  const figure = figureHop(query);
-  return figure ? [figure] : [];
+  return [];
 }
 
 const PROCESS = /\bhow (?:do|can|should) i\s+(renew|apply for|get|obtain|replace|register|file for|sign up for|request|order|transfer|cancel)\s+(?:a |an |my |the |for )?(.+?)\s*[?.!]*$/i;
@@ -469,25 +468,61 @@ export function askedFigureLines(query: string, results: readonly { title: strin
   const stem = item.toLowerCase().split(/\s+/).map((word) => word.replace(/(?:es|s)$/, '').slice(0, 5)).filter((word) => word.length >= 3);
   const subject = [...new Set(query.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 4 && !FIGURE_STOP.has(word) && !stem.some((part) => word.startsWith(part))).map((word) => word.slice(0, 5)))];
   const money = /[$€£]\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?(?!\d)/g;
+  const names = (text: string) => text.includes(stem[0]!) || (stem[0] === 'incom' && /\b(?:magi|agi)\b/.test(text));
   const year = query.match(/\b(?:19|20)\d{2}\b/)?.[0];
   const lines: { n: number; line: string; amounts: string[]; named: number }[] = [];
-  results.slice(0, 20).forEach((row, index) => {
-    for (const part of `${row.title}. ${row.snippet ?? ''}`.split(/(?<=[.!?])\s+|\s+[·•|…]\s+|\s+\.\.\.\s*/)) {
+  results.slice(0, 30).forEach((row, index) => {
+    const parts = [row.title, ...(row.snippet ?? '').split(/(?<=[.!?])\s+|\s+[·•|…]\s+|\s+\.\.\.\s*/)];
+    parts.forEach((raw, at) => {
+      // "…a $35 facility fee." starts mid-sentence: the "will not charge you" before it is cut off.
+      if (/^[a-z]/.test(raw)) return;
+      const before = at > 1 ? parts[at - 1]! : '';
+      // "Your fee depends on what you are renewing. $130 Passport Card ・ $30 …": the table lost its first label.
+      const shifted = !names(raw.toLowerCase()) && names(before.toLowerCase()) && before.length <= 140 ? shiftedLabels(raw) : undefined;
+      const part = shifted ? (money.test(before) ? shifted : `${before.replace(/^[\s…·•|.]+/, "").trim()} ${shifted}`) : raw.replace(/^[\s…·•|.]+/, '');
+      money.lastIndex = 0;
       const low = part.toLowerCase();
       const amounts = [...new Set((part.match(money) ?? []).map((amount) => amount.replace(/\s/g, '')))];
-      // "Income limits" is about income: a "contribution limit" line is the other row.
-      if (part.length < 12 || part.length > 320 || !amounts.length || !low.includes(stem[0]!)) continue;
-      if (/\b(?:should not|shouldn't|do not|don't|never|no longer|not charge)\b/i.test(part)) continue;
+      if (part.length < 12 || part.length > 320 || !amounts.length) return;
+      if (/\b(?:should not|shouldn't|do not|don't|never|no longer|not charge)\b/i.test(part)) return;
+      // "Income limits" is about income: a "contribution limit" line is the other row. MAGI is the income those limits
+      // are set on, and "What are the income limits…?" heads the sentence that answers it.
+      const own = names(low) || (/\?\s*$/.test(before) && names(before.toLowerCase()));
+      // "Passport book: $130 Passport card: $30": a labeled price list for the asked thing names its own figures.
+      const listed = (part.match(/[a-z)]\s*:\s*[$€£]\s?\d/gi) ?? []).length >= 2;
+      if (!own && !listed) return;
       const words = low.split(/[^a-z0-9]+/);
-      const named = subject.filter((word) => words.some((token) => token.startsWith(word))).length;
-      if (!named) continue;
+      const named = subject.filter((word) => words.some((token) => token.startsWith(word))).length + (own || listed ? 1 : 0);
+      if (!named) return;
       // Asked for 2026: a line that also quotes 2025's range goes after one that does not.
       const stale = year && (part.match(/\b(?:19|20)\d{2}\b/g) ?? []).some((other) => other !== year) ? 1 : 0;
-      lines.push({ n: index + 1, line: part.trim(), amounts, named: named - stale });
-    }
+      // "…less than $153,000 to contribute fully and married couples ...": the snippet's cut-off tail goes.
+      const line = /[.!?]\s*$/.test(part) ? part.trim() : part.trim().replace(/,?\s+(?:and|or|but)\s+[a-z][a-z\s]{0,30}$/i, '');
+      lines.push({ n: index + 1, line, amounts, named: named - stale });
+    });
   });
-  const best = lines.sort((a, b) => b.named - a.named || b.amounts.length - a.amounts.length || a.n - b.n).slice(0, 4);
+  // A later line quoting only amounts an earlier one already gives adds nothing.
+  const best = lines
+    .sort((a, b) => b.named - a.named || b.amounts.length - a.amounts.length || a.n - b.n)
+    .filter((line, i, all) => !all.slice(0, i).some((before) => line.amounts.every((amount) => before.amounts.includes(amount))))
+    .slice(0, 4);
   return best.length ? { item, lines: best.map(({ n, line, amounts }) => ({ n, line, amounts })) } : undefined;
+}
+
+/**
+ * "$130 Passport Card ・ $30 Passport Book and Card ・ $160": a table read row by row, where each label names the amount
+ * after it, as "$130 · Passport Card $30 · Passport Book and Card $160". Undefined when it is not that shape.
+ */
+function shiftedLabels(part: string): string | undefined {
+  const pieces = part.split(/([$€£]\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?)(?!\d)/);
+  if (pieces.length < 7 || !/^\W*(?:[A-Z]{2}-\d+)?\W*$/.test(pieces[0]!)) return undefined;
+  const out = [pieces[1]!];
+  for (let i = 2; i + 1 < pieces.length; i += 2) {
+    const name = pieces[i]!.replace(/[・·•|…]/g, ' ').replace(/\b[A-Z]{2}-\d+\b/g, '').replace(/\s+/g, ' ').trim();
+    if (!/^[A-Z][\w&' -]{2,40}$/.test(name)) return undefined;
+    out.push(`${name} ${pieces[i + 1]}`);
+  }
+  return out.join(' · ');
 }
 
 const FIGURE_STOP = new Set(['what', 'when', 'where', 'which', 'with', 'from', 'that', 'this', 'step', 'make', 'table', 'comparing', 'compare', 'show', 'give', 'list', 'chart', 'does', 'have', 'about', 'your', 'into', 'their', 'there']);
