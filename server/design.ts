@@ -27,7 +27,7 @@ import { isQuoteRow } from './liveQuote';
 import { BRIEF_ROWS, rejectedSources, type SourceBrief } from './brief';
 import { CHART_TALK, withoutCharts } from '../shared/tickerNotes';
 import { brandPriceProbe } from './brandPrice';
-import { diagramIntent, diagramRegionIndex, diagramSlotAt, diagramsEnabled, dropModelDiagram, layoutWithDiagram } from '../shared/diagram';
+import { diagramRegionIndex, diagramSlotAt, diagramsOn, dropModelDiagram, explicitDiagram, layoutWithDiagram } from '../shared/diagram';
 import { requestDiagram } from './diagramAsk';
 import { teamLogos } from './liveScore';
 
@@ -498,7 +498,7 @@ export async function designStream(req: DesignRequest, env: Env, on: DesignEvent
   const emitNode = bindVerdict(req, on.node);
   const base = req.followup?.mode === 'refine' && req.followup.baseCard ? `CURRENT CARD\n${JSON.stringify(req.followup.baseCard).slice(0, 12000)}\n\n` : '';
   const asked = req.followup?.question ?? req.query;
-  const diagramTask = diagramsEnabled(env.ZO_DIAGRAMS) && diagramIntent(asked) ? requestDiagram(env, asked, corpusOf(req)) : Promise.resolve(undefined);
+  const diagramTask = diagramsOn(env.ZO_DIAGRAMS, asked) ? requestDiagram(env, asked, corpusOf(req)) : Promise.resolve(undefined);
   const user = `${sourcesBlock(req.search, req.pages)}${keyLinesBlock(req)}\n\n${base}SKELETON\n${JSON.stringify(patternSkeleton(req.pattern, asked))}\n\nTASK\n${taskBlock(req)}\n\nQUERY: ${asked}`;
 
   let headSent = false;
@@ -609,9 +609,11 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
   const lead = videoLead(req);
   const query = req.followup?.question ?? req.query;
   const skeleton = patternSkeleton(req.pattern, query);
-  const diagramOn = diagramsEnabled(env.ZO_DIAGRAMS) && diagramIntent(query) !== null;
+  const diagramOn = diagramsOn(env.ZO_DIAGRAMS, query);
+  // "Visualize how a bill becomes a law": the card opens on the picture that was asked for.
+  const diagramFirst = diagramOn && explicitDiagram(query);
   const baseLayout = lead ? [lead, ...skeleton] : skeleton;
-  const regions = diagramOn ? layoutWithDiagram(baseLayout, !!lead) : baseLayout;
+  const regions = diagramOn ? layoutWithDiagram(baseLayout, !!lead, diagramFirst) : baseLayout;
   on.layout(regions);
   const sources = priceSources(req);
   const corpus = corpusOf(req);
@@ -637,7 +639,7 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
         const node = emitReady(polish.apply(parsed.node), req.search.results.length === 0);
         if (!node || (node.type === 'video' && lead?.type === 'video' && node.source === lead.source)) return;
         contentNodes++;
-        pictures.emit(node, diagramRegionIndex(i, !!lead, diagramOn), emitNode);
+        pictures.emit(node, diagramRegionIndex(i, !!lead, diagramOn, diagramFirst), emitNode);
       } else if (parsed?.kind === 'dropped') removed++;
     }, req.followup || req.fromFollowup ? { deadlineMs: 12_000 } : {});
   };
@@ -680,13 +682,13 @@ export async function designParallel(req: DesignRequest, env: Env, on: DesignEve
 
   if (lead) {
     contentNodes++;
-    emitNode(lead, 0);
+    emitNode(lead, diagramFirst ? 1 : 0);
   }
   const diagramTask = diagramOn
     ? requestDiagram(env, query, corpusOf(req)).then((node) => {
         if (!node) return;
         contentNodes++;
-        return pictures.emit(node, diagramSlotAt(!!lead, skeleton.length), emitNode);
+        return pictures.emit(node, diagramSlotAt(!!lead, skeleton.length, diagramFirst), emitNode);
       })
     : Promise.resolve();
   const results = await Promise.allSettled([...skeleton.map((region, i) => regionCall(region, i)), finishCall(), diagramTask]);

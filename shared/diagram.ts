@@ -48,24 +48,40 @@ export function diagramIntent(question: string): DiagramKind | null {
   return 'concept';
 }
 
-/** Where the diagram hole sits: after the opening answer, and after a lead video when there is one. */
-export function diagramSlotAt(hasLead: boolean, skeletonCount: number): number {
+/**
+ * The person asked for the picture itself ("Visualize how a bill becomes a law", "diagram of", "flowchart"). That
+ * diagram is drawn whatever ZO_DIAGRAMS says, and the card opens on it. "Explain how" and "how X works" stay behind
+ * the flag.
+ */
+export function explicitDiagram(question: string): boolean {
+  return /\b(?:visuali[sz]e|diagram|flowchart|flow chart|schematic)\b/i.test(question) && diagramIntent(question) !== null;
+}
+
+/** A diagram is drawn for this question: the flag is on and it is a diagram question, or it asks for one outright. */
+export function diagramsOn(flag: string | undefined, question: string): boolean {
+  return explicitDiagram(question) || (diagramsEnabled(flag) && diagramIntent(question) !== null);
+}
+
+/** Where the diagram hole sits: first when it was asked for, else after the opening answer (and a lead video). */
+export function diagramSlotAt(hasLead: boolean, skeletonCount: number, first = false): number {
+  if (first) return 0;
   if (skeletonCount <= 0) return hasLead ? 1 : 0;
   return hasLead ? 2 : 1;
 }
 
 /** Index of skeleton region `i` once the diagram hole is open. */
-export function diagramRegionIndex(i: number, hasLead: boolean, diagramOn: boolean): number {
+export function diagramRegionIndex(i: number, hasLead: boolean, diagramOn: boolean, first = false): number {
   const base = (hasLead ? 1 : 0) + i;
   if (!diagramOn) return base;
-  const slot = diagramSlotAt(hasLead, 1);
+  const slot = diagramSlotAt(hasLead, 1, first);
   return base >= slot ? base + 1 : base;
 }
 
 const SLOT: CardNode = { type: 'slot', hint: 'How it fits together', shape: 'block' };
 
-/** Layout placeholders with a diagram hole after the opening answer. */
-export function layoutWithDiagram(regions: CardNode[], hasLead: boolean): CardNode[] {
+/** Layout placeholders with a diagram hole after the opening answer, or on top when it was asked for. */
+export function layoutWithDiagram(regions: CardNode[], hasLead: boolean, first = false): CardNode[] {
+  if (first) return [SLOT, ...regions];
   const cut = hasLead ? Math.min(regions.length, 2) : Math.min(regions.length, 1);
   return [...regions.slice(0, cut), SLOT, ...regions.slice(cut)];
 }
