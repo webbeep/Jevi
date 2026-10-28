@@ -174,8 +174,9 @@ export function moreQueries(literal: string, extras: string[], limit = 2): strin
  */
 export function extraSearchRoom(route: 'quick' | 'deep', hops: number, workplace = 0, compares = 0): number {
   const base = Math.max(route === 'deep' ? 2 : 1, Math.min(hops, 2), Math.min(workplace, 2));
-  // A comparison searches each product, not only the first extra slot.
-  return Math.min(4, Math.max(base, Math.min(compares, 4)));
+  // A comparison searches each product, not only the first extra slot. A figure hop beside it ("… income limits") takes
+  // one more slot instead of a product's.
+  return Math.min(4, Math.max(base, Math.min(compares, 4) + (compares >= 2 ? Math.min(hops, 1) : 0)));
 }
 
 /** One line per ask. No keys, headers, query text, or URLs. `served` is the engine name only. */

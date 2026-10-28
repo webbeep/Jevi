@@ -52,7 +52,7 @@ import { agreeOfficialRate, claimSources, groundMembers, oneNamedCharge, present
 import { answerTitle, fillPaperCard, keepAnswerBody, restoreKeptPapers, wantsNamedQuote } from './cardAgree';
 import { dropDisputedBio, type BioSource } from './bioFacts';
 import { withoutGluedPerson } from './peopleSplit';
-import { abstainComputed, alignFactProse, cardFacts, factAnswer, hasMemberWork, hopQueries, leadMemberRows, placeFactLead, unsupportedYear, withRoleDates } from './hops';
+import { abstainComputed, alignFactProse, askedFigureLines, cardFacts, factAnswer, hasMemberWork, hopQueries, leadMemberRows, placeFactLead, unsupportedYear, withRoleDates } from './hops';
 import { gapQuery, onTopicCount, rescueQuery, sourcesMiss } from './rescue';
 import { keepShownComponent } from '../shared/keepShown';
 import { keepPictures, reviewCard, reviewComponents, type Review } from './review';
@@ -872,6 +872,24 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   const separateObjects = () => {
     publishAll(unblendObjects(shown, designReq.priorBody ?? [], designReq.search.results));
   };
+  // The figure the question turns on ("the fee" of a renewal, "income limits" in an IRA table) is on the card. When a
+  // source line states it and the card shows none of its amounts, that line goes under the lead, cited.
+  const showAskedFigure = () => {
+    if (chat) return;
+    const found = askedFigureLines(designReq.followup?.question ?? designReq.query, designReq.search.results);
+    if (!found) return;
+    const text = JSON.stringify([...shown.values()]).replace(/(\d),(?=\d{3})/g, '$1');
+    const shows = (amount: string) => text.includes(amount.replace(/,/g, ''));
+    // Up to two lines with an amount the card does not show: the single filer's range may be there and the joint one not.
+    const missing = found.lines.filter((line) => !line.amounts.every(shows)).slice(0, 2);
+    if (!missing.length) return;
+    const leadIndex = [...shown.keys()].sort((a, b) => a - b).find((i) => !['citations', 'actions', 'ticker', 'choices', 'diagram'].includes(shown.get(i)!.type));
+    if (leadIndex === undefined) return;
+    const label = found.item.charAt(0).toUpperCase() + found.item.slice(1);
+    const note: CardNode = { type: 'callout', tone: 'default', icon: 'receipt', title: label, text: missing.map((line) => `${line.line.replace(/\s*\[\d+\]\s*$/, '').replace(/[.;,]?\s*$/, '.')} [${line.n}]`).join(' ') };
+    console.log(JSON.stringify({ zo: 'asked-figure', item: found.item, n: missing.map((line) => line.n) }));
+    publish(leadIndex, { type: 'stack', direction: 'col', gap: 'sm', children: [shown.get(leadIndex)!, note] });
+  };
   const searchGaps = async () => {
     const question = designReq.followup?.question ?? designReq.query;
     // Finished cells stay on screen. A placeholder is the wait, before those cells exist.
@@ -1098,6 +1116,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   if (!chat) await searchGaps();
   separateObjects();
   republishFees();
+  showAskedFigure();
   send('done', { ...summary, pagesRead: pages.length, ms: Date.now() - started, ...(designReq.search.results.some(isLiveScoreRow) ? { live: true } : {}) });
   if (pendingReview && !arrived.ready) {
     const review = await pendingReview;
@@ -1111,6 +1130,7 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     leadTotal();
     restoreKeptProducts();
     separateObjects();
+    showAskedFigure();
     const question = compareSides(designReq.query).length >= 2 ? designReq.query : (designReq.followup?.question ?? designReq.query);
     if (!designReq.search.results.some(isLiveScoreRow)) publishAll(placeSidePhotos(question, shown, designReq.search.images));
     republishFees();

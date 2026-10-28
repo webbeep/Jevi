@@ -361,10 +361,14 @@ function attributedPrice(side: string, value: string, search: SearchResponse, si
   // An amount no source has at all is the card-wide check's to drop; this one moves a price that a page gives for
   // something else (another model on a lineup page) back to the product's own.
   if (!amount || offerName(value) || !sourcesState(amount, search) || statedForSide(side, amount, search, sides)) return value;
-  return cited([statedPrice(side, search, blocked), sharedPrice(side, search, sides)], side, search, sides);
+  return cited([statedPrice(side, search, blocked), sharedPrice(side, search, sides), statedPrice(side, search, [])], side, search, sides);
 }
 
-/** The first candidate a page states for this side, with that page's citation ("$799 [13]"). */
+/**
+ * The first candidate a page states for this side, with that page's citation ("$799 [13]"). The last candidate may be
+ * the other side's amount ("The iPhone 17 starts at the same $799 price"): it stands only because `statedSource`
+ * finds a sentence naming this side, and no other compared one, with it.
+ */
 function cited(candidates: (string | undefined)[], side: string, search: SearchResponse, sides: readonly string[]): string | undefined {
   for (const price of candidates) {
     const n = price ? statedSource(side, price, search, sides) : undefined;
@@ -634,7 +638,7 @@ function groundCompareNode(node: CardNode, sides: string[], search: SearchRespon
       // Only a price row's cell is a price to repair: "tax-free growth" or "MAGI under $153,000" is not a deal.
       if (priceRow(row[0] ?? '')) {
         const blocked = [...shown.entries()].filter(([name]) => name !== side).map(([, price]) => price);
-        const found = cited([statedPrice(side, search, blocked), sharedPrice(side, search, sides)], side, search, sides);
+        const found = cited([statedPrice(side, search, blocked), sharedPrice(side, search, sides), statedPrice(side, search, [])], side, search, sides);
         if (found) return found;
         return BLANK_CELL.test(cell) || NOT_STATED.test(cell) ? cell : '';
       }

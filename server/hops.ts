@@ -434,7 +434,88 @@ export function hopQueries(query: string): string[] {
   const act = memberAct(query);
   const work = memberWork(query);
   if (act && work && MEMBER_ASK.test(query)) return [`${work} ${act} appearances`];
-  return [];
+  const figure = figureHop(query);
+  return figure ? [figure] : [];
+}
+
+const PROCESS = /\bhow (?:do|can|should) i\s+(renew|apply for|get|obtain|replace|register|file for|sign up for|request|order|transfer|cancel)\s+(?:a |an |my |the |for )?(.+?)\s*[?.!]*$/i;
+const MODE = /\s+(by mail|online|in person|by phone)$/i;
+// A price is the comparison's own check (a lineup page's "$899" is not the iPhone 17's), so it is not a figure hop.
+const FIGURE_ITEM = /\b(?:limits?|fees?|rates?|caps?|thresholds?|phase-?outs?|minimums?|maximums?)\b/i;
+
+/**
+ * The figure a complete answer needs and the first search rarely brings: the fee of a process ("How do I renew my
+ * US passport by mail?" → "renew US passport by mail fee": travel.state.gov's "$130" is on that search's snippet, not on
+ * the how-to's), or the last figure item a question lists after a colon ("…: contribution limit, tax treatment, and
+ * income limits" → "Roth IRA and traditional IRA 2026 income limits", where the married-filing-jointly range is).
+ */
+/** The figure item the question needs ("fee", "income limits"), when `figureHop` would search for one. */
+export function figureItem(query: string): string | undefined {
+  if (PROCESS.test(query) && !/\b(?:fee|fees|cost|price)\b/i.test(query)) return 'fee';
+  const colon = query.indexOf(':');
+  if (colon < 0) return undefined;
+  const items = query.slice(colon + 1).replace(/[?.!]+$/, '').split(/,\s*(?:and\s+)?|\s+and\s+/).map((item) => item.trim()).filter(Boolean);
+  return items.length >= 2 ? [...items].reverse().find((entry) => FIGURE_ITEM.test(entry) && entry.split(/\s+/).length <= 4) : undefined;
+}
+
+/**
+ * Snippet lines in the first 20 results that state the asked figure (a "fee", "income limits"): the line has to name
+ * the question's subject too ("passport", "Roth"), so "a $60 expedite fee" or "should not charge you a $35 facility
+ * fee" is not the renewal fee. Lines naming more of the subject, then more amounts, come first.
+ */
+export function askedFigureLines(query: string, results: readonly { title: string; snippet?: string }[]): { item: string; lines: { n: number; line: string; amounts: string[] }[] } | undefined {
+  const item = figureItem(query);
+  if (!item) return undefined;
+  const stem = item.toLowerCase().split(/\s+/).map((word) => word.replace(/(?:es|s)$/, '').slice(0, 5)).filter((word) => word.length >= 3);
+  const subject = [...new Set(query.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 4 && !FIGURE_STOP.has(word) && !stem.some((part) => word.startsWith(part))).map((word) => word.slice(0, 5)))];
+  const money = /[$€£]\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?(?!\d)/g;
+  const year = query.match(/\b(?:19|20)\d{2}\b/)?.[0];
+  const lines: { n: number; line: string; amounts: string[]; named: number }[] = [];
+  results.slice(0, 20).forEach((row, index) => {
+    for (const part of `${row.title}. ${row.snippet ?? ''}`.split(/(?<=[.!?])\s+|\s+[·•|…]\s+|\s+\.\.\.\s*/)) {
+      const low = part.toLowerCase();
+      const amounts = [...new Set((part.match(money) ?? []).map((amount) => amount.replace(/\s/g, '')))];
+      // "Income limits" is about income: a "contribution limit" line is the other row.
+      if (part.length < 12 || part.length > 320 || !amounts.length || !low.includes(stem[0]!)) continue;
+      if (/\b(?:should not|shouldn't|do not|don't|never|no longer|not charge)\b/i.test(part)) continue;
+      const words = low.split(/[^a-z0-9]+/);
+      const named = subject.filter((word) => words.some((token) => token.startsWith(word))).length;
+      if (!named) continue;
+      // Asked for 2026: a line that also quotes 2025's range goes after one that does not.
+      const stale = year && (part.match(/\b(?:19|20)\d{2}\b/g) ?? []).some((other) => other !== year) ? 1 : 0;
+      lines.push({ n: index + 1, line: part.trim(), amounts, named: named - stale });
+    }
+  });
+  const best = lines.sort((a, b) => b.named - a.named || b.amounts.length - a.amounts.length || a.n - b.n).slice(0, 4);
+  return best.length ? { item, lines: best.map(({ n, line, amounts }) => ({ n, line, amounts })) } : undefined;
+}
+
+const FIGURE_STOP = new Set(['what', 'when', 'where', 'which', 'with', 'from', 'that', 'this', 'step', 'make', 'table', 'comparing', 'compare', 'show', 'give', 'list', 'chart', 'does', 'have', 'about', 'your', 'into', 'their', 'there']);
+
+export function figureHop(query: string): string | undefined {
+  const process = query.match(PROCESS);
+  if (process && !/\b(?:fee|fees|cost|price)\b/i.test(query)) {
+    const object = process[2]!.trim();
+    const mode = object.match(MODE)?.[1] ?? '';
+    const thing = object.replace(MODE, '').replace(/^(?:a|an|my|the)\s+/i, '');
+    return `${process[1]!.toLowerCase()} ${thing}${mode ? ` ${mode}` : ''} fee`;
+  }
+  const colon = query.indexOf(':');
+  if (colon < 0) return undefined;
+  const items = query.slice(colon + 1).replace(/[?.!]+$/, '').split(/,\s*(?:and\s+)?|\s+and\s+/).map((item) => item.trim()).filter(Boolean);
+  const item = [...items].reverse().find((entry) => FIGURE_ITEM.test(entry) && entry.split(/\s+/).length <= 4);
+  if (!item || items.length < 2) return undefined;
+  const subject = query.slice(0, colon)
+    .replace(/^\s*(?:please\s+)?(?:make|build|create|give me|show)\s+(?:me\s+)?(?:a\s+)?(?:table|chart|list)\s+(?:comparing|of|for|on)\s+/i, '')
+    .replace(/^\s*compare\s+/i, '')
+    .replace(/\b(?:a|an|the)\s+/gi, '')
+    .replace(/\bfor\s+((?:19|20)\d{2})\b/i, '$1')
+    .replace(/\bside[- ]by[- ]side\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  // Income limits are set per filing status; the search asks for them that way, so the joint range comes back too.
+  const tail = /\bincome\b/i.test(item) ? ' by filing status' : '';
+  return subject.split(/\s+/).length >= 2 && subject.length <= 70 ? `${subject} ${item}${tail}` : undefined;
 }
 
 const MEMBER_ASK = /\bwhich\b[\s\S]{0,180}\b(?:have|has|had|did|does|appeared|appear)\b/i;
