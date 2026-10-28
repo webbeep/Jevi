@@ -552,6 +552,9 @@ export function askedFigureLines(query: string, results: readonly { title: strin
       if (!named) return;
       // Asked for 2026: a line that also quotes 2025's range goes after one that does not.
       const stale = year && (part.match(/\b(?:19|20)\d{2}\b/g) ?? []).some((other) => other !== year) ? 1 : 0;
+      // "…should only charge you a $35 fee if you are": cut off inside the condition, so who pays it is lost.
+      const finished = /[.!?]\s*$/.test(part);
+      if (!finished && /\b(?:if|unless|when|only)\b[^$€£]*$/i.test(part.slice(part.search(/[$€£]\s?\d[^$€£]*$/)))) return;
       // "…less than $153,000 to contribute fully and married couples ...": the snippet's cut-off tail goes.
       const line = /[.!?]\s*$/.test(part) ? part.trim() : part.trim().replace(/,?\s+(?:and|or|but)\s+[a-z][a-z\s]{0,30}$/i, '');
       lines.push({ n: index + 1, line, amounts, named: named - stale });
@@ -590,7 +593,9 @@ export function withPageText<T extends { snippet?: string }>(results: readonly T
  */
 function shiftedLabels(part: string): string | undefined {
   const pieces = part.split(/([$€£]\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?)(?!\d)/);
-  if (pieces.length < 7 || !/^\W*(?:[A-Z]{2}-\d+)?\W*$/.test(pieces[0]!)) return undefined;
+  if (pieces.length < 3 || !/^\W*(?:[A-Z]{2}-\d+)?\W*$/.test(pieces[0]!)) return undefined;
+  // "$130 Passport Card": cut after the first amount, whose label was lost; the label left labels the next one.
+  if (pieces.length === 3) return /^\s+[A-Z][\w&' -]{2,40}$/.test(pieces[2]!) ? pieces[1] : undefined;
   const out = [pieces[1]!];
   for (let i = 2; i + 1 < pieces.length; i += 2) {
     const name = pieces[i]!.replace(/[・·•|…]/g, ' ').replace(/\b[A-Z]{2}-\d+\b/g, '').replace(/\s+/g, ' ').trim();
