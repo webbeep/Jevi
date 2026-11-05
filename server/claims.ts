@@ -92,6 +92,52 @@ function significant(text: string): string[] {
   return numberTokens(quantities).filter((num) => Number(num) > FREE);
 }
 
+const TIME_UNITS: readonly (readonly [string, string])[] = [
+  ['s', 'sec(?:ond)?s?'],
+  ['m', 'min(?:ute)?s?'],
+  ['h', 'h(?:ou)?rs?|h'],
+  ['d', 'days?'],
+  ['w', 'w(?:ee)?ks?'],
+];
+const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty', 'thirty', 'forty', 'forty-five', 'sixty', 'ninety'];
+const WORD_VALUE: Record<string, number> = Object.fromEntries(NUMBER_WORDS.map((word, i) => [word, i <= 20 ? i : { thirty: 30, forty: 40, 'forty-five': 45, sixty: 60, ninety: 90 }[word]!]));
+const ANY_UNIT = TIME_UNITS.map(([, unit]) => unit).join('|');
+const DURATION = new RegExp(String.raw`(?<![\d.,])(\d+(?:\.\d+)?)(?:\s*(?:-|–|to)\s*(\d+(?:\.\d+)?))?\s*-?\s*(${ANY_UNIT})\b`, 'gi');
+
+/** "2 min", "10–15 minutes", "1.5 h": each time on a card, as its numbers and the kind of unit. */
+function durations(text: string): { nums: string[]; family: string }[] {
+  return [...text.matchAll(DURATION)].map((match) => ({
+    nums: [match[1]!, ...(match[2] ? [match[2]] : [])],
+    family: TIME_UNITS.find(([, unit]) => new RegExp(`^(?:${unit})$`, 'i').test(match[3]!))![0],
+  }));
+}
+
+/** The page states this time: the same number, in digits or words, with a unit of the same kind ("two minutes"). */
+function statesDuration(source: ClaimSource, time: { nums: string[]; family: string }): boolean {
+  const unit = TIME_UNITS.find(([family]) => family === time.family)![1];
+  const text = `${source.stated ?? ''} ${source.text}`;
+  return time.nums.every((num) => {
+    const words = Object.entries(WORD_VALUE).filter(([, value]) => String(value) === num).map(([word]) => word);
+    const said = [num.replace('.', '\\.'), ...words].join('|');
+    return new RegExp(String.raw`(?<![\d.,])(?:${said})(?:\s*(?:-|–|to|or)\s*(?:\d+|[a-z]+))?\s*-?\s*(?:${unit})\b`, 'i').test(text);
+  });
+}
+
+const VIDEO_HOST = /(?:^|\.)(?:youtube\.com|youtu\.be|vimeo\.com|tiktok\.com)$/i;
+
+/**
+ * A time on the card ("2 min" to fix a flat) is shown only when a page states it. The cited page first, then any
+ * page that is not a video title. Small numbers are never checked as figures, so a time gets its own check.
+ */
+function sourcedTime(value: string, cited: number | undefined, sources: readonly ClaimSource[]): { ok: boolean; source?: number } {
+  const times = durations(value);
+  if (!times.length) return { ok: true, source: cited };
+  const states = (source: ClaimSource | undefined) => !!source && times.every((time) => statesDuration(source, time));
+  if (cited && states(byNumber(sources, cited))) return { ok: true, source: cited };
+  const other = sources.find((source) => !VIDEO_HOST.test(source.domain ?? '') && states(source));
+  return other ? { ok: true, source: other.n } : { ok: false };
+}
+
 function has(source: ClaimSource | undefined, num: string): boolean {
   return !!source && numberTokens(source.text).includes(num);
 }
@@ -157,7 +203,8 @@ function withoutForeignAgency(label: string, source: ClaimSource | undefined): s
   if (!source?.domain) return label;
   let out = label;
   for (const token of agencyTokens(label)) {
-    if (hostHasAgency(source, token)) continue;
+    // "WF-1000XM5", "CB-2000": letters joined to a number by a hyphen are a model code, not an agency and its year.
+    if (hostHasAgency(source, token) || new RegExp(`\\b${token}-\\d`).test(label)) continue;
     const named = new RegExp(`\\b${token}\\b(?:'s)?\\s*[,:—–-]?\\s*(?:\\d{4}|survey|report|estimate|study|studies|data|figures?)`, 'i');
     const clause = new RegExp(`\\b(?:according to|per|from|cited by)\\s+(?:the\\s+)?(?:[A-Za-z]+\\s+){0,3}${token}(?:'s)?(?:\\s+(?:latest|recent|annual|new|current))?(?:\\s+(?:estimate|survey|report|study|studies|data|figures?))?`, 'i');
     const exact = new RegExp(`^${token}$`, 'i').test(label.trim());
@@ -308,24 +355,36 @@ export function retargetCites(text: string, sources: readonly ClaimSource[], que
   }).join(' ');
 }
 
-export function priceFor(name: string, sources: readonly ClaimSource[], ceilings: readonly number[] = []): { price: string; n: number } | undefined {
-  const head = (name.split(/[(\[]/)[0] ?? name);
+/** "1. Breville Bambino Plus — easy to use [6]" names "Breville Bambino Plus". */
+function productName(text: string): string {
+  return text.replace(/^\s*#?\d+[.)]\s*/, '').split(/\s+[—–-]\s+|:\s|,\s|\s*[(\[]|\s+for\s+/)[0] ?? text;
+}
+
+export function priceFor(name: string, sources: readonly ClaimSource[], ceilings: readonly number[] = [], asked = ''): { price: string; n: number } | undefined {
+  const head = productName(name);
+  // A word of the question is the category ("HDMI" in "best HDMI cable"): a page can name the product without it.
+  const category = new Set(asked.toLowerCase().split(/[^a-z0-9]+/));
   const words = head.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 3 && !PRICE_STOP.has(word) && !PRICE_GENERIC.has(word));
-  if (!words.length) return undefined;
-  // The longest token is the one a page uses to name this product. A missing shorter token
-  // ("HDMI" beside "MonoPrice cable") must not hide the price, and a generic noun must not take it.
-  const lead = words.reduce((best, word) => (word.length > best.length ? word : best));
+  const named = words.filter((word) => !category.has(word));
+  const need = named.length ? named : words;
+  if (!need.length) return undefined;
+  // The name's words in order, as whole words, at most two words apart: "Breville" alone is any Breville, and "all"
+  // is in "small".
+  const phrase = new RegExp(`(?<![a-z0-9])${need.slice(0, 4).join('(?:[^a-z0-9]+[a-z0-9]+){0,2}?[^a-z0-9]+')}(?![a-z0-9])`, 'gi');
   let found: { price: string; n: number } | undefined;
   for (const source of sources) {
-    const low = source.text.toLowerCase();
-    const at = low.indexOf(lead);
-    if (at < 0) continue;
-    const after = priced(source.text.slice(at, at + 180), ceilings);
-    const before = priced(source.text.slice(Math.max(0, at - 24), at), ceilings);
-    const raw = after ?? before;
-    if (!raw) continue;
-    found = { price: raw, n: source.n };
-    if (after) break;
+    for (const match of source.text.matchAll(phrase)) {
+      const at = match.index ?? 0;
+      // The price in the name's own sentence: the next sentence can be the next product's.
+      const tail = source.text.slice(at + match[0].length, at + match[0].length + 120);
+      const stop = tail.search(/[.!?]\s+(?=[A-Z])/);
+      const after = priced(`${match[0]}${stop < 0 ? tail : tail.slice(0, stop + 1)}`, ceilings);
+      const before = priced(source.text.slice(Math.max(0, at - 24), at), ceilings);
+      const raw = after ?? before;
+      if (!raw) continue;
+      found = { price: raw, n: source.n };
+      if (after) return found;
+    }
   }
   return found;
 }
@@ -383,12 +442,12 @@ function citeValue(text: string, sources: readonly ClaimSource[], current: numbe
   return current && nums.some((num) => has(byNumber(sources, current), num)) ? current : undefined;
 }
 
-function fillPrices(node: CardNode, sources: readonly ClaimSource[], ceilings: readonly number[]): CardNode {
+function fillPrices(node: CardNode, sources: readonly ClaimSource[], ceilings: readonly number[], asked = ''): CardNode {
   switch (node.type) {
     case 'list': {
       const items = node.items.map((item) => {
         if (hasPrice(item.meta, ceilings) || hasPrice(item.text, ceilings)) return item;
-        const found = priceFor(item.text, sources, ceilings);
+        const found = priceFor(item.text, sources, ceilings, asked);
         if (!found) return item;
         return { ...item, meta: found.price, source: item.source ?? found.n };
       });
@@ -396,7 +455,8 @@ function fillPrices(node: CardNode, sources: readonly ClaimSource[], ceilings: r
     }
     case 'tile': {
       if (hasPrice(node.value, ceilings) || hasPrice(node.sub, ceilings) || hasPrice(node.label, ceilings)) return node;
-      const found = priceFor(node.value || node.label, sources, ceilings);
+      // "4. Breville Barista Express" over "All-in-one": a ranked label is the product, its value a description.
+      const found = priceFor(/^\s*#?\d+[.)]\s/.test(node.label) ? node.label : node.value || node.label, sources, ceilings, asked);
       if (!found) return node;
       if (!node.value) return { ...node, value: found.price, source: node.source ?? found.n };
       return { ...node, sub: node.sub ? `${found.price} · ${node.sub}` : found.price, source: node.source ?? found.n };
@@ -405,9 +465,9 @@ function fillPrices(node: CardNode, sources: readonly ClaimSource[], ceilings: r
     case 'grid':
     case 'section':
     case 'scroller':
-      return { ...node, children: node.children.map((child) => fillPrices(child, sources, ceilings)) };
+      return { ...node, children: node.children.map((child) => fillPrices(child, sources, ceilings, asked)) };
     case 'tabs':
-      return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: tab.children.map((child) => fillPrices(child, sources, ceilings)) })) };
+      return { ...node, tabs: node.tabs.map((tab) => ({ ...tab, children: tab.children.map((child) => fillPrices(child, sources, ceilings, asked)) })) };
     case 'text':
     case 'callout':
     case 'quote':
@@ -558,6 +618,7 @@ function retargetNode(node: CardNode, sources: readonly ClaimSource[], query = '
       return text === node.text ? node : { ...node, text };
     }
     case 'hero': {
+      if (!sourcedTime(node.value, undefined, sources).ok) return { ...node, value: '' };
       const face = honestHero(query, node, sources);
       const caption = face.caption ? completeCutDecimal(retargetCites(face.caption, sources, query), [face.value, face.label]) : face.caption;
       const nums = significant(face.value);
@@ -575,9 +636,11 @@ function retargetNode(node: CardNode, sources: readonly ClaimSource[], query = '
       return next === face.caption ? face : { ...face, caption: next };
     }
     case 'tile': {
+      const timed = sourcedTime(node.value ?? '', node.source, sources);
+      if (!timed.ok) return { ...node, value: undefined, source: undefined };
       const valueNums = significant(node.value ?? '');
       let value = node.value;
-      let source = node.source;
+      let source = timed.source;
       if (valueNums.length) {
         const full = node.source && covers(byNumber(sources, node.source), valueNums)
           ? node.source
@@ -603,6 +666,7 @@ function retargetNode(node: CardNode, sources: readonly ClaimSource[], query = '
       return value === node.value && sub === node.sub && source === node.source && label === node.label ? node : { ...node, value, sub, source, label };
     }
     case 'stat': {
+      if (!sourcedTime(node.value, undefined, sources).ok) return { ...node, value: '' };
       const nums = significant(node.value);
       const page = nums.length ? sources.find((item) => covers(item, nums)) : undefined;
       const value = nums.length && !page && !keepsDerived(query, node.value, sources) ? stripNums(node.value, nums) : node.value;
@@ -1139,6 +1203,9 @@ function applyTax(node: CardNode, query: string, pick: TaxPick, keep: ReadonlySe
 
 /** An unpriced pick drops once any pick has a price. Priced picks keep their order. */
 function rankPriced<T>(items: readonly T[], ceilings: readonly number[], pricedText: (item: T) => string): T[] {
+  // Only a budget ask drops an unpriced pick: there it cannot be shown to fit. A ranking ("best espresso machine for a
+  // small kitchen") keeps every pick in its place, priced or not.
+  if (!ceilings.length) return items.map((item) => item);
   const scored = items.map((item, index) => ({ item, index, priced: hasPrice(pricedText(item), ceilings) }));
   if (!scored.some((row) => row.priced)) return items.map((item) => item);
   return scored.filter((row) => row.priced).sort((a, b) => a.index - b.index).map((row) => row.item);
@@ -2678,6 +2745,6 @@ export function bindClaims(node: CardNode, sources: readonly ClaimSource[], quer
   const charged = fee ? alignFee(applyCharge(lined, fee, allowed), fee, allowed, query, namedCharges(sources)) : lined;
   if (!shoppingAsk(query)) return charged;
   const ceilings = budgetAmounts(query);
-  const filled = dropPriceless(keepBudgetPrices(fillPrices(charged, sources, ceilings), ceilings), ceilings, query);
+  const filled = dropPriceless(keepBudgetPrices(fillPrices(charged, sources, ceilings, query), ceilings), ceilings, query);
   return keepStorePrices(filled, sources) ?? { type: 'stack', children: [] };
 }

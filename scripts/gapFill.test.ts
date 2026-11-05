@@ -100,3 +100,20 @@ test('a versus page does not copy one side\'s measurement into the other side\'s
   }]);
   assert.equal(own, '7 days [1]');
 });
+
+test('a versus cell is searched for its own side, and words in a measured row are a missing figure', () => {
+  const table: CardNode = {
+    type: 'table',
+    columns: ['Factor', 'AirPods Pro 3', 'Sony WF-1000XM5'],
+    rows: [['Battery life', 'Up to 8 hours with ANC [6]', 'Premium noise cancelling [12]']],
+  };
+  const gaps = cardGaps([[1, table]]);
+  assert.equal(gaps.length, 1);
+  assert.equal(gaps[0]?.side, 'Sony WF-1000XM5');
+  assert.equal(gaps[0]?.missing, true);
+  assert.equal(gapSearchQuery('Sony WF-1000XM5', gaps), 'Sony WF-1000XM5 Battery life');
+  const unfilled = settleGap(table, gaps[0]!, undefined);
+  assert.equal(unfilled.type === 'table' ? unfilled.rows[0]?.[2] : '', 'Not stated');
+  const filled = settleGap(table, gaps[0]!, citeForGap(gaps[0]!, [{ title: 'WF-1000XM5 Specifications | Sony', snippet: 'Sony WF-1000XM5 battery life: up to 8 hours with noise cancelling on.' }]));
+  assert.match(filled.type === 'table' ? filled.rows[0]?.[2] ?? '' : '', /8 hours/);
+});

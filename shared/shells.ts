@@ -6,10 +6,13 @@ function hollow(text: string | undefined): boolean {
   return !text || !text.replace(/\[\d+\]/g, '').replace(/[\s·•|,.;:()\-–—″"°%$€£¥]+/g, '');
 }
 
-const blankCell = (cell: string) => cell !== GAP_MARK && hollow(cell);
+// "Not stated in sources" in a table cell is a hole, the same as "—": the row goes when enough whole rows remain.
+// "None" and "N/A" stay: in a table they are answers ("Late fee: None").
+const TABLE_HOLE = /^(?:not (?:yet )?(?:stated|reported|listed|found|detailed|given|provided|specified|mentioned)(?: in (?:the |these )?(?:sources|results))?|not in (?:the |these )?sources|unavailable|unknown|no data)\.?$/i;
+const blankCell = (cell: string) => cell !== GAP_MARK && (hollow(cell) || TABLE_HOLE.test(cell.replace(/\[\d+\]/g, '').trim()));
 
 /** A value that says there is no value ("Unavailable", "None yet", "N/A"). */
-const NON_ANSWER = /^(?:unavailable|not available|none(?: yet| listed| found| reported)?|n\/?a|tbd|tba|unknown|not (?:yet )?(?:stated|reported|listed|announced|found)|not in (?:the |these )?sources|no data|pending)\.?$/i;
+const NON_ANSWER = /^(?:unavailable|not available|none(?: yet| listed| found| reported)?|n\/?a|tbd|tba|unknown|not (?:yet )?(?:stated|reported|listed|announced|found)(?: in (?:the |these )?(?:sources|results))?|not in (?:the |these )?sources|no data|pending)\.?$/i;
 const PRICE_LEFTOVER = /^(?:~|≈|under|over|from|around|about|approx\.?|up to|starting at|less than|more than|below|above)$/i;
 /** A price cut off where its figure was: "starts at $...", "from $." A cashtag ("$RDW") is not one. */
 const CUT_MONEY = /[$€£¥]\s*(?:\.{2,}|…)|[$€£¥](?=\s*(?:[,;:)]|$))/;

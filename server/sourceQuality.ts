@@ -482,6 +482,20 @@ function officialLead(domain: string, orgs: readonly string[], places: readonly 
  * Drops foreign-script hits and free-host blogs once enough better hits remain, then
  * orders encyclopedias and official sites ahead of everything else. Same objects, new order.
  */
+/**
+ * A store's own listing: a collection or shop page, or a link tagged for Google's merchant listings (srsltid). A seller
+ * ranks what it sells, so its page does not set the top pick.
+ */
+export function storeListing(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    if (parsed.searchParams.has('srsltid')) return true;
+    return /\/(?:collections?|shop|category|categories|catalog|pages\/shop[^/]*)(?:\/|$)/i.test(parsed.pathname);
+  } catch {
+    return false;
+  }
+}
+
 export function preferSources<T extends RankedHit>(query: string, rows: readonly T[]): T[] {
   if (rows.length <= 1) return [...rows];
   const latin = latinQuery(query);
@@ -600,8 +614,11 @@ export function preferSources<T extends RankedHit>(query: string, rows: readonly
     const desk = (item: (typeof pool)[number]) => Number(!isNewsroom(item.row.domain || hostOf(item.row.url)));
     pool.sort((a, b) => byLead(a, b) || desk(a) - desk(b) || Number(a.tier === 3) - Number(b.tier === 3) || a.index - b.index);
   } else if (shoppingAsk(query)) {
-    // A priced row that matches the ask leads. An unpriced row stays, behind it.
-    pool.sort((a, b) => byLead(a, b) || specOrder(a) - specOrder(b) || priceRank(b) - priceRank(a) || Number(a.tier === 3) - Number(b.tier === 3) || a.index - b.index);
+    // "Best espresso machine for a small kitchen" is a ranking: a review or the maker's page sets it, and a store's
+    // listing of what it sells goes behind them. A priced row that matches the ask leads among the rest.
+    const ranking = /\b(?:best|top|recommend(?:ed)?)\b/i.test(query);
+    const seller = (item: (typeof pool)[number]) => Number(ranking && storeListing(item.row.url));
+    pool.sort((a, b) => byLead(a, b) || specOrder(a) - specOrder(b) || seller(a) - seller(b) || priceRank(b) - priceRank(a) || Number(a.tier === 3) - Number(b.tier === 3) || a.index - b.index);
   } else {
     pool.sort((a, b) => byLead(a, b) || (promote ? a.tier - b.tier : Number(a.tier === 3) - Number(b.tier === 3)) || a.index - b.index);
   }
@@ -1021,8 +1038,10 @@ function productPriceTexts(node: CardNode): string[] {
 
 /** On a shopping card, a product hero with no price does not lead once another pick states one. The budget in the label, and a dollar in a follow-up chip, are not that price. */
 function dropUnpricedProductLead(query: string, nodes: readonly (CardNode | undefined)[]): (CardNode | undefined)[] {
-  if (!shoppingAsk(query)) return [...nodes];
+  // Only a budget ask ("under $40"): there an unpriced lead cannot be shown to fit. "Best espresso machine for a
+  // small kitchen" keeps its top pick when another pick carries a price.
   const ceilings = budgetAmounts(query);
+  if (!shoppingAsk(query) || !ceilings.length) return [...nodes];
   const priced = nodes.some((node) => !!node && productPriceTexts(node).some((text) => statesProductPrice(text, ceilings)));
   if (!priced) return [...nodes];
   return nodes.map((node) => {

@@ -450,3 +450,21 @@ test('an IRS page on Roth income ranges fits an IRA limits ask without the word 
   const ask = 'Make a table comparing a Roth IRA and a traditional IRA for 2026: contribution limit, tax treatment, income limits';
   assert.equal(officialFits(ask, { title: 'Amount of Roth IRA contributions that you can make for 2026', snippet: 'modified AGI phase-out range' }), true);
 });
+
+test('a shopping ask with no budget keeps its unpriced top pick beside a priced one', () => {
+  const nodes = finishQuality('Best espresso machine for a small kitchen', [
+    { type: 'hero', value: 'Breville Bambino Plus', label: 'Top pick for small kitchens' },
+    { type: 'list', style: 'bullet', items: [{ text: 'Flair Espresso Maker', meta: '$319' }] },
+  ]);
+  assert.equal(nodes[0]?.type, 'hero');
+});
+
+test('a best-of shopping ask puts reviews ahead of store listings', () => {
+  const rows = [
+    { url: 'https://procoffeegear.com/collections/espresso-machines-small-spaces?srsltid=abc', domain: 'procoffeegear.com', title: 'Espresso Machines for Small Spaces', snippet: 'Shop compact machines' },
+    { url: 'https://www.seattlecoffeegear.com/pages/shop-compact-espresso-machines-small-kitchens', domain: 'seattlecoffeegear.com', title: 'Compact Espresso Machines For Small Kitchens', snippet: 'Shop now' },
+    { url: 'https://www.foodandwine.com/best-small-espresso-machines-7370253', domain: 'foodandwine.com', title: 'The 9 Best Small Espresso Machines, According to Our Tests', snippet: 'We tested' },
+  ];
+  const out = preferSources('Best espresso machine for a small kitchen', rows);
+  assert.equal(out[0]?.domain, 'foodandwine.com');
+});

@@ -640,7 +640,7 @@ test('an agency label stays only when the cited host is that agency', () => {
   assert.match(kept.type === 'tile' ? kept.sub ?? '' : '', /DNR/);
 });
 
-test('a product list drops a pick that has no price and keeps one that does', () => {
+test('a budget product list drops a pick that has no price and keeps one that does', () => {
   assert.equal(shoppingAsk('best hdmi cable for a tv'), true);
   assert.equal(shoppingAsk('best ways to sleep'), false);
   const catalog: ClaimSource[] = [
@@ -651,10 +651,13 @@ test('a product list drops a pick that has no price and keeps one that does', ()
     style: 'number',
     items: [{ text: 'MonoPrice HDMI cable' }, { text: 'No name cable' }],
   };
-  const next = bindClaims(list, catalog, 'best hdmi cable for a tv');
+  const next = bindClaims(list, catalog, 'best hdmi cable under $20');
   const items = next.type === 'list' ? next.items : [];
   assert.equal(items.length, 1);
   assert.equal(items[0]?.meta, '$8.99');
+  // With no budget the ranking stays whole.
+  const ranking = bindClaims(list, catalog, 'best hdmi cable for a tv');
+  assert.equal(ranking.type === 'list' ? ranking.items.length : 0, 2);
 });
 
 test('a table drops a number no page states', () => {
@@ -1037,4 +1040,44 @@ test('a breakdown part that shows the combined rate is dropped, in a grid and in
   ] };
   const gone = agreeOfficialRate(table, ask, sources as never);
   assert.ok(!JSON.stringify(gone).includes('MCTD surcharge'), 'a table whose parts all show the whole says nothing');
+});
+
+test('a model code joined to its number keeps its letters', () => {
+  const pages: ClaimSource[] = [{ n: 1, domain: 'bestbuy.com', text: 'Sony WF-1000XM5 earbuds, $249.99. Cafe Bueno CB-2000 espresso maker.' }];
+  const sony: CardNode = { type: 'tile', label: 'Sony WF-1000XM5', value: '$249.99', source: 1 };
+  const next = bindClaims(sony, pages, 'AirPods Pro 3 vs Sony WF-1000XM5');
+  assert.equal(next.type === 'tile' ? next.label : '', 'Sony WF-1000XM5');
+  const cafe: CardNode = { type: 'list', items: [{ text: 'Cafe Bueno CB-2000 for small counters [1]' }] };
+  const kept = bindClaims(cafe, pages, 'Best espresso machine for a small kitchen');
+  assert.match(JSON.stringify(kept), /CB-2000/);
+});
+
+test('a time on a tile is shown only when a page states it, and a video title does not count', () => {
+  const pages: ClaimSource[] = [
+    { n: 1, domain: 'youtube.com', text: 'Fix a flat tire in two minutes' },
+    { n: 2, domain: 'rei.com', text: 'Step 2: remove the wheel. Step 1: shift into the smallest cog.' },
+    { n: 3, domain: 'trekbikes.com', text: 'With practice, changing a tube takes about 10-15 minutes.' },
+  ];
+  const quick: CardNode = { type: 'tile', label: 'Time', value: '2 min', sub: 'With practice', source: 2 };
+  const dropped = bindClaims(quick, pages, 'How do I fix a flat bike tire?');
+  assert.equal(dropped.type === 'tile' ? dropped.value : 'x', undefined);
+  const stated: CardNode = { type: 'tile', label: 'Time', value: '10–15 min', source: 2 };
+  const kept = bindClaims(stated, pages, 'How do I fix a flat bike tire?');
+  assert.equal(kept.type === 'tile' ? `${kept.value} [${kept.source}]` : '', '10–15 min [3]');
+});
+
+test('a pick takes only a price written beside its whole name', () => {
+  const pages: ClaimSource[] = [
+    { n: 1, text: 'Appia Life Compact $6,050. TIMER EVO 1 GROUP $5,699. These machines are ideal for small kitchen areas.' },
+    { n: 2, text: 'The Breville Bambino Plus costs $499. The Breville Barista Express is $599.95 at most stores.' },
+  ];
+  assert.equal(priceFor('All-in-one', pages), undefined);
+  assert.deepEqual(priceFor('4. Breville Barista Express — built-in grinder', pages), { price: '$599.95', n: 2 });
+  assert.equal(priceFor('Breville Oracle Jet', pages), undefined);
+});
+
+test('a pick with no price of its own does not take the next sentence\'s price', () => {
+  const pages: ClaimSource[] = [{ n: 1, text: 'The Flair Espresso Maker is fully manual. The Breville Bambino Plus costs $499.' }];
+  assert.equal(priceFor('Flair Espresso Maker', pages, [], 'best espresso machine for a small kitchen'), undefined);
+  assert.deepEqual(priceFor('Breville Bambino Plus', pages, [], 'best espresso machine for a small kitchen'), { price: '$499', n: 1 });
 });

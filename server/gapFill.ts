@@ -112,7 +112,7 @@ export function gapSearchQuery(question: string, gaps: readonly PieceGap[]): str
       const text = word?.replace(/\s+/g, ' ').trim();
       if (!text) continue;
       const token = text.toLowerCase();
-      if (seen.has(token)) continue;
+      if (seen.has(token) || question.toLowerCase().includes(token)) continue;
       seen.add(token);
       parts.push(text);
     }
@@ -143,15 +143,19 @@ function collect(node: CardNode, index: number, path: Step[], out: PieceGap[]) {
       row.forEach((cell, column) => {
         if (column === 0) return;
         const text = cell.trim();
-        if (CITE.test(text) || MONEY.test(text) || measureNumbers(text).length > 0) return;
-        const missing = !text || BLANK.test(text) || NOT_STATED.test(text);
+        if (MONEY.test(text) || measureNumbers(text).length > 0) return;
+        // "Battery | Up to 8 hours [6] | Premium noise cancelling [12]": a measured row where this side's cell holds
+        // words and no measurement is a missing figure, cited or not.
+        const unmeasured = row.slice(1).some((other, at) => at + 1 !== column && MEASURE.test(other));
+        if (CITE.test(text) && !unmeasured) return;
+        const missing = !text || BLANK.test(text) || NOT_STATED.test(text) || unmeasured;
         const side = sideName(node.columns, node.rows, column);
         out.push({
           index,
           path: [...path, { kind: 'cell', row: rowIndex, column }],
           label: factor,
           side,
-          previous: missing ? '' : text,
+          previous: missing ? (unmeasured && !NOT_STATED.test(text) && !BLANK.test(text) ? 'Not stated' : '') : text,
           missing,
           whole: false,
         });

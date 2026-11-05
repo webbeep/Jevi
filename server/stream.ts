@@ -419,6 +419,20 @@ function pagesCanWait(req: DesignArgs): boolean {
   return req.search.results.slice(0, 5).some((row) => hostTier(row.domain) === 0 && /\d/.test(`${row.title} ${row.snippet}`));
 }
 
+/** The labels of the tiles in a component, in order. */
+function tileLabels(node: CardNode | undefined): string[] {
+  if (!node) return [];
+  if (node.type === 'tile') return [node.label];
+  if ('children' in node && Array.isArray(node.children)) return (node.children as CardNode[]).flatMap(tileLabels);
+  return [];
+}
+
+/** Numbered picks that skip a rank ("1. …, 2. …, 4. …"). */
+function rankGap(labels: readonly string[]): boolean {
+  const ranks = labels.map((label) => Number(label.match(/^\s*#?(\d+)[.)]/)?.[1] ?? NaN)).filter((rank) => !Number.isNaN(rank));
+  return ranks.some((rank, i) => i > 0 && rank !== ranks[i - 1]! + 1);
+}
+
 /**
  * Pages read since the card was written: the early reads (DeepSeek's fetch reaches the .gov pages that turn a plain
  * fetch away, but takes longer than the writer can wait) finish while the card is written. The review reads them, so
@@ -698,6 +712,18 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       const stage = !quoted0 ? (fx ? 'fx' : 'quote') : !agreed ? 'forecast' : !quoted ? 'quotes' : !tidy ? 'shells' : 'repeated';
       console.log(JSON.stringify({ zo: 'collapsed', index, stage, raw: JSON.stringify(raw).slice(0, 400) }));
     }
+    // A component on screen replaced by an empty one (the hero overwritten by an empty stack): who replaced it.
+    if (isBlankLayout(node) && shown.has(index) && !isBlankLayout(shown.get(index)!)) {
+      console.log(JSON.stringify({ zo: 'blanked', index, was: shown.get(index)!.type, raw: JSON.stringify(raw).slice(0, 200), by: new Error().stack?.split('\n').slice(2, 6).map((line) => line.trim()) }));
+    }
+    // A pick that arrived and is gone after the checks ("1, 2, 4, 5"): which check took it.
+    const rawPicks = tileLabels(raw);
+    const lost = rawPicks.filter((label) => !tileLabels(node).includes(label));
+    if (lost.length || rankGap(rawPicks)) {
+      const at = (step: CardNode | undefined) => !step || lost.some((label) => !tileLabels(step).includes(label));
+      const stage = at(fitted) ? 'sources' : at(quoted0) ? 'quote' : at(agreed) ? 'forecast' : at(dated) ? 'months' : at(quoted) ? 'quotes' : at(tidy) ? 'shells' : 'repeated';
+      console.log(JSON.stringify({ zo: 'picks', index, lost, stage: lost.length ? stage : undefined, arrived: rawPicks }));
+    }
     shown.set(index, node);
     if (!arrival.includes(index)) arrival.push(index);
     const key = JSON.stringify(node);
@@ -738,11 +764,20 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     });
     const knowledge = designReq.search.knowledge;
     if (knowledge?.extract) bioSources.unshift({ title: knowledge.title, url: knowledge.url, domain: 'wikipedia.org', text: `${knowledge.title}\n${knowledge.extract}` });
-    const agreed = dropDisputedBio(
-      fillPaperCard(question, keepAnswerBody(question, restoreKeptPapers(question, presentNamedCharges(question, finishQuality(question, settled.nodes, head?.subtitle ?? '', order), claimSources(designReq.search.results, designReq.pages)), designReq.followup?.baseCard?.body, claimSources(designReq.search.results, designReq.pages)), recovered), paperSources),
-      bioSources,
-      { person: designReq.person?.name, question, followup: !!designReq.followup || !!designReq.fromFollowup },
-    );
+    const finished = finishQuality(question, settled.nodes, head?.subtitle ?? '', order);
+    const charged = presentNamedCharges(question, finished, claimSources(designReq.search.results, designReq.pages));
+    const papers = restoreKeptPapers(question, charged, designReq.followup?.baseCard?.body, claimSources(designReq.search.results, designReq.pages));
+    const answered = keepAnswerBody(question, papers, recovered);
+    const filled = fillPaperCard(question, answered, paperSources);
+    const agreed = dropDisputedBio(filled, bioSources, { person: designReq.person?.name, question, followup: !!designReq.followup || !!designReq.fromFollowup });
+    // Which step emptied a component that was on screen: the hero overwritten by an empty stack.
+    indexes.forEach((index, i) => {
+      const before = shown.get(index);
+      if (!before || isBlankLayout(before) || (agreed[i] && !isBlankLayout(agreed[i]!))) return;
+      const steps: [string, readonly (CardNode | undefined)[]][] = [['readings', settled.nodes], ['quality', finished], ['charges', charged], ['papers', papers], ['answer', answered], ['paperCard', filled], ['bio', agreed]];
+      const step = steps.find(([, nodes]) => !nodes[i] || isBlankLayout(nodes[i]!))?.[0];
+      console.log(JSON.stringify({ zo: 'settle-blank', index, step, was: before.type }));
+    });
     const quality = agreed;
     if (head) {
       if (settled.head) head = { ...head, title: settled.head.title, subtitle: settled.head.subtitle && withRoleDates(settled.head.subtitle, factCorpus) };
@@ -910,16 +945,21 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       const node = shown.get(gap.index);
       if (node && !originals.has(gap.index)) originals.set(gap.index, node);
     }
-    const query = gapSearchQuery(question, gaps);
+    // A versus card searches each side's missing figure on its own ("Sony WF-1000XM5 battery"): a search for the whole
+    // question brings back versus pages, and a number there can be the other side's.
+    const sides = [...new Set(gaps.map((gap) => gap.side).filter((side): side is string => !!side))];
+    const versus = compareSides(question).length >= 2 && sides.length > 0;
+    const queries = versus ? sides.slice(0, 2).map((side) => gapSearchQuery(side, gaps.filter((gap) => gap.side === side))) : [gapSearchQuery(question, gaps)];
     try {
-      const found = await Promise.race([
-        searchWithLate({ q: query, freshness: 'any', count: 6, lite: true }, env, scope),
+      const searched = await Promise.all(queries.map((query) => Promise.race([
+        searchWithLate({ q: query, freshness: 'any', count: 6, lite: true }, env, scope).catch(() => null),
         new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
-      ]);
-      const rows = found?.response.results ?? [];
+      ])));
+      const rows = searched.flatMap((found) => found?.response.results ?? []);
+      console.log(JSON.stringify({ zo: 'cell-search', queries, rows: rows.length, gaps: gaps.map((gap) => `${gap.side ?? ''}: ${gap.label}`) }));
       if (!rows.length) return;
       const have = new Set([...designReq.search.results, ...addedRows].map((row) => row.url));
-      const add = rows.filter((row) => row.url && !have.has(row.url)).slice(0, 4);
+      const add = rows.filter((row, at) => row.url && !have.has(row.url) && rows.findIndex((other) => other.url === row.url) === at).slice(0, versus ? 6 : 4);
       const base = designReq.search.results.length + addedRows.length;
       if (add.length) {
         addedRows = [...addedRows, ...add];

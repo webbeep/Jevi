@@ -124,3 +124,14 @@ test('one long quote on several rows is shown once, and not again beside the slo
   const figures = new Map([[0, { type: 'text' as const, text: 'Keep it under 10%.' }]]);
   assert.equal(withoutRepeatedFacts(rows, factsElsewhere(figures, 1)), rows);
 });
+
+test('a "Not stated in sources" row goes when two whole rows remain, and "None" is an answer', () => {
+  const table: CardNode = {
+    type: 'table',
+    columns: ['Factor', 'A', 'B'],
+    rows: [['Battery', '8 h [1]', 'Not stated in sources'], ['Price', '$249 [2]', '$329 [3]'], ['Weight', '5.3 g [1]', '5.9 g [4]'], ['Late fee', 'None', '$5 [3]']],
+  };
+  const next = withoutShells(table, 'AirPods Pro 3 vs Sony WF-1000XM5');
+  const rows = next?.type === 'table' ? next.rows.map((row) => row[0]) : [];
+  assert.deepEqual(rows, ['Price', 'Weight', 'Late fee']);
+});
