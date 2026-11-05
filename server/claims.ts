@@ -6,6 +6,7 @@ import { completeCutDecimal, withoutEmptySlots } from './polish';
 import { dropInventedTitles, finishQuotedText, honestHero, honestStudyText, peerPaperItems, peerPaperSource } from './cardAgree';
 import { figureClause, leadFigure, moneyClauses } from './thinSource';
 import { keepStorePrices } from './retailerPrice';
+import { keepUsPrices } from './usdPrice';
 
 /** One search result, numbered the way the card cites it, with the text the card was allowed to use. */
 export interface ClaimSource {
@@ -2742,7 +2743,9 @@ export function bindClaims(node: CardNode, sources: readonly ClaimSource[], quer
   const lined = TAX_ASK.test(query) ? repairTaxNode(taxed, query, sources) : taxed;
   const fee = officialCharge(query, sources);
   const allowed = officialAmounts(sources.find((source) => source.n === fee?.n));
-  const charged = fee ? alignFee(applyCharge(lined, fee, allowed), fee, allowed, query, namedCharges(sources)) : lined;
+  const fee0 = fee ? alignFee(applyCharge(lined, fee, allowed), fee, allowed, query, namedCharges(sources)) : lined;
+  // A dollar price is one a page states in US dollars, not "£249" or amazon.ca's "$329".
+  const charged = keepUsPrices(fee0, sources, query);
   if (!shoppingAsk(query)) return charged;
   const ceilings = budgetAmounts(query);
   const filled = dropPriceless(keepBudgetPrices(fillPrices(charged, sources, ceilings, query), ceilings), ceilings, query);

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { CardNode } from '../shared/card.ts';
 import { GAP_MARK, keptCardNodes } from '../shared/gap.ts';
-import { cardGaps, citeForGap, gapSearchQuery, markGap, settleGap } from '../server/gapFill.ts';
+import { cardGaps, citeForGap, gapSearchQuery, markGap, phraseForLabel, settleGap } from '../server/gapFill.ts';
 
 const table: CardNode = {
   type: 'table',
@@ -116,4 +116,9 @@ test('a versus cell is searched for its own side, and words in a measured row ar
   assert.equal(unfilled.type === 'table' ? unfilled.rows[0]?.[2] : '', 'Not stated');
   const filled = settleGap(table, gaps[0]!, citeForGap(gaps[0]!, [{ title: 'WF-1000XM5 Specifications | Sony', snippet: 'Sony WF-1000XM5 battery life: up to 8 hours with noise cancelling on.' }]));
   assert.match(filled.type === 'table' ? filled.rows[0]?.[2] ?? '' : '', /8 hours/);
+});
+
+test('an income-limit cell takes the dollar range its clause states, thousands separator and all', () => {
+  assert.equal(phraseForLabel('The Roth IRA income phase-out range for single filers is $153,000 to $168,000.', 'Income limits'), '$153,000 to $168,000');
+  assert.equal(phraseForLabel('Battery 5,000 mAh, charging 45 W.', 'Battery'), '5,000 mAh');
 });

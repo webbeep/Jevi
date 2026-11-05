@@ -52,14 +52,19 @@ function mentionsLabel(label: string, clause: string): boolean {
 /** A number and unit in the same clause as this row. A price row only takes a price. */
 export function phraseForLabel(blob: string, label: string): string | undefined {
   const price = keysOf(label).some((key) => key.startsWith('pric') || key.startsWith('cost'));
+  // "Income limits", "Phase-out", "Fee": a dollar figure is the measurement, and a range keeps both ends.
+  const dollars = !price && keysOf(label).some((key) => ['incom', 'limit', 'thres', 'phase', 'salar', 'wage'].includes(key) || key === 'fees');
+  const range = new RegExp(`${MONEY.source}(?:\\s*(?:-|–|to)\\s*${MONEY.source})?`);
   for (const sentence of blob.split(/(?<=[.!?])\s+/)) {
-    for (const clause of sentence.split(/\s*(?:,|;|\band\b|\bwith\b)\s*/i)) {
+    // "$153,000" is one number: a comma between digits does not end a clause.
+    for (const clause of sentence.split(/\s*(?:,(?!\d{3})|;|\band\b|\bwith\b)\s*/i)) {
       if (!mentionsLabel(label, clause)) continue;
       const money = clause.match(MONEY);
       if (price) {
         if (money) return money[0].replace(/\s/g, '');
         continue;
       }
+      if (dollars && money) return clause.match(range)![0].replace(/\s+/g, ' ').trim();
       if (money && !measureNumbers(clause.replace(MONEY, ' ')).length) continue;
       const match = clause.match(MEASURE);
       if (match) return match[0].replace(/\s+/g, ' ').trim();

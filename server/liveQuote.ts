@@ -140,10 +140,15 @@ function thin(points: TickerPoint[], max = 260): TickerPoint[] {
   return out;
 }
 
+/** The chart runs beside the web search, so it can wait longer than the price; a slow first host gets one more try. */
+const SERIES_MS = 2500;
+
 async function yahooSeries(symbol: string, range: TickerRange): Promise<TickerSeries | undefined> {
   const { range: r, interval } = YAHOO_RANGE[range];
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${r}&interval=${interval}`;
-  const res = (await fetchJson<YahooChart>(url, { headers: UA }, QUOTE_MS)).chart?.result?.[0];
+  const path = `/v8/finance/chart/${encodeURIComponent(symbol)}?range=${r}&interval=${interval}`;
+  const chart = await fetchJson<YahooChart>(`https://query1.finance.yahoo.com${path}`, { headers: UA }, SERIES_MS)
+    .catch(() => fetchJson<YahooChart>(`https://query2.finance.yahoo.com${path}`, { headers: UA }, SERIES_MS));
+  const res = chart.chart?.result?.[0];
   const meta = res?.meta;
   if (!meta || !finite(meta.regularMarketPrice)) return undefined;
   const closes = res.indicators?.quote?.[0]?.close ?? [];
@@ -211,10 +216,13 @@ export async function liveQuote(query: string): Promise<LiveQuote | undefined> {
   try {
     const target = await resolve(ask);
     if (!target) return undefined;
-    const [fromYahoo, today] = await Promise.all([
+    const [fromYahoo, day] = await Promise.all([
       yahoo(target.symbol, target.kind, target.name).catch(() => undefined),
       fetchSeries(target.symbol, '1D'),
     ]);
+    // Before the open or after a holiday the day can have no points yet: the week's chart shows instead of none.
+    const today = day ?? (await Promise.race([fetchSeries(target.symbol, '1W'), new Promise<undefined>((resolve) => setTimeout(resolve, 2000))]));
+    if (!today) console.log(JSON.stringify({ zo: 'quote-series', failed: target.symbol }));
     const quote = fromYahoo ?? (target.kind === 'crypto' ? await coinbase(target.symbol, target.name) : undefined);
     return quote && { ...quote, series: today?.series };
   } catch (err) {

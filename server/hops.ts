@@ -557,11 +557,19 @@ export function askedFigureLines(query: string, results: readonly { title: strin
       if (!finished && /\b(?:if|unless|when|only)\b[^$€£]*$/i.test(part.slice(part.search(/[$€£]\s?\d[^$€£]*$/)))) return;
       // "…less than $153,000 to contribute fully and married couples ...": the snippet's cut-off tail goes.
       const line = /[.!?]\s*$/.test(part) ? part.trim() : part.trim().replace(/,?\s+(?:and|or|but)\s+[a-z][a-z\s]{0,30}$/i, '');
-      lines.push({ n: index + 1, line, amounts, named: named - stale });
+      // "Passport book: $130 Passport card: $30" names each amount right before it, so it goes ahead of a table the
+      // snippet cut ("DS-82 $130 Adult Passport Book & Card DS-82 $30"), where a label can sit on the wrong amount.
+      const labeled = labeledAmounts(line) ? 2 : 0;
+      // "Between $153,000 and $168,000": both ends of a range, so a card that shows only the floor gets the top too.
+      const range = /[$€£]\s?\d[\d,.]*\s*(?:-|–|to|and)\s*[$€£]\s?\d/.test(line) ? 1 : 0;
+      lines.push({ n: index + 1, line, amounts, named: named - stale + labeled + range - (shifted ? 1 : 0) });
     });
   }
-  // A later line quoting only amounts an earlier one already gives adds nothing.
+  // A later line quoting only amounts an earlier one already gives adds nothing. Beside a line that labels each amount,
+  // a cut table of several amounts is left out: its labels can sit on the wrong amount.
+  const anyLabeled = lines.some((line) => labeledAmounts(line.line));
   const best = lines
+    .filter((line) => !anyLabeled || line.amounts.length < 2 || labeledAmounts(line.line) || /[.!?]$/.test(line.line) && !/\$\d[^.!?]*\$\d[^.!?]*\$\d/.test(line.line))
     .sort((a, b) => b.named - a.named || b.amounts.length - a.amounts.length || a.n - b.n)
     .filter((line, i, all) => !all.slice(0, i).some((before) => line.amounts.every((amount) => before.amounts.includes(amount))))
     .slice(0, 4);
@@ -585,6 +593,13 @@ export function withPageText<T extends { snippet?: string }>(results: readonly T
       .replace(/(?:\s*[;·]\s*){2,}/g, ' ; ');
     return { ...row, snippet: `${row.snippet ?? ''} … ${text}` };
   });
+}
+
+/** Every amount in the line has a word of its own just before it: "Passport book: $130 Passport card: $30". */
+function labeledAmounts(line: string): boolean {
+  const pieces = line.split(/[$€£]\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?/);
+  if (pieces.length < 3) return false;
+  return pieces.slice(0, -1).every((before) => /[A-Za-z]{4,}[^A-Za-z$€£]{0,20}$/.test(before.slice(-40)) && !/^\s*[A-Z]{2}-\d+\s*$/.test(before.trim()));
 }
 
 /**
