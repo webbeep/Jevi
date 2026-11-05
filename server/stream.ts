@@ -48,7 +48,7 @@ import type { EngineStatus, Freshness, ImageResult, SearchResponse, SearchResult
 import { rewriteQuery } from './ai';
 import { type DesignRequest, designParallel, designStream, gateNode } from './design';
 import { BRIEF_ROWS, briefSources, remapBrief, type SourceBrief } from './brief';
-import { agreeOfficialRate, claimSources, groundMembers, oneNamedCharge, presentNamedCharges, salesTax } from './claims';
+import { agreeOfficialRate, claimSources, groundMembers, oneNamedCharge, presentNamedCharges, salesTax, shoppingAsk } from './claims';
 import { answerTitle, fillPaperCard, keepAnswerBody, restoreKeptPapers, wantsNamedQuote } from './cardAgree';
 import { dropDisputedBio, type BioSource } from './bioFacts';
 import { withoutGluedPerson } from './peopleSplit';
@@ -1177,6 +1177,14 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   separateObjects();
   republishFees();
   await showAskedFigure();
+  // A price is a price on a day: a shopping or price card says when its prices were read.
+  if (head && !chat && (shoppingAsk(questionOf()) || /\b(?:price|prices|cost|costs|how much|cheaper|deals?)\b/i.test(questionOf()))
+    && /\$\s?\d/.test(JSON.stringify([...shown.values()].filter((node) => node.type !== 'actions' && node.type !== 'choices')))
+    && !/\bas of\b/i.test(head.subtitle ?? '')) {
+    const day = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'America/New_York' });
+    head = { ...head, subtitle: head.subtitle ? `${head.subtitle} · prices as of ${day}` : `Prices as of ${day}` };
+    send('head', head);
+  }
   await offeredLoaded;
   if (choicesFor && !offered) {
     const choices = [...shown.values()].find((node) => node.type === 'choices');
