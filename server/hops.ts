@@ -478,8 +478,15 @@ const FIGURE_ITEM = /\b(?:limits?|fees?|rates?|caps?|thresholds?|phase-?outs?|mi
  * income limits" → "Roth IRA and traditional IRA 2026 income limits", where the married-filing-jointly range is).
  */
 /** The figure item the question needs ("fee", "income limits"), when `figureHop` would search for one. */
+/** "Is aspartame a carcinogen?", "Is sucralose safe?": a safety question about something people eat or drink. */
+const SAFETY = /\b(?:is|are)\s+([a-z][a-z0-9 -]{2,40}?)\s+(?:a\s+|an\s+)?(?:carcinogen(?:ic)?|cancer[- ]causing|safe(?: to (?:eat|drink|consume|use))?|toxic|harmful)\b/i;
+
+/** The intake limit a safety body sets ("0–40 mg/kg body weight"): the figure that answers "how much is safe". */
+export const DOSE = /\d+(?:\.\d+)?(?:\s*(?:-|–|to)\s*\d+(?:\.\d+)?)?\s*(?:mg|milligrams?|µg|mcg|micrograms?)\s*(?:\/|per)\s*(?:kg|kilograms?)(?![a-z])/gi;
+
 export function figureItem(query: string): string | undefined {
   if (processAsk(query) && !/\b(?:fee|fees|cost|price)\b/i.test(query)) return 'fee';
+  if (SAFETY.test(query)) return 'daily intake';
   const colon = query.indexOf(':');
   if (colon < 0) return undefined;
   const items = query.slice(colon + 1).replace(/[?.!]+$/, '').split(/,\s*(?:and\s+)?|\s+and\s+/).map((item) => item.trim()).filter(Boolean);
@@ -496,8 +503,9 @@ export function askedFigureLines(query: string, results: readonly { title: strin
   if (!item) return undefined;
   const stem = item.toLowerCase().split(/\s+/).map((word) => word.replace(/(?:es|s)$/, '').slice(0, 5)).filter((word) => word.length >= 3);
   const subject = [...new Set(query.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 4 && !FIGURE_STOP.has(word) && !stem.some((part) => word.startsWith(part))).map((word) => word.slice(0, 5)))];
-  const money = /[$€£]\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?(?!\d)/g;
-  const names = (text: string) => text.includes(stem[0]!) || (stem[0] === 'incom' && /\b(?:magi|agi)\b/.test(text));
+  // A fee or a limit is in money; a safe intake is a dose per kilogram of body weight.
+  const money = item === 'daily intake' ? new RegExp(DOSE.source, 'gi') : /[$€£]\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?(?!\d)/g;
+  const names = (text: string) => text.includes(stem[0]!) || (stem[0] === 'incom' && /\b(?:magi|agi)\b/.test(text)) || (item === 'daily intake' && /\b(?:adi|intake)\b/.test(text));
   const year = query.match(/\b(?:19|20)\d{2}\b/)?.[0];
   const lines: { n: number; line: string; amounts: string[]; named: number }[] = [];
   results.slice(0, 30).forEach((row, index) => {
@@ -623,6 +631,8 @@ function shiftedLabels(part: string): string | undefined {
 const FIGURE_STOP = new Set(['what', 'when', 'where', 'which', 'with', 'from', 'that', 'this', 'step', 'make', 'table', 'comparing', 'compare', 'show', 'give', 'list', 'chart', 'does', 'have', 'about', 'your', 'into', 'their', 'there']);
 
 export function figureHop(query: string): string | undefined {
+  const safety = query.match(SAFETY);
+  if (safety) return `${safety[1]!.trim()} acceptable daily intake`;
   const process = processAsk(query);
   if (process && !/\b(?:fee|fees|cost|price)\b/i.test(query)) {
     const object = process[1];

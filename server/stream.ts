@@ -74,6 +74,7 @@ import { anchoredFollowup, asksToCompare, comparisonFollow, cryptographyHint, fa
 import { calculationAnswer, isCalculationAsk, leadTaxedTotal, rateOnAmount, splitShare } from './calculate';
 import { acceptProductPhoto, appendAskedFact, comparisonRepair, comparisonTitle, dropShownDenials, keepComparedProducts, mentionsSide, missingSideNode, nameForms, placeSidePhotos, restoreSideTiles, stickerPrice } from './compareAnswer';
 import { cardGaps, citeForGap, gapSearchQuery, settleGap, type PieceGap } from './gapFill';
+import { keepChoices, keptChoices } from './stableChoices';
 import { factsElsewhere, quoteCorpus, withinSources, withoutRepeatedFacts, withoutShells, withVerbatimQuotes } from '../shared/shells';
 import { fxQuote, feedPcts, liveQuoteFacts, quoteRanges, withinFx, withinQuote } from '../shared/fxCard';
 import { asksForHigh, forecastHigh, withinForecast } from '../shared/weatherCard';
@@ -695,7 +696,12 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     const page = designReq.pages.find((item) => item.n === i + 1);
     return `${row.title ?? ''} ${row.snippet ?? ''} ${row.content ?? ''} ${row.date ?? ''} ${page?.text ?? ''}`;
   });
-  const publish: Publish = (index, raw) => {
+  // The same question offers the same choices: the first ones it was offered are kept and shown again.
+  const choicesFor = !designReq.followup && !chat ? designReq.query : undefined;
+  let offered: CardNode | undefined;
+  const offeredLoaded = choicesFor ? keptChoices(choicesFor).then((node) => { offered = node; }) : Promise.resolve();
+  const publish: Publish = (index, given) => {
+    const raw = given.type === 'choices' && offered ? offered : given;
     // A component whose figures were all removed is collapsed, not shown as an empty shell.
     const fitted = withinSources(raw, designReq.search.results.length + addedSources);
     const quoted0 = fx ? withinFx(fitted, fx) : live ? withinQuote(fitted, live) : fitted;
@@ -923,15 +929,17 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
       ? { item: (snippets ?? paged)!.item, lines: [...(snippets?.lines ?? []), ...(paged?.lines ?? []).filter((line) => !snippets?.lines.some((before) => line.amounts.every((amount) => before.amounts.includes(amount))))] }
       : undefined;
     if (!found) return;
-    const text = JSON.stringify([...shown.values()]).replace(/(\d),(?=\d{3})/g, '$1');
-    const shows = (amount: string) => text.includes(amount.replace(/,/g, ''));
+    // "40 mg per kg" on the card is the "40 mg/kg" a page states.
+    const plain = (raw: string) => raw.toLowerCase().replace(/(\d),(?=\d{3})/g, '$1').replace(/milligrams?/g, 'mg').replace(/kilograms?/g, 'kg').replace(/\s*per\s*/g, '/').replace(/\s+/g, '');
+    const text = plain(JSON.stringify([...shown.values()]));
+    const shows = (amount: string) => text.includes(plain(amount));
     // Up to two lines with an amount the card does not show: the single filer's range may be there and the joint one not.
     const missing = found.lines.filter((line) => !line.amounts.every(shows)).slice(0, 2);
     if (!missing.length) return;
     const leadIndex = [...shown.keys()].sort((a, b) => a - b).find((i) => !['citations', 'actions', 'ticker', 'choices', 'diagram'].includes(shown.get(i)!.type));
     if (leadIndex === undefined) return;
     const label = found.item.charAt(0).toUpperCase() + found.item.slice(1);
-    const note: CardNode = { type: 'callout', tone: 'default', icon: 'receipt', title: label, text: missing.map((line) => `${line.line.replace(/\s*\[\d+\]\s*$/, '').replace(/[.;,]?\s*$/, '.')} [${line.n}]`).join(' ') };
+    const note: CardNode = { type: 'callout', tone: 'default', icon: found.item === 'daily intake' ? 'shield-check' : 'receipt', title: found.item === 'daily intake' ? 'Acceptable daily intake' : label, text: missing.map((line) => `${line.line.replace(/\s*\[\d+\]\s*$/, '').replace(/[.;,]?\s*$/, '.')} [${line.n}]`).join(' ') };
     console.log(JSON.stringify({ zo: 'asked-figure', item: found.item, n: missing.map((line) => line.n) }));
     publish(leadIndex, { type: 'stack', direction: 'col', gap: 'sm', children: [shown.get(leadIndex)!, note] });
   };
@@ -1167,6 +1175,11 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
   separateObjects();
   republishFees();
   await showAskedFigure();
+  await offeredLoaded;
+  if (choicesFor && !offered) {
+    const choices = [...shown.values()].find((node) => node.type === 'choices');
+    if (choices) keepChoices(choicesFor, choices, scope.waitUntil);
+  }
   send('done', { ...summary, pagesRead: pages.length, ms: Date.now() - started, ...(designReq.search.results.some(isLiveScoreRow) ? { live: true } : {}) });
   if (pendingReview && !arrived.ready) {
     const review = await pendingReview;

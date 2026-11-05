@@ -59,3 +59,13 @@ test('a how-to for paperwork asks for its fee however it is worded, and "get bet
   assert.equal(figureHop('Getting started with Python'), undefined);
   assert.equal(figureHop('passport renewal requirements'), undefined);
 });
+
+test('a safety question asks for the intake limit a safety body sets', () => {
+  const q = 'Is aspartame a carcinogen? What did WHO conclude?';
+  assert.equal(figureHop(q), 'aspartame acceptable daily intake');
+  const found = askedFigureLines(q, [
+    { title: 'IARC and JECFA on aspartame', snippet: 'The committee found no reason to change the previously established ADI of 0–40 mg/kg body weight for aspartame.' },
+  ]);
+  assert.deepEqual(found?.lines.map((line) => line.amounts), [['0–40mg/kg']]);
+  assert.equal(figureHop('How much coffee is safe during pregnancy?'), undefined);
+});

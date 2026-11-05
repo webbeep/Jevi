@@ -177,7 +177,8 @@ export function readDiagram(raw: unknown): DiagramCard | undefined {
     nodes.push({ id, label, detail: detail || undefined });
   }
   if (nodes.length < 3) return undefined;
-  const kept = nodes.slice(0, 6);
+  // A flow can need eight steps (a bill: introduce, committee, House, Senate, President, veto, override, law).
+  const kept = nodes.slice(0, kind === 'flow' ? 8 : 6);
   const graph = finishGraph(kept, parseEdges(n.edges, idMap, new Set(kept.map((step) => step.id))));
   const titleRaw = typeof n.title === 'string' && !hostile(n.title) ? plain(n.title, 60) : '';
   const card: DiagramCard = { type: 'diagram', kind, title: titleRaw || undefined, nodes: graph.nodes, edges: graph.edges };
@@ -336,7 +337,8 @@ export function acceptDiagram(raw: unknown, corpus: string, kind: DiagramKind): 
     nodes.push({ id, label, detail: detail || undefined });
   }
   if (nodes.length < 3) return undefined;
-  const kept = nodes.slice(0, 6);
+  // A flow can need eight steps (a bill: introduce, committee, House, Senate, President, veto, override, law).
+  const kept = nodes.slice(0, kind === 'flow' ? 8 : 6);
   const graph = finishGraph(kept, parseEdges(body.edges, idMap, new Set(kept.map((step) => step.id)), corpus));
   const titleRaw = typeof body.title === 'string' && !hostile(body.title) ? plain(body.title, 60) : '';
   const title = titleRaw && wordsIn(titleRaw, corpus) ? titleRaw : undefined;
