@@ -507,6 +507,7 @@ export function askedFigureLines(query: string, results: readonly { title: strin
   const money = item === 'daily intake' ? new RegExp(DOSE.source, 'gi') : /[$€£]\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?(?!\d)/g;
   const names = (text: string) => text.includes(stem[0]!) || (stem[0] === 'incom' && /\b(?:magi|agi)\b/.test(text)) || (item === 'daily intake' && /\b(?:adi|intake)\b/.test(text));
   const year = query.match(/\b(?:19|20)\d{2}\b/)?.[0];
+  const thing = item === 'daily intake' ? query.match(SAFETY)?.[1]?.trim().toLowerCase().split(/\s+/).find((word) => word.length >= 4) : undefined;
   const lines: { n: number; line: string; amounts: string[]; named: number }[] = [];
   results.slice(0, 30).forEach((row, index) => {
     const before = lines.length;
@@ -522,7 +523,10 @@ export function askedFigureLines(query: string, results: readonly { title: strin
       const cut = snippet.indexOf('…', at);
       const window = snippet.slice(start, Math.min(at + 160, cut < 0 ? Infinity : cut));
       const found = [...window.matchAll(money)];
-      if (found.length < 2 || /\b(?:should not|shouldn't|do not|don't|never|no longer|not charge)\b/i.test(window)) continue;
+      const distinct = new Set(found.map((m) => m[0].replace(/[\s,]/g, '')));
+      if (distinct.size < 2 || /\b(?:should not|shouldn't|do not|don't|never|no longer|not charge)\b/i.test(window)) continue;
+      const spanYears: string[] = window.match(/\b(?:19|20)\d{2}\b/g) ?? [];
+      if ((year && spanYears.length && !spanYears.includes(year)) || (thing && !window.toLowerCase().includes(thing))) continue;
       const last = found[found.length - 1]!;
       const line = window.slice(0, (last.index ?? 0) + last[0].length).replace(/^[\s…·•|.;]+/, '').replace(/\s*;\s*/g, ' · ').replace(/\s+/g, ' ').trim();
       if (/^[a-z]/.test(line)) continue;
@@ -543,6 +547,8 @@ export function askedFigureLines(query: string, results: readonly { title: strin
       const shifted = !names(raw.toLowerCase()) && names(before.toLowerCase()) && before.length <= 140 ? shiftedLabels(raw) : undefined;
       // "$35 execution fee, in addition to…" is a list item cut from what it applies to.
       if (!shifted && /^[\s…·•|.]*[$€£]\s?\d/.test(raw)) return;
+      // "Cited by 106 — Aspartame has…": a scholar listing's count is not part of the line.
+      raw = raw.replace(/^Cited by \d+\s*[—–-]\s*/i, '');
       const part = shifted ? (money.test(before) ? shifted : `${before.replace(/^[\s…·•|.]+/, "").trim()} ${shifted}`) : raw.replace(/^[\s…·•|.]+/, '');
       money.lastIndex = 0;
       const low = part.toLowerCase();
@@ -558,6 +564,11 @@ export function askedFigureLines(query: string, results: readonly { title: strin
       const words = low.split(/[^a-z0-9]+/);
       const named = subject.filter((word) => words.some((token) => token.startsWith(word))).length + (own || listed ? 1 : 0);
       if (!named) return;
+      // An intake line names the thing asked about: acesulfame K's limit is not aspartame's.
+      if (thing && !low.includes(thing)) return;
+      // Asked for 2026: a line about 2020 only ("Danny earned $3,500 in 2020") is another year's example.
+      const years: string[] = part.match(/\b(?:19|20)\d{2}\b/g) ?? [];
+      if (year && years.length && !years.includes(year)) return;
       // Asked for 2026: a line that also quotes 2025's range goes after one that does not.
       const stale = year && (part.match(/\b(?:19|20)\d{2}\b/g) ?? []).some((other) => other !== year) ? 1 : 0;
       // "…should only charge you a $35 fee if you are": cut off inside the condition, so who pays it is lost.

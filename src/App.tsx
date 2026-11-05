@@ -66,7 +66,7 @@ interface Quote {
 }
 
 
-const TAGLINE = 'Ask anything. Get answers you can compare, tweak and keep.';
+const TAGLINE = 'Ask anything. Get one page that answers it, with its sources.';
 
 /** One automatic regenerate per normalized query for this page load. */
 const regenerated = new Set<string>();

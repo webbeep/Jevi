@@ -934,6 +934,8 @@ async function design(send: Send, env: Env, req: DesignArgs, started: number, sc
     const text = plain(JSON.stringify([...shown.values()]));
     const shows = (amount: string) => text.includes(plain(amount));
     // Up to two lines with an amount the card does not show: the single filer's range may be there and the joint one not.
+    // A card that already gives a safe intake has the figure: a second body's limit would only crowd it.
+    if (found.item === 'daily intake' && found.lines.some((line) => line.amounts.some(shows))) return;
     const missing = found.lines.filter((line) => !line.amounts.every(shows)).slice(0, 2);
     if (!missing.length) return;
     const leadIndex = [...shown.keys()].sort((a, b) => a - b).find((i) => !['citations', 'actions', 'ticker', 'choices', 'diagram'].includes(shown.get(i)!.type));
